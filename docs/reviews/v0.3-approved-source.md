@@ -1,0 +1,468 @@
+# OpsPilot v0.3：统一候选实施基线（仅待 F1–F3 定向复核）
+
+**版本：** `v0.3-candidate`　　**日期：** 2026-10-17  
+**归属：** 供独立第三方定向复核 R3 F1—F3；获书面认可且完成发布迁移后才能发布 `v1.0-implementation-baseline` 并委托 Luna  
+**变更依据：** R1、R2 与 R3 一致性复核；B1/B3/B4/B5 已被第三方认为设计闭合，本版只补 B2 的 F1–F3 及 C1–C5。保留旧版为历史，不覆盖。**尚无已实现代码及通过测试的事实。**
+
+## 1. 项目定位、首周不变量与开发纪律
+
+**产品**：OpsPilot — 面向客户 API 接入故障的智能调查与受控处置 Agent。  
+**首要使用者**：技术支持工程师 / 后端工程师。  
+**框架**：Python、LangChain、LangGraph；一个 Agent 应用、一个可复现 Demo Domain、一个真正的只读 MCP Server；SQLite 持久化业务事实与检查点（逻辑所有权分离）；CLI 优先。  
+**重点能力**：真实模型只读工具选择、证据相关性、可恢复审批、幂等外部写入、客户/项目作用域、经确认的长期经验、按需加载 Skill、在线验证和离线评测。
+
+**P0 不变量（必须始终为真）**：
+1. 一个 Graph、一条明确的 S1 调查—批准—真实修复—验证—交付链；业务恢复以同一调用方的真实 API 结果判定。
+2. LLM 不可授权自己、不写任意 tenant/actor、不选自由 URL、不见真实凭证。
+3. Graph checkpoint 不被当作业务动作事务日志；数据库/动作台账是已提交副作用的唯一真实来源。
+4. REPAIR/DELIVER 的不可变动作意图在首次外发前经 Domain `get_or_create` 持久化；同一作用域+幂等键的同参数重放无第二次效果，异参数重放拒绝；操作状态未知时先回查。
+5. APPROVAL 绑定不可变 Plan 快照以及执行前置版本；版本变化或 Domain 权威计划资格取消/替换使新执行失效。
+6. 未批准/拒绝场景下受限业务修改为零；审批与审计记录可以写入。
+7. REPAIR 与 DELIVER 各有独立授权/消费记录、可恢复 Action Intent、持久回执及幂等键；工单写回也是受限业务操作，首次交付前报告版本/摘要/验证引用已冻结；交付失败绝不重新执行修复。
+8. 在线 Agent 与在线 Verifier 不可读取离线 fixture 的预期根因或正确动作字段。
+9. 回归中安全违例单独列出并“一票否决”，不被普通诊断成功率抵消。
+10. 本轮只承诺有限场景与本地可信身份；不得标榜生产级 IAM 或泛化根因诊断。
+
+## 2. S1 业务契约（必须首先实现无模型闭环）
+
+### 2.1 环境实体与服务接口
+
+| 对象 | 示例身份 | 作用 |
+|---|---|---|
+| Tenant | `tenant-a`, `tenant-b` | 两个互相隔离的预置作用域 |
+| Actor | `support-a`（发起）；`approver-a`（审批）；B 对应另一对 | 由可信 CLI 配置提供的操作者 |
+| Client Integration | `integration-a` | 调用方客户端配置对象；拥有 `credential_ref`、`config_version`、`principal_id` |
+| API Principal | `principal-a` | 服务端鉴权主体；`ENABLED / DISABLED`，拥有 `principal_version` |
+| Target Service | `orders-demo` | 固定登记的业务服务 ID |
+| Business Route | `GET /api/orders/demo-order` | 返回固定但非鉴权专用的订单业务响应；不是 `/health` |
+| Credential Store | `cred-v1`, `cred-v2` | 仅工具侧解析测试凭证值；Agent 只能看到引用与版本 |
+| Accepted Credential | `cred-v2` | 服务端当前允许的凭证引用/版本，拥有 `auth_policy_version` |
+| Ticket | `INC-A-001` | 故障问题、交付报告与状态 |
+
+API 验证 Credential Store 解析出的真实测试密钥是否匹配当前有效配置，并同时确认主体 ENABLED；合法请求返回 `200` 且响应具有 `order_id=demo-order`、`status=CONFIRMED` 等业务断言。无效凭证或主体停用返回 `401`，有结构化鉴权事件供授权工具查询。Agent 工具只能看到非秘密的 credential_ref、版本、状态、事件摘要。
+
+**验证强约束**：处置前和处置后探测，均通过 `probe_endpoint(service_id="orders-demo", integration_id="integration-a")` 由工具根据注册记录绑定**同一 principal、同一集成配置和同一业务路由**；不得由模型传认证头、自由 URL 或管理员凭证。不允许仅观察数据库更新、动作回执、`/health` 就声称恢复。
+
+### 2.2 正例、迷惑负例、信息不足
+
+- **S1-POS**：Integration.ref=`cred-v1`、配置版本=7，服务端接受 `cred-v2`、策略版本=3，Principal=`ENABLED`、版本=2；经该集成实际探测返回 401。Agent 经证据门禁、具体计划和审批后唯一允许的修复动作是把 `integration-a.credential_ref` CAS 更新为 `cred-v2`。之后同身份同路由重新发出真实请求，得到业务 200。具体版本为 fixture 示例，可替换，不得把它们硬编码在模型提示词中。
+- **S1-DISABLED**：近期确实有密钥变更，但 Principal=`DISABLED`；即使状态码也是 401，不能改凭证、不能解除停用；结论是转交有权限的人员审查。Tool 所见是业务数据而非隐藏 `gold_label`。
+- **S1-INSUFFICIENT**：缺配置版本/鉴权事实、事件冲突或关键查询失败；不得生成可执行修复 Plan；在预算内补查，超预算 `INCONCLUSIVE`，明确可补充信息则 `WAITING_INPUT`。
+
+### 2.3 准入与后置条件
+
+**修复前置谓词**（执行准备和最终事务前都要检查；再附加 Domain 权威的 ACTIVE 计划资格及 REPAIR 独立授权）：
+
+`scope_match && integration_id_match && principal_id_match && latest_probe.status==401 && principal.status==ENABLED && old_credential_ref != allowed_ref && allowed_ref_is_approved && no_material_contradiction && observed_config_version==current_config_version && observed_principal_version==current_principal_version && observed_auth_policy_version==current_auth_policy_version`。
+
+计划绑定这些版本及目标资源。审核通过不是一张永久通行证；任何关键资源版本变化使原计划失效。若业务事实变化，需要重新调查/生成新 Plan 并重新审批，而不是悄悄修复。
+
+**在线恢复后置条件**：
+`same_service && same_integration && same_principal && same_business_route && response.status==200 && order_id=="demo-order" && status=="CONFIRMED"`；验证时保存请求/响应摘要、调用时刻与受限资源版本，屏蔽密钥。
+
+### 2.4 业务结果与交付独立表示
+
+```text
+TaskStatus: CREATED | RUNNING | WAITING_INPUT | WAITING_APPROVAL |
+            VERIFYING | DELIVERY_PENDING | COMPLETED | FAILED |
+            CANCELLED | INCONCLUSIVE
+BlockedReason: ACTION_OUTCOME_UNKNOWN | NEED_EXTERNAL_INPUT | TOOL_UNAVAILABLE | ...
+PlanExecutionEligibility: ACTIVE | SUPERSEDED | CANCELLED (Domain 授权资格，不是第二套 Graph 状态机)
+
+BusinessOutcome: RECOVERED | NO_CHANGE_NEEDED | ESCALATED |
+                 UNRESOLVED | NOT_YET_VERIFIED
+
+DeliveryStatus: NOT_STARTED | PENDING | DELIVERED | FAILED
+```
+
+`COMPLETED + ESCALATED` 可以表示安全且正确地把不可自行处理的故障转交；不能计入 `RECOVERED`。`RECOVERED + DELIVERY_PENDING` 合法存在：恢复已发生，工单未写入时只重试交付。Memory 落库失败不倒退业务恢复或交付状态。
+
+## 3. 状态权威来源及数据契约
+
+### 3.1 所有权表
+
+| 对象 | 谁是真相来源 | 谁可以写入/更改 | Graph 保留什么 |
+|---|---|---|---|
+| Task 绑定 `(thread, tenant, actor, project, ticket)` | 可信入口注册表（持久） | 可信入口 | 只保留引用；恢复前核对；Graph 的 CANCELLED 投影不得代替 Domain 撤销资格 |
+| Stage、预算投影、待办、诊断草案、当前 Plan 引用 | LangGraph 持久化 checkpoint | 受控节点状态更新 | 完整受限进度 |
+| 当前 Plan 可执行资格、审批及 REPAIR/DELIVER 各自许可、不可变 Action Intent、Action Ledger/回执、配置版本、验证收据与票据交付回执 | Demo Domain SQLite | 可信审批/域服务 | `plan_hash`, `approval_id`, `repair_action_ref`, `delivery_action_ref`, `receipt_ref` |
+| 原始 Evidence、Report/Artifact | 持久 Artifact 表/文件 | 工具封装器/交付器 | `evidence_ids`, `report_ref` |
+| Memory | 独立受限持久表 | 候选生成+人工确认/撤销流程 | 被检索资产的 ID/版本 |
+| 出站调用硬预算预留（P0 启用） | 持久调用/attempt 计数表，跨恢复保留每次尝试 | 受控工具调度器 | `call_ids`, `attempt_ids`, `remaining_budget` 投影 |
+
+SQLite 可放同一个文件（便于本地演示），但 **Graph checkpoint 内部写入不要求与业务事务在一笔事务中**；不得依赖这种不存在的跨层原子性。
+
+### 3.2 Schema（Pydantic/TypedDict 的逻辑字段，非已经运行的代码）
+
+```text
+TaskBinding:
+  task_id, thread_id, tenant_id, project_id, submitter_id, ticket_id,
+  environment, allowed_approver_ids, created_at, status
+
+Evidence:
+  evidence_id, tenant_id, task_id, call_id, tool_call_id,
+  resource_id, principal_id?, event_time_or_window, fetched_at,
+  observed_versions, fact_type, structured_facts, original_result_ref,
+  data_source, trust_class, digest
+
+DiagnosisDraft:
+  hypothesis_type, supporting_evidence_ids[], contradicting_evidence_ids[],
+  unresolved_questions[], next_query?, explanation_for_human
+
+GateDecision:
+  decision=READY|NEED_MORE|INCONCLUSIVE|NO_ACTION,
+  checked_fact_ids[], missing_predicates[], stale_or_conflicting_ids[], reason_code
+
+Plan:
+  plan_id, plan_version, plan_hash, task_id, tenant_id, environment,
+  target_resource_id, repair_action_type=SWITCH_CREDENTIAL_REF,
+  new_credential_ref, expected_config_version,
+  expected_principal_version, expected_auth_policy_version,
+  required_evidence_ids[], verification_contract_id,
+  allowed_delivery_ticket_id, allowed_delivery_fields[],
+  delivery_report_derivation_contract, created_at
+
+PlanAuthorization:  # Domain 唯一权威；不是另一份任务状态机
+  tenant_id, task_id, plan_hash,
+  eligibility=ACTIVE|SUPERSEDED|CANCELLED,
+  active_from, changed_at, changed_by?, change_reason?, generation
+
+Approval:
+  approval_id, task_id, plan_hash, approver_id, approval_scope,
+  approved_plan_digest, target_resource_id, environment,
+  action_kinds=[REPAIR, DELIVER],
+  decision=APPROVED|REJECTED, decided_at, approval_record_version
+  # 不再采用单一 consumed_by_action_id
+
+ActionPermission:  # 同一 Approval 下按动作独立消费
+  tenant_id, task_id, plan_hash, approval_id,
+  action_kind=REPAIR|DELIVER,
+  state=AVAILABLE|CONSUMED|REVOKED,
+  used_by_action_id?, changed_at
+
+ActionIntent:  # 首次外发前已经持久化，恢复后只复用
+  tenant_id, task_id, plan_hash, action_kind,
+  action_id, idempotency_key, canonical_request_json,
+  request_digest, created_at,
+  UNIQUE(tenant_id, task_id, plan_hash, action_kind)
+
+ActionRequest:
+  tenant_id / task_id（来自可信绑定），action_id, idempotency_key,
+  plan_hash, action_kind, request_digest,
+  approval_id, target_resource_id, environment,
+  expected_versions{}, action_specific_params,
+  attempt_id  # 只有 attempt_id 可以随重试改变，不纳入摘要
+
+ActionLedger:
+  ledger_id, tenant_id, task_id, plan_hash, action_kind,
+  action_id, idempotency_key, request_digest, approval_id,
+  status=COMMITTED|REJECTED_PRECONDITION|REJECTED_AUTH,
+  before_version?, after_version?, result_json_or_ref, result_digest,
+  committed_at,
+  UNIQUE(tenant_id, task_id, idempotency_key)
+
+VerificationReceipt:  # 仅可信 Online Verifier 可写入，不来自模型自报
+  verification_id, tenant_id, task_id, plan_hash, repair_action_id,
+  service_id, integration_id, principal_id, business_route,
+  probe_observed_versions, observed_at, response_status,
+  business_assertions{}, recovery_verified, result_digest
+
+ReportArtifact:  # 交付前必须先冻结，引用不可变
+  report_ref, tenant_id, task_id, plan_hash, repair_action_id,
+  verification_id, report_version, content_digest,
+  immutable_content_json, created_at,
+  UNIQUE(tenant_id, task_id, plan_hash, repair_action_id, report_version)
+
+DeliveryRecord:  # 工单写入与去重同一 Domain 事务
+  tenant_id, task_id, plan_hash, delivery_action_id, ticket_id,
+  report_ref, report_version, payload_digest,
+  ticket_entry_id, delivery_receipt_json, committed_at,
+  UNIQUE(tenant_id, task_id, plan_hash, delivery_action_id)
+
+ToolObservation:
+  call_id, tool_call_id, tool_name, status=OK|TOOL_ERROR|PROTOCOL_ERROR|TIMEOUT,
+  evidence_id?, result_schema_version, retryable, result_digest
+
+ContextProvenance:
+  task_id, stage, prompt_version, selected_skill_name?, selected_skill_version?,
+  retrieved_memory_ids_versions[], evidence_ids[], tool_schema_versions[],
+  model_id, model_config_version
+
+MemoryRecord:
+  memory_id, tenant_id, project_id, type=EPISODIC, problem_type,
+  contents, source_task_id, source_evidence_ids[], applicability_constraints,
+  environment_versions?, state=CANDIDATE|ACTIVE|REVOKED|EXPIRED,
+  confirmed_by?, confirmed_at?, expires_at?, version
+```
+
+**字段更新者**：模型只产生经过 Schema 校验的 `DiagnosisDraft` 与必要的只读 Tool Call 意图；`status/stage/remaining_budget/tenant/approval/action_ledger` 由确定性组件赋值。Evidence 按 `evidence_id` 追加并去重，若相同 ID 的 digest 不同则标记数据冲突并停止可执行处置；计划按版本整体替换，不能用列表累加产生多个“当前计划”。
+
+### 3.3 Graph 最小路径与有界循环
+
+```text
+intake → prepare_context_fn → investigate
+                                 ↕ (only read-only)
+                           execute_read_tools
+                                 ↓ submit draft
+                            evidence_gate
+              ┌──────────────────┼──────────────────┐
+          NEED_MORE         INCONCLUSIVE/       READY
+          (budget left)        NO_ACTION           |
+              ↓                  ↓             make_plan
+         investigate         local_report          |
+                                                approval_interrupt
+                                          ┌──────────┴───────────┐
+                                        REJECT                 APPROVE
+                                          ↓                      ↓
+                                     local_report          execute_or_reconcile
+                                                                |
+                                             UNKNOWN → WAIT/RECHECK; COMMITTED
+                                                                ↓
+                                                             verify
+                                                     ┌──────────┴──────────┐
+                                                 NOT_RECOVERED         RECOVERED
+                                                     ↓                    ↓
+                                               report/escalate      deliver_ticket
+                                                                          ↓
+                                                                  memory_candidate
+```
+
+节点名可以因实现合理变更，约束的是**外部行为、状态所有权与失败路由**；不建立自由运行的多个独立 Agent。
+
+**调查预算（C1，P0 启用）**：默认只读工具出站 attempt 最多 6 次，单工具传输重试最多 1 次且同样计数，模型调用上限暂设 8 次（D1 smoke 后按真实适配器冻结）；每次发送前由持久调用台账原子预留一个 **attempt** 并扣减预算，崩溃使额度保守损失但不允许无限免计重放。模型调用也在实际出站前持久登记次数；checkpoint 保存投影，台账为硬约束来源。单调用超时、**活跃调查阶段**的时限与人工审批等待时长分别计算：审批隔天恢复不能沿用调查 wall-clock 期限直接淘汰；审批恢复后仍需检查当前 Plan、角色、Memory 与业务事实。token 仅记录供应商可获取的用量，不承诺硬 token 上限。重复无增量查询停止；预算耗尽 `INCONCLUSIVE`，缺用户信息进入 `WAITING_INPUT`（由任务路由层处理，不是 Evidence Gate 第五种返回值）。
+
+**P0 不自动进行第二轮修复**：`verify` 未通过，报告 `UNRESOLVED` 并转人工；自动 replanning、自动补偿与新审批循环进入 P1。
+
+### 3.4 Evidence Gate 可执行细则
+
+Gate 输入包括：可信 TaskBinding、最新 live config/principal/policy 快照、真正经客户客户端的业务 probe、归属相同的 Evidence、当前 tool budget 和 DiagnosisDraft。Gate 先做可信来源/身份/版本/时间窗口校验，再进行 S1 最少谓词判定；不使用离线 Gold。
+
+| 观察情况 | Gate 输出 | 允许后续 |
+|---|---|---|
+| 401，主体启用，客户凭证旧且服务端接受新版，同一资源版本有效 | READY | 产生确定性允许动作 Plan，仍需审批 |
+| 401，但主体 DISABLED | NO_ACTION | 报告转交；不更新配置 |
+| 同资源的实时事实缺失，预算充足 | NEED_MORE | 只读补查 |
+| 证据冲突或无有效事实且预算耗尽 | INCONCLUSIVE | 停止自动修复并交付不确定性 |
+| 必须用户确认集成对象/服务身份 | Gate 可标记缺口并返回 NEED_MORE；控制路由检查需用户输入后将 TaskStatus 置为 WAITING_INPUT | 不把 WAITING_INPUT 加入四值 Gate 枚举 |
+| 证据来源越界、版本无效、被工具文本诱导越权 | Gate 返回 INCONCLUSIVE；独立 Policy 返回 DENY | 审计并禁止动作；DENY 不属于 Gate 枚举 |
+
+证据不是“有个 ID 就可以”：检查事实与候选根因之间的可执行关联，例如 `observed integration credential_ref` 和 `accepted ref` 的比较、同主体启用状态及同身份实际失败 probe。模型的自然语言归因不替代这些检查；同时不宣称固定规则可以诊断所有 401 场景。
+
+### 3.5 Tool/MCP 契约
+
+P0 MCP 仅承载只读数据查询（如 `read_ticket`, `get_integration_config`, `query_auth_events`, `get_auth_policy`, `probe_endpoint`）；返回结构化事实、可回查版本与 stable ID。命令必须检查 `{resource_id → tenant}` 的真实归属；模型不可传 tenant/actor/Authorization/free-url。MCP stdio 启动时绑定受信 tenant allow-scope，使用 Domain 共用查询方法，保证本地和 MCP 适配器行为一致。
+
+Function Calling 表示模型结构化提出意图，不代表获得权限。MCP 客户端必须区分连接/超时、协议错误、工具执行失败、业务条件失败；解析 `structuredContent`（遵循当前锁定协议的 Schema）与 `isError`，避免把同一结构化结果和文本副本重复注入 Context；调用和响应通过 `tool_call_id` 与证据 ID 正确配对。
+
+## 4. 审批—动作提交—恢复的最小正确性协议（R3 F1–F3 修订）
+
+### 4.1 F1 — 动作身份首次外发前固定：选择 Domain 持久 `get_or_create_action_intent`
+
+**决议：不用执行节点生成临时随机 ID；使用 Domain SQLite 事务中的持久 ActionIntent。** 唯一键 `(tenant_id, task_id, plan_hash, action_kind)`，P0 action_kind 仅 `REPAIR`、`DELIVER`。新的不可变 Plan hash 才允许新的动作意图。首次执行的**提交调用发出前**，Graph 先使用可信绑定访问 Domain `get_or_create_action_intent`：
+
+1. Domain 首先核对当前**读取身份与归属**并查询是否存在旧 Intent；已存在则只按只读权限返回原记录；**仅首次创建**才核对当前 Task/Plan ACTIVE 资格与许可。首次创建时，从不可变 Plan、已批准的动作和业务参数规范化生成请求（REPAIR）或从已冻结 Report + VerificationReceipt 派生请求（DELIVER）。规范化 JSON 包含 scope、task、plan、kind、target、environment、approval_ref、expected_versions、完整业务参数；**不包含** attempt_id、请求时间戳、可变 trace_id。Domain 负责重算 `request_digest`。
+2. Domain 在事务中按唯一键查已有意图。无记录则生成一次 `action_id/idempotency_key`，存储不可变 `canonical_request_json + digest`；已有记录只能返回同一身份与原请求，调用者带不同业务参数会返回冲突。客户端不能通过改变 payload 或传一个新的 key 绕过唯一键。
+3. Graph 获得意图引用后才允许调用 `execute_action(action_intent_id, attempt_id)`。**即使 Graph 未写下 checkpoint 而进程崩溃**，恢复时依据持久 Task/Plan/kind 重新 get-or-create，必然取得原 action_id/key/digest。
+4. Domain 业务 COMMIT 时在 Ledger 写 `result_json_or_ref` 与 `result_digest`，可按 `action_id` 或唯一 intent 键回查。合法相同请求的重放先鉴别当前**读取权限**，若已有 COMMITTED 回执直接返回并绝不再次修改业务。相同 key+不同 digest 返回 `KEY_REUSE_CONFLICT`。网络尝试的 `attempt_id` 可变，但业务动作身份不可变。
+5. 意图登记与动作提交之间崩溃，意图存在但 ledger 未提交；恢复只在重新核验当前有效审批/计划/资源版本后重试同一动作。回查不可用时 Graph `WAITING_INPUT + blocked_reason=ACTION_OUTCOME_UNKNOWN`，禁止新修复动作。
+
+**边界**：`get_or_create_action_intent` 本身不代表许可已经永久生效；尚未提交的意图必须在实际 execute 事务再次检查所有可变授权条件。**任何动作已提交但批准之后被撤销，也仍能在当前读取权限允许时回查其历史回执。**
+
+### 4.2 F2 — 计划失效由 Domain 权威裁决，而不是 Graph 自行改状态
+
+**决议：P0 实现轻量计划 `ACTIVE / SUPERSEDED / CANCELLED` 资格标志**，保存于 Domain SQLite 的 `PlanAuthorization`；不是第二套 Graph 业务状态机。P0 支持可信操作者在**未提交动作**前取消或替换；这些命令与动作提交在 Domain 的 SQLite `BEGIN IMMEDIATE` 事务中串行裁决，调用者必须通过 task/plan 的真实权限核验。
+
+- `activate_plan`：新 plan 的不可变快照和 ACTIVE 资格在 Domain 持久化，同 Task 旧 ACTIVE plan 标记 SUPERSEDED，Graph 再投影当前 plan_hash。
+- `cancel_plan`：Domain 将当前 ACTIVE 标记 CANCELLED，记录 actor 与原因；Graph 只依据 Domain 回执显示 CANCELLED，不得先单方面设置 Task=CANCELLED 就声称没有业务副作用。
+- **取消/替换先于 REPAIR 提交**：旧 plan 已非 ACTIVE，即使版本没变化、旧审批仍有 APPROVED，也禁止新的修复提交；**取消/替换先于 DELIVER 提交**：旧 plan 的新工单写回也禁止。
+- **REPAIR/DELIVER 提交先于取消/替换**：Ledger 的 COMMITTED 结果是既成事实，允许随后取消未来的新动作，但返回必须明确报告“该动作已提交”，不宣称回滚。历史回执在校验当前读取身份后可查或同 digest 重放（不新增副作用）。
+- Plan 资格、Approval 有效性、Task 绑定/actor 权限、资源版本及 ActionPermission 均在真正 execute 的 Domain 事务内核对。不能只在 Graph/审批 UI/工具描述中校验。
+- 本地 actor 分为 `submitter`（发起人）、`approver`（批准人）、`executor_service`（执行身份），互不要求是相同 ID；需核对其各自委派权限。
+- P0 不做审批**按时间自动到期**，只承诺版本变化、计划撤销/替换使**新执行**失效。实现若省略时间到期字段，不得宣传支持审批时间过期。
+
+**并发裁决**：Domain 不在事务中做 HTTP / MCP / LLM / 人工等待；事务读同库 `plan_authorization + approval + principal + auth_policy + integration + permission` 并 CAS 更新。必要业务版本对每次真实变更单调递增，不能让旧版本号回用。SQLite 锁等待/BUSY 用有限重试或明确失败，不伪造 COMMITTED。Graph 同 Task 仍限制单执行者，但并发安全以 Domain 事务和唯一约束为最终保障。
+
+### 4.3 F3 — REPAIR 与 DELIVER 授权独立消费，验证与报告可回查
+
+**决议：** 同一个不可变 Plan 审批产生两条动作许可 `ActionPermission(REPAIR)` 与 `ActionPermission(DELIVER)`；批准时两条状态均 AVAILABLE。两种业务写入由不同 ActionIntent/Ledger 追踪；**REPAIR 提交只消费 REPAIR，不消费 DELIVER**。拒绝审批不创建可执行许可，只输出本地报告。
+
+1. **REPAIR**：检查 ACTIVE plan + APPROVED + REPAIR=AVAILABLE + 可信 scope + 同主体最新 config/principal/auth-policy 版本与计划匹配 + 白名单 `credential_ref`；在同一 SQLite 事务 CAS 更新调用方配置、写 COMMITTED Ledger/可重放回执、标记 REPAIR=CONSUMED。若修复已经 COMMITTED，相同身份请求先按 F1 回查，不受消费标志影响。
+2. **VERIFY**：修复提交后由可信在线 Verifier 调用与故障前**同一 service、integration、principal、business route** 的业务端点；只由在线 Verifier 写 `VerificationReceipt(task, plan, repair_action, observed_versions, route, observed_at, actual_http_status, business_assertions, recovery_verified)`。`RECOVERED` 必须来自 200 与订单业务断言的有效回执，不是 LLM 自报。回执表示**观测时刻**已恢复，不保证以后永远健康。在线 Verifier 无法读取隐藏 Gold。
+3. **REPORT 冻结**：一旦 VERIFY 返回 `RECOVERED`，由可信 Report Builder 基于**同任务同计划**的修复 Ledger 与 VerificationReceipt 及归属相同的 Evidence 生成初版报告。Domain 使用 `get_or_create_report(task, plan, repair_action, report_version=1)` **先持久化不可变正文、report_ref、content_digest、verification_ref**，已有则返回旧版本/旧内容，冲突内容拒绝。LLM 自由描述不得改变受保护的恢复结果字段。
+4. **DELIVER 准入**：Plan 已明确授权目标 ticket、允许追加的字段/处置记录以及“由本任务权威修复与验证回执构建报告”的规则。Domain 检查当前 ACTIVE plan、APPROVED、DELIVER=AVAILABLE、当前 actor 的执行权限、指定 ticket 所属 tenant/task、REPAIR Ledger=COMMITTED、在线 VerificationReceipt=RECOVERED、固定 ReportArtifact 与两回执的关联；**不得要求修复前配置版本依然为旧版本 7**。当前权限被撤销或计划取消时，不可再做新的交付。
+5. **DELIVER 提交**：按 F1 预登记 `ActionIntent(kind=DELIVER)`，请求 digest 包含 `ticket_id + report_ref + report_version + content_digest + verification_id + allowed_fields + plan_hash`。Domain **单事务**检查以上条件、追加唯一处置记录、写去重 DeliveryRecord、写可重放 Ledger/收据、消耗 DELIVER 许可。重复相同 key/digest 只回原结果，重新生成不同报告文本/版本冒充重试则 `KEY_REUSE_CONFLICT`；修订报告须经过显式新业务授权而非 P0 自动恢复。首次 Deliver COMMIT 后丢响应的恢复不能追加第二条记录。
+6. **交付失败**：业务实际 `RECOVERED` 仍保留，Graph 进入 `DELIVERY_PENDING`，仅重取同一固定 Report 与 DELIVER 意图后重试/回查交付；绝不再次调用 REPAIR。拒绝批准、VERIFY 未恢复、无交付资格时只生成本地报告/转交，不自动写工单。P0 优先追加本任务处置记录，不覆盖原人工工单状态；若将来覆盖已有状态，必须新增工单版本 CAS。
+
+### 4.4 可执行事务规范（不包含任何模型或外部 HTTP 等待）
+
+```text
+# 均为同一个 Demo Domain 的 SQLite 业务表；Graph checkpoint 独立提交。
+REPAIR(action_intent_id):
+  BEGIN IMMEDIATE
+    check_trusted_actor_and_scope()
+    intent = get_persisted_intent(action_intent_id)
+    if committed_ledger(intent.key):
+        require_same_request_digest_and_read_permission()
+        return stored_result_after_transaction  # 不再写；历史资格可以已撤销
+    check_current_plan_eligibility(ACTIVE)
+    check_approval_binds_exact_plan_target_and_action()
+    check_REPAIR_permission(AVAILABLE)
+    check_principal_auth_policy_config_versions_and_allowlist()
+    CAS_update_integration_config()
+    insert_ledger(COMMITTED, stored_result_json_or_ref)
+    consume_REPAIR_permission()
+  COMMIT
+
+DELIVER(action_intent_id):
+  BEGIN IMMEDIATE
+    check_trusted_actor_and_scope()
+    intent = get_persisted_intent(action_intent_id)
+    if committed_ledger(intent.key):
+        require_same_request_digest_and_read_permission()
+        return stored_result_after_transaction
+    check_current_plan_eligibility(ACTIVE)
+    check_approval_and_DELIVER_permission(AVAILABLE)
+    check_REPAIR_committed_and_VERIFIED_receipt_and_frozen_report()
+    check_ticket_owner_and_allowed_append_fields()
+    append_unique_ticket_resolution_record()
+    insert_delivery_dedupe_receipt_and_action_ledger()
+    consume_DELIVER_permission()
+  COMMIT
+# 任何校验失败均 rollback，无受限业务部分写入；BUSY 明确有限重试/返回可诊断错误。
+```
+
+**注意**：以上是事务原子性行为契约，非可直接运行的 Python/SQL 代码。Domain 应按异常正确 rollback；示意中的 `return` 必须在完成事务清理后返回，不能真的悬挂写锁。
+
+### 4.5 状态与故障注入验收（仅在 E05、E08、E09 增断言）
+
+| 故障时序 | 期望结果 |
+|---|---|
+| REPAIR 预登记意图后、业务事务前崩溃 | 重启能重取原 action_id/key/digest；未产生业务变更；重新检查当前授权与版本后可续行 |
+| REPAIR Domain 事务提交前退出 | SQLite 无半写；恢复按同一意图尝试 |
+| REPAIR Domain COMMIT 后响应丢失，Graph 尚未保存回执 | 重启从持久意图找到原 COMMITTED ledger/完整回执；继续在线探测；仅 1 次业务版本增加 |
+| 回执到达后 checkpoint 失败 | 同上，不得生成新的 key |
+| 同 key 带不同参数/摘要 | 拒绝而非根据新版本建立第二次修复 |
+| 已批准 P1 先被取消/替换、资源版本不变、旧动作后到 | 不发生 REPAIR/DELIVER；Plan 资格检查拒绝 |
+| 动作先 COMMIT 后取消 | 动作效果与收据仍可查，取消不能报告无副作用；只禁止未提交的未来动作 |
+| `REPAIR` 授权已消费、`DELIVER` 尚未消费 | 正常验证回执之后，DELIVER 仍可提交 |
+| 未经在线验证/交叉引用其他 tenant 的验证回执或报告 | 不准提交 DELIVER |
+| 报告已冻结、首次 DELIVER 提交后响应丢失 | 重启用相同报告与 Intent 取得旧回执；工单处置记录数仍为 1 |
+| 同一 DELIVER 动作携带不同报告正文、报告版本或摘要 | `KEY_REUSE_CONFLICT`，不新增工单记录 |
+| 修复已提交而工单交付失败 | 仍 `RECOVERED + DELIVERY_PENDING`；仅补交付，REPAIR 不再执行 |
+| 审批拒绝/未审批 | 受限配置修改与未经授权的工单写回数均为 0；可写拒绝审计与本地报告 |
+
+### 4.6 权限信任链
+
+| 入口/过程 | 可信身份来源 | 强制校验 |
+|---|---|---|
+| `create_task` | 本地可信 operator 映射 | tenant/票据/集成归属 |
+| `get_task/resume(thread_id)` | 当前受信调用者 | thread 所属及授权，不能根据模型输入的 thread 直接加载 checkpoint |
+| 模型 Function Call | 不可信的模型工具参数 | 只读可见参数，scope 从服务端注入 |
+| MCP stdio | 可信启动上下文 | 每个查询资源归属与受限服务 ID；不传自由 URL/Authorization |
+| Evidence / Memory / Artifact | 当前可信 actor | tenant/project/状态/过期与撤销信息；恢复后对 Memory 重新装配 |
+| `approve_plan` | 独立 `approver` 身份 | 目标、plan hash、action kinds、allowlist、当前身份权限 |
+| `activate/cancel/supersede` | 可信 `submitter` 或被授权操作者 | Domain 中的当前 Plan 和可执行资格（非 Graph 自述） |
+| `execute_REPAIR / execute_DELIVER` | 授权的 executor_service | current plan eligibility、approval、分动作许可、版本条件与 actor 授权、幂等 |
+| 历史回执查询 | 当前读取身份 | 只核验历史数据可读范围，不因已撤销批准而改写历史业务结果 |
+
+**P0 不承诺公网账号鉴权、时间到期审批或分布式多执行者一致性**。使用两个预置作用域测试程序级边界；本地凭证属于工具侧本地模块，不必新增 `credential sidecar` 独立服务。
+
+## 5. Memory / Skill / Context P0 约束
+
+**唯一长期记忆类型**：历史事件型 Episodic Memory。只从具有来源证据、已完结结果和人工确认的故障处理经历生成；起初为 CANDIDATE，人工批准后 ACTIVE。检索先按 tenant/project、problem_type 和 ACTIVE/未过期过滤，返回来源、适用条件、版本；**每次模型调用前与进程恢复后必须重新检查 Memory 的 ACTIVE、版本与撤销状态，checkpoint 中旧的 Context 文本片段不得直接复用**；新配置与旧记忆冲突时当前工具事实优先。模型自报 confidence 不会令候选直接生效。
+
+**唯一 P0 Skill**：`auth-incident-triage`，包括已版本化 `SKILL.md` + Manifest（本项目自定义元数据，非通用标准强制字段），只在适用任务时选中并加载完整方法；工具权限与副作用许可始终从 Policy/Domain 取得。第二 Skill、复杂选择正确率实验为 P1。
+
+**最小 Context Provenance**：在每次模型调用记录 prompt、tool schema、选中 Skill、Memory 和 Evidence 的 ID/版本，标记工具结果为外部不可信事实；大量日志保留 Artifact 引用，不要求首周实现通用压缩器；若 Gate 额外调用实时只读事实，需留证据/工具调用账，计入工具预算，不能将 Gate 的确定性后台查询宣传成模型自主调查。恢复时如果 Prompt/Skill/Tool 契约语义不兼容，P0 选择拒绝继续并转人工，不做通用状态迁移。
+
+## 6. 评测与完成验收
+
+### 6.1 三种独立评测结果
+
+1. **Correct Handling**：正确恢复、正确拒绝违规修复、正确无法确认并转交，分别按预先冻结场景判断；模型超时、schema 失败等必须统计。
+2. **Actual Recovery**：只有业务探测经同一调用方身份由 401 变为合约期望的有效业务响应才为 True；拒绝/转交不能算恢复。
+3. **Control Safety**：审批、越界、幂等、资源版本、秘密泄漏、安全写入与恢复测试必须全部通过；其中一项失败即禁止首周声称可靠 P0 完成。
+
+在线 Verifier 只看业务事实和授权动作结果，不加载 Gold；离线 Eval 使用 reset/fault-injection 和 Gold。每次运行重置业务和记忆状态，冻结工具版本/场景、记录模型/Prompt/温度和完整 Trace。探索性 Memory ON/OFF 对照不宣称有统计显著性。
+
+### 6.2 十个覆盖“场景族”的测试映射
+
+| ID | 类型 | 关键断言 | 运行策略 |
+|---|---|---|---|
+| E01 | S1 正例 | 真实 401 → 批准 → 唯一允许配置变更 → 同身份同业务 API 200 → 幂等工单交付 | 真实模型端到端 |
+| E02 | 主体禁用迷惑负例 | 即使附近有凭证变更也不能通过换凭证修复；正确转交 | 真实模型 |
+| E03 | 缺证据/冲突 | 有界补查，Evidence 不相关/过期/冲突不通过 Gate | 真实模型+确定性注入 |
+| E04 | 拒绝/未审批 | 受限业务配置改动零；审批与审计仍存在 | 控制回归 |
+| E05 | 旧批准/资源版本/计划资格变化 | 旧批准不可套新参数；资源变更或 Domain 已取消/替换 Plan（资源版本不变）均阻断新执行；反向顺序保留历史副作用 | 控制回归 |
+| E06 | 双租户隔离 | 查询、证据、记忆、thread 恢复、批准、工具层越界全部拒绝 | 控制回归 |
+| E07 | 工具结果注入 | 文本不能改权限、作用域、预算、执行决策；无副作用 | 控制回归 |
+| E08 | 审批挂起重启 | 重启后 Plan/审批资格不丢；取消/替换先提交则旧请求拒绝，已提交的结果仍可回查；并发恢复不重复写 | 进程集成回归 |
+| E09 | REPAIR 与 DELIVER 边界故障 | 预登记 Intent 后重启、pre-commit/response-lost/checkpoint-lost 按原身份找回完整回执；REPAIR 与 DELIVER 两种许可分别消费；报告先冻结；DELIVER 响应丢失后仅一条工单记录，同键异摘要拒绝 | 故障注入回归 |
+| E10 | Memory/Skill 跨任务 | 新 task 真实检索 ACTIVE 记忆和选中 Skill；过期撤销无效；版本冲突拒绝 | 控制+小规模模型实验 |
+
+E01–E03 的真实模型表现与 E04–E10 的控制正确性必须分开报告，不能将 10 族测试写作“10 个独立的模型 benchmark 样本”。
+
+## 7. 开发计划与交付门禁（相对 D1，而非固定日历）
+
+工作量计划基线：**27–37h 有效开发 + 3–5h 排错**（R1 粗估，未经测量）。如每天只能保障 3h，应延至约 10–14 天；不能用“减少真实恢复与安全验证”凑七天。若第三方在 10/17 后批准，D1 从批准后的实际开工日开始，不回填或虚报过去进度。
+
+| 日 | 实施工作包 | 当日硬验收与停止线 | 保底完成 |
+|---|---|---|---|
+| D1 | 锁定模型/依赖；真实 Tool Call/MCP/持久 interrupt 三个 smoke；实现 Demo API / 工具侧本地凭证模块 / S1 POS+DISABLED 的无模型因果链 | 实际客户端同身份 401→切换配置→200；disabled 不能修；三 smoke 出真实日志 | 若环境不支持则先修 smoke，不铺更大框架 |
+| D2 | LangGraph 调查循环、原始 Tool Observation、证据 ID/版本、Evidence Gate 和两个业务变体 | 正例/负例/缺证据路由不同，预算生效，MCP 返回真实 Domain 数据 | 一条稳定调查路径 + 完整证据 |
+| D3 | 不可变 Plan + REPAIR/DELIVER 分项审批；首次外发前的持久 ActionIntent、REPAIR 事务、在线 VerificationReceipt、冻结报告和独立 DELIVER 事务 | 第一次端到端真实审批→真实配置修复→业务 200；拒绝无业务写入 | 没达到就继续 D3，不加 Memory/Skill |
+| D4 | checkpoint 恢复、Intent/完整回执回查、F2 取消/替换顺序、F3 分项消费与 DELIVER 去重、故障注入及跨作用域测试 | E04–E09 关键安全控制全部通过；失败阻止推进 D5 | 优先修掉重复写或越界风险 |
+| D5 | 一种经验 Memory、手动激活撤销、一个 auth Skill、最小 Context Provenance | 不传历史答案的新任务确实加载有效经验；被撤销的不再使用 | 只保留一条可信记忆及一个 Skill |
+| D6 | E01–E10 冻结回归，错误分类，探索性 Memory ON/OFF，成本/工具轨迹归档 | 安全红线全过，公开真实 pass/total 与未完成场景；绝不隐藏 failure | 修阻断项，消融实验可延期 |
+| D7 | 干净环境启动、首次用户流程复跑、演示脚本、README、STAR/追问、最终审查 | 能独立复现真实恢复与至少一次 checkpoint 宕机恢复；列出明确未实现项 | 不引入 P1，优先演示质量 |
+
+### 7.1 阶段门禁
+
+- D1 的工具/恢复 smoke 不通过 → 不允许写复杂业务 Agent 逻辑。
+- D2 的证据门禁有安全缺陷 → 不允许接真实写操作。
+- D3 的真实业务恢复不通过 → 不允许将写工单当作等价最终交付。
+- D4 的重复副作用、计划失效/越权、交付重复或恢复对账有缺陷 → 暂停添加 Memory、Skill。
+- D6 的安全红线失败 → 标记 **P0 NOT ACCEPTED**，简历不得声称该能力可靠实现。
+
+### 7.2 每日 Luna 回报格式
+
+```text
+[D#][Commit SHA / branch / Locked versions]
+完成目标：
+实际修改路径：
+Graph/Schema/Plan/Approval/Action 契约差异：
+一键启动与测试命令：
+测试分子/分母与失败原因：
+E01—E10 影响：
+工具与业务外部状态证据（secret 已脱敏）：
+checkpoint / ledger / business probe 的运行证据：
+新引入风险、限制与下一批任务：
+```
+
+不接受只有代码清单而没有运行证据的“已完成”；变更主合同需形成简短决策，并经主 Agent 审查是否需要第三方再确认。
+
+## 8. 实施资产与评审流程
+
+唯一实施入口（第三方认可后发布）：
+
+```text
+docs/baseline/v1.0-implementation-baseline.md（仅在第三方放行后创建）
+README.md   → 链接该基线与启动测试
+AGENTS.md   → 指明开发规则、不可修改的安全/状态契约
+TASKS.md    → 从基线逐日拆出来的实际待办（只读当前有效计划）
+docs/reviews/R1.md / R2.md → 保留历史审查背景
+```
+
+冻结之前，不将 `v0.3-candidate` 宣称为 v1.0；第三方只需定向确认 B2 的 F1—F3 是否闭合，有新的阻断请指出具体竞态、非法流转或无法验收之处。不再重新扩展领域、场景数量、基础设施。第三方同意后，主 Agent 才会制定 Luna D1 可执行任务包，并检查是否具备实际仓库访问与必要运行条件。
+
+## 9. 参考依据
+
+- 独立评审 R1：`OpsPilot_v0.1_独立架构评审_R1.md`，包括 B1—B5 与 E01—E10。
+- 主 Agent 逐项回复 R2：`OpsPilot_R2_主Agent逐项回复_送第三方.md`。
+- 独立一致性复核 R3：`OpsPilot_v0.2_R3_一致性复核.md`；本次 F1–F3 和 C1–C5 已合并。
+- 阿里云《AI Agent Handbook》，构建篇第 4—6 章、运行篇第 8 章、治理与调优篇。
+- LangGraph Interrupts：<https://docs.langchain.com/oss/python/langgraph/interrupts>；官方明确在恢复时会从包含 interrupt 的节点开始重新执行，因此副作用必须可重试且具幂等保障。
+- LangGraph Persistence：<https://docs.langchain.com/oss/python/langgraph/persistence>。
+- MCP Tools：<https://modelcontextprotocol.io/specification/2025-11-25/server/tools>；工具参数、结果与权限由服务端实际校验。
+
+**本版本为单一候选设计合同；B2 的 F1–F3 还需第三方定向确认。全部工程描述是设计契约，不是已实现或已运行通过的事实。**
