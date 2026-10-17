@@ -725,6 +725,28 @@ def list_model_traces(path: str | Path, task_id: str) -> list[dict[str, object]]
     return result
 
 
+def _stable_diagnostic_fact_digest(item: dict[str, object]) -> str:
+    facts = item.get("facts")
+    if item.get("fact_type") != "endpoint_probe" or not isinstance(facts, dict):
+        return digest_json(facts)
+    # Per-probe correlation IDs and timestamps are expected to vary. Compare only
+    # fields that can change the diagnosis or the Evidence Gate's safety result.
+    stable_fields = (
+        "service_id",
+        "integration_id",
+        "principal_id",
+        "route",
+        "http_status",
+        "auth_event_result",
+        "credential_ref",
+        "versions_stable_during_probe",
+        "auth_event_scope_valid",
+        "business_order_id",
+        "business_order_status",
+    )
+    return digest_json({key: facts.get(key) for key in stable_fields})
+
+
 def evaluate_evidence_gate(
     path: str | Path,
     task_id: str,
@@ -786,7 +808,7 @@ def evaluate_evidence_gate(
         seen: dict[str, str] = {}
         for item in items:
             version_key = canonical_json(item["observed_versions"])
-            facts_digest = digest_json(item["facts"])
+            facts_digest = _stable_diagnostic_fact_digest(item)
             if version_key in seen and seen[version_key] != facts_digest:
                 conflicting.extend(str(candidate["evidence_id"]) for candidate in items)
                 break

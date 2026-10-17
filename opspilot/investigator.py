@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 from mcp import Client, StdioServerParameters
 from pydantic import ValidationError
 
@@ -86,6 +87,17 @@ class InvestigatorState(TypedDict, total=False):
     pending_call_refs: list[str]
     gate_decision: dict[str, object]
     report_ref: str
+    local_report_ref: str
+    plan_id: str
+    plan_hash: str
+    approval_id: str
+    approval_decision: str
+    repair_action_id: str
+    repair_ledger_ref: str
+    verification_id: str
+    frozen_report_ref: str
+    deliver_action_id: str
+    deliver_ledger_ref: str
 
 
 def _model_error_text(error: Exception) -> str:
@@ -230,6 +242,11 @@ def build_investigation_graph(
     llm: ChatOpenAI,
     checkpointer: AsyncSqliteSaver,
     checkpoint_db_path: Path,
+    *,
+    d3_mode: bool = False,
+    submitter_id: str | None = None,
+    executor_id: str | None = None,
+    business_api_url: str | None = None,
 ):
     async def intake(state: InvestigatorState) -> dict[str, object]:
         binding = get_task_binding(db_path, task_id)
@@ -529,6 +546,150 @@ def build_investigation_graph(
         report_ref = save_immutable_report(db_path, task_id, body)
         return {"stage": "complete", "report_ref": report_ref, "budget": attempt_counts(db_path, task_id)}
 
+    async def d3_create_plan(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import create_plan_from_gate
+
+        if not submitter_id:
+            raise RuntimeError("D3 Plan creation requires a trusted submitter identity.")
+        plan = create_plan_from_gate(db_path, task_id, submitter_id, dict(state.get("gate_decision", {})))
+        return {"stage": "d3_plan_created", "plan_id": plan["plan_id"], "plan_hash": plan["plan_hash"]}
+
+    async def d3_human_approval(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import get_plan_approval, get_plan_for_task
+
+        plan_hash = str(state.get("plan_hash", ""))
+        if not plan_hash:
+            raise RuntimeError("D3 approval interrupt has no immutable Plan hash.")
+        plan = get_plan_for_task(db_path, task_id, plan_hash)
+        resumed = interrupt({
+            "kind": "PLAN_APPROVAL_REQUIRED",
+            "task_id": task_id,
+            "thread_id": get_task_binding(db_path, task_id)["thread_id"],
+            "plan_id": plan["plan_id"],
+            "plan_hash": plan_hash,
+            "allowed_decisions": ["APPROVED", "REJECTED"],
+        })
+        if not isinstance(resumed, dict) or resumed.get("plan_hash") != plan_hash:
+            raise RuntimeError("D3 resume command is not bound to the interrupted Plan.")
+        approval = get_plan_approval(db_path, str(get_task_binding(db_path, task_id)["thread_id"]), plan_hash)
+        if approval is None or approval.get("approval_id") != resumed.get("approval_id"):
+            raise RuntimeError("D3 resume command does not match a persisted approval record.")
+        return {
+            "stage": "d3_approval_recorded",
+            "approval_id": approval["approval_id"],
+            "approval_decision": approval["decision"],
+            "approver_id": approval["approver_id"],
+        }
+
+    async def d3_unapproved_report(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import save_local_report
+
+        decision = str(state.get("approval_decision", "REJECTED"))
+        report = save_local_report(
+            db_path,
+            task_id,
+            "REJECTED",
+            {
+                "plan_hash": state.get("plan_hash"),
+                "approval_id": state.get("approval_id"),
+                "approver_id": state.get("approver_id"),
+                "approval_decision": decision,
+                "gate_decision": state.get("gate_decision"),
+            },
+            plan_hash=str(state.get("plan_hash")),
+        )
+        return {"stage": "complete", "local_report_ref": report["report_ref"]}
+
+    async def d3_nonready_report(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import save_local_report
+
+        gate = dict(state.get("gate_decision", {}))
+        decision = str(gate.get("decision", "INCONCLUSIVE"))
+        report = save_local_report(
+            db_path,
+            task_id,
+            decision,
+            {"gate_decision": gate, "diagnosis_draft": dict(state.get("diagnosis_draft", {}))},
+        )
+        return {"stage": "complete", "local_report_ref": report["report_ref"]}
+
+    async def d3_create_repair_intent(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import get_or_create_action_intent
+
+        if not executor_id:
+            raise RuntimeError("D3 action intent requires a trusted executor service identity.")
+        intent = get_or_create_action_intent(db_path, task_id, str(state["plan_hash"]), "REPAIR", executor_id)
+        return {"stage": "d3_repair_intent_persisted", "repair_action_id": intent["action_id"]}
+
+    async def d3_execute_repair(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import execute_repair
+
+        if not executor_id:
+            raise RuntimeError("D3 repair requires a trusted executor service identity.")
+        action_id = str(state["repair_action_id"])
+        ledger = execute_repair(db_path, action_id, executor_id, f"attempt-{uuid.uuid4()}")
+        return {"stage": "d3_repair_committed", "repair_action_id": action_id, "repair_ledger_ref": ledger["ledger_id"]}
+
+    async def d3_verify_repair(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import verify_repair_online
+
+        if not executor_id or not business_api_url:
+            raise RuntimeError("D3 online verification requires the trusted executor and loopback API.")
+        receipt = verify_repair_online(
+            db_path, task_id, str(state["plan_hash"]), str(state["repair_action_id"]), executor_id, business_api_url
+        )
+        return {
+            "stage": "d3_verification_complete",
+            "verification_id": receipt["verification_id"],
+        }
+
+    async def d3_unresolved_report(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import get_verification_receipt, save_local_report
+
+        if not executor_id:
+            raise RuntimeError("D3 receipt lookup requires a trusted executor service identity.")
+        receipt = get_verification_receipt(db_path, task_id, str(state["verification_id"]), executor_id)
+        report = save_local_report(
+            db_path,
+            task_id,
+            "UNRESOLVED",
+            {
+                "plan_hash": state.get("plan_hash"),
+                "repair_action_id": state.get("repair_action_id"),
+                "verification_id": state.get("verification_id"),
+                "verification_result_digest": receipt.get("result_digest"),
+                "verification_recovery_verified": receipt.get("recovery_verified"),
+                "verification_response_status": receipt.get("response_status"),
+            },
+            plan_hash=str(state.get("plan_hash")),
+        )
+        return {"stage": "complete", "local_report_ref": report["report_ref"]}
+
+    async def d3_freeze_report(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import get_or_create_report
+
+        if not executor_id:
+            raise RuntimeError("D3 report freeze requires a trusted executor service identity.")
+        report = get_or_create_report(db_path, task_id, str(state["plan_hash"]), str(state["repair_action_id"]), executor_id)
+        return {"stage": "d3_report_frozen", "frozen_report_ref": report["report_ref"]}
+
+    async def d3_create_deliver_intent(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import get_or_create_action_intent
+
+        if not executor_id:
+            raise RuntimeError("D3 delivery intent requires a trusted executor service identity.")
+        intent = get_or_create_action_intent(db_path, task_id, str(state["plan_hash"]), "DELIVER", executor_id)
+        return {"stage": "d3_deliver_intent_persisted", "deliver_action_id": intent["action_id"]}
+
+    async def d3_execute_deliver(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import execute_deliver
+
+        if not executor_id:
+            raise RuntimeError("D3 delivery requires a trusted executor service identity.")
+        action_id = str(state["deliver_action_id"])
+        ledger = execute_deliver(db_path, action_id, executor_id, f"attempt-{uuid.uuid4()}")
+        return {"stage": "complete", "deliver_action_id": action_id, "deliver_ledger_ref": ledger["ledger_id"]}
+
     def after_investigate(state: InvestigatorState) -> str:
         return "execute_read_tools" if state.get("pending_call_refs") else "evidence_gate"
 
@@ -545,7 +706,23 @@ def build_investigation_graph(
         return "evidence_gate" if no_progress >= 2 else "investigate"
 
     def after_gate(state: InvestigatorState) -> str:
-        return "investigate" if state.get("gate_decision", {}).get("decision") == "NEED_MORE" else "report"
+        decision = state.get("gate_decision", {}).get("decision")
+        if decision == "NEED_MORE":
+            return "investigate"
+        if d3_mode:
+            return "d3_create_plan" if decision == "READY" else "d3_nonready_report"
+        return "report"
+
+    def after_approval(state: InvestigatorState) -> str:
+        return "d3_repair_intent" if state.get("approval_decision") == "APPROVED" else "d3_unapproved_report"
+
+    def after_verification(state: InvestigatorState) -> str:
+        from opspilot.domain.d3 import get_verification_receipt
+
+        if not executor_id:
+            raise RuntimeError("D3 verification routing requires a trusted executor identity.")
+        receipt = get_verification_receipt(db_path, task_id, str(state["verification_id"]), executor_id)
+        return "d3_freeze_report" if receipt.get("recovery_verified") else "d3_unresolved_report"
 
     graph = StateGraph(InvestigatorState)
     graph.add_node("intake", intake)
@@ -559,7 +736,42 @@ def build_investigation_graph(
     graph.add_edge("prepare_context", "investigate")
     graph.add_conditional_edges("investigate", after_investigate, {"execute_read_tools": "execute_read_tools", "evidence_gate": "evidence_gate"})
     graph.add_conditional_edges("execute_read_tools", after_tool_execution, {"investigate": "investigate", "evidence_gate": "evidence_gate"})
-    graph.add_conditional_edges("evidence_gate", after_gate, {"investigate": "investigate", "report": "report"})
+    gate_routes = {"investigate": "investigate", "report": "report"}
+    if d3_mode:
+        for node_name, node_fn in (
+            ("d3_create_plan", d3_create_plan),
+            ("d3_human_approval", d3_human_approval),
+            ("d3_unapproved_report", d3_unapproved_report),
+            ("d3_nonready_report", d3_nonready_report),
+            ("d3_repair_intent", d3_create_repair_intent),
+            ("d3_execute_repair", d3_execute_repair),
+            ("d3_verify_repair", d3_verify_repair),
+            ("d3_unresolved_report", d3_unresolved_report),
+            ("d3_freeze_report", d3_freeze_report),
+            ("d3_deliver_intent", d3_create_deliver_intent),
+            ("d3_execute_deliver", d3_execute_deliver),
+        ):
+            graph.add_node(node_name, node_fn)
+        gate_routes["d3_create_plan"] = "d3_create_plan"
+        gate_routes["d3_nonready_report"] = "d3_nonready_report"
+        graph.add_conditional_edges("d3_create_plan", lambda _: "d3_human_approval", {"d3_human_approval": "d3_human_approval"})
+        graph.add_conditional_edges(
+            "d3_human_approval", after_approval,
+            {"d3_repair_intent": "d3_repair_intent", "d3_unapproved_report": "d3_unapproved_report"},
+        )
+        graph.add_edge("d3_repair_intent", "d3_execute_repair")
+        graph.add_edge("d3_execute_repair", "d3_verify_repair")
+        graph.add_conditional_edges(
+            "d3_verify_repair", after_verification,
+            {"d3_freeze_report": "d3_freeze_report", "d3_unresolved_report": "d3_unresolved_report"},
+        )
+        graph.add_edge("d3_freeze_report", "d3_deliver_intent")
+        graph.add_edge("d3_deliver_intent", "d3_execute_deliver")
+        graph.add_edge("d3_unapproved_report", END)
+        graph.add_edge("d3_nonready_report", END)
+        graph.add_edge("d3_unresolved_report", END)
+        graph.add_edge("d3_execute_deliver", END)
+    graph.add_conditional_edges("evidence_gate", after_gate, gate_routes)
     graph.add_edge("report", END)
     return graph.compile(checkpointer=checkpointer)
 
@@ -580,19 +792,29 @@ async def run_investigation(
     db_path: str | Path | None = None,
     checkpoint_db_path: str | Path | None = None,
     resume: bool = False,
+    d3_mode: bool = False,
+    executor_id: str | None = None,
+    resume_command: dict[str, object] | None = None,
 ) -> dict[str, object]:
     resolved_db = database_path(str(db_path) if db_path is not None else str(DEFAULT_DB_PATH))
     checkpoint_value = Path(checkpoint_db_path or DEFAULT_CHECKPOINT_DB_PATH)
     resolved_checkpoint_db = checkpoint_value if checkpoint_value.is_absolute() else ROOT / checkpoint_value
     resolved_checkpoint_db = resolved_checkpoint_db.resolve()
     resolved_checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
-    if resume:
+    if d3_mode and resume:
+        # D3 approval binding is checked before SqliteSaver construction or state access.
+        from opspilot.domain.d3 import authorize_workflow_resume
+
+        binding = authorize_workflow_resume(resolved_db, task_id, actor_id)
+    elif resume:
         # This authorization precedes SqliteSaver construction and get_state().
         binding = authorize_thread_resume(resolved_db, task_id, actor_id)
     else:
         binding = get_task_binding(resolved_db, task_id)
         if binding["actor_id"] != actor_id:
             raise ScopeDenied("Task is owned by a different trusted actor.")
+    if d3_mode and not executor_id:
+        raise ValueError("D3 mode requires an explicit trusted executor service identity.")
     task_id = str(binding["task_id"])
 
     model_api_key = os.environ.get(MODEL_API_KEY, "")
@@ -613,55 +835,107 @@ async def run_investigation(
         env=_mcp_child_environment(resolved_db),
         cwd=str(ROOT),
     )
-    config = {"configurable": {"thread_id": str(binding["thread_id"])}}
+    config = {"configurable": {"thread_id": str(binding["thread_id"])} }
     os.environ["LANGGRAPH_STRICT_MSGPACK"] = "true"
-    async with Client(server_params) as mcp_client:
-        catalog_result = await mcp_client.list_tools()
-        tool_catalog, model_tool_specs = _mcp_catalog(catalog_result.tools)
-        async with AsyncSqliteSaver.from_conn_string(str(resolved_checkpoint_db)) as checkpointer:
-            await checkpointer.setup()
-            graph = build_investigation_graph(
-                resolved_db,
-                task_id,
-                model_id,
-                mcp_client,
-                tool_catalog,
-                model_tool_specs,
-                llm,
-                checkpointer,
-                resolved_checkpoint_db,
-            )
-            if resume:
-                snapshot = await graph.aget_state(config)
-                if not snapshot.values:
-                    raise RuntimeError("No persisted graph state exists for the authorized thread.")
-                if snapshot.values.get("stage") == "complete":
-                    saved = read_report(resolved_db, task_id)
-                    if saved is None:
-                        raise RuntimeError("Completed checkpoint has no immutable D2 report.")
-                    return saved
-                await graph.ainvoke(None, config)
-            else:
-                snapshot = await graph.aget_state(config)
-                if snapshot.values:
-                    raise RuntimeError("Task already has a checkpoint; use the authorized resume command.")
-                await graph.ainvoke(
-                    {
-                        "task_binding_id": task_id,
-                        "stage": "created",
-                        "budget": attempt_counts(resolved_db, task_id),
-                        "diagnosis_draft": {},
-                        "evidence_ids": [],
-                        "tool_observations": [],
-                        "pending_call_refs": [],
-                        "gate_decision": {},
-                    },
-                    config,
+    api_server = None
+    api_thread = None
+    verification_url: str | None = None
+    if d3_mode:
+        import threading
+
+        from opspilot.domain.api import make_server
+
+        api_server = make_server(resolved_db, str(binding["tenant_id"]), "127.0.0.1", 0)
+        api_thread = threading.Thread(
+            target=api_server.serve_forever,
+            kwargs={"poll_interval": 0.05},
+            daemon=True,
+        )
+        api_thread.start()
+        host, port = api_server.server_address
+        verification_url = f"http://{host}:{port}"
+    try:
+        async with Client(server_params) as mcp_client:
+            catalog_result = await mcp_client.list_tools()
+            tool_catalog, model_tool_specs = _mcp_catalog(catalog_result.tools)
+            async with AsyncSqliteSaver.from_conn_string(str(resolved_checkpoint_db)) as checkpointer:
+                await checkpointer.setup()
+                graph = build_investigation_graph(
+                    resolved_db,
+                    task_id,
+                    model_id,
+                    mcp_client,
+                    tool_catalog,
+                    model_tool_specs,
+                    llm,
+                    checkpointer,
+                    resolved_checkpoint_db,
+                    d3_mode=d3_mode,
+                    submitter_id=str(binding["actor_id"]),
+                    executor_id=executor_id,
+                    business_api_url=verification_url,
                 )
-    saved = read_report(resolved_db, task_id)
-    if saved is None:
-        raise RuntimeError("D2 graph ended without a persisted report.")
-    return saved
+                snapshot = await graph.aget_state(config)
+                if resume:
+                    if not snapshot.values:
+                        raise RuntimeError("No persisted graph state exists for the authorized thread.")
+                    if snapshot.values.get("stage") == "complete":
+                        if d3_mode:
+                            from opspilot.domain.d3 import get_task_action_state
+
+                            return {
+                                "task_id": task_id,
+                                "thread_id": binding["thread_id"],
+                                "graph_state": dict(snapshot.values),
+                                "action_state": get_task_action_state(resolved_db, task_id, actor_id),
+                            }
+                        saved = read_report(resolved_db, task_id)
+                        if saved is None:
+                            raise RuntimeError("Completed checkpoint has no immutable D2 report.")
+                        return saved
+                    if d3_mode:
+                        if resume_command is None:
+                            raise RuntimeError("D3 resume requires the persisted approval command.")
+                        await graph.ainvoke(Command(resume=resume_command), config)
+                    else:
+                        await graph.ainvoke(None, config)
+                else:
+                    if snapshot.values:
+                        raise RuntimeError("Task already has a checkpoint; use the authorized resume command.")
+                    await graph.ainvoke(
+                        {
+                            "task_binding_id": task_id,
+                            "stage": "created",
+                            "budget": attempt_counts(resolved_db, task_id),
+                            "diagnosis_draft": {},
+                            "evidence_ids": [],
+                            "tool_observations": [],
+                            "pending_call_refs": [],
+                            "gate_decision": {},
+                        },
+                        config,
+                    )
+                snapshot = await graph.aget_state(config)
+                if d3_mode:
+                    from opspilot.domain.d3 import get_task_action_state
+
+                    return {
+                        "task_id": task_id,
+                        "thread_id": binding["thread_id"],
+                        "graph_state": dict(snapshot.values),
+                        "next_nodes": list(snapshot.next),
+                        "action_state": get_task_action_state(resolved_db, task_id, actor_id),
+                    }
+        saved = read_report(resolved_db, task_id)
+        if saved is None:
+            raise RuntimeError("D2 graph ended without a persisted report.")
+        return saved
+    finally:
+        if api_server is not None:
+            api_server.shutdown()
+            if api_thread is not None:
+                api_thread.join(timeout=2)
+            api_server.server_close()
 
 
 def create_and_run(

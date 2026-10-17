@@ -15,6 +15,7 @@ from opspilot.domain.d2 import (
     authorize_thread_resume,
     create_task_binding,
     evaluate_evidence_gate,
+    list_evidence,
     get_auth_policy_fact,
     get_integration_config_fact,
     get_principal_status_fact,
@@ -69,6 +70,27 @@ def test_evidence_gate_ready_requires_linked_401_and_matching_versions(demo_db: 
     assert decision["reason_code"] == "ENABLED_PRINCIPAL_AND_CREDENTIAL_REFERENCE_MISMATCH"
     assert decision["plan_candidate"]["new_credential_ref"] == "cred-v2"
     assert decision["side_effects"] == []
+
+
+def test_repeated_same_version_probe_ids_do_not_look_like_diagnostic_conflict(demo_db: Path, live_api: str) -> None:
+    binding = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a")
+    task_id = str(binding["task_id"])
+    evidence_ids = _complete_evidence(demo_db, task_id, live_api)
+    repeated_probe = probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)
+    assert repeated_probe["facts"]["http_status"] == 401
+    first_probe = list_evidence(demo_db, task_id, [evidence_ids[-1]])[0]
+    assert repeated_probe["facts"]["request_id"] != first_probe["facts"]["request_id"]
+    assert repeated_probe["facts"]["auth_event_id"] != first_probe["facts"]["auth_event_id"]
+    repeated_id = _record_fact(demo_db, task_id, "probe_endpoint", repeated_probe, 5)
+
+    decision = evaluate_evidence_gate(demo_db, task_id, evidence_ids + [repeated_id])
+    assert decision["decision"] == "READY"
+
+    conflict_probe = {**repeated_probe, "facts": {**repeated_probe["facts"], "auth_event_result": "AUTH_ACCEPTED"}}
+    conflict_id = _record_fact(demo_db, task_id, "probe_endpoint", conflict_probe, 6)
+    conflict = evaluate_evidence_gate(demo_db, task_id, evidence_ids + [repeated_id, conflict_id])
+    assert conflict["decision"] == "INCONCLUSIVE"
+    assert conflict["reason_code"] == "CONTRADICTORY_FACTS_AT_SAME_VERSION"
 
 
 def test_disabled_principal_is_no_action_even_with_credential_clue(demo_db: Path, live_api: str) -> None:

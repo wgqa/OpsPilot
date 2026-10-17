@@ -4,17 +4,19 @@
 
 **设计状态：** R5 · DESIGN APPROVED
 **D1 状态：** D1 技术 smoke、S1 业务闭环与 8 项自动化测试已通过主 Agent 审查。
-**D2 状态：** 只读动态调查、真实模型 + MCP 链路、Evidence Gate 与三种 401 场景已完成；等待主 Agent 审查。
+**D2 状态：** 只读动态调查、真实模型 + MCP 链路、Evidence Gate 与三种 401 场景已通过主 Agent 验收，PR #2 已合入 `main@171f028`。
+**D3 状态：** WP-01–05、真实端到端运行与全套回归已通过；提交主 Agent 源码与证据复核（29 项 pytest、13 项 D3 smoke 检查）。
 **唯一有效架构与验收规范：** [v1.0 实施基线](docs/baseline/v1.0-implementation-baseline.md)
-**当前实施任务：** [Luna D1 任务书](docs/handoff/Luna-D1-implementation-brief.md)
+**当前实施任务：** [Luna D3 任务卡](docs/handoff/Luna-D3-implementation-brief.md)
 **逐项进度与测试结论：** [TASKS.md](TASKS.md)
 **D1 执行日志与报告：** [D1 报告](docs/evidence/d1/REPORT.md)
 **D2 任务卡与执行报告：** [D2 任务卡](docs/handoff/Luna-D2-implementation-brief.md) · [D2 报告](docs/evidence/d2/REPORT.md)
+**D3 真实运行轨迹与报告：** [D3 报告](docs/evidence/d3/REPORT.md) · [脱敏轨迹](docs/evidence/d3/TRACE.json) · [进程与测试日志](docs/evidence/d3/)
 **工程边界：** [AGENTS.md](AGENTS.md)
 
 ## 产品目标与边界
 
-S1-POS 中，`integration-a` 用旧凭证引用访问固定订单业务路由，收到真实 HTTP 401；仅测试 fixture 驱动可以把配置切至服务端接受的凭证引用。随后同一 integration、principal 和路由必须得到业务 HTTP 200，且响应包含 `order_id=demo-order`、`status=CONFIRMED`。S1-DISABLED 验证主体停用时切换凭证仍然返回 401。
+S1-POS fixture 将 `integration-a` 设为旧凭证引用，访问固定订单业务路由会得到真实 HTTP 401。D3 只有在独立 approver 批准不可变 Plan 后，才由持久 ActionIntent 驱动事务 REPAIR；同一 service、integration、principal 和路由随后必须通过真实 HTTP 200，且响应包含 `order_id=demo-order`、`status=CONFIRMED`。S1-DISABLED 验证主体停用时不能通过切换凭证恢复。
 
 D1 的 MCP 工具只读，服务端启动时绑定租户作用域。checkpoint smoke 用 SQLite 持久化，在进程 A 退出后由另一进程以同一 thread ID 恢复；越权操作者在读取 checkpoint 前被拒绝。fixture 凭证、SQLite 数据库和响应只用于本地演示，不代表生产系统或生产级身份管理。
 
@@ -67,6 +69,19 @@ D2 真实模型调查命令（每个 `d2-smoke` 都会重置 `--db` 指定的本
 .\.venv\Scripts\python -m opspilot.cli d2-smoke --scenario INSUFFICIENT --db .runtime\d2-insufficient.sqlite3 --checkpoint-db .runtime\d2-insufficient-checkpoints.sqlite3
 ```
 
+D3 手动流程分两个 OS 进程运行。先执行 `d3-start`；它在 Plan 后通过 LangGraph `interrupt` 挂起并输出 `thread_id` 与 `plan_hash`。再从另一个进程以可信 approver 身份批准或拒绝，恢复同一 checkpoint。首次 `REPAIR` 和 `DELIVER` 之前都会先持久化各自的 ActionIntent：
+
+```powershell
+.\.venv\Scripts\python -m opspilot.cli d3-start --actor support-a --executor executor-a --db .runtime\d3.sqlite3 --checkpoint-db .runtime\d3-checkpoints.sqlite3
+.\.venv\Scripts\python -m opspilot.cli d3-approve --actor approver-a --thread-id <d3-start 输出的 thread_id> --plan-hash <d3-start 输出的 plan_hash> --decision APPROVED --executor executor-a --db .runtime\d3.sqlite3 --checkpoint-db .runtime\d3-checkpoints.sqlite3
+```
+
+一条命令会复现真实模型、MCP Client/Server、独立进程审批恢复、真实业务验证与工单追加。该命令会重置指定的本地演示数据库：
+
+```powershell
+.\.venv\Scripts\python -m opspilot.cli d3-smoke --db .runtime\d3-smoke.sqlite3 --checkpoint-db .runtime\d3-smoke-checkpoints.sqlite3 --evidence-dir docs/evidence/d3
+```
+
 正式调查入口从可信本地操作者注册表创建 TaskBinding；需要先用 `reset` 初始化演示数据。D2 Investigator 通过真实 MCP stdio Server 选择只读查询，Graph checkpointer 与 Domain 数据库存放在不同 SQLite 文件中：
 
 ```powershell
@@ -82,16 +97,16 @@ D2 Investigator 只暴露四个拆分工具：`get_integration_config`、`get_pr
 
 ```powershell
 New-Item -ItemType Directory -Path .runtime -Force | Out-Null
-.\.venv\Scripts\python -m pytest -q -s --basetemp=.runtime\pytest-d2
+.\.venv\Scripts\python -m pytest -q -s --basetemp=.runtime\pytest-d3
 ```
 
-各命令的脱敏输出、失败尝试和解释见 [D1 evidence](docs/evidence/d1/) 与 [D1 报告](docs/evidence/d1/REPORT.md)，D2 真实轨迹与测试记录见 [D2 evidence](docs/evidence/d2/) 与 [D2 报告](docs/evidence/d2/REPORT.md)。D1 独立干净环境测试为 **8 passed**；D2 的最新完整测试数以 D2 报告为准。此前 pytest 默认临时目录遇到 Windows `PermissionError`；切换到仓库内 `.runtime` 临时目录后在主环境和独立干净环境都通过。
+各命令的脱敏输出、失败尝试和解释见 [D1 evidence](docs/evidence/d1/) 与 [D1 报告](docs/evidence/d1/REPORT.md)、[D2 evidence](docs/evidence/d2/) 与 [D2 报告](docs/evidence/d2/REPORT.md)、[D3 evidence](docs/evidence/d3/) 与 [D3 报告](docs/evidence/d3/REPORT.md)。D1 独立干净环境测试为 **8 passed**；D2 与 D3 的最终测试分子/分母以对应阶段报告为准。pytest 在 Windows 上请使用仓库内 `.runtime` 临时目录。
 
 ## 当前已知问题
 
 - Function Calling 和 D2 Investigator 目前只验证了已配置的 `deepseek-flash` OpenAI-compatible Chat Completions 端点；其他提供商和模型尚未验证。模型偶尔会返回并行调用；Dispatcher 只发出第一个，其他调用留痕为未发送，再让模型依据结果选择下一步。
-- D2 的可信操作者注册表、业务 API、fixture 与 SQLite 仅用于本地演示，不代表生产 IAM 或客户系统。D2 不执行配置修改、审批或工单写回。
-- 尚未实现 D3/D4 审批与事务动作、Memory、Skill、多 Agent、Redis、S2/S3 或前端。
+- 本地可信操作者注册表、业务 API、fixture 与 SQLite 仅用于演示，不代表生产 IAM 或客户系统。D3 通过本地事务与跨进程 CLI 演示首次正确闭环。
+- D4 的系统性崩溃窗口、并发取消/替换和响应丢失故障矩阵尚未执行；Memory、Skills、多 Agent、Redis、S2/S3 与前端也不在当前实现范围。
 
 ## 文档与评审历史
 

@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, DEFAULT_DB_PATH, database_path, load_local_environment
@@ -14,6 +16,59 @@ from opspilot.domain.database import reset_fixture
 
 def emit(event: str, **fields: object) -> None:
     print(json.dumps({"event": event, **fields}, sort_keys=True, default=str))
+
+
+def d3_public_action_summary(state: dict[str, object]) -> dict[str, object]:
+    def rows(name: str) -> list[dict[str, object]]:
+        value = state.get(name, [])
+        return [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+    receipts = []
+    for item in rows("verification_receipts"):
+        assertions = json.loads(str(item.pop("business_assertions_json", "{}")))
+        versions = json.loads(str(item.pop("probe_observed_versions_json", "{}")))
+        item["business_assertions"] = assertions
+        item["probe_observed_versions"] = versions
+        item["recovery_verified"] = bool(item.get("recovery_verified"))
+        receipts.append(item)
+    ledgers = []
+    for item in rows("action_ledgers"):
+        item["result"] = json.loads(str(item.pop("result_json", "{}")))
+        ledgers.append(item)
+    deliveries = []
+    for item in rows("delivery_records"):
+        item["delivery_receipt"] = json.loads(str(item.pop("delivery_receipt_json", "{}")))
+        deliveries.append(item)
+    entries = rows("ticket_entries")
+    return {
+        "task_binding": state.get("task_binding"),
+        "plans": [
+            {key: item.get(key) for key in ("plan_id", "plan_hash", "plan_version", "created_by")}
+            for item in rows("plans")
+        ],
+        "plan_authorizations": rows("plan_authorizations"),
+        "approvals": [
+            {key: item.get(key) for key in ("approval_id", "plan_hash", "approver_id", "decision", "approval_scope_json", "decided_at")}
+            for item in rows("approvals")
+        ],
+        "permissions": rows("permissions"),
+        "action_intents": [
+            {key: item.get(key) for key in ("action_id", "action_kind", "idempotency_key", "request_digest", "approval_id", "plan_hash")}
+            for item in rows("action_intents")
+        ],
+        "action_ledgers": ledgers,
+        "verification_receipts": receipts,
+        "report_artifacts": [
+            {key: item.get(key) for key in ("report_ref", "plan_hash", "repair_action_id", "verification_id", "report_version", "content_digest")}
+            for item in rows("report_artifacts")
+        ],
+        "delivery_records": deliveries,
+        "ticket_entries": entries,
+        "local_reports": [
+            {key: item.get(key) for key in ("report_ref", "outcome", "content_digest", "plan_hash")}
+            for item in rows("local_reports")
+        ],
+    }
 
 
 def parser_for_cli() -> argparse.ArgumentParser:
@@ -57,6 +112,33 @@ def parser_for_cli() -> argparse.ArgumentParser:
     d2_smoke.add_argument("--actor", default="support-a")
     d2_smoke.add_argument("--db", default=str(DEFAULT_DB_PATH))
     d2_smoke.add_argument("--checkpoint-db", default=str(DEFAULT_CHECKPOINT_DB_PATH))
+
+    d3_start = subparsers.add_parser("d3-start", help="Run real D2 investigation and persist a Plan before the HITL interrupt.")
+    d3_start.add_argument("--actor", default="support-a", help="Trusted task submitter actor ID.")
+    d3_start.add_argument("--executor", default="executor-a", help="Trusted executor service ID.")
+    d3_start.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    d3_start.add_argument("--checkpoint-db", default=str(DEFAULT_CHECKPOINT_DB_PATH))
+
+    d3_approve = subparsers.add_parser("d3-approve", help="Persist an independent human approval and resume a D3 checkpoint.")
+    d3_approve.add_argument("--actor", required=True, help="Trusted approver actor ID.")
+    d3_approve.add_argument("--thread-id", required=True)
+    d3_approve.add_argument("--plan-hash", required=True)
+    d3_approve.add_argument("--decision", choices=("APPROVED", "REJECTED"), required=True)
+    d3_approve.add_argument("--executor", default="executor-a", help="Trusted executor service ID.")
+    d3_approve.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    d3_approve.add_argument("--checkpoint-db", default=str(DEFAULT_CHECKPOINT_DB_PATH))
+
+    d3_cancel = subparsers.add_parser("d3-cancel", help="Cancel an active persisted D3 Plan.")
+    d3_cancel.add_argument("--actor", required=True, help="Trusted task submitter actor ID.")
+    d3_cancel.add_argument("--task-id", required=True)
+    d3_cancel.add_argument("--plan-hash", required=True)
+    d3_cancel.add_argument("--reason", required=True)
+    d3_cancel.add_argument("--db", default=str(DEFAULT_DB_PATH))
+
+    d3_smoke = subparsers.add_parser("d3-smoke", help="Run a real-model, real-MCP D3 workflow with approval in a second OS process.")
+    d3_smoke.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    d3_smoke.add_argument("--checkpoint-db", default=str(DEFAULT_CHECKPOINT_DB_PATH))
+    d3_smoke.add_argument("--evidence-dir", default="docs/evidence/d3")
     return parser
 
 
@@ -173,6 +255,87 @@ def main() -> int:
             report=report,
         )
         return 0 if passed else 1
+    if args.command == "d3-start":
+        from opspilot.domain.d2 import create_task_binding
+        from opspilot.domain.d3 import get_plan_for_task
+        from opspilot.investigator import run_investigation
+
+        binding = create_task_binding(db_path, args.actor, "orders-demo", "integration-a")
+        try:
+            result = asyncio.run(run_investigation(
+                str(binding["task_id"]), args.actor, db_path=db_path,
+                checkpoint_db_path=args.checkpoint_db, d3_mode=True, executor_id=args.executor,
+            ))
+        except Exception as error:
+            from opspilot.smokes.tool_call import safe_error_details
+
+            emit("d3_start_failed", process_id=os.getpid(), error=safe_error_details(error))
+            return 1
+        state = dict(result.get("graph_state", {}))
+        action_state = dict(result.get("action_state", {}))
+        plan = get_plan_for_task(db_path, str(binding["task_id"]), str(state["plan_hash"])) if state.get("plan_hash") else None
+        emit(
+            "d3_plan_waiting_approval" if action_state.get("task_binding", {}).get("status") == "WAITING_APPROVAL" else "d3_investigation_complete",
+            process_id=os.getpid(),
+            task_binding=action_state.get("task_binding", {key: binding[key] for key in ("task_id", "thread_id", "tenant_id", "actor_id", "service_id", "integration_id", "principal_id", "ticket_id")}),
+            stage=state.get("stage"),
+            gate_decision=state.get("gate_decision"),
+            plan_hash=state.get("plan_hash"),
+            plan=plan,
+            graph_only_plan_reference="plan" not in state and "canonical_request_json" not in state,
+            next_nodes=result.get("next_nodes", []),
+        )
+        return 0
+    if args.command == "d3-approve":
+        from opspilot.domain.d3 import submit_plan_approval
+        from opspilot.domain.d2 import get_task_binding
+        from opspilot.investigator import run_investigation
+
+        try:
+            approval = submit_plan_approval(db_path, args.thread_id, args.actor, args.plan_hash, args.decision)
+            binding = get_task_binding(db_path, str(approval["task_id"]))
+            result = asyncio.run(run_investigation(
+                args.thread_id, args.actor, db_path=db_path,
+                checkpoint_db_path=args.checkpoint_db, resume=True, d3_mode=True,
+                executor_id=args.executor,
+                resume_command={"approval_id": approval["approval_id"], "plan_hash": args.plan_hash},
+            ))
+        except Exception as error:
+            from opspilot.smokes.tool_call import safe_error_details
+
+            emit("d3_approval_resume_failed", process_id=os.getpid(), error=safe_error_details(error))
+            return 1
+        state = dict(result.get("graph_state", {}))
+        action_state = dict(result.get("action_state", {}))
+        public_state = d3_public_action_summary(action_state)
+        business_outcome = "RECOVERED" if any(
+            item.get("action_kind") == "DELIVER" and item.get("status") == "COMMITTED"
+            for item in public_state.get("action_ledgers", [])
+        ) else (public_state.get("local_reports", [{}])[-1].get("outcome") if public_state.get("local_reports") else "UNRESOLVED")
+        emit(
+            "d3_approval_process_completed",
+            process_id=os.getpid(),
+            task_id=binding["task_id"],
+            thread_id=args.thread_id,
+            plan_hash=args.plan_hash,
+            approval_id=approval["approval_id"],
+            approval_decision=approval["decision"],
+            graph_stage=state.get("stage"),
+            graph_signals={key: state.get(key) for key in ("plan_id", "plan_hash", "repair_action_id", "repair_ledger_ref", "verification_id", "frozen_report_ref", "deliver_action_id", "deliver_ledger_ref", "local_report_ref")},
+            business_outcome=business_outcome,
+            action_state=public_state,
+        )
+        return 0
+    if args.command == "d3-cancel":
+        from opspilot.domain.d3 import cancel_plan
+
+        result = cancel_plan(db_path, args.task_id, args.plan_hash, args.actor, args.reason)
+        emit("d3_plan_cancelled", authorization=result)
+        return 0
+    if args.command == "d3-smoke":
+        from opspilot.smokes.d3 import run_smoke
+
+        return run_smoke(db_path, args.checkpoint_db, args.evidence_dir)
     if args.kind == "tool-call":
         from opspilot.smokes.tool_call import run_smoke
 

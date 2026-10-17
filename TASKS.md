@@ -1,7 +1,7 @@
 # TASKS.md — OpsPilot 相对 D1 的实施追踪
 
 **主合同**：[`docs/baseline/v1.0-implementation-baseline.md`](docs/baseline/v1.0-implementation-baseline.md)
-**设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1 已通过主 Agent 审查；D2 实际开工：2026-10-17（北京时间），当前提交主 Agent 复核。**
+**设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1、D2 已通过主 Agent 验收；D2 PR #2 合入 `main@171f028`。D3 WP-01–05 与运行验收已完成，提交主 Agent 复核。**
 
 > 本表只勾选已执行且有证据的项目。D1–D7 代表实际开发的相对顺序，**不是**把 2026-10-17—23 自动当作已经执行。评审阶段累计的时间不当作有效编码时间。
 
@@ -29,10 +29,12 @@
 
 ## D3 — 第一次真实审批 → 修复 → 业务验证 → 交付
 
-- [ ] 不可变 Plan、Domain 权威计划资格和分项 REPAIR/DELIVER Approval。
-- [ ] 两个动作首次发出前预登记唯一 ActionIntent，Domain 事务与 ActionLedger 保存可重放完整结果。
-- [ ] REPAIR 事务 CAS，在线 Verifier 同调用方真实业务恢复，VerificationReceipt 持久化。
-- [ ] 固定 ReportArtifact、DELIVER 意图、幂等工单交付及独立回执；拒绝分支没有未经授权业务写入。
+- [x] WP-01：不可变 Plan、Domain 权威计划资格和分项 REPAIR/DELIVER Approval；LangGraph interrupt 由独立进程审批并恢复，checkpoint 只存业务对象引用。
+- [x] WP-02：两个动作首次发出前预登记唯一 ActionIntent；各自授权、幂等身份、ActionLedger 分别持久化，事务入口只接受 Intent ID。
+- [x] WP-03：REPAIR 事务 CAS；同一 TaskBinding 的真实业务路由在线验证 HTTP 200 和订单字段；VerificationReceipt 持久化。
+- [x] WP-04：固定 ReportArtifact；DELIVER 使用独立 Intent、许可、ledger 和 receipt，工单处置条目只追加一次。
+- [x] WP-05：拒绝、DISABLED、过期版本和失败在线验证均阻断受限写入；重复 Probe 新 request/auth-event ID 不再误判冲突，稳定事实变化仍触发 INCONCLUSIVE。
+- [x] 真实 D3 smoke、D1/D2 回归、全套 pytest 及 `docs/evidence/d3/REPORT.md` 已执行并记录；未扩展 D4、Memory、Skills 或 Multi-Agent。
 
 **停止线**：无法显示真实 401→200 或受限操作不安全，停留 D3 修复，不添加 Memory/Skill。
 
@@ -69,6 +71,7 @@
 | 日期（实际） | 阶段 | Commit / 版本 | 结果（测试分子/分母） | 阻断与下一步 |
 |---|---|---|---|---|
 | 2026-10-17 | D1（已验收） | `1a038be` / PR #1 merged | WP-01–06 通过；pytest 8/8；真实模型、MCP、跨进程 checkpoint、S1 POS/DISABLED 均有日志 | 主 Agent 已通过审查。报告见 `docs/evidence/d1/REPORT.md` |
-| 2026-10-17 | D2（待主 Agent 复核） | `e6ae7a7` / PR #2 | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 已按任务卡停止扩展；等待主 Agent 验收。报告见 `docs/evidence/d2/REPORT.md` |
+| 2026-10-17 | D2（已验收并合入 main） | PR #2 / `171f028` | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 主 Agent 已验收。报告见 `docs/evidence/d2/REPORT.md` |
+| 2026-10-17 | D3（完成，待主 Agent 复核） | `main` / SHA 见交接 | 全量 pytest 29/29；D3 真实跨进程模型/MCP/HITL smoke 13 项检查通过；D2 POS/DISABLED/INSUFFICIENT 三场景回归通过 | 真实 401→200、订单字段、固定报告与单条工单交付见 `docs/evidence/d3/REPORT.md` |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。

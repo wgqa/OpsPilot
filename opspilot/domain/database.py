@@ -187,6 +187,179 @@ CREATE TABLE IF NOT EXISTS d2_tool_faults (
     error_code TEXT NOT NULL,
     PRIMARY KEY (task_id, tool_name)
 );
+CREATE TABLE IF NOT EXISTS executor_services (
+    executor_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+);
+CREATE TABLE IF NOT EXISTS tickets (
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    ticket_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    PRIMARY KEY (tenant_id, ticket_id)
+);
+CREATE TABLE IF NOT EXISTS d3_plans (
+    plan_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    plan_version INTEGER NOT NULL,
+    plan_hash TEXT NOT NULL,
+    plan_signature TEXT NOT NULL,
+    canonical_plan_json TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tenant_id, task_id, plan_hash),
+    UNIQUE (tenant_id, task_id, plan_signature),
+    UNIQUE (tenant_id, task_id, plan_version)
+);
+CREATE TABLE IF NOT EXISTS d3_plan_authorizations (
+    plan_hash TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    eligibility TEXT NOT NULL CHECK (eligibility IN ('ACTIVE', 'SUPERSEDED', 'CANCELLED')),
+    generation INTEGER NOT NULL,
+    changed_by TEXT,
+    change_reason TEXT,
+    active_from TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_d3_plan_auth_task ON d3_plan_authorizations(tenant_id, task_id, eligibility);
+CREATE TABLE IF NOT EXISTS d3_plan_authorization_history (
+    history_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    eligibility TEXT NOT NULL CHECK (eligibility IN ('ACTIVE', 'SUPERSEDED', 'CANCELLED')),
+    generation INTEGER NOT NULL,
+    changed_by TEXT,
+    change_reason TEXT,
+    changed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS d3_approvals (
+    approval_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    approver_id TEXT NOT NULL,
+    approval_scope_json TEXT NOT NULL,
+    approved_plan_digest TEXT NOT NULL,
+    target_resource_id TEXT NOT NULL,
+    environment TEXT NOT NULL,
+    action_kinds_json TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('APPROVED', 'REJECTED')),
+    decided_at TEXT NOT NULL,
+    UNIQUE (tenant_id, task_id, plan_hash)
+);
+CREATE TABLE IF NOT EXISTS d3_action_permissions (
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    approval_id TEXT NOT NULL REFERENCES d3_approvals(approval_id),
+    action_kind TEXT NOT NULL CHECK (action_kind IN ('REPAIR', 'DELIVER')),
+    state TEXT NOT NULL CHECK (state IN ('AVAILABLE', 'CONSUMED', 'REVOKED')),
+    used_by_action_id TEXT,
+    changed_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, task_id, plan_hash, action_kind)
+);
+CREATE TABLE IF NOT EXISTS d3_action_intents (
+    action_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    action_kind TEXT NOT NULL CHECK (action_kind IN ('REPAIR', 'DELIVER')),
+    idempotency_key TEXT NOT NULL UNIQUE,
+    approval_id TEXT NOT NULL,
+    canonical_request_json TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, task_id, plan_hash, action_kind)
+);
+CREATE TABLE IF NOT EXISTS d3_action_ledgers (
+    ledger_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    action_kind TEXT NOT NULL CHECK (action_kind IN ('REPAIR', 'DELIVER')),
+    action_id TEXT NOT NULL UNIQUE REFERENCES d3_action_intents(action_id),
+    idempotency_key TEXT NOT NULL UNIQUE,
+    request_digest TEXT NOT NULL,
+    approval_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('COMMITTED', 'REJECTED_PRECONDITION', 'REJECTED_AUTH')),
+    before_version INTEGER,
+    after_version INTEGER,
+    result_json TEXT NOT NULL,
+    result_digest TEXT NOT NULL,
+    committed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS d3_verification_receipts (
+    verification_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    repair_action_id TEXT NOT NULL,
+    service_id TEXT NOT NULL,
+    integration_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    business_route TEXT NOT NULL,
+    probe_observed_versions_json TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    response_status INTEGER NOT NULL,
+    business_assertions_json TEXT NOT NULL,
+    recovery_verified INTEGER NOT NULL CHECK (recovery_verified IN (0, 1)),
+    result_digest TEXT NOT NULL,
+    UNIQUE (tenant_id, task_id, plan_hash, repair_action_id)
+);
+CREATE TABLE IF NOT EXISTS d3_report_artifacts (
+    report_ref TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    repair_action_id TEXT NOT NULL,
+    verification_id TEXT NOT NULL,
+    report_version INTEGER NOT NULL,
+    content_digest TEXT NOT NULL,
+    immutable_content_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, task_id, plan_hash, repair_action_id, report_version)
+);
+CREATE TABLE IF NOT EXISTS d3_ticket_resolution_entries (
+    entry_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    ticket_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    delivery_action_id TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    content_json TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, ticket_id, delivery_action_id)
+);
+CREATE TABLE IF NOT EXISTS d3_delivery_records (
+    delivery_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    delivery_action_id TEXT NOT NULL UNIQUE,
+    ticket_id TEXT NOT NULL,
+    report_ref TEXT NOT NULL,
+    report_version INTEGER NOT NULL,
+    payload_digest TEXT NOT NULL,
+    ticket_entry_id TEXT NOT NULL,
+    delivery_receipt_json TEXT NOT NULL,
+    committed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS d3_local_reports (
+    report_ref TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT,
+    outcome TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    immutable_content_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, task_id, plan_hash, outcome)
+);
 """
 
 
@@ -218,6 +391,20 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     status_a = "DISABLED" if scenario == "S1_DISABLED" else "ENABLED"
     with connect(path) as connection:
         for table in (
+            "d3_local_reports",
+            "d3_delivery_records",
+            "d3_ticket_resolution_entries",
+            "d3_report_artifacts",
+            "d3_verification_receipts",
+            "d3_action_ledgers",
+            "d3_action_intents",
+            "d3_action_permissions",
+            "d3_approvals",
+            "d3_plan_authorization_history",
+            "d3_plan_authorizations",
+            "d3_plans",
+            "tickets",
+            "executor_services",
             "d2_tool_faults",
             "d2_reports",
             "d2_evidence",
@@ -250,6 +437,14 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
                 ("support-b", "tenant-b", "SUPPORT"),
                 ("approver-b", "tenant-b", "APPROVER"),
             ],
+        )
+        connection.executemany(
+            "INSERT INTO executor_services (executor_id, tenant_id, active) VALUES (?, ?, 1)",
+            [("executor-a", "tenant-a"), ("executor-b", "tenant-b")],
+        )
+        connection.executemany(
+            "INSERT INTO tickets (tenant_id, ticket_id, status) VALUES (?, ?, 'OPEN')",
+            [("tenant-a", "INC-A-001"), ("tenant-b", "INC-B-001")],
         )
         for tenant_id, suffix, principal_status in (
             ("tenant-a", "a", status_a),

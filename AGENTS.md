@@ -23,7 +23,10 @@
 - D2 模型不能指定 tenant、actor、Authorization、凭证值、任意 URL 或 thread ID。MCP Server 从持久可信 TaskBinding 取得 scope；Domain 每次查询均重新核验 task/resource 归属。恢复 checkpoint 前必须先校验 thread 所有者。
 - D2 只读循环的程序预算默认最多 8 次模型请求、6 次 MCP `tools/call` attempt；每次外发前持久登记，重试/恢复重放都计数。Gate 只返回 `READY`、`NEED_MORE`、`NO_ACTION`、`INCONCLUSIVE`，只用类型化、同租户、同任务、同资源、版本兼容且足够新的 Evidence；模型文字不能直接决定 Gate。
 - D2 的 `READY` 只允许生成诊断与 Plan 候选，不执行配置或工单写入。主体 `DISABLED` 返回 `NO_ACTION`；缺失事实在预算内可 `NEED_MORE`，冲突、重复无增量或耗尽预算则安全停止为 `INCONCLUSIVE`。
-- **D3**：Plan、审批、持久 ActionIntent、修复事务、独立在线业务恢复探测、报告与交付首次闭环。
+- **D3**：只从同任务 `READY` 与其 Evidence 生成不可变 canonical Plan；Gate 本身不授予执行权。沿用 D2 单主 Graph，以 `interrupt` 等待可信 CLI 审批；Graph checkpoint 只保存 Plan/Intent/Receipt 引用，Domain SQLite 保存计划资格、Approval、分开的 REPAIR/DELIVER Permission、ActionIntent、ActionLedger、VerificationReceipt、冻结 ReportArtifact 和 DeliveryRecord。
+- D3 的 REPAIR/DELIVER 首次业务写入前必须各自持久化 ActionIntent；动作入口只接受 Intent ID，由同一 Domain `BEGIN IMMEDIATE` 事务检查当前 Plan/审批/版本/许可并提交 CAS 或追加工单。事务内不调用模型、MCP 或 HTTP。
+- D3 恢复证明必须由同一 TaskBinding 的 service/integration/principal 对固定业务 route 发出真实 HTTP 200，并校验 `order_id`、`status` 与版本；验证成功后先冻结报告，再执行独立 DELIVER。未审批、拒绝、DISABLED、过期版本或验证失败时不得产生越权配置/工单写入。
+- D3 的本地 `support-a` / `approver-a` / `executor-a` 仅演示信任角色；D4 才完成系统性崩溃窗口、并发取消/替换、响应丢失与重复恢复矩阵。
 - **D4**：恢复、动作身份回查、取消/替换、授权消费、工单去重、越界及响应丢失故障注入。
 - **D5**：一个 `auth-incident-triage` Skill、一类经批准 Episodic Memory、最小 Context Provenance。
 - **D6**：冻结 E01–E10 回归、成本/错误记录及探索性对照。
