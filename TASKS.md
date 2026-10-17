@@ -72,6 +72,6 @@
 |---|---|---|---|---|
 | 2026-10-17 | D1（已验收） | `1a038be` / PR #1 merged | WP-01–06 通过；pytest 8/8；真实模型、MCP、跨进程 checkpoint、S1 POS/DISABLED 均有日志 | 主 Agent 已通过审查。报告见 `docs/evidence/d1/REPORT.md` |
 | 2026-10-17 | D2（已验收并合入 main） | PR #2 / `171f028` | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 主 Agent 已验收。报告见 `docs/evidence/d2/REPORT.md` |
-| 2026-10-17 | D3（完成，待主 Agent 复核） | `main` / SHA 见交接 | 全量 pytest 29/29；D3 真实跨进程模型/MCP/HITL smoke 13 项检查通过；D2 POS/DISABLED/INSUFFICIENT 三场景回归通过 | 真实 401→200、订单字段、固定报告与单条工单交付见 `docs/evidence/d3/REPORT.md` |
+| 2026-10-17 | D3（完成，待主 Agent 复核） | `main` / `5529990` | 全量 pytest 29/29；D3 真实跨进程模型/MCP/HITL smoke 13 项检查通过；D2 POS/DISABLED/INSUFFICIENT 三场景回归通过 | 真实 401→200、订单字段、固定报告与单条工单交付见 `docs/evidence/d3/REPORT.md` |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。
