@@ -204,7 +204,12 @@ def run_smoke(db_path: str | Path, checkpoint_db_path: str | Path, evidence_dir:
         "real_initial_401_evidence": bool(initial_401 and initial_facts.get("request_id") and initial_facts.get("auth_event_id")),
         "no_business_write_before_approval": int(before_approval_integration["config_version"]) == 7 and before_approval_integration["credential_ref"] == "cred-v1" and len(before_approval_ticket_entries) == 0,
         "gate_ready_and_plan_hash": gate.get("decision") == "READY" and bool(plan_hash),
-        "graph_checkpoint_stores_references_only": bool(start_event.get("graph_only_plan_reference") and "canonical_request_json" not in completion.get("graph_signals", {})),
+        "graph_checkpoint_stores_references_only": bool(
+            start_event
+            and completion
+            and start_event.get("graph_only_plan_reference")
+            and "canonical_request_json" not in completion.get("graph_signals", {})
+        ),
         "processes_are_distinct": bool(start.get("pid") and approval_resume.get("pid") and start["pid"] != approval_resume["pid"]),
         "independent_approver": completion is not None and completion.get("approval_decision") == "APPROVED" and any(item.get("approver_id") == "approver-a" for item in state.get("approvals", [])),
         "repair_committed_once": repair.get("status") == "COMMITTED" and int(integration["config_version"]) == 8 and integration["credential_ref"] == "cred-v2",

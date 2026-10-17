@@ -53,6 +53,10 @@ def _absolute(path: str | Path) -> Path:
     return (candidate if candidate.is_absolute() else ROOT / candidate).resolve()
 
 
+def _work_dir_for_checkpoint(checkpoint_path: Path) -> Path:
+    return checkpoint_path.parent / f"{checkpoint_path.stem}-d5-smoke-work"
+
+
 def _run(command: list[str]) -> dict[str, object]:
     result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False, timeout=600)
     return {
@@ -160,7 +164,7 @@ def run_smoke(db_path: str | Path, checkpoint_db_path: str | Path, evidence_dir:
     resolved_checkpoint = _absolute(checkpoint_db_path)
     output_dir = _absolute(evidence_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    work_dir = resolved_checkpoint.parent / "d5-smoke-work"
+    work_dir = _work_dir_for_checkpoint(resolved_checkpoint)
     work_dir.mkdir(parents=True, exist_ok=True)
     if not os.environ.get(MODEL_API_KEY) or not os.environ.get(MODEL_NAME):
         blocked = {

@@ -1,0 +1,49 @@
+command=python -m pytest -q -s --basetemp=.runtime\pytest-d6-evidence-captured tests\test_d6_smoke_evidence.py
+started_utc=2026-10-17T09:54:38.8131148Z
+.{"checks": {"both_action_intents_persisted": false, "business_outcome_recovered": false, "frozen_report_before_delivery": false, "gate_ready_and_plan_hash": false, "graph_checkpoint_stores_references_only": false, "independent_approver": false, "independent_deliver_committed_once": false, "model_and_mcp_trajectory_present": false, "no_business_write_before_approval": true, "processes_are_distinct": false, "real_initial_401_evidence": false, "repair_committed_once": false, "same_identity_online_200": false}, "delivery_ledger_id": null, "event": "d3_smoke_result", "plan_hash": null, "repair_ledger_id": null, "report_ref": null, "result": "FAIL", "task_id": "", "ticket_entry_count": 0, "verification_id": null}
+F
+================================== FAILURES ===================================
+________ test_d3_smoke_preserves_failed_start_process_without_crashing ________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-d6-evidence-captured/test_d3_smoke_preserves_failed0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B78C968180>
+
+    def test_d3_smoke_preserves_failed_start_process_without_crashing(
+        tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv(MODEL_API_KEY, "d6-test-key")
+        monkeypatch.setenv(MODEL_NAME, "d6-test-model")
+        monkeypatch.setattr(
+            d3_smoke,
+            "_run_child",
+            lambda command: {
+                "command": command,
+                "return_code": 1,
+                "events": [{"event": "d3_start_failed", "error": "provider timeout"}],
+                "stdout_unparsed": "",
+                "stderr": "provider timeout (redacted)",
+                "pid": 2468,
+            },
+        )
+    
+        evidence_dir = tmp_path / "d3-evidence"
+        result = d3_smoke.run_smoke(
+            tmp_path / "domain.sqlite3",
+            tmp_path / "checkpoint.sqlite3",
+            evidence_dir,
+        )
+    
+        trace = json.loads((evidence_dir / "TRACE.json").read_text(encoding="utf-8"))
+        assert result == 1
+        assert trace["result"] == "FAIL"
+        assert trace["processes"]["start"]["return_code"] == 1
+        assert trace["processes"]["start"]["stderr"] == "provider timeout (redacted)"
+>       assert all(value is False for value in trace["checks"].values())
+E       assert False
+E        +  where False = all(<generator object test_d3_smoke_preserves_failed_start_process_without_crashing.<locals>.<genexpr> at 0x000001B78C90D700>)
+
+tests\test_d6_smoke_evidence.py:49: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_d6_smoke_evidence.py::test_d3_smoke_preserves_failed_start_process_without_crashing
+1 failed, 1 passed in 1.95s
+exit_code=1
