@@ -5,9 +5,11 @@
 **设计状态：** R5 · DESIGN APPROVED
 **D1 状态：** D1 技术 smoke、S1 业务闭环与 8 项自动化测试已通过主 Agent 审查。
 **D2 状态：** 只读动态调查、真实模型 + MCP 链路、Evidence Gate 与三种 401 场景已通过主 Agent 验收，PR #2 已合入 `main@171f028`。
-**D3 状态：** WP-01–05、真实端到端运行与全套回归已通过；提交主 Agent 源码与证据复核（29 项 pytest、13 项 D3 smoke 检查）。
+**D3 状态：** WP-01–05、真实端到端运行与全套回归已通过主 Agent 审查（29 项 pytest、13 项 D3 smoke 检查）。
+**D4/D5 状态：** D4 恢复可靠性和 D5 Memory/Skill/Context Provenance 已通过主 Agent 审查。
+**D6 状态：** E01–E10 已形成新鲜运行矩阵；全量 pytest 64/64，E01–E03 真实模型场景通过，E10 保留一次 smoke 失败并在独立数据重跑通过；E10 族诚实记为 PARTIAL，安全控制未见 P0 失败。
 **唯一有效架构与验收规范：** [v1.0 实施基线](docs/baseline/v1.0-implementation-baseline.md)
-**当前实施任务：** [Luna D3 任务卡](docs/handoff/Luna-D3-implementation-brief.md)
+**当前实施状态：** D6 评测完成，交主 Agent 复核；D7 尚未开始。
 **逐项进度与测试结论：** [TASKS.md](TASKS.md)
 **D1 执行日志与报告：** [D1 报告](docs/evidence/d1/REPORT.md)
 **D2 任务卡与执行报告：** [D2 任务卡](docs/handoff/Luna-D2-implementation-brief.md) · [D2 报告](docs/evidence/d2/REPORT.md)
@@ -129,6 +131,20 @@ D5 定向用例与 D1–D4 全量回归：
 本轮全量结果为 `62 passed`；完整运行轨迹见 [pytest-full.txt](docs/evidence/d5/pytest-full.txt)。
 
 日常可信人工管理入口为 `memory candidate --task-id <Task A ID> --actor support-a`、`memory confirm --memory-id <ID> --actor approver-a` 和 `memory revoke --memory-id <ID> --actor approver-a`；候选操作不自动激活。
+
+## D6 离线评测与复现
+
+E01–E10 冻结清单、离线 Gold、逐次模型/MCP 轨迹、Provider Token、ActionLedger、Control Safety 断言和失败记录见 [`D6 报告`](docs/evidence/d6/REPORT.md)、[`CASES.json`](docs/evidence/d6/CASES.json)、[`RESULTS.json`](docs/evidence/d6/RESULTS.json) 与 [`D6 证据目录`](docs/evidence/d6/)。E01–E03 使用独立 D6 Domain/checkpoint 运行；E10 通过 `d5-smoke` 运行跨任务记忆链。
+
+```powershell
+.\.venv\Scripts\python.exe -m opspilot.cli d3-smoke --db .runtime\d6-e01.sqlite3 --checkpoint-db .runtime\d6-e01-checkpoints.sqlite3 --evidence-dir docs\evidence\d6\e01
+.\.venv\Scripts\python.exe -m opspilot.cli d2-smoke --scenario DISABLED --db .runtime\d6-e02.sqlite3 --checkpoint-db .runtime\d6-e02-checkpoints.sqlite3
+.\.venv\Scripts\python.exe -m opspilot.cli d2-smoke --scenario INSUFFICIENT --db .runtime\d6-e03.sqlite3 --checkpoint-db .runtime\d6-e03-checkpoints.sqlite3
+.\.venv\Scripts\python.exe -m opspilot.cli d5-smoke --db .runtime\d6-e10-retry.sqlite3 --checkpoint-db .runtime\d6-e10-retry-checkpoints.sqlite3 --evidence-dir docs\evidence\d6\e10\attempt-02
+.\.venv\Scripts\python.exe -m pytest -vv -s --basetemp=.runtime\pytest-d6-final
+```
+
+D6 仅有 5 次真实模型 smoke 尝试，不是十个独立 benchmark 样本；E10 首次失败留在分母和 `ATTEMPT-01` 记录中。E10 的固定通用 Memory 与 Skill 内容相似，未进行不公平的 ON/OFF 消融，也没有声称经验提升准确率或效率。
 
 ## 当前已知问题
 

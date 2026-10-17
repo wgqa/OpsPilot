@@ -1,7 +1,7 @@
 # TASKS.md — OpsPilot 相对 D1 的实施追踪
 
 **主合同**：[`docs/baseline/v1.0-implementation-baseline.md`](docs/baseline/v1.0-implementation-baseline.md)
-**设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1、D2 已通过主 Agent 验收；D2 PR #2 合入 `main@171f028`。D3 WP-01–05 与运行验收已完成，提交主 Agent 复核。**
+**设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1–D5 已通过主 Agent 验收；D2 PR #2 合入 `main@171f028`。D6 E01–E10 评测及证据已完成，交主 Agent 复核。**
 
 > 本表只勾选已执行且有证据的项目。D1–D7 代表实际开发的相对顺序，**不是**把 2026-10-17—23 自动当作已经执行。评审阶段累计的时间不当作有效编码时间。
 
@@ -60,9 +60,12 @@
 
 ## D6 — 离线评测与故障归因
 
-- [ ] E01–E10 按合同分别运行；控制断言和真实模型表现单独统计。
-- [ ] 保存错误类别、动作台账、证据关联、Token 与工具次数（若可获得）。
-- [ ] 有条件时 Memory ON/OFF 探索性对照；不声称统计显著性。
+- [x] 在真实 smoke 前冻结 E01–E10 离线 Gold 与类型/测试映射；E07 后续仅更正真实 MCP 控制测试的运行类型，Gold 未变，初始冻结版留在 commit `151a1cea`。
+- [x] E01 D3 真实闭环、E02 DISABLED、E03 INSUFFICIENT 各新鲜运行一次；E10 D5 跨任务 smoke 保留一次真实失败，并在独立 Domain/checkpoint 下重跑通过。
+- [x] E04–E10 控制断言映射到全量 pytest；64/64 总测试通过，45 个唯一映射控制测试项全部通过；错误、ActionLedger、Evidence、Provider Token 和 MCP 轨迹均归档。
+- [x] Correct Handling、Actual Recovery、Control Safety 分开统计；E10 场景族记 PARTIAL（首次失败、隔离重跑通过），安全门禁独立 PASS。
+- [x] D5 Memory 固定通用提示及其与 Skill 重叠情况如实记录；未声称准确率/效率提升，Memory ON/OFF 消融按冻结条件标记 NOT_RUN。
+- [x] 更新报告、CASE/RESULTS 机器文件及复现日志；完整结果见 [`docs/evidence/d6/REPORT.md`](docs/evidence/d6/REPORT.md) 和 [`RESULTS.json`](docs/evidence/d6/RESULTS.json)。
 
 ## D7 — 独立复现、材料与面试准备
 
@@ -76,8 +79,9 @@
 |---|---|---|---|---|
 | 2026-10-17 | D1（已验收） | `1a038be` / PR #1 merged | WP-01–06 通过；pytest 8/8；真实模型、MCP、跨进程 checkpoint、S1 POS/DISABLED 均有日志 | 主 Agent 已通过审查。报告见 `docs/evidence/d1/REPORT.md` |
 | 2026-10-17 | D2（已验收并合入 main） | PR #2 / `171f028` | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 主 Agent 已验收。报告见 `docs/evidence/d2/REPORT.md` |
-| 2026-10-17 | D3（完成，待主 Agent 复核） | `main` / `5529990` | 全量 pytest 29/29；D3 真实跨进程模型/MCP/HITL smoke 13 项检查通过；D2 POS/DISABLED/INSUFFICIENT 三场景回归通过 | 真实 401→200、订单字段、固定报告与单条工单交付见 `docs/evidence/d3/REPORT.md` |
-| 2026-10-17 | D4（完成，待主 Agent 复核） | `main` / 本轮 D4 提交 | 全量 pytest **55/55**；D3 真实 smoke **13/13**；D2 三场景均 PASS，详见 `docs/evidence/d4/REPORT.md` | E04–E09 通过；无 Domain 回执的终态安全阻断 |
-| 2026-10-17 | D5（完成，待主 Agent 复核） | `main` / D5 implementation commit（见 D5 报告） | 全量 pytest **62/62**；D5 真实模型/MCP **19/19**；D3 来源闭环及 D2 主体禁用/证据不足控制有真实轨迹 | 跨任务经验激活、撤销和跨进程不复用通过；详见 `docs/evidence/d5/REPORT.md` |
+| 2026-10-17 | D3（主 Agent 已审查通过） | `main` / `5529990` | 全量 pytest 29/29；D3 真实跨进程模型/MCP/HITL smoke 13 项检查通过；D2 POS/DISABLED/INSUFFICIENT 三场景回归通过 | 真实 401→200、订单字段、固定报告与单条工单交付见 `docs/evidence/d3/REPORT.md` |
+| 2026-10-17 | D4（主 Agent 已审查通过） | `main` / 本轮 D4 提交 | 全量 pytest **55/55**；D3 真实 smoke **13/13**；D2 三场景均 PASS，详见 `docs/evidence/d4/REPORT.md` | E04–E09 通过；无 Domain 回执的终态安全阻断 |
+| 2026-10-17 | D5（主 Agent 已审查通过） | `main` / D5 implementation commit（见 D5 报告） | 全量 pytest **62/62**；D5 真实模型/MCP **19/19**；D3 来源闭环及 D2 主体禁用/证据不足控制有真实轨迹 | 跨任务经验激活、撤销和跨进程不复用通过；详见 `docs/evidence/d5/REPORT.md` |
+| 2026-10-17 | D6（评测完成，待主 Agent 复核） | `main` / 运行代码 `f2c9403`；评测 Gold 冻结于 `151a1ce` | 全量 pytest **64/64**；E04–E10 映射控制测试唯一项 **45/45**；E01/E02/E03 新鲜真实模型场景均 PASS；E10 attempt 01 FAIL、attempt 02 PASS | 场景族 9 PASS / 1 PARTIAL；无 P0 安全红线失败。报告与结果矩阵见 `docs/evidence/d6/`；D7 未开始 |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。
