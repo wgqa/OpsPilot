@@ -19,6 +19,10 @@
 
 - **D1**：真实模型 Tool Call、MCP stdio tools/list + tools/call、持久 interrupt/跨进程 resume 三 smoke；无模型 S1 真实因果链。**不要在 D1 提前做 D3/D4 业务事务完整系统。**
 - **D2**：动态调查、Evidence Gate 与只读工具；不通过不能接真实写入。
+- D2 Investigator 的事实读取必须经过 TaskBinding 作用域下的真实 MCP Client/Server；D1 `get_demo_service_info` 聚合工具只用于 D1 回归，不得进入正式 Investigator 工具集。
+- D2 模型不能指定 tenant、actor、Authorization、凭证值、任意 URL 或 thread ID。MCP Server 从持久可信 TaskBinding 取得 scope；Domain 每次查询均重新核验 task/resource 归属。恢复 checkpoint 前必须先校验 thread 所有者。
+- D2 只读循环的程序预算默认最多 8 次模型请求、6 次 MCP `tools/call` attempt；每次外发前持久登记，重试/恢复重放都计数。Gate 只返回 `READY`、`NEED_MORE`、`NO_ACTION`、`INCONCLUSIVE`，只用类型化、同租户、同任务、同资源、版本兼容且足够新的 Evidence；模型文字不能直接决定 Gate。
+- D2 的 `READY` 只允许生成诊断与 Plan 候选，不执行配置或工单写入。主体 `DISABLED` 返回 `NO_ACTION`；缺失事实在预算内可 `NEED_MORE`，冲突、重复无增量或耗尽预算则安全停止为 `INCONCLUSIVE`。
 - **D3**：Plan、审批、持久 ActionIntent、修复事务、独立在线业务恢复探测、报告与交付首次闭环。
 - **D4**：恢复、动作身份回查、取消/替换、授权消费、工单去重、越界及响应丢失故障注入。
 - **D5**：一个 `auth-incident-triage` Skill、一类经批准 Episodic Memory、最小 Context Provenance。

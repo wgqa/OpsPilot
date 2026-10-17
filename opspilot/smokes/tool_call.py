@@ -55,6 +55,9 @@ def safe_error_details(error: Exception) -> dict[str, object]:
             "[REDACTED]",
             details["message"],
         )[:300]
+    nested = getattr(error, "exceptions", None)
+    if isinstance(nested, tuple) and nested:
+        details["causes"] = [safe_error_details(item) for item in nested[:4] if isinstance(item, Exception)]
     return details
 
 

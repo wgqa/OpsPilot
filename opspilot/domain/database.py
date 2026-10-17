@@ -79,6 +79,114 @@ CREATE TABLE IF NOT EXISTS thread_owners (
     tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
     owner_id TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS trusted_operators (
+    actor_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    role TEXT NOT NULL CHECK (role IN ('SUPPORT', 'APPROVER'))
+);
+CREATE TABLE IF NOT EXISTS task_bindings (
+    task_id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL UNIQUE,
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    actor_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
+    service_id TEXT NOT NULL,
+    integration_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    ticket_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (task_id, tenant_id),
+    FOREIGN KEY (tenant_id, service_id) REFERENCES services(tenant_id, service_id),
+    FOREIGN KEY (tenant_id, integration_id) REFERENCES integrations(tenant_id, integration_id),
+    FOREIGN KEY (tenant_id, principal_id) REFERENCES principals(tenant_id, principal_id)
+);
+CREATE TABLE IF NOT EXISTS d2_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    kind TEXT NOT NULL CHECK (kind IN ('MODEL', 'MCP')),
+    call_id TEXT NOT NULL,
+    tool_call_id TEXT,
+    tool_name TEXT,
+    argument_digest TEXT,
+    status TEXT NOT NULL DEFAULT 'RESERVED',
+    reserved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT,
+    result_digest TEXT,
+    error_class TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_d2_attempts_task_kind ON d2_attempts(task_id, kind);
+CREATE TABLE IF NOT EXISTS d2_model_traces (
+    call_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    attempt_id TEXT NOT NULL REFERENCES d2_attempts(attempt_id),
+    model_id TEXT NOT NULL,
+    prompt_digest TEXT NOT NULL,
+    input_evidence_ids_json TEXT NOT NULL,
+    provider_response_id TEXT,
+    tool_calls_json TEXT NOT NULL,
+    assistant_text TEXT NOT NULL,
+    usage_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS d2_pending_tool_calls (
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    call_id TEXT NOT NULL REFERENCES d2_model_traces(call_id),
+    tool_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    arguments_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    PRIMARY KEY (task_id, call_id, tool_call_id)
+);
+CREATE TABLE IF NOT EXISTS d2_tool_observations (
+    observation_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    call_id TEXT NOT NULL,
+    attempt_id TEXT,
+    tool_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    argument_digest TEXT NOT NULL,
+    status TEXT NOT NULL,
+    progress_added INTEGER NOT NULL,
+    error_class TEXT,
+    result_digest TEXT,
+    result_json TEXT,
+    evidence_id TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS ix_d2_observations_task ON d2_tool_observations(task_id, created_at);
+CREATE TABLE IF NOT EXISTS d2_evidence (
+    evidence_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    call_id TEXT NOT NULL,
+    tool_call_id TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    principal_id TEXT,
+    data_source TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    observed_versions_json TEXT NOT NULL,
+    fact_type TEXT NOT NULL,
+    facts_json TEXT NOT NULL,
+    original_result_ref TEXT NOT NULL,
+    trust_class TEXT NOT NULL,
+    digest TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_d2_evidence_task_fact ON d2_evidence(task_id, fact_type, fetched_at);
+CREATE TABLE IF NOT EXISTS d2_reports (
+    report_ref TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL UNIQUE REFERENCES task_bindings(task_id),
+    content_digest TEXT NOT NULL,
+    immutable_content_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS d2_tool_faults (
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    tool_name TEXT NOT NULL,
+    remaining_calls INTEGER NOT NULL,
+    error_code TEXT NOT NULL,
+    PRIMARY KEY (task_id, tool_name)
+);
 """
 
 
@@ -110,6 +218,14 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     status_a = "DISABLED" if scenario == "S1_DISABLED" else "ENABLED"
     with connect(path) as connection:
         for table in (
+            "d2_tool_faults",
+            "d2_reports",
+            "d2_evidence",
+            "d2_tool_observations",
+            "d2_pending_tool_calls",
+            "d2_model_traces",
+            "d2_attempts",
+            "task_bindings",
             "auth_events",
             "auth_policies",
             "services",
@@ -118,12 +234,22 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             "credentials",
             "orders",
             "thread_owners",
+            "trusted_operators",
             "tenants",
         ):
             connection.execute(f"DELETE FROM {table}")
         connection.executemany(
             "INSERT INTO tenants (tenant_id) VALUES (?)",
             [("tenant-a",), ("tenant-b",)],
+        )
+        connection.executemany(
+            "INSERT INTO trusted_operators (actor_id, tenant_id, role) VALUES (?, ?, ?)",
+            [
+                ("support-a", "tenant-a", "SUPPORT"),
+                ("approver-a", "tenant-a", "APPROVER"),
+                ("support-b", "tenant-b", "SUPPORT"),
+                ("approver-b", "tenant-b", "APPROVER"),
+            ],
         )
         for tenant_id, suffix, principal_status in (
             ("tenant-a", "a", status_a),
@@ -222,11 +348,25 @@ def record_auth_event(
     service_id: str,
     route: str,
     result_code: str,
-) -> None:
+) -> int:
     with connect(path) as connection:
-        connection.execute(
+        cursor = connection.execute(
             """INSERT INTO auth_events
                (tenant_id, integration_id, principal_id, service_id, route, result_code)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (tenant_id, integration_id, principal_id, service_id, route, result_code),
         )
+        return int(cursor.lastrowid)
+
+
+def get_auth_event(path: str | Path, tenant_id: str, event_id: int) -> dict[str, object]:
+    with connect(path) as connection:
+        row = connection.execute(
+            """SELECT event_id, tenant_id, integration_id, principal_id,
+                      service_id, route, result_code, observed_at
+               FROM auth_events WHERE tenant_id = ? AND event_id = ?""",
+            (tenant_id, event_id),
+        ).fetchone()
+    if row is None:
+        raise LookupError("Authentication event is not available within the trusted tenant scope.")
+    return dict(row)
