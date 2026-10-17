@@ -360,6 +360,61 @@ CREATE TABLE IF NOT EXISTS d3_local_reports (
     created_at TEXT NOT NULL,
     UNIQUE (tenant_id, task_id, plan_hash, outcome)
 );
+CREATE TABLE IF NOT EXISTS d5_memories (
+    memory_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    project_id TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type = 'EPISODIC'),
+    problem_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    applicability_constraints_json TEXT NOT NULL,
+    source_task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    source_evidence_ids_json TEXT NOT NULL,
+    source_report_ref TEXT NOT NULL,
+    source_verification_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('CANDIDATE', 'ACTIVE', 'REVOKED')),
+    version INTEGER NOT NULL,
+    confirmed_by TEXT,
+    confirmed_at TEXT,
+    revoked_by TEXT,
+    revoked_at TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, project_id, problem_type, source_task_id)
+);
+CREATE INDEX IF NOT EXISTS ix_d5_memories_lookup
+    ON d5_memories(tenant_id, project_id, problem_type, state, expires_at);
+CREATE TABLE IF NOT EXISTS d5_memory_events (
+    event_id TEXT PRIMARY KEY,
+    memory_id TEXT NOT NULL REFERENCES d5_memories(memory_id),
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('CANDIDATE_CREATED', 'CONFIRMED', 'REVOKED')),
+    actor_id TEXT NOT NULL,
+    memory_version INTEGER NOT NULL,
+    occurred_at TEXT NOT NULL,
+    details_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS d5_context_provenance (
+    call_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    attempt_id TEXT NOT NULL UNIQUE REFERENCES d2_attempts(attempt_id),
+    model_id TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    prompt_digest TEXT NOT NULL,
+    tool_schema_version TEXT NOT NULL,
+    tool_schema_digest TEXT NOT NULL,
+    selected_skill_name TEXT,
+    selected_skill_version TEXT,
+    selected_skill_digest TEXT,
+    selected_memories_json TEXT NOT NULL,
+    evidence_ids_json TEXT NOT NULL,
+    built_at TEXT NOT NULL,
+    model_status TEXT NOT NULL DEFAULT 'PREPARED',
+    completed_at TEXT,
+    error_class TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_d5_context_task ON d5_context_provenance(task_id, built_at);
 """
 
 
@@ -391,6 +446,9 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     status_a = "DISABLED" if scenario == "S1_DISABLED" else "ENABLED"
     with connect(path) as connection:
         for table in (
+            "d5_context_provenance",
+            "d5_memory_events",
+            "d5_memories",
             "d3_local_reports",
             "d3_delivery_records",
             "d3_ticket_resolution_entries",

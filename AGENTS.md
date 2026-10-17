@@ -29,6 +29,8 @@
 - D3 的本地 `support-a` / `approver-a` / `executor-a` 仅演示信任角色；D4 才完成系统性崩溃窗口、并发取消/替换、响应丢失与重复恢复矩阵。
 - **D4**：恢复、动作身份回查、取消/替换、授权消费、工单去重、越界及响应丢失故障注入。
 - **D5**：一个 `auth-incident-triage` Skill、一类经批准 Episodic Memory、最小 Context Provenance。
+- D5 Memory 只能从可核对的同任务 COMMITTED REPAIR、在线 RECOVERED VerificationReceipt、冻结 ReportArtifact 和来源 Evidence 创建 CANDIDATE；仅同租户可信 APPROVER 可确认或撤销。查询按可信 TaskBinding 推导的 tenant/project、当前 DB state 与 expires_at 过滤；Memory/Skill 只能给调查方法，不能改 Evidence、Gate、Plan、权限或审批。
+- D5 的每次模型调用均在出站前持久记录 Prompt/Tool schema digest 和实际选用的 Skill/Memory ID 与版本。Prompt 每次从当前 SQLite 重新检索，checkpoint 不得保存后再注入已撤销的记忆文本；继续任务须重新校验 Skill digest/version。
 - **D6**：冻结 E01–E10 回归、成本/错误记录及探索性对照。
 - **D7**：干净环境演示、文档、可重跑报告、面试追问。任何硬门禁失败则不向下一层叠加功能。
 

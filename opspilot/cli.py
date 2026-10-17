@@ -146,6 +146,30 @@ def parser_for_cli() -> argparse.ArgumentParser:
     d3_smoke.add_argument("--db", default=str(DEFAULT_DB_PATH))
     d3_smoke.add_argument("--checkpoint-db", default=str(DEFAULT_CHECKPOINT_DB_PATH))
     d3_smoke.add_argument("--evidence-dir", default="docs/evidence/d3")
+
+    memory = subparsers.add_parser("memory", help="Manage a trusted, source-verified episodic memory.")
+    memory_commands = memory.add_subparsers(dest="memory_command", required=True)
+    memory_candidate = memory_commands.add_parser("candidate", help="Create an unconfirmed memory candidate from a completed D3 recovery.")
+    memory_candidate.add_argument("--task-id", required=True)
+    memory_candidate.add_argument("--actor", required=True)
+    memory_candidate.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    memory_confirm = memory_commands.add_parser("confirm", help="Activate a source-verified memory as a trusted approver.")
+    memory_confirm.add_argument("--memory-id", required=True)
+    memory_confirm.add_argument("--actor", required=True)
+    memory_confirm.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    memory_revoke = memory_commands.add_parser("revoke", help="Revoke an active memory as a trusted approver.")
+    memory_revoke.add_argument("--memory-id", required=True)
+    memory_revoke.add_argument("--actor", required=True)
+    memory_revoke.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    memory_list = memory_commands.add_parser("list", help="List applicable active memories for a trusted task.")
+    memory_list.add_argument("--task-id", required=True)
+    memory_list.add_argument("--actor", required=True)
+    memory_list.add_argument("--db", default=str(DEFAULT_DB_PATH))
+
+    d5_smoke = subparsers.add_parser("d5-smoke", help="Run the D5 real-model, real-MCP cross-task memory smoke.")
+    d5_smoke.add_argument("--db", default=".runtime/d5-domain.sqlite3")
+    d5_smoke.add_argument("--checkpoint-db", default=".runtime/d5-checkpoints.sqlite3")
+    d5_smoke.add_argument("--evidence-dir", default="docs/evidence/d5")
     return parser
 
 
@@ -376,6 +400,37 @@ def main() -> int:
         return 0
     if args.command == "d3-smoke":
         from opspilot.smokes.d3 import run_smoke
+
+        return run_smoke(db_path, args.checkpoint_db, args.evidence_dir)
+    if args.command == "memory":
+        from opspilot.domain.episodic_memory import (
+            confirm_memory,
+            create_memory_candidate,
+            list_applicable_memories,
+            revoke_memory,
+        )
+
+        if args.memory_command == "candidate":
+            result = create_memory_candidate(db_path, args.task_id, args.actor)
+        elif args.memory_command == "confirm":
+            result = confirm_memory(db_path, args.memory_id, args.actor)
+        elif args.memory_command == "revoke":
+            result = revoke_memory(db_path, args.memory_id, args.actor)
+        elif args.memory_command == "list":
+            from opspilot.domain.d2 import get_task_binding
+
+            binding = get_task_binding(db_path, args.task_id)
+            if binding["actor_id"] != args.actor:
+                from opspilot.domain.episodic_memory import MemoryScopeDenied
+
+                raise MemoryScopeDenied("Only the task owner may list memories from the CLI.")
+            result = {"memories": list_applicable_memories(db_path, args.task_id, "auth_401")}
+        else:
+            raise AssertionError("Unknown memory operation.")
+        emit(f"memory_{args.memory_command}", result=result)
+        return 0
+    if args.command == "d5-smoke":
+        from opspilot.smokes.d5 import run_smoke
 
         return run_smoke(db_path, args.checkpoint_db, args.evidence_dir)
     if args.kind == "tool-call":

@@ -51,9 +51,12 @@
 
 ## D5 — Memory / Skill / Context
 
-- [ ] 一种经来源核验、人工批准后 ACTIVE 的 Episodic Memory；过期/撤销/恢复后重新检索过滤。
-- [ ] 一个版本化 `auth-incident-triage` Skill，按需加载、不新增工具执行权限。
-- [ ] 实际 Context Provenance 记录来源 ID/版本/Prompt/Tool/Skill 信息。
+- [x] 一种经来源核验、人工批准后 ACTIVE 的 Episodic Memory；候选仅引用同任务 COMMITTED REPAIR、真实 `RECOVERED` 在线验证、冻结报告和可查 Evidence；重复候选幂等，过期/撤销/跨租户/跨项目均不进入检索。
+- [x] 一个版本化 `auth-incident-triage` Skill，manifest 与 SHA-256 正文一致时按需加载；恢复时校验版本/digest，不新增工具或操作权限。
+- [x] 每个真实模型调用出站前，在同一预算事务登记 Context Provenance：call/attempt、prompt 与工具 schema digest、当前 Evidence IDs、Skill 与 Memory ID/version；模型失败也可审计。
+- [x] 真实跨任务轨迹：D3 成功任务 A → CANDIDATE（未进 Prompt）→ `approver-a` 确认 → 新 Task B 首次真实模型请求使用 Memory/Skill → 撤销 → 独立进程恢复后新模型请求无旧 Memory；Memory 保持在 MCP Evidence/Evidence Gate/审批之外。
+- [x] 真实模型/MCP 安全反例：Memory ACTIVE 时主体 DISABLED 的 401 仍为 `NO_ACTION`；独立证据不足的 401 仍为 `INCONCLUSIVE`。
+- [x] D5 定向测试 7/7、全量 pytest 62/62、19/19 真实 D5 smoke 断言、`py_compile` 与 `pip check` 通过；完整日志和跨任务轨迹见 `docs/evidence/d5/`。
 
 ## D6 — 离线评测与故障归因
 
@@ -75,5 +78,6 @@
 | 2026-10-17 | D2（已验收并合入 main） | PR #2 / `171f028` | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 主 Agent 已验收。报告见 `docs/evidence/d2/REPORT.md` |
 | 2026-10-17 | D3（完成，待主 Agent 复核） | `main` / `5529990` | 全量 pytest 29/29；D3 真实跨进程模型/MCP/HITL smoke 13 项检查通过；D2 POS/DISABLED/INSUFFICIENT 三场景回归通过 | 真实 401→200、订单字段、固定报告与单条工单交付见 `docs/evidence/d3/REPORT.md` |
 | 2026-10-17 | D4（完成，待主 Agent 复核） | `main` / 本轮 D4 提交 | 全量 pytest **55/55**；D3 真实 smoke **13/13**；D2 三场景均 PASS，详见 `docs/evidence/d4/REPORT.md` | E04–E09 通过；无 Domain 回执的终态安全阻断 |
+| 2026-10-17 | D5（完成，待主 Agent 复核） | `main` / D5 implementation commit（见 D5 报告） | 全量 pytest **62/62**；D5 真实模型/MCP **19/19**；D3 来源闭环及 D2 主体禁用/证据不足控制有真实轨迹 | 跨任务经验激活、撤销和跨进程不复用通过；详见 `docs/evidence/d5/REPORT.md` |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。

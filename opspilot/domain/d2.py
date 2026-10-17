@@ -395,6 +395,7 @@ def reserve_attempt(
     tool_call_id: str | None = None,
     tool_name: str | None = None,
     argument_digest: str | None = None,
+    context_provenance: dict[str, object] | None = None,
 ) -> tuple[str, int]:
     if kind not in {"MODEL", "MCP"} or limit < 1:
         raise ValueError("Invalid D2 attempt kind or limit.")
@@ -420,6 +421,29 @@ def reserve_attempt(
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (attempt_id, task_id, kind, call_id, tool_call_id, tool_name, argument_digest),
         )
+        if context_provenance is not None:
+            if kind != "MODEL":
+                raise ValueError("Context Provenance can only be attached to a MODEL attempt.")
+            from opspilot.domain.episodic_memory import insert_context_provenance_in_transaction
+
+            skill = context_provenance.get("selected_skill")
+            memories = context_provenance.get("selected_memories", [])
+            evidence_ids = context_provenance.get("evidence_ids", [])
+            if not isinstance(memories, list) or not isinstance(evidence_ids, list):
+                raise ValueError("Context Provenance source lists must be arrays.")
+            insert_context_provenance_in_transaction(
+                connection,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                model_id=str(context_provenance["model_id"]),
+                prompt_version=str(context_provenance["prompt_version"]),
+                prompt_digest=str(context_provenance["prompt_digest"]),
+                tool_schema_version=str(context_provenance["tool_schema_version"]),
+                tool_schema_digest=str(context_provenance["tool_schema_digest"]),
+                selected_skill=skill if isinstance(skill, dict) else None,
+                selected_memories=[item for item in memories if isinstance(item, dict)],
+                evidence_ids=[str(item) for item in evidence_ids],
+            )
     return attempt_id, used + 1
 
 

@@ -109,11 +109,32 @@ New-Item -ItemType Directory -Path .runtime -Force | Out-Null
 
 各命令的脱敏输出、失败尝试和解释见 [D1 evidence](docs/evidence/d1/) 与 [D1 报告](docs/evidence/d1/REPORT.md)、[D2 evidence](docs/evidence/d2/) 与 [D2 报告](docs/evidence/d2/REPORT.md)、[D3 evidence](docs/evidence/d3/) 与 [D3 报告](docs/evidence/d3/REPORT.md)，以及 [D4 报告](docs/evidence/d4/REPORT.md)。D4 包含 D2 三场景模型/MCP 复测、D3 业务闭环 smoke、D1–D4 全套测试和崩溃/丢响应/并发/Checkpoint 恢复轨迹。pytest 在 Windows 上请使用仓库内 `.runtime` 临时目录。
 
+## D5 Memory / Skill / Context Provenance
+
+一条 D3 成功处置只能由可信 Domain 中同任务的 COMMITTED REPAIR、在线 `RECOVERED` VerificationReceipt、冻结 ReportArtifact 和仍可核对的 Evidence 生成 `CANDIDATE`。可信 `APPROVER` 必须明确确认后才会进入新任务的 Prompt；撤销或过期后，下一次模型请求及 checkpoint 恢复都会重新从 SQLite 检索。Memory 与 `auth-incident-triage` Skill 只提供调查方法，不能代替 MCP Evidence、Evidence Gate 或人工审批。项目范围由可信 TaskBinding 的 `service_id` 派生。
+
+D5 完整真实模型/MCP 轨迹（含任务 A 来源、B 的 Prompt provenance、主体禁用和证据不足反例、撤销后的跨进程恢复）及复现命令见 [D5 报告](docs/evidence/d5/REPORT.md) 和 [D5 evidence](docs/evidence/d5/)。复跑命令会重置**指定**的 D5 本地演示数据库，并先运行真实 D3 成功任务 A：
+
+```powershell
+.\.venv\Scripts\python -m opspilot.cli d5-smoke --db .runtime\d5-domain.sqlite3 --checkpoint-db .runtime\d5-checkpoints.sqlite3 --evidence-dir docs\evidence\d5
+```
+
+D5 定向用例与 D1–D4 全量回归：
+
+```powershell
+.\.venv\Scripts\python -m pytest -q -s tests\test_d5_context.py --basetemp=.runtime\pytest-d5-unit
+.\.venv\Scripts\python -m pytest -q -s --basetemp=.runtime\pytest-d5
+```
+
+本轮全量结果为 `62 passed`；完整运行轨迹见 [pytest-full.txt](docs/evidence/d5/pytest-full.txt)。
+
+日常可信人工管理入口为 `memory candidate --task-id <Task A ID> --actor support-a`、`memory confirm --memory-id <ID> --actor approver-a` 和 `memory revoke --memory-id <ID> --actor approver-a`；候选操作不自动激活。
+
 ## 当前已知问题
 
 - Function Calling 和 D2 Investigator 目前只验证了已配置的 `deepseek-flash` OpenAI-compatible Chat Completions 端点；其他提供商和模型尚未验证。模型偶尔会返回并行调用；Dispatcher 只发出第一个，其他调用留痕为未发送，再让模型依据结果选择下一步。
 - 本地可信操作者注册表、业务 API、fixture 与 SQLite 仅用于演示，不代表生产 IAM 或客户系统。D3 通过本地事务与跨进程 CLI 演示首次正确闭环。
-- D4 已用真实 OS 子进程验证 ActionIntent、REPAIR、冻结报告和 DELIVER 在提交/检查点边界进程退出后的幂等恢复，并覆盖计划取消/替换竞争、并发重复提交和未知终态阻断；这仍是本地 SQLite Demo Domain 的可靠性证据，不代表生产 IAM 或分布式存储保证。Memory、Skills、多 Agent、Redis、S2/S3 与前端也不在当前实现范围。
+- D4 已用真实 OS 子进程验证 ActionIntent、REPAIR、冻结报告和 DELIVER 在提交/检查点边界进程退出后的幂等恢复，并覆盖计划取消/替换竞争、并发重复提交和未知终态阻断；D5 在同一本地 SQLite Demo Domain 中加入一类人工管理的 Episodic Memory、单一版本化 Skill 和模型调用来源台账。这些证据不代表生产 IAM 或分布式存储保证。向量记忆、Memory 自动总结、其他 Skill、多 Agent、Redis、S2/S3 与前端仍不在当前实现范围。
 
 ## 文档与评审历史
 

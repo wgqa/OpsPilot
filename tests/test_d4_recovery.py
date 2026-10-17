@@ -1002,5 +1002,3 @@ def test_d4_terminal_checkpoint_without_domain_receipt_blocks_unknown_outcome(
         delivery_records=len(result["action_state"]["delivery_records"]),
         ticket_entries=len(result["action_state"]["ticket_entries"]),
     )
-
-\n
