@@ -1,7 +1,7 @@
 # TASKS.md — OpsPilot 相对 D1 的实施追踪
 
 **主合同**：[`docs/baseline/v1.0-implementation-baseline.md`](docs/baseline/v1.0-implementation-baseline.md)
-**设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1 实际开工：2026-10-17（北京时间）；实现已提交主 Agent 复核，D2 未开始。**
+**设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1 已通过主 Agent 审查；D2 实际开工：2026-10-17（北京时间），当前提交主 Agent 复核。**
 
 > 本表只勾选已执行且有证据的项目。D1–D7 代表实际开发的相对顺序，**不是**把 2026-10-17—23 自动当作已经执行。评审阶段累计的时间不当作有效编码时间。
 
@@ -18,9 +18,12 @@
 
 ## D2 — 只读动态调查与证据门禁
 
-- [ ] Graph 只读调查循环；MCP 数据读取与类型化 ToolObservation/Evidence。
-- [ ] Gate 四值 READY/NEED_MORE/INCONCLUSIVE/NO_ACTION；budget 持久 attempt 计数。
-- [ ] 正例、禁用主体负例、缺/冲突证据走不同流程；真实模型 E01–E03 首版轨迹。
+- [x] WP1：保留 `get_demo_service_info` 仅作 D1 回归；D2 MCP 只暴露按来源拆分的 `get_integration_config`、`get_principal_status`、`get_auth_policy`、`probe_endpoint`。持久 TaskBinding 绑定 actor/tenant/thread/service/integration，Domain 每次请求重验资源归属。
+- [x] WP2：LangGraph `intake → prepare_context → investigate ↔ execute_read_tools → evidence_gate → report`；真实模型 Function Calling 只提出 MCP 工具调用，真实 stdio Client/Server 执行。记录 `tool_call_id → call_id/attempt_id → Observation → Evidence ID`。
+- [x] WP3：Gate 的四值为 READY/NEED_MORE/NO_ACTION/INCONCLUSIVE；模型请求上限 8、MCP `tools/call` attempt 上限 6，预登记台账持久化在 Domain SQLite；跨进程预算重启测试通过。READY 只产生候选诊断，不执行写入。
+- [x] WP4：真实模型 + MCP 的 POS 得 READY、DISABLED 得 NO_ACTION、策略证据源缺失时 401 得 INCONCLUSIVE；三种路径均保持 config_version=7。另验证跨租户调用拒绝、严格模型参数、恶意事实不能提升 Gate、重复无增量停止。
+- [x] WP5：D1 回归 8/8 通过；D2 新增 pytest 9/9 通过；真实模型 POS/DISABLED/INSUFFICIENT 轨迹及一次保留的并行调用失败样本见 `docs/evidence/d2/`。
+- [x] WP6：更新 README/TASKS/AGENTS，提供锁定依赖、实际命令、脱敏轨迹、已知问题与 `docs/evidence/d2/REPORT.md`；未实现 D3/D4、Memory、Skills 或 Multi-Agent。
 
 **停止线**：门禁漏放或跨作用域读失控，则禁止接写操作。
 
@@ -65,6 +68,7 @@
 
 | 日期（实际） | 阶段 | Commit / 版本 | 结果（测试分子/分母） | 阻断与下一步 |
 |---|---|---|---|---|
-| 2026-10-17 | D1（待主 Agent 复核） | `d1/implementation-2026-10-17` | WP-01–06 通过；pytest 8/8；真实模型、MCP、跨进程 checkpoint、S1 POS/DISABLED 均有日志 | D1 已停止扩展并提交复核；未开始 D2。报告见 `docs/evidence/d1/REPORT.md` |
+| 2026-10-17 | D1（已验收） | `1a038be` / PR #1 merged | WP-01–06 通过；pytest 8/8；真实模型、MCP、跨进程 checkpoint、S1 POS/DISABLED 均有日志 | 主 Agent 已通过审查。报告见 `docs/evidence/d1/REPORT.md` |
+| 2026-10-17 | D2（待主 Agent 复核） | `e6ae7a7` / PR #2 | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 已按任务卡停止扩展；等待主 Agent 验收。报告见 `docs/evidence/d2/REPORT.md` |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。

@@ -18,6 +18,8 @@ BUSINESS_ROUTE = "/api/orders/demo-order"
 class ProbeResult:
     status_code: int
     body: dict[str, object]
+    request_id: str | None
+    event_id: int | None
     tenant_id: str
     integration_id: str
     principal_id: str
@@ -77,6 +79,16 @@ def probe_orders(
     return ProbeResult(
         status_code=status_code,
         body=response_body,
+        request_id=(
+            str(response_body["request_id"])
+            if isinstance(response_body.get("request_id"), str)
+            else None
+        ),
+        event_id=(
+            int(response_body["event_id"])
+            if isinstance(response_body.get("event_id"), int)
+            else None
+        ),
         tenant_id=tenant_id,
         integration_id=integration_id,
         principal_id=str(integration["principal_id"]),

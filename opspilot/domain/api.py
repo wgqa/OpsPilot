@@ -56,7 +56,7 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
                 and service["principal_status"] == "ENABLED"
             )
             result_code = "AUTH_ACCEPTED" if authorized else "AUTH_REJECTED"
-            record_auth_event(
+            event_id = record_auth_event(
                 db_path,
                 tenant_id,
                 str(service["integration_id"]),
@@ -66,7 +66,10 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
                 result_code,
             )
             if not authorized:
-                self._respond(401, {"error": "UNAUTHORIZED", "request_id": request_id})
+                self._respond(
+                    401,
+                    {"error": "UNAUTHORIZED", "request_id": request_id, "event_id": event_id},
+                )
                 return
             from opspilot.domain.database import connect
 
@@ -76,7 +79,10 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
                     (tenant_id, "demo-order"),
                 ).fetchone()
             if order is None:
-                self._respond(404, {"error": "ORDER_NOT_FOUND", "request_id": request_id})
+                self._respond(
+                    404,
+                    {"error": "ORDER_NOT_FOUND", "request_id": request_id, "event_id": event_id},
+                )
                 return
             self._respond(
                 200,
@@ -84,6 +90,7 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
                     "order_id": str(order["order_id"]),
                     "status": str(order["status"]),
                     "request_id": request_id,
+                    "event_id": event_id,
                 },
             )
         except LookupError:

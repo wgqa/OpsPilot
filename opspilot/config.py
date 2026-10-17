@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = ROOT / ".runtime" / "opspilot.sqlite3"
+DEFAULT_CHECKPOINT_DB_PATH = ROOT / ".runtime" / "opspilot-checkpoints.sqlite3"
 MODEL_API_KEY = "OPSPILOT_MODEL_API_KEY"
 MODEL_BASE_URL = "OPSPILOT_MODEL_BASE_URL"
 MODEL_NAME = "OPSPILOT_MODEL_NAME"
