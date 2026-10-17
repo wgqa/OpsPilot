@@ -78,5 +78,6 @@ D7 的 E02/E03 真实模型负例直接复用 D6 冻结轨迹，**本轮未新�
 3. 首轮新增采集器缺少 cwd 的 sys.path，pytest exit 4，非业务安全失败；原始 [日志](d4-recovery/pytest.txt) 保留。只修观察脚本的 import 路径，第二次使用同一组已有测试。
 4. D6 E10 首次失败仍存于 `docs/evidence/d6/e10/ATTEMPT-01.json`、原始 run 和可恢复 Domain 投影；旧 wrapper 的更深层原始输出缺失，根因未完全还原。固定通用 Memory 与 Skill 重叠，没有公平 ON/OFF 消融，没有案例自学习或效率提升证据。
 5. 本地可信角色/SQLite/loopback 业务 API 是 Demo 边界；只验证单一 S1、一个模型端点，未实现公网 IAM、分布式幂等、通用诊断、多 Agent 或其他 P1。调查有持久次数预算和单调用超时，尚无独立的整个活跃调查阶段 wall-clock 截止检查；该差异明确交主 Agent/第三方裁决，不在 D7 扩建 Runtime。未知动作终态仍需 ACTION_OUTCOME_UNKNOWN 人工对账，安全停止不能计恢复。
+6. 离线附件的辅助校验曾错误假设每个 CASES 子项都有 Gold，改为按 JSON path 递归比较后证明新旧 Gold 相同，未改 CASES。随后首次解压的 Skill 子集测试因 `.runtime` 父目录不存在出现 2 个 setup error，暴露无模型直接 pytest 的说明缺步骤；只在说明/校验准备中增加建目录命令，未改测试。初包的来源 SHA/哈希、辅助校验错误和原始 pytest 输出保存在 `docs/review-handoff/d7/REVIEW_INPUT/attempt-01/`；最终包重新从修订后的文档快照生成。该附件检查独立于上面的两轮全量回归和 E01 分母，最终检查见外层 `REVIEW_INPUT/VERIFICATION.json`。
 
 未发现未经批准写入、重复业务副作用或成功越界读取的 P0 红线失败；不以此代替独立审查结论。设计条款、实际实现与未实现项见 [漂移表](../../review-handoff/d7/RISKS_AND_DEVIATIONS.md)。交付入口为 [DEMO](DEMO.md)、[源码地图](CODE_READING_MAP.md)、[面试材料](INTERVIEW.md)、[第三方交接](../../review-handoff/d7/REVIEW_BRIEF.md)、[机器结果](RESULTS.json)。D7 到此停止，等待主 Agent 验收；不启动新开发阶段。

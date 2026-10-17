@@ -1,6 +1,6 @@
 # OpsPilot 源码阅读地图
 
-阅读对象：D7 修正后的实现 `a2517fd`；Agent/Domain 的 Python 逻辑与 D6 `28c3e1a` 相同。唯一实施合同仍是 [v1.0 基线](../../baseline/v1.0-implementation-baseline.md)。下面的函数名可以直接搜索；测试从仓库根目录、已安装锁定依赖的环境运行。
+阅读对象：D7 修正后的实现 `a2517fd`；Agent/Domain 的 Python 逻辑与 D6 `28c3e1a` 相同。唯一实施合同仍是 [v1.0 基线](../../baseline/v1.0-implementation-baseline.md)。下面的函数名可以直接搜索；测试从仓库根目录、已安装锁定依赖的环境运行。Windows 首次测试前执行 `New-Item -ItemType Directory -Path .runtime -Force | Out-Null`，pytest 的 basetemp 父目录必须存在。
 
 先沿一条成功路径读：`cli.main → run_investigation → build_investigation_graph → create_plan_from_gate → submit_plan_approval → get_or_create_action_intent → execute_repair → verify_repair_online → get_or_create_report → execute_deliver`。再看负例和恢复，最后读 Memory。不要从历史规划文件推断当前实现。
 

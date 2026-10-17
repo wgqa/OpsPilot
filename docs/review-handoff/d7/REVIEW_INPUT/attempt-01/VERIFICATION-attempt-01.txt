@@ -1,0 +1,18 @@
+command: python .runtime/d7_verify_package.py
+exit_code: 1
+The auxiliary archive verifier incorrectly assumed every CASES subcase had a
+gold field. Archive hashing, secret/path checks passed before this error.
+No files were extracted, no tests/model calls/business actions ran.
+
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.runtime\d7_verify_package.py", line 36, in <module>
+    assert gold(current)==gold(original)
+           ~~~~^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.runtime\d7_verify_package.py", line 35, in <lambda>
+    gold=lambda v:{c['case_id']:[s['gold'] for s in c['subcases']] for c in v['cases']}
+                                 ~^^^^^^^^
+KeyError: 'gold'
+
+Corrected only the auxiliary verifier to recursively compare existing Gold
+fields by JSON path. Neither current nor historical CASES nor the ZIP changed.
+The successful verification is recorded independently in VERIFICATION.json.

@@ -39,6 +39,7 @@
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
 .\.venv\Scripts\python.exe -m pip check
+New-Item -ItemType Directory -Path .runtime -Force | Out-Null
 .\.venv\Scripts\python.exe -m pytest -vv -s --basetemp=.runtime/review-full
 .\.venv\Scripts\python.exe -m pytest -vv -s tests/test_d4_recovery.py -k 'langgraph_replays_committed' --basetemp=.runtime/review-recovery
 # 配置本地 .env 后使用新的 DB/checkpoint，真实模型有成本，不能复用成功 DB。

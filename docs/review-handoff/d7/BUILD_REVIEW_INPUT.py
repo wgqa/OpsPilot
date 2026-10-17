@@ -39,6 +39,8 @@ def selected(path: str) -> bool:
     if path.startswith("docs/review-handoff/d7/") and (
             path.endswith(".md") or path.endswith("BUILD_REVIEW_INPUT.py")):
         return True
+    if path.startswith("docs/review-handoff/d7/REVIEW_INPUT/attempt-01/"):
+        return path.endswith((".json", ".txt"))
     if path.startswith("docs/evidence/d7/"):
         return True
     if path in {f"docs/evidence/d{i}/REPORT.md" for i in range(1, 7)}:
