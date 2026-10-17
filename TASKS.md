@@ -69,6 +69,6 @@
 | 日期（实际） | 阶段 | Commit / 版本 | 结果（测试分子/分母） | 阻断与下一步 |
 |---|---|---|---|---|
 | 2026-10-17 | D1（已验收） | `1a038be` / PR #1 merged | WP-01–06 通过；pytest 8/8；真实模型、MCP、跨进程 checkpoint、S1 POS/DISABLED 均有日志 | 主 Agent 已通过审查。报告见 `docs/evidence/d1/REPORT.md` |
-| 2026-10-17 | D2（待主 Agent 复核） | `d2/investigation-2026-10-17` | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 已按任务卡停止扩展；提交 D2 PR 后等待主 Agent 验收。报告见 `docs/evidence/d2/REPORT.md` |
+| 2026-10-17 | D2（待主 Agent 复核） | `e6ae7a7` / PR #2 | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 已按任务卡停止扩展；等待主 Agent 验收。报告见 `docs/evidence/d2/REPORT.md` |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。
