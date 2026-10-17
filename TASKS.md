@@ -40,11 +40,12 @@
 
 ## D4 — 丢响应/恢复/旧计划/越界安全门禁
 
-- [ ] E04 拒绝/未审批：配置及工单受限写入均为零。
-- [ ] E05：同资源版本下先取消/替换再执行会阻断；动作先执行后取消历史可读；重复批准不能重置已消费授权；旧 activate 不能复活旧计划。
-- [ ] E06/E07：跨租户的任务、Evidence、Memory、工具、审批和注入安全。
-- [ ] E08：持久中断恢复；重复/并发恢复不重复 REPAIR/DELIVER。
-- [ ] E09：Intent 返回丢失、REPAIR COMMIT 后丢响应、Checkpoint 落后、报告冻结后退出、DELIVER 丢响应，均可恢复原身份/报告/回执；配置版本只递增一次，工单仅一条；交付不重跑修复。
+- [x] E04 拒绝/未审批：`test_d3_rejection_creates_no_action_intents_or_business_writes` 与未批准 ActionIntent 检查通过；配置版本保持 7，工单条目、Intent、Ledger 均为零。
+- [x] E05：取消和 Plan 替换的动作前阻断、动作提交后取消回执重放、REPAIR/DELIVER 竞争及重复批准后授权不复活均通过；旧 Plan 无法重新 activate。
+- [x] E06/E07：跨租户/角色任务、计划、审批、Intent 和工单读取拒绝；真实只读 MCP 返回含恶意指令的未信任事实，Gate 保持确定性且未审批动作被拒。Memory 尚未进入 D5，按冻结范围标记 N/A。
+- [x] E08：LangGraph 审批中断可等待和跨调用恢复；两个并行相同 REPAIR 或 DELIVER 只生成一条 ledger，配置只改一次、工单只追加一条。
+- [x] E09：真实 OS 子进程在 ActionIntent、REPAIR 事务前/后、冻结报告和 DELIVER 事务前/后强制退出；陈旧 checkpoint 重放恢复相同 action/report/ledger 身份，配置只递增一次，工单仅一条。无 Domain 回执的终态被阻断为 `ACTION_OUTCOME_UNKNOWN`。
+- [x] D1–D4 全量回归、真实 D2 POS/DISABLED/INSUFFICIENT 模型/MCP 复测、真实 D3 闭环 smoke、进程/并发故障轨迹和 `docs/evidence/d4/REPORT.md` 已记录；仅保留本地 SQLite Demo Domain 的适用边界。
 
 **停止线**：任一已承诺的安全红线失败，不进入 D5；失败不能被平均成功率掩盖。
 
@@ -73,5 +74,6 @@
 | 2026-10-17 | D1（已验收） | `1a038be` / PR #1 merged | WP-01–06 通过；pytest 8/8；真实模型、MCP、跨进程 checkpoint、S1 POS/DISABLED 均有日志 | 主 Agent 已通过审查。报告见 `docs/evidence/d1/REPORT.md` |
 | 2026-10-17 | D2（已验收并合入 main） | PR #2 / `171f028` | WP1–WP6 通过；D1 回归 8/8、D2 新增测试 9/9；真实模型/MCP 三场景有轨迹 | 主 Agent 已验收。报告见 `docs/evidence/d2/REPORT.md` |
 | 2026-10-17 | D3（完成，待主 Agent 复核） | `main` / `5529990` | 全量 pytest 29/29；D3 真实跨进程模型/MCP/HITL smoke 13 项检查通过；D2 POS/DISABLED/INSUFFICIENT 三场景回归通过 | 真实 401→200、订单字段、固定报告与单条工单交付见 `docs/evidence/d3/REPORT.md` |
+| 2026-10-17 | D4（完成，待主 Agent 复核） | `main` / 本轮 D4 提交 | 全量 pytest **55/55**；D3 真实 smoke **13/13**；D2 三场景均 PASS，详见 `docs/evidence/d4/REPORT.md` | E04–E09 通过；无 Domain 回执的终态安全阻断 |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。

@@ -7,7 +7,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -61,6 +61,15 @@ from opspilot.smokes.tool_call import safe_error_details
 
 
 PROMPT_VERSION = "d2-read-only-investigator-2"
+_D4_GRAPH_TEST_FAILPOINT: Callable[[str], None] | None = None
+
+
+def _run_d4_graph_test_failpoint(name: str) -> None:
+    """Private test-only seam for process death between Domain commit and checkpoint save."""
+    if _D4_GRAPH_TEST_FAILPOINT is not None:
+        _D4_GRAPH_TEST_FAILPOINT(name)
+
+
 EXPECTED_D2_TOOLS = {
     "get_integration_config",
     "get_principal_status",
@@ -91,6 +100,7 @@ class InvestigatorState(TypedDict, total=False):
     plan_id: str
     plan_hash: str
     approval_id: str
+    approval_resume_id: str
     approval_decision: str
     repair_action_id: str
     repair_ledger_ref: str
@@ -98,6 +108,37 @@ class InvestigatorState(TypedDict, total=False):
     frozen_report_ref: str
     deliver_action_id: str
     deliver_ledger_ref: str
+    blocked_reason: str
+
+
+def _snapshot_has_pending_interrupt(snapshot: object) -> bool:
+    """LangGraph marks an interrupt on the task, separately from the saved state."""
+    return any(bool(getattr(task, "interrupts", ())) for task in getattr(snapshot, "tasks", ()))
+
+
+def _d3_terminal_is_authoritative(state: dict[str, object], action_state: dict[str, object]) -> bool:
+    """A terminal checkpoint is trusted only when its referenced Domain receipt exists."""
+    if state.get("deliver_ledger_ref"):
+        ledger_exists = any(
+            row.get("ledger_id") == state["deliver_ledger_ref"]
+            and row.get("action_kind") == "DELIVER"
+            and row.get("status") == "COMMITTED"
+            for row in action_state.get("action_ledgers", [])
+            if isinstance(row, dict)
+        )
+        delivery_exists = any(
+            row.get("delivery_action_id") == state.get("deliver_action_id")
+            for row in action_state.get("delivery_records", [])
+            if isinstance(row, dict)
+        )
+        return bool(ledger_exists and delivery_exists)
+    if state.get("local_report_ref"):
+        return any(
+            row.get("report_ref") == state["local_report_ref"]
+            for row in action_state.get("local_reports", [])
+            if isinstance(row, dict)
+        )
+    return False
 
 
 def _model_error_text(error: Exception) -> str:
@@ -557,23 +598,46 @@ def build_investigation_graph(
     async def d3_human_approval(state: InvestigatorState) -> dict[str, object]:
         from opspilot.domain.d3 import get_plan_approval, get_plan_for_task
 
+        if not submitter_id:
+            raise RuntimeError("D3 approval read requires a trusted submitter identity.")
         plan_hash = str(state.get("plan_hash", ""))
         if not plan_hash:
             raise RuntimeError("D3 approval interrupt has no immutable Plan hash.")
-        plan = get_plan_for_task(db_path, task_id, plan_hash)
-        resumed = interrupt({
-            "kind": "PLAN_APPROVAL_REQUIRED",
-            "task_id": task_id,
-            "thread_id": get_task_binding(db_path, task_id)["thread_id"],
-            "plan_id": plan["plan_id"],
-            "plan_hash": plan_hash,
-            "allowed_decisions": ["APPROVED", "REJECTED"],
-        })
-        if not isinstance(resumed, dict) or resumed.get("plan_hash") != plan_hash:
-            raise RuntimeError("D3 resume command is not bound to the interrupted Plan.")
-        approval = get_plan_approval(db_path, str(get_task_binding(db_path, task_id)["thread_id"]), plan_hash)
-        if approval is None or approval.get("approval_id") != resumed.get("approval_id"):
-            raise RuntimeError("D3 resume command does not match a persisted approval record.")
+        plan = get_plan_for_task(db_path, task_id, plan_hash, submitter_id)
+        thread_id = str(get_task_binding(db_path, task_id)["thread_id"])
+        approval = get_plan_approval(db_path, thread_id, plan_hash, submitter_id)
+        if state.get("approval_resume_id"):
+            resumed = interrupt({
+                "kind": "PLAN_APPROVAL_REQUIRED",
+                "task_id": task_id,
+                "thread_id": thread_id,
+                "plan_id": plan["plan_id"],
+                "plan_hash": plan_hash,
+                "allowed_decisions": ["APPROVED", "REJECTED"],
+            })
+            if not isinstance(resumed, dict) or resumed.get("plan_hash") != plan_hash:
+                raise RuntimeError("D3 resume command is not bound to the interrupted Plan.")
+            if approval is None or approval.get("approval_id") != resumed.get("approval_id"):
+                raise RuntimeError("D3 resume command does not match a persisted approval record.")
+            if approval.get("approval_id") != state["approval_resume_id"]:
+                raise RuntimeError("D3 resume marker does not match the persisted approval record.")
+        elif approval is None:
+            resumed = interrupt({
+                "kind": "PLAN_APPROVAL_REQUIRED",
+                "task_id": task_id,
+                "thread_id": thread_id,
+                "plan_id": plan["plan_id"],
+                "plan_hash": plan_hash,
+                "allowed_decisions": ["APPROVED", "REJECTED"],
+            })
+            approval = get_plan_approval(db_path, thread_id, plan_hash, submitter_id)
+            if not isinstance(resumed, dict) or resumed.get("plan_hash") != plan_hash:
+                raise RuntimeError("D3 resume command is not bound to the interrupted Plan.")
+            if approval is None or approval.get("approval_id") != resumed.get("approval_id"):
+                raise RuntimeError("D3 resume command does not match a persisted approval record.")
+        elif approval.get("plan_hash") != plan_hash:
+            raise RuntimeError("Persisted D3 approval is not bound to the immutable Plan.")
+        assert approval is not None
         return {
             "stage": "d3_approval_recorded",
             "approval_id": approval["approval_id"],
@@ -619,6 +683,7 @@ def build_investigation_graph(
         if not executor_id:
             raise RuntimeError("D3 action intent requires a trusted executor service identity.")
         intent = get_or_create_action_intent(db_path, task_id, str(state["plan_hash"]), "REPAIR", executor_id)
+        _run_d4_graph_test_failpoint("repair_intent_after_commit_before_checkpoint")
         return {"stage": "d3_repair_intent_persisted", "repair_action_id": intent["action_id"]}
 
     async def d3_execute_repair(state: InvestigatorState) -> dict[str, object]:
@@ -671,6 +736,7 @@ def build_investigation_graph(
         if not executor_id:
             raise RuntimeError("D3 report freeze requires a trusted executor service identity.")
         report = get_or_create_report(db_path, task_id, str(state["plan_hash"]), str(state["repair_action_id"]), executor_id)
+        _run_d4_graph_test_failpoint("report_after_commit_before_checkpoint")
         return {"stage": "d3_report_frozen", "frozen_report_ref": report["report_ref"]}
 
     async def d3_create_deliver_intent(state: InvestigatorState) -> dict[str, object]:
@@ -679,6 +745,7 @@ def build_investigation_graph(
         if not executor_id:
             raise RuntimeError("D3 delivery intent requires a trusted executor service identity.")
         intent = get_or_create_action_intent(db_path, task_id, str(state["plan_hash"]), "DELIVER", executor_id)
+        _run_d4_graph_test_failpoint("deliver_intent_after_commit_before_checkpoint")
         return {"stage": "d3_deliver_intent_persisted", "deliver_action_id": intent["action_id"]}
 
     async def d3_execute_deliver(state: InvestigatorState) -> dict[str, object]:
@@ -883,20 +950,65 @@ async def run_investigation(
                         if d3_mode:
                             from opspilot.domain.d3 import get_task_action_state
 
+                            action_state = get_task_action_state(resolved_db, task_id, actor_id)
+                            if not _d3_terminal_is_authoritative(dict(snapshot.values), action_state):
+                                blocked_state = {
+                                    **dict(snapshot.values),
+                                    "stage": "waiting_input",
+                                    "blocked_reason": "ACTION_OUTCOME_UNKNOWN",
+                                }
+                                return {
+                                    "task_id": task_id,
+                                    "thread_id": binding["thread_id"],
+                                    "graph_state": blocked_state,
+                                    "next_nodes": list(snapshot.next),
+                                    "action_state": action_state,
+                                }
                             return {
                                 "task_id": task_id,
                                 "thread_id": binding["thread_id"],
                                 "graph_state": dict(snapshot.values),
-                                "action_state": get_task_action_state(resolved_db, task_id, actor_id),
+                                "action_state": action_state,
                             }
                         saved = read_report(resolved_db, task_id)
                         if saved is None:
                             raise RuntimeError("Completed checkpoint has no immutable D2 report.")
                         return saved
                     if d3_mode:
-                        if resume_command is None:
-                            raise RuntimeError("D3 resume requires the persisted approval command.")
-                        await graph.ainvoke(Command(resume=resume_command), config)
+                        if _snapshot_has_pending_interrupt(snapshot):
+                            from opspilot.domain.d3 import get_plan_approval, get_task_action_state
+
+                            plan_hash = str(snapshot.values.get("plan_hash", ""))
+                            if not plan_hash:
+                                raise RuntimeError("D3 approval interrupt has no immutable Plan hash.")
+                            approval = get_plan_approval(
+                                resolved_db, str(binding["thread_id"]), plan_hash, actor_id
+                            )
+                            if approval is None:
+                                return {
+                                    "task_id": task_id,
+                                    "thread_id": binding["thread_id"],
+                                    "graph_state": dict(snapshot.values),
+                                    "next_nodes": list(snapshot.next),
+                                    "action_state": get_task_action_state(resolved_db, task_id, actor_id),
+                                }
+                            persisted_command = {
+                                "approval_id": approval["approval_id"],
+                                "plan_hash": approval["plan_hash"],
+                            }
+                            if resume_command is not None and resume_command != persisted_command:
+                                raise RuntimeError("Supplied D3 resume command differs from the persisted approval.")
+                            await graph.ainvoke(
+                                Command(
+                                    resume=persisted_command,
+                                    update={"approval_resume_id": approval["approval_id"]},
+                                ),
+                                config,
+                            )
+                        else:
+                            # A stale/mid-stage checkpoint resumes from its saved next node.
+                            # Every mutating node is safe to replay through its persisted intent/ledger.
+                            await graph.ainvoke(None, config)
                     else:
                         await graph.ainvoke(None, config)
                 else:

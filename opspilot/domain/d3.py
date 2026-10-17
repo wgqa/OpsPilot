@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from opspilot.domain.d2 import (
     canonical_json,
@@ -21,6 +21,13 @@ from opspilot.domain.client import BUSINESS_ROUTE, probe_orders
 
 
 ActionKind = Literal["REPAIR", "DELIVER"]
+_D4_TEST_FAILPOINT: Callable[[str, sqlite3.Connection | None], None] | None = None
+
+
+def _run_d4_test_failpoint(name: str, connection: sqlite3.Connection | None = None) -> None:
+    """Private monkeypatch seam for subprocess tests; never exposed to Agent tools or CLI."""
+    if _D4_TEST_FAILPOINT is not None:
+        _D4_TEST_FAILPOINT(name, connection)
 
 
 class D3Error(RuntimeError):
@@ -439,16 +446,50 @@ def _approval_for(connection: sqlite3.Connection, tenant_id: str, task_id: str, 
     return result
 
 
-def get_plan_for_task(path: str | Path, task_id: str, plan_hash: str) -> dict[str, object]:
-    binding = get_task_binding(path, task_id)
+def _require_plan_reader(
+    connection: sqlite3.Connection,
+    binding: dict[str, object],
+    plan_hash: str,
+    actor_id: str,
+) -> None:
+    operator = connection.execute(
+        "SELECT tenant_id, role FROM trusted_operators WHERE actor_id = ?", (actor_id,)
+    ).fetchone()
+    if operator is not None and operator["tenant_id"] == binding["tenant_id"]:
+        if operator["role"] == "SUPPORT" and actor_id == binding["actor_id"]:
+            return
+        if operator["role"] == "APPROVER":
+            approval = connection.execute(
+                """SELECT 1 FROM d3_approvals WHERE tenant_id = ? AND task_id = ?
+                   AND plan_hash = ? AND approver_id = ?""",
+                (binding["tenant_id"], binding["task_id"], plan_hash, actor_id),
+            ).fetchone()
+            if approval is not None:
+                return
+    executor = connection.execute(
+        "SELECT tenant_id FROM executor_services WHERE executor_id = ? AND active = 1", (actor_id,)
+    ).fetchone()
+    if executor is not None and executor["tenant_id"] == binding["tenant_id"]:
+        return
+    raise D3ScopeDenied("Plan read scope check failed.")
+
+
+def get_plan_for_task(path: str | Path, task_id: str, plan_hash: str, actor_id: str) -> dict[str, object]:
     with connect(path) as connection:
+        binding = _row(connection.execute(
+            "SELECT * FROM task_bindings WHERE task_id = ?", (task_id,)
+        ).fetchone())
+        if binding is None:
+            raise D3ScopeDenied("Task is not available for this Plan read.")
+        _require_plan_reader(connection, binding, plan_hash, actor_id)
         return _load_plan(connection, str(binding["tenant_id"]), task_id, plan_hash)
 
 
-def get_plan_approval(path: str | Path, thread_id: str, plan_hash: str) -> dict[str, object] | None:
+def get_plan_approval(path: str | Path, thread_id: str, plan_hash: str, actor_id: str) -> dict[str, object] | None:
     """Read the persisted approval bound to this task thread and immutable Plan."""
     with connect(path) as connection:
         binding = _binding_for_thread(connection, thread_id)
+        _require_plan_reader(connection, binding, plan_hash, actor_id)
         return _row(connection.execute(
             """SELECT * FROM d3_approvals WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
             (binding["tenant_id"], binding["task_id"], plan_hash),
@@ -727,6 +768,7 @@ def execute_repair(path: str | Path, action_intent_id: str, executor_id: str, at
         )
         if cursor.rowcount != 1:
             raise D3PreconditionRejected("REPAIR_CAS_FAILED")
+        _run_d4_test_failpoint("repair_before_commit", connection)
         result = {
             "action_id": intent["action_id"],
             "idempotency_key": intent["idempotency_key"],
@@ -749,6 +791,7 @@ def execute_repair(path: str | Path, action_intent_id: str, executor_id: str, at
             (intent["action_id"], utc_now(), intent["tenant_id"], intent["task_id"], intent["plan_hash"]),
         )
         connection.execute("UPDATE task_bindings SET status = 'VERIFYING' WHERE task_id = ?", (intent["task_id"],))
+    _run_d4_test_failpoint("repair_after_commit_before_response")
     return ledger
 
 
@@ -1105,6 +1148,8 @@ def execute_deliver(path: str | Path, action_intent_id: str, executor_id: str, a
             (intent["action_id"], utc_now(), intent["tenant_id"], intent["task_id"], intent["plan_hash"]),
         )
         connection.execute("UPDATE task_bindings SET status = 'COMPLETED' WHERE task_id = ?", (intent["task_id"],))
+        _run_d4_test_failpoint("deliver_before_commit", connection)
+    _run_d4_test_failpoint("deliver_after_commit_before_response")
     return ledger
 
 

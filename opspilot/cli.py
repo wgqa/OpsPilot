@@ -128,6 +128,13 @@ def parser_for_cli() -> argparse.ArgumentParser:
     d3_approve.add_argument("--db", default=str(DEFAULT_DB_PATH))
     d3_approve.add_argument("--checkpoint-db", default=str(DEFAULT_CHECKPOINT_DB_PATH))
 
+    d3_resume = subparsers.add_parser("d3-resume", help="Safely resume a D3 checkpoint from its persisted Domain state.")
+    d3_resume.add_argument("--actor", required=True, help="Trusted task owner or authorized approver actor ID.")
+    d3_resume.add_argument("--thread-id", required=True)
+    d3_resume.add_argument("--executor", default="executor-a", help="Trusted executor service ID.")
+    d3_resume.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    d3_resume.add_argument("--checkpoint-db", default=str(DEFAULT_CHECKPOINT_DB_PATH))
+
     d3_cancel = subparsers.add_parser("d3-cancel", help="Cancel an active persisted D3 Plan.")
     d3_cancel.add_argument("--actor", required=True, help="Trusted task submitter actor ID.")
     d3_cancel.add_argument("--task-id", required=True)
@@ -273,7 +280,7 @@ def main() -> int:
             return 1
         state = dict(result.get("graph_state", {}))
         action_state = dict(result.get("action_state", {}))
-        plan = get_plan_for_task(db_path, str(binding["task_id"]), str(state["plan_hash"])) if state.get("plan_hash") else None
+        plan = get_plan_for_task(db_path, str(binding["task_id"]), str(state["plan_hash"]), args.actor) if state.get("plan_hash") else None
         emit(
             "d3_plan_waiting_approval" if action_state.get("task_binding", {}).get("status") == "WAITING_APPROVAL" else "d3_investigation_complete",
             process_id=os.getpid(),
@@ -326,6 +333,41 @@ def main() -> int:
             action_state=public_state,
         )
         return 0
+    if args.command == "d3-resume":
+        from opspilot.investigator import run_investigation
+
+        try:
+            result = asyncio.run(run_investigation(
+                args.thread_id,
+                args.actor,
+                db_path=db_path,
+                checkpoint_db_path=args.checkpoint_db,
+                resume=True,
+                d3_mode=True,
+                executor_id=args.executor,
+            ))
+        except Exception as error:
+            from opspilot.smokes.tool_call import safe_error_details
+
+            emit("d3_recovery_resume_failed", process_id=os.getpid(), error=safe_error_details(error))
+            return 1
+        graph_state = dict(result.get("graph_state", {}))
+        action_state = d3_public_action_summary(dict(result.get("action_state", {})))
+        emit(
+            "d3_recovery_resumed",
+            process_id=os.getpid(),
+            task_id=result.get("task_id"),
+            thread_id=result.get("thread_id"),
+            graph_stage=graph_state.get("stage"),
+            blocked_reason=graph_state.get("blocked_reason"),
+            next_nodes=result.get("next_nodes", []),
+            graph_signals={key: graph_state.get(key) for key in (
+                "plan_id", "plan_hash", "repair_action_id", "repair_ledger_ref", "verification_id",
+                "frozen_report_ref", "deliver_action_id", "deliver_ledger_ref", "local_report_ref",
+            )},
+            action_state=action_state,
+        )
+        return 2 if graph_state.get("blocked_reason") == "ACTION_OUTCOME_UNKNOWN" else 0
     if args.command == "d3-cancel":
         from opspilot.domain.d3 import cancel_plan
 

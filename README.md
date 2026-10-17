@@ -76,6 +76,12 @@ D3 手动流程分两个 OS 进程运行。先执行 `d3-start`；它在 Plan �
 .\.venv\Scripts\python -m opspilot.cli d3-approve --actor approver-a --thread-id <d3-start 输出的 thread_id> --plan-hash <d3-start 输出的 plan_hash> --decision APPROVED --executor executor-a --db .runtime\d3.sqlite3 --checkpoint-db .runtime\d3-checkpoints.sqlite3
 ```
 
+跨进程中断后可从持久化 Domain 回执恢复。恢复命令会先核对操作者和已存审批；无法由业务回执确认的终态会阻断并报告 `ACTION_OUTCOME_UNKNOWN`：
+
+```powershell
+.\.venv\Scripts\python -m opspilot.cli d3-resume --actor support-a --thread-id <task thread_id> --executor executor-a --db .runtime\d3.sqlite3 --checkpoint-db .runtime\d3-checkpoints.sqlite3
+```
+
 一条命令会复现真实模型、MCP Client/Server、独立进程审批恢复、真实业务验证与工单追加。该命令会重置指定的本地演示数据库：
 
 ```powershell
@@ -93,20 +99,21 @@ D3 手动流程分两个 OS 进程运行。先执行 `d3-start`；它在 Plan �
 
 D2 Investigator 只暴露四个拆分工具：`get_integration_config`、`get_principal_status`、`get_auth_policy`、`probe_endpoint`；D1 聚合工具仅保留在 D1 回归。每个模型请求最多 8 次，每个模型选择的 MCP `tools/call` 最多 6 次；attempt 在外发前写入 Domain 台账。`d2-smoke INSUFFICIENT` 使用测试专用证据源故障注入，业务端点仍实际返回 401，Gate 必须安全停止，不能进入 READY。
 
-运行全套测试；给 pytest 指定仓库内临时目录，可避开 Windows 共享 Temp 目录的权限问题：
+运行全套测试；给 pytest 指定仓库内临时目录，可避开 Windows 共享 Temp 目录的权限问题。D4 故障测试会启动真实 OS 子进程，并在事务或 Graph checkpoint 边界强制退出：
 
 ```powershell
 New-Item -ItemType Directory -Path .runtime -Force | Out-Null
-.\.venv\Scripts\python -m pytest -q -s --basetemp=.runtime\pytest-d3
+.\.venv\Scripts\python -m pytest -q -s --basetemp=.runtime\pytest-d4
+.\.venv\Scripts\python -m pytest -q -s --basetemp=.runtime\pytest-d4-focused tests\test_d4_recovery.py
 ```
 
-各命令的脱敏输出、失败尝试和解释见 [D1 evidence](docs/evidence/d1/) 与 [D1 报告](docs/evidence/d1/REPORT.md)、[D2 evidence](docs/evidence/d2/) 与 [D2 报告](docs/evidence/d2/REPORT.md)、[D3 evidence](docs/evidence/d3/) 与 [D3 报告](docs/evidence/d3/REPORT.md)。D1 独立干净环境测试为 **8 passed**；D2 与 D3 的最终测试分子/分母以对应阶段报告为准。pytest 在 Windows 上请使用仓库内 `.runtime` 临时目录。
+各命令的脱敏输出、失败尝试和解释见 [D1 evidence](docs/evidence/d1/) 与 [D1 报告](docs/evidence/d1/REPORT.md)、[D2 evidence](docs/evidence/d2/) 与 [D2 报告](docs/evidence/d2/REPORT.md)、[D3 evidence](docs/evidence/d3/) 与 [D3 报告](docs/evidence/d3/REPORT.md)，以及 [D4 报告](docs/evidence/d4/REPORT.md)。D4 包含 D2 三场景模型/MCP 复测、D3 业务闭环 smoke、D1–D4 全套测试和崩溃/丢响应/并发/Checkpoint 恢复轨迹。pytest 在 Windows 上请使用仓库内 `.runtime` 临时目录。
 
 ## 当前已知问题
 
 - Function Calling 和 D2 Investigator 目前只验证了已配置的 `deepseek-flash` OpenAI-compatible Chat Completions 端点；其他提供商和模型尚未验证。模型偶尔会返回并行调用；Dispatcher 只发出第一个，其他调用留痕为未发送，再让模型依据结果选择下一步。
 - 本地可信操作者注册表、业务 API、fixture 与 SQLite 仅用于演示，不代表生产 IAM 或客户系统。D3 通过本地事务与跨进程 CLI 演示首次正确闭环。
-- D4 的系统性崩溃窗口、并发取消/替换和响应丢失故障矩阵尚未执行；Memory、Skills、多 Agent、Redis、S2/S3 与前端也不在当前实现范围。
+- D4 已用真实 OS 子进程验证 ActionIntent、REPAIR、冻结报告和 DELIVER 在提交/检查点边界进程退出后的幂等恢复，并覆盖计划取消/替换竞争、并发重复提交和未知终态阻断；这仍是本地 SQLite Demo Domain 的可靠性证据，不代表生产 IAM 或分布式存储保证。Memory、Skills、多 Agent、Redis、S2/S3 与前端也不在当前实现范围。
 
 ## 文档与评审历史
 
