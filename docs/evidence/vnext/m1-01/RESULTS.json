@@ -1,0 +1,129 @@
+{
+  "stage": "M1-01",
+  "status": "PASS_PENDING_MAIN_AGENT_REVIEW",
+  "overall_m1_accepted": false,
+  "third_party_approval_claimed": false,
+  "branch": "main",
+  "base_sha": "a53e13a4243cc6c7fa545b3e3a92b838596b6242",
+  "final_sha": null,
+  "final_sha_note": "The delivery response records git rev-parse HEAD; this JSON is committed in the resulting evidence commit.",
+  "python": "3.14.0",
+  "pytest": "9.1.1",
+  "dependencies": {
+    "langchain": "1.4.1",
+    "langchain-openai": "1.7.2",
+    "langgraph": "1.2.16",
+    "langgraph-checkpoint-sqlite": "3.1.2",
+    "mcp": "2.3.0",
+    "pydantic": "2.14.1"
+  },
+  "pytest_full": {
+    "command": ".venv/Scripts/python.exe -m pytest -q -s --basetemp=.runtime/m101-pytest-final",
+    "passed": 73,
+    "failed": 0,
+    "duration_seconds": 48.25,
+    "evidence": "logs/pytest-full.txt",
+    "expected_injected_failure_event": "test_d3_smoke_preserves_failed_start_process_without_crashing injects provider timeout; the test passes while preserving d3_smoke_result FAIL"
+  },
+  "pytest_m1_focused": {
+    "command": ".venv/Scripts/python.exe -m pytest -q -s tests/test_m1_task_control.py --basetemp=.runtime/m101-m1-focused-final",
+    "passed": 9,
+    "failed": 0,
+    "duration_seconds": 7.33,
+    "evidence": "logs/pytest-m1-focused.txt"
+  },
+  "static_checks": {
+    "compileall": "PASS",
+    "pip_check": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "acceptance_cases": {
+    "N1-01/02": {
+      "status": "PASS",
+      "rollback_atomic": true,
+      "same_request_ids_on_retry": true,
+      "revision_increments_once": true,
+      "same_key_different_digest": "IDEMPOTENCY_CONFLICT"
+    },
+    "N1-05": {
+      "status": "PASS",
+      "claim_results": ["CLAIMED/RUNNING", "REJECTED/TASK_RUN_NOT_QUEUED"],
+      "running_run_count": 1
+    },
+    "N1-09": {
+      "status": "PASS",
+      "independent_os_process": true,
+      "parent_pid": 7456,
+      "child_pid": 34440,
+      "resume_result": "TASK_ABORTED",
+      "control_revision": 1,
+      "plan_count": 0,
+      "approval_count": 0,
+      "intent_count": 0,
+      "ledger_count": 0
+    },
+    "N1-10": {
+      "status": "PASS",
+      "old_run_before_consumption": "TASK_INPUT_PENDING",
+      "old_plan_after_correction_consumed": "TASK_CONTROL_STALE",
+      "fresh_plan_control_revision": 2,
+      "config_version_after": 8,
+      "repair_ledger_count": 1
+    },
+    "N1-11": {
+      "status": "PASS",
+      "independent_os_process": true,
+      "parent_pid": 7456,
+      "child_pid": 27196,
+      "resume_result": "TASK_ABORTED",
+      "repair_ledger_count": 1,
+      "config_version_after": 8,
+      "historical_repair_receipt_readable": true,
+      "deliver_ledger_count": 0,
+      "delivery_record_count": 0,
+      "ticket_entry_count": 0
+    },
+    "migration": {
+      "status": "PASS",
+      "idempotent_replays": 2,
+      "historical_plan_hash_preserved": true
+    }
+  },
+  "real_model_task_run_smoke": {
+    "status": "PASS",
+    "model": "deepseek-flash",
+    "model_calls": 5,
+    "model_call_statuses": ["OK", "OK", "OK", "OK", "OK"],
+    "mcp_calls": 4,
+    "mcp_tools": ["get_integration_config", "get_auth_policy", "get_principal_status", "probe_endpoint"],
+    "total_tokens": 12792,
+    "evidence_gate": "READY",
+    "task_run_status": "WAITING_APPROVAL",
+    "control_revision": 2,
+    "config_version_before_approval": 7,
+    "business_write_before_approval": false,
+    "evidence": "logs/real-model-task-run.jsonl"
+  },
+  "fresh_s1_business_regression": {
+    "status": "PASS",
+    "passed_checks": 13,
+    "total_checks": 13,
+    "initial_http_status": 401,
+    "repaired_config_version": 8,
+    "verified_http_status": 200,
+    "order_id": "demo-order",
+    "order_status": "CONFIRMED",
+    "repair_ledger_count": 1,
+    "deliver_ledger_count": 1,
+    "ticket_entry_count": 1,
+    "evidence": "s1-d3-smoke/TRACE.json",
+    "approval_note": "local demo approver-a simulation; not human or third-party signoff"
+  },
+  "known_limits": [
+    "one initial real-model smoke attempt failed due to an unregistered demo ticket; terminal stderr was not captured; see ATTEMPT-01.md",
+    "no HTTP 202/API/SSE or background cross-process worker lease in M1-01",
+    "single-machine SQLite semantics only; no distributed lock or exactly-once claim",
+    "M1-02 has not started"
+  ],
+  "main_agent_review": "PENDING"
+}

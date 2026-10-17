@@ -45,3 +45,10 @@
 - 旧项目和其他学习任务仅作只读参考，不修改其中的代码或资料。
 - 在 D1 中只完成 D1 范围；不以常规实现选择为由引入额外审批，也不扩展到 D2 及后续阶段。
 - 归档文件中的旧方案和任务卡仅供溯源。实施时只按根目录本文件、`TASKS.md`、当前阶段任务书及唯一有效的 v1.0 基线执行。
+
+## vNext M1-01 的范围衔接
+
+- v1.0 基线继续约束 D1–D7 历史能力及其回归；vNext 任务不得覆盖或重写这些冻结合同。
+- vNext/M1-01 的范围依据 `docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md` 与 `docs/handoff/vnext/Luna-M1-01-implementation-task-card.md`；`docs/baseline/vNext-product-baseline-candidate.md` 是待审实现快照，不表示第三方签字或 M1 总体验收。若合同冲突，停止相关变更并提交变更说明，由主 Agent 裁决。
+- 当前用户已要求在 `main` 直接开发、提交并推送，不新建分支或 PR。每轮只做明确授权阶段；M1-01 后停止并等待主 Agent 审查，不自行进入 M1-02。
+- 本轮实现不得把 Graph checkpoint 当作 Task 权限事实来源。Plan、审批、Intent、REPAIR、DELIVER 的最终资格必须在 Domain 写事务校验；用户关键纠错是未信任输入，不能提升为 Evidence 或审批授权。

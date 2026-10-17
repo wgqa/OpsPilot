@@ -18,6 +18,11 @@ from opspilot.domain.d2 import (
 )
 from opspilot.domain.database import connect, get_service_info
 from opspilot.domain.client import BUSINESS_ROUTE, probe_orders
+from opspilot.domain.task_control import (
+    TaskControlError,
+    assert_plan_control_in_transaction,
+    assert_task_control_in_transaction,
+)
 
 
 ActionKind = Literal["REPAIR", "DELIVER"]
@@ -135,6 +140,40 @@ def _write_plan_history(
     )
 
 
+def _assert_control(
+    connection: sqlite3.Connection,
+    tenant_id: str,
+    task_id: str,
+    expected_revision: int | None = None,
+    *,
+    run_id: str | None = None,
+    allow_completed: bool = False,
+) -> sqlite3.Row:
+    try:
+        return assert_task_control_in_transaction(
+            connection, tenant_id, task_id, expected_revision, run_id=run_id,
+            allow_completed=allow_completed,
+        )
+    except TaskControlError as exc:
+        raise D3PreconditionRejected(exc.code) from exc
+
+
+def _assert_plan_control(
+    connection: sqlite3.Connection,
+    tenant_id: str,
+    task_id: str,
+    plan_hash: str,
+    *,
+    allow_completed: bool = False,
+) -> sqlite3.Row:
+    try:
+        return assert_plan_control_in_transaction(
+            connection, tenant_id, task_id, plan_hash, allow_completed=allow_completed
+        )
+    except TaskControlError as exc:
+        raise D3PreconditionRejected(exc.code) from exc
+
+
 def _activate_plan_in_transaction(
     connection: sqlite3.Connection,
     tenant_id: str,
@@ -145,6 +184,7 @@ def _activate_plan_in_transaction(
 ) -> None:
     _require_submitter(connection, task_id, actor_id)
     plan = _load_plan(connection, tenant_id, task_id, plan_hash)
+    _assert_plan_control(connection, tenant_id, task_id, plan_hash)
     ticket = connection.execute(
         "SELECT 1 FROM tickets WHERE tenant_id = ? AND ticket_id = ?",
         (tenant_id, plan["ticket_id"]),
@@ -193,6 +233,8 @@ def create_plan_from_gate(
     task_id: str,
     actor_id: str,
     gate_decision: dict[str, object],
+    *,
+    run_id: str | None = None,
 ) -> dict[str, object]:
     """Persist and activate the unique immutable Plan derived from a fresh READY gate."""
     if gate_decision.get("decision") != "READY":
@@ -261,10 +303,32 @@ def create_plan_from_gate(
         "report_derivation_contract": "repair_ledger+online_verification+same_task_evidence-v1",
         "gate_reason_code": recomputed["reason_code"],
     }
-    signature = digest_json(base_plan)
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         _require_submitter(connection, task_id, actor_id)
+        if run_id is None:
+            control = _assert_control(connection, str(binding["tenant_id"]), task_id, 0)
+            expected_revision = int(control["control_revision"])
+            consumed_message_seq = int(control["applied_critical_message_seq"])
+        else:
+            run = connection.execute(
+                """SELECT expected_control_revision, consumed_message_seq FROM task_runs
+                   WHERE run_id = ? AND tenant_id = ? AND task_id = ?""",
+                (run_id, binding["tenant_id"], task_id),
+            ).fetchone()
+            if run is None:
+                raise D3PreconditionRejected("TASK_RUN_NOT_FOUND")
+            expected_revision = int(run["expected_control_revision"])
+            consumed_message_seq = int(run["consumed_message_seq"])
+            _assert_control(connection, str(binding["tenant_id"]), task_id, expected_revision, run_id=run_id)
+        base_signature = digest_json(base_plan)
+        # Keep the v1.0 plan body/hash byte-for-byte compatible. New control epochs
+        # qualify only the lookup signature in this separate authorization layer.
+        signature = base_signature if expected_revision == 0 and consumed_message_seq == 0 else digest_json({
+            "canonical_plan_signature": base_signature,
+            "bound_control_revision": expected_revision,
+            "consumed_message_seq": consumed_message_seq,
+        })
         existing = connection.execute(
             """SELECT plan_id, plan_hash, canonical_plan_json FROM d3_plans
                WHERE tenant_id = ? AND task_id = ? AND plan_signature = ?""",
@@ -291,6 +355,14 @@ def create_plan_from_gate(
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (plan_id, binding["tenant_id"], task_id, version, plan_hash, signature, canonical, actor_id),
         )
+        connection.execute(
+            """INSERT INTO d3_plan_control_bindings
+               (tenant_id, task_id, plan_hash, bound_control_revision, consumed_message_seq,
+                task_run_id, bound_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (binding["tenant_id"], task_id, plan_hash, expected_revision,
+             consumed_message_seq, run_id, utc_now()),
+        )
         _activate_plan_in_transaction(connection, str(binding["tenant_id"]), task_id, plan_hash, actor_id, "ready_gate_plan")
     plan["plan_hash"] = plan_hash
     return plan
@@ -316,6 +388,14 @@ def cancel_plan(path: str | Path, task_id: str, plan_hash: str, actor_id: str, r
         if current is None:
             raise D3PreconditionRejected("PLAN_NOT_FOUND")
         if current["eligibility"] == "ACTIVE":
+            # Plan cancellation is an idempotent authorization-history operation.
+            # It remains available after a completed delivery, while an ABORTED or
+            # stale Task cannot reactivate anything because the active path below
+            # still uses the control guard.
+            _assert_plan_control(
+                connection, str(binding["tenant_id"]), task_id, plan_hash,
+                allow_completed=True,
+            )
             generation = int(current["generation"]) + 1
             now = utc_now()
             connection.execute(
@@ -335,7 +415,9 @@ def cancel_plan(path: str | Path, task_id: str, plan_hash: str, actor_id: str, r
     return current or {}
 
 
-def authorize_workflow_resume(path: str | Path, thread_id: str, actor_id: str) -> dict[str, object]:
+def authorize_workflow_resume(
+    path: str | Path, thread_id: str, actor_id: str, *, run_id: str | None = None
+) -> dict[str, object]:
     """Authorize submitter or task-tenant approver before checkpoint construction/read."""
     with connect(path) as connection:
         binding = _binding_for_thread(connection, thread_id)
@@ -349,6 +431,36 @@ def authorize_workflow_resume(path: str | Path, thread_id: str, actor_id: str) -
             raise D3ScopeDenied("Workflow resume actor is outside the task tenant.")
         if owner["tenant_id"] != binding["tenant_id"] or owner["owner_id"] != binding["actor_id"]:
             raise D3ScopeDenied("Workflow thread owner record is invalid.")
+        control = connection.execute(
+            "SELECT * FROM task_controls WHERE tenant_id = ? AND task_id = ?",
+            (binding["tenant_id"], binding["task_id"]),
+        ).fetchone()
+        if control is None:
+            raise D3PreconditionRejected("TASK_CONTROL_MIGRATION_REQUIRED")
+        if str(control["terminal_state"]) != "ACTIVE":
+            raise D3PreconditionRejected("TASK_ABORTED")
+        if control["pending_critical_message_seq"] is not None:
+            raise D3PreconditionRejected("TASK_INPUT_PENDING")
+        if run_id is None:
+            # This legacy Graph entry carries no durable Run token. It is therefore
+            # valid only for the original revision-zero execution.
+            if int(control["control_revision"]) != 0:
+                raise D3PreconditionRejected("TASK_CONTROL_STALE")
+        else:
+            run = connection.execute(
+                """SELECT r.*, s.owner_id FROM task_runs AS r JOIN sessions AS s
+                   ON s.session_id = r.session_id AND s.tenant_id = r.tenant_id
+                   WHERE r.run_id = ? AND r.tenant_id = ? AND r.task_id = ?""",
+                (run_id, binding["tenant_id"], binding["task_id"]),
+            ).fetchone()
+            if run is None or str(run["owner_id"]) != str(binding["actor_id"]):
+                raise D3ScopeDenied("Persisted Run is outside the trusted task owner scope.")
+            if str(run["status"]) != "RUNNING":
+                raise D3PreconditionRejected("TASK_RUN_NOT_ACTIVE")
+            if int(control["control_revision"]) != int(run["expected_control_revision"] or -1):
+                raise D3PreconditionRejected("TASK_CONTROL_STALE")
+            if int(run["consumed_message_seq"]) < int(control["applied_critical_message_seq"]):
+                raise D3PreconditionRejected("TASK_CONTROL_STALE")
         if operator["role"] == "SUPPORT" and actor_id == binding["actor_id"]:
             return binding
         if operator["role"] == "APPROVER":
@@ -386,8 +498,6 @@ def submit_plan_approval(
             raise D3ScopeDenied("The submitter cannot approve their own Plan.")
         plan = _load_plan(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
         auth = _authorization(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
-        if auth is None or auth["eligibility"] != "ACTIVE":
-            raise D3PreconditionRejected("PLAN_NOT_ACTIVE")
         actions = ["REPAIR", "DELIVER"]
         approval_scope = {
             "plan_hash": plan_hash,
@@ -407,7 +517,12 @@ def submit_plan_approval(
         if existing is not None:
             if existing["approver_id"] != approver_id or existing["decision"] != decision or existing["approval_scope_json"] != scope_json:
                 raise D3PreconditionRejected("APPROVAL_ALREADY_RECORDED_WITH_DIFFERENT_SCOPE")
+            # Exact approval replay is a history read, never a new grant. Return
+            # it even if Task control later invalidated its permissions.
             return _row(existing) or {}
+        _assert_plan_control(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
+        if auth is None or auth["eligibility"] != "ACTIVE":
+            raise D3PreconditionRejected("PLAN_NOT_ACTIVE")
         if binding["status"] != "WAITING_APPROVAL":
             raise D3PreconditionRejected("TASK_NOT_WAITING_FOR_APPROVAL")
         approval_id = f"approval-{uuid.uuid4()}"
@@ -598,6 +713,7 @@ def get_or_create_action_intent(
         authorization = _authorization(connection, str(binding["tenant_id"]), task_id, plan_hash)
         if authorization is None or authorization["eligibility"] != "ACTIVE":
             raise D3PreconditionRejected("PLAN_NOT_ACTIVE")
+        _assert_plan_control(connection, str(binding["tenant_id"]), task_id, plan_hash)
         permission = connection.execute(
             """SELECT state, approval_id FROM d3_action_permissions
                WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? AND action_kind = ?""",
@@ -722,6 +838,7 @@ def execute_repair(path: str | Path, action_intent_id: str, executor_id: str, at
         prior = _prior_ledger(connection, intent)
         if prior is not None:
             return prior
+        _assert_plan_control(connection, str(intent["tenant_id"]), str(intent["task_id"]), str(intent["plan_hash"]))
         auth = _authorization(connection, str(intent["tenant_id"]), str(intent["task_id"]), str(intent["plan_hash"]))
         if auth is None or auth["eligibility"] != "ACTIVE":
             raise D3PreconditionRejected("PLAN_NOT_ACTIVE")
@@ -825,6 +942,10 @@ def verify_repair_online(
             result["business_assertions"] = json.loads(str(result.pop("business_assertions_json")))
             result["recovery_verified"] = bool(result["recovery_verified"])
             return result
+        try:
+            _assert_plan_control(connection, str(binding["tenant_id"]), task_id, plan_hash)
+        except D3PreconditionRejected:
+            raise
     # The verifier uses the registered integration, principal and fixed route from Domain.
     probe = probe_orders(path, business_api_url, str(binding["tenant_id"]), str(binding["integration_id"]))
     assertions = {
@@ -873,6 +994,7 @@ def verify_repair_online(
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         _require_executor(connection, executor_id, str(binding["tenant_id"]))
+        _assert_plan_control(connection, str(binding["tenant_id"]), task_id, plan_hash)
         connection.execute(
             """INSERT INTO d3_verification_receipts
                (verification_id, tenant_id, task_id, plan_hash, repair_action_id,
@@ -967,6 +1089,7 @@ def get_or_create_report(
             item = _row(existing) or {}
             item["report"] = json.loads(str(item.pop("immutable_content_json")))
             return item
+        _assert_plan_control(connection, str(binding["tenant_id"]), task_id, plan_hash)
         evidence_rows = connection.execute(
             """SELECT * FROM d2_evidence WHERE task_id = ?
                AND evidence_id IN (%s) ORDER BY fetched_at"""
@@ -1040,6 +1163,7 @@ def execute_deliver(path: str | Path, action_intent_id: str, executor_id: str, a
         prior = _prior_ledger(connection, intent)
         if prior is not None:
             return prior
+        _assert_plan_control(connection, str(intent["tenant_id"]), str(intent["task_id"]), str(intent["plan_hash"]))
         auth = _authorization(connection, str(intent["tenant_id"]), str(intent["task_id"]), str(intent["plan_hash"]))
         if auth is None or auth["eligibility"] != "ACTIVE":
             raise D3PreconditionRejected("PLAN_NOT_ACTIVE")
@@ -1168,6 +1292,10 @@ def save_local_report(
     digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
+        if plan_hash is None:
+            _assert_control(connection, str(binding["tenant_id"]), task_id, 0, allow_completed=True)
+        else:
+            _assert_plan_control(connection, str(binding["tenant_id"]), task_id, plan_hash, allow_completed=True)
         existing = connection.execute(
             """SELECT * FROM d3_local_reports WHERE tenant_id = ? AND task_id = ?
                AND ((plan_hash IS NULL AND ? IS NULL) OR plan_hash = ?) AND outcome = ?""",

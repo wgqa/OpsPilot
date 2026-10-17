@@ -3,6 +3,8 @@
 **主合同**：[`docs/baseline/v1.0-implementation-baseline.md`](docs/baseline/v1.0-implementation-baseline.md)
 **设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1–D5 已通过主 Agent 验收；D2 PR #2 合入 `main@171f028`。D6 E01–E10 评测及证据已完成，交主 Agent 复核。**
 
+**vNext 执行登记：** v1.0 基线继续约束 D1–D7 历史实现；vNext/M1-01 的当前范围依据 [v0.3 合同](docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md)、[M1-01 任务卡](docs/handoff/vnext/Luna-M1-01-implementation-task-card.md) 与 [候选实现基线](docs/baseline/vNext-product-baseline-candidate.md)。M1-01 本轮验证完成，待主 Agent 审查；不表示 M1 总体或第三方审查通过。
+
 > 本表只勾选已执行且有证据的项目。D1–D7 代表实际开发的相对顺序，**不是**把 2026-10-17—23 自动当作已经执行。评审阶段累计的时间不当作有效编码时间。
 
 ## D1 — 环境实证 + S1 无模型真实因果链
@@ -80,6 +82,17 @@
 
 **停止线**：D7 开发完成后停止扩展；只就经证明确有 P0 阻断的具体问题做最小修复，不启动下一开发阶段。实际结果见 [`docs/evidence/d7/REPORT.md`](docs/evidence/d7/REPORT.md)。
 
+## vNext M1-01 — Task 终止、关键纠错与动作原子裁决
+
+- [x] 在现有 Domain SQLite 增加 TaskControl、Session、Message、Command、TaskRun、Outbox 与 Plan-control 绑定；迁移重放两次保持原 Plan hash，未知旧历史不升级成新控制权限。
+- [x] 消息受理、幂等 Command、排队 Run 与 Outbox 同事务；Task abort / 关键纠错提高可信控制版本、使旧 Run/Plan 失效。更正以 `USER_INPUT_UNTRUSTED` 进入新调查，不能替代 Evidence。
+- [x] D3 的 Plan、审批、ActionIntent、REPAIR、DELIVER 在 Domain 事务内校验 Task/Run/Plan 控制绑定；同身份历史已提交 Ledger 可回查，终态 Task 不会被后到 abort 覆盖。
+- [x] N1-09、N1-10、N1-11 新鲜通过；N1-09 与 N1-11 使用真实独立 OS 子进程恢复旧 checkpoint。N1-01/02 受理回滚与幂等、N1-05 独立连接争用及迁移回归通过。
+- [x] 本轮全量 pytest **73/73**；`compileall`、`pip check`、Git whitespace 检查通过；真实模型/MCP TaskRun smoke 与既有 D3 S1 401→200 smoke 各有本轮轨迹。报告与原始证据：[`docs/evidence/vnext/m1-01/REPORT.md`](docs/evidence/vnext/m1-01/REPORT.md)。
+- [ ] 主 Agent M1-01 审查（等待）；未实施 M1-02、Web/API/SSE 或多进程 worker lease。
+
+**停止线**：本轮到 M1-01 为止；等待主 Agent 审查，不自行进入 M1-02。v0.3 附录 B 未获第三方重新签字，不把本轮测试称为第三方审批。
+
 ## 实际进度登记
 
 | 日期（实际） | 阶段 | Commit / 版本 | 结果（测试分子/分母） | 阻断与下一步 |
@@ -91,5 +104,6 @@
 | 2026-10-17 | D5（主 Agent 已审查通过） | `main` / D5 implementation commit（见 D5 报告） | 全量 pytest **62/62**；D5 真实模型/MCP **19/19**；D3 来源闭环及 D2 主体禁用/证据不足控制有真实轨迹 | 跨任务经验激活、撤销和跨进程不复用通过；详见 `docs/evidence/d5/REPORT.md` |
 | 2026-10-17 | D6（历史评测冻结） | `main` / 运行代码 `f2c9403`；评测 Gold 冻结于 `151a1ce`；最终证据 `28c3e1a` | 全量 pytest **64/64**；E04–E10 映射控制测试唯一项 **45/45**；E01/E02/E03 新鲜真实模型场景均 PASS；E10 attempt 01 FAIL、attempt 02 PASS | 场景族 9 PASS / 1 PARTIAL；无 P0 安全红线失败；D7 不改写其结果 |
 | 2026-10-17 | D7（交付完成，等待主 Agent 验收） | 运行实现 `a2517fdbe2b66e4490867cc388aadc32ec5b5197`；最终交付 SHA 见 Git/交付消息，附件来源 SHA 见 MANIFEST | 首轮 E01 FAIL、pytest **61/64**；修正后 E01 **13/13**、恢复 **2/2**、pytest **64/64**；模型 7 / MCP 6 / 19,244 tokens | 仅修 Skill 导出 LF，未改 Agent/Domain 执行逻辑；离线包和源码/面试材料齐备；开发停止，外部审查未执行 |
+| 2026-10-18 | vNext M1-01（本轮测试完成，待主 Agent 审查） | 基于 `main@a53e13a4243cc6c7fa545b3e3a92b838596b6242`；交付 SHA 以本轮 Git 终点为准 | N1-09/10/11 通过；新鲜全量 pytest **73/73**；模型/MCP TaskRun、D3 S1 真实 smoke 通过 | 仅 M1-01；不声称 M1 总体或第三方审查通过；等待主 Agent 决定是否启动 M1-02 |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。

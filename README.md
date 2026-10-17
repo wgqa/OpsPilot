@@ -8,11 +8,13 @@
 **D3 状态：** WP-01–05、真实端到端运行与全套回归已通过主 Agent 审查（29 项 pytest、13 项 D3 smoke 检查）。
 **D4/D5 状态：** D4 恢复可靠性和 D5 Memory/Skill/Context Provenance 已通过主 Agent 审查。
 **D6 状态：** E01–E10 已形成新鲜运行矩阵；全量 pytest 64/64，E01–E03 真实模型场景通过，E10 保留一次 smoke 失败并在独立数据重跑通过；E10 族诚实记为 PARTIAL，安全控制未见 P0 失败。
-**唯一有效架构与验收规范：** [v1.0 实施基线](docs/baseline/v1.0-implementation-baseline.md)
+**v1.0 / D1–D7 实施规范：** [v1.0 实施基线](docs/baseline/v1.0-implementation-baseline.md)
 **D7 状态：** 干净环境发现并最小修复 Skill 导出换行问题；修正后真实 E01 13/13、两条真进程崩溃恢复 2/2、全量 pytest 64/64。首轮 E01 FAIL 与 61/64 回归保留，详见 [D7 报告](docs/evidence/d7/REPORT.md)。
 **当前实施状态：** D7 交付完成，开发停止，等待主 Agent 验收；独立第三方审计与用户最终审阅尚未执行。
+**vNext / M1-01 状态：** 本轮在 `main` 完成 Task 终止、关键纠错与业务提交的 Domain 事务裁决；N1-09/10/11、全量 pytest 73/73、真实模型/MCP TaskRun smoke 与 D3 S1 回归均有本轮证据。当前等待主 Agent 审查；M1-02、Web/HTTP 对话接入及后台 worker 尚未实现。vNext 执行范围见 [v0.3 合同](docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md)、[M1-01 任务卡](docs/handoff/vnext/Luna-M1-01-implementation-task-card.md) 与 [候选实现基线](docs/baseline/vNext-product-baseline-candidate.md)；候选基线不代表第三方签字或 M1 总体验收。
 **运行实现 SHA：** `a2517fdbe2b66e4490867cc388aadc32ec5b5197`；最终交付 main SHA 用 `git rev-parse HEAD` 核对，离线附件的精确来源见包内 MANIFEST。D7 未改 Agent/Domain Python 逻辑。
 **逐项进度与测试结论：** [TASKS.md](TASKS.md)
+**M1-01 新鲜运行证据：** [M1-01 报告](docs/evidence/vnext/m1-01/REPORT.md) · [机器结果](docs/evidence/vnext/m1-01/RESULTS.json) · [原始日志与失败尝试](docs/evidence/vnext/m1-01/)
 **D1 执行日志与报告：** [D1 报告](docs/evidence/d1/REPORT.md)
 **D2 任务卡与执行报告：** [D2 任务卡](docs/handoff/Luna-D2-implementation-brief.md) · [D2 报告](docs/evidence/d2/REPORT.md)
 **D3 真实运行轨迹与报告：** [D3 报告](docs/evidence/d3/REPORT.md) · [脱敏轨迹](docs/evidence/d3/TRACE.json) · [进程与测试日志](docs/evidence/d3/)

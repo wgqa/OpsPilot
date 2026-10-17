@@ -100,6 +100,125 @@ CREATE TABLE IF NOT EXISTS task_bindings (
     FOREIGN KEY (tenant_id, integration_id) REFERENCES integrations(tenant_id, integration_id),
     FOREIGN KEY (tenant_id, principal_id) REFERENCES principals(tenant_id, principal_id)
 );
+CREATE TABLE IF NOT EXISTS task_controls (
+    task_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    terminal_state TEXT NOT NULL CHECK (terminal_state IN ('ACTIVE', 'ABORTED')),
+    control_revision INTEGER NOT NULL CHECK (control_revision >= 0),
+    pending_critical_message_seq INTEGER,
+    applied_critical_message_seq INTEGER NOT NULL DEFAULT 0,
+    changed_at TEXT NOT NULL,
+    changed_by TEXT,
+    reason TEXT,
+    UNIQUE (task_id, tenant_id),
+    FOREIGN KEY (task_id, tenant_id)
+        REFERENCES task_bindings(task_id, tenant_id) ON DELETE CASCADE,
+    CHECK (pending_critical_message_seq IS NULL OR pending_critical_message_seq > applied_critical_message_seq)
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    owner_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (session_id, tenant_id)
+);
+CREATE INDEX IF NOT EXISTS ix_sessions_owner ON sessions(tenant_id, owner_id, updated_at);
+CREATE TABLE IF NOT EXISTS session_task_links (
+    session_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    linked_at TEXT NOT NULL,
+    is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0, 1)),
+    PRIMARY KEY (session_id, task_id),
+    UNIQUE (task_id),
+    FOREIGN KEY (session_id, tenant_id) REFERENCES sessions(session_id, tenant_id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id, tenant_id) REFERENCES task_bindings(task_id, tenant_id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS commands (
+    command_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
+    command_kind TEXT NOT NULL,
+    target_ref TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    accepted_at TEXT NOT NULL,
+    accepted_status TEXT NOT NULL CHECK (accepted_status IN ('ACCEPTED', 'REJECTED')),
+    error_code TEXT,
+    message_id TEXT,
+    run_id TEXT,
+    result_json TEXT NOT NULL,
+    UNIQUE (tenant_id, actor_id, command_kind, target_ref, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS ix_commands_task ON commands(tenant_id, target_ref, accepted_at);
+CREATE TABLE IF NOT EXISTS messages (
+    message_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    task_id TEXT,
+    sequence INTEGER NOT NULL CHECK (sequence > 0),
+    role TEXT NOT NULL CHECK (role IN ('USER', 'ASSISTANT', 'SYSTEM')),
+    input_kind TEXT NOT NULL CHECK (input_kind IN ('CHAT_READONLY', 'CORRECT_TASK_INPUT')),
+    body TEXT NOT NULL,
+    body_digest TEXT NOT NULL,
+    command_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    application_state TEXT NOT NULL DEFAULT 'RECEIVED_NOT_APPLIED'
+        CHECK (application_state IN ('RECEIVED_NOT_APPLIED', 'APPLIED_TO_RUN')),
+    applied_run_id TEXT,
+    UNIQUE (session_id, sequence),
+    UNIQUE (message_id, task_id, sequence),
+    FOREIGN KEY (session_id, tenant_id) REFERENCES sessions(session_id, tenant_id) ON DELETE CASCADE,
+    FOREIGN KEY (task_id, tenant_id) REFERENCES task_bindings(task_id, tenant_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_messages_task_seq ON messages(task_id, sequence);
+CREATE TABLE IF NOT EXISTS task_runs (
+    run_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT,
+    session_id TEXT NOT NULL,
+    command_id TEXT NOT NULL UNIQUE,
+    source_message_id TEXT,
+    kind TEXT NOT NULL CHECK (kind IN ('CHAT_READONLY', 'INVESTIGATE', 'RESUME', 'APPROVAL_RESUME', 'RECONCILE')),
+    status TEXT NOT NULL CHECK (status IN ('QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'BLOCKED', 'WAITING_INPUT', 'WAITING_APPROVAL', 'INTERRUPTED_RECOVERABLE')),
+    control_revision_at_start INTEGER,
+    expected_control_revision INTEGER,
+    consumed_message_seq INTEGER NOT NULL DEFAULT 0,
+    applied_critical_message_seq INTEGER NOT NULL DEFAULT 0,
+    blocked_reason TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    ended_at TEXT,
+    FOREIGN KEY (task_id, tenant_id) REFERENCES task_bindings(task_id, tenant_id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id, tenant_id) REFERENCES sessions(session_id, tenant_id) ON DELETE CASCADE,
+    FOREIGN KEY (source_message_id, task_id, consumed_message_seq)
+        REFERENCES messages(message_id, task_id, sequence) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_task_runs_one_active_business
+    ON task_runs(task_id) WHERE status = 'RUNNING' AND kind != 'CHAT_READONLY' AND task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_task_runs_queue ON task_runs(status, created_at);
+CREATE TABLE IF NOT EXISTS task_run_inputs (
+    message_id TEXT PRIMARY KEY REFERENCES messages(message_id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES task_runs(run_id) ON DELETE CASCADE,
+    input_digest TEXT NOT NULL,
+    provenance TEXT NOT NULL CHECK (provenance = 'USER_INPUT_UNTRUSTED'),
+    consumed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS domain_outbox (
+    event_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT,
+    session_id TEXT,
+    source_kind TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    event_kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (source_kind, source_id, event_kind)
+);
+CREATE INDEX IF NOT EXISTS ix_domain_outbox_task ON domain_outbox(tenant_id, task_id, created_at);
 CREATE TABLE IF NOT EXISTS d2_attempts (
     attempt_id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
@@ -211,6 +330,18 @@ CREATE TABLE IF NOT EXISTS d3_plans (
     UNIQUE (tenant_id, task_id, plan_hash),
     UNIQUE (tenant_id, task_id, plan_signature),
     UNIQUE (tenant_id, task_id, plan_version)
+);
+CREATE TABLE IF NOT EXISTS d3_plan_control_bindings (
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    bound_control_revision INTEGER NOT NULL CHECK (bound_control_revision >= 0),
+    consumed_message_seq INTEGER NOT NULL DEFAULT 0,
+    task_run_id TEXT REFERENCES task_runs(run_id),
+    bound_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, task_id, plan_hash),
+    FOREIGN KEY (tenant_id, task_id, plan_hash)
+        REFERENCES d3_plans(tenant_id, task_id, plan_hash) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS d3_plan_authorizations (
     plan_hash TEXT PRIMARY KEY,
@@ -437,7 +568,55 @@ def connect(path: str | Path) -> Iterator[sqlite3.Connection]:
 
 def initialize(path: str | Path) -> None:
     with connect(path) as connection:
-        connection.executescript(SCHEMA)
+        # executescript normally commits any open transaction before executing.
+        # Put the transaction opener inside the script so schema creation and the
+        # versioned compatibility backfill commit or roll back together.
+        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version > 1:
+            raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+        if version < 1:
+            # A pre-vNext Task is safe to initialize at revision 0 only when the new
+            # admission tables contain no history that could represent pending input.
+            for task in connection.execute("SELECT task_id, tenant_id, actor_id FROM task_bindings").fetchall():
+                task_id = str(task["task_id"])
+                tenant_id = str(task["tenant_id"])
+                new_history = connection.execute(
+                    "SELECT 1 FROM messages WHERE task_id = ? UNION ALL SELECT 1 FROM task_runs WHERE task_id = ? LIMIT 1",
+                    (task_id, task_id),
+                ).fetchone()
+                if new_history is not None:
+                    continue
+                connection.execute(
+                    """INSERT OR IGNORE INTO task_controls
+                       (task_id, tenant_id, terminal_state, control_revision,
+                        pending_critical_message_seq, applied_critical_message_seq,
+                        changed_at, changed_by, reason)
+                       VALUES (?, ?, 'ACTIVE', 0, NULL, 0, CURRENT_TIMESTAMP, ?, 'legacy_revision_0_migration')""",
+                    (task_id, tenant_id, str(task["actor_id"])),
+                )
+                session_id = f"session-legacy-{task_id}"
+                connection.execute(
+                    """INSERT OR IGNORE INTO sessions (session_id, tenant_id, owner_id, created_at, updated_at)
+                       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                    (session_id, tenant_id, str(task["actor_id"])),
+                )
+                connection.execute(
+                    """INSERT OR IGNORE INTO session_task_links
+                       (session_id, task_id, tenant_id, linked_at, is_primary)
+                       VALUES (?, ?, ?, CURRENT_TIMESTAMP, 1)""",
+                    (session_id, task_id, tenant_id),
+                )
+            connection.execute(
+                """INSERT OR IGNORE INTO d3_plan_control_bindings
+                   (tenant_id, task_id, plan_hash, bound_control_revision, consumed_message_seq,
+                    task_run_id, bound_at)
+                   SELECT p.tenant_id, p.task_id, p.plan_hash, 0, 0, NULL, p.created_at
+                   FROM d3_plans AS p JOIN task_controls AS c
+                     ON c.task_id = p.task_id AND c.tenant_id = p.tenant_id
+                   WHERE c.control_revision = 0 AND c.pending_critical_message_seq IS NULL"""
+            )
+            connection.execute("PRAGMA user_version = 1")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -446,6 +625,15 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     status_a = "DISABLED" if scenario == "S1_DISABLED" else "ENABLED"
     with connect(path) as connection:
         for table in (
+            "task_run_inputs",
+            "domain_outbox",
+            "d3_plan_control_bindings",
+            "task_runs",
+            "messages",
+            "commands",
+            "session_task_links",
+            "sessions",
+            "task_controls",
             "d5_context_provenance",
             "d5_memory_events",
             "d5_memories",

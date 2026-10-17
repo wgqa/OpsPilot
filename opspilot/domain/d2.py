@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from opspilot.domain.client import probe_orders
-from opspilot.domain.database import connect, get_auth_event, get_integration_info
+from opspilot.domain.database import connect, get_auth_event, get_integration_info, initialize
 
 
 AttemptKind = Literal["MODEL", "MCP"]
@@ -61,11 +61,15 @@ def create_task_binding(
     service_id: str,
     integration_id: str,
     ticket_id: str = "INC-A-001",
+    *,
+    session_id: str | None = None,
 ) -> dict[str, object]:
     """Create an immutable task binding from the local trusted operator registry."""
+    initialize(path)
     task_id = f"task-{uuid.uuid4()}"
     thread_id = f"opspilot-{uuid.uuid4()}"
     with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
         operator = connection.execute(
             "SELECT tenant_id, role FROM trusted_operators WHERE actor_id = ?",
             (actor_id,),
@@ -106,10 +110,39 @@ def create_task_binding(
             "INSERT INTO thread_owners (thread_id, tenant_id, owner_id) VALUES (?, ?, ?)",
             (thread_id, tenant_id, actor_id),
         )
+        now = utc_now()
+        connection.execute(
+            """INSERT INTO task_controls
+               (task_id, tenant_id, terminal_state, control_revision,
+                pending_critical_message_seq, applied_critical_message_seq,
+                changed_at, changed_by, reason)
+               VALUES (?, ?, 'ACTIVE', 0, NULL, 0, ?, ?, 'task_created')""",
+            (task_id, tenant_id, now, actor_id),
+        )
+        if session_id is None:
+            session_id = f"session-{uuid.uuid4()}"
+            connection.execute(
+                """INSERT INTO sessions (session_id, tenant_id, owner_id, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (session_id, tenant_id, actor_id, now, now),
+            )
+        else:
+            session = connection.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ? AND tenant_id = ? AND owner_id = ?",
+                (session_id, tenant_id, actor_id),
+            ).fetchone()
+            if session is None:
+                raise ScopeDenied("The session is not owned by the trusted task submitter.")
+        connection.execute(
+            """INSERT INTO session_task_links
+               (session_id, task_id, tenant_id, linked_at, is_primary)
+               VALUES (?, ?, ?, ?, 1)""",
+            (session_id, task_id, tenant_id, now),
+        )
         result = connection.execute(
             "SELECT * FROM task_bindings WHERE task_id = ?", (task_id,)
         ).fetchone()
-    return _dict_row(result)
+    return {**_dict_row(result), "session_id": session_id}
 
 
 def get_task_binding(path: str | Path, task_id: str) -> dict[str, object]:
