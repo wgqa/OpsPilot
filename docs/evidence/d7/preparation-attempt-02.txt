@@ -1,0 +1,16 @@
+command: python .runtime/d7_run.py
+cwd: D:\学习\agent新项目
+exit_code: 1
+Captured tool output (Windows console rendered non-ASCII paths incorrectly):
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.runtime\d7_run.py", line 29, in <module>
+    assert path.read_bytes() == committed, relative
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: opspilot/cli.py
+
+The first correction was insufficient: core.autocrlf=true also converts text
+inside git archive. Exported cli.py has 456 CRLFs; the committed blob has none.
+Both cli.py and domain/d3.py match their committed blobs after CRLF->LF
+normalization. Final comparison uses that explicit textual normalization and
+stores hashes of the actual exported bytes separately. No model/business/test
+execution occurred in either failed preparation attempt. Core files unchanged.

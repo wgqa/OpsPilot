@@ -69,9 +69,16 @@
 
 ## D7 — 独立复现、材料与面试准备
 
-- [ ] 干净环境单命令重现主要业务和 checkpoint 中断。
-- [ ] README 完成可运行命令、版本与边界；报告真实通过数/失败数；演示脚本和 STAR 条目。
-- [ ] 提交给主 Agent 做完整实现审查；P0 未通过时诚实注明，优先修缺陷。
+- [x] 两次独立源码目录、全新 venv/数据库/checkpoint；首轮 Skill CRLF 摘要失败保留；仅 `.gitattributes` 固定 LF 后，真实模型/MCP/HITL 业务闭环 13/13，401→200、配置 7→8、独立 Ledger 和单条工单均有证据。
+- [x] 复用两个已有 D4 真进程 COMMIT 后退出用例，exit 75→0，Action/Ledger 身份相同、无重复副作用；定向 2/2、修正后全量 pytest 64/64、pip check 与语法检查通过。首轮全量 61/64 和采集入口 exit 4 均保留。
+- [x] README 最短路线、人工两进程 CLI、DEMO、源码地图、两个 STAR 与十个追问、报告及机器结果完成。
+- [x] 准备实际代码/合同/测试/脱敏证据的离线审计附件和逐文件来源清单；第三方不需 GitHub 权限即可阅读核心实现。
+- [x] D6 9 PASS + E10 PARTIAL、4/5 模型 smoke 和固定通用 Memory 局限原样保留；D7 E02/E03/E10 模型证据标注历史复用，未冒充新跑。
+- [ ] 主 Agent D7 验收（等待）。
+- [ ] 一次独立第三方实现/漂移审计（尚未开始，不预写审查意见）。
+- [ ] 用户最终亲自阅读与审阅（尚未开始）。
+
+**停止线**：D7 开发完成后停止扩展；只就经证明确有 P0 阻断的具体问题做最小修复，不启动下一开发阶段。实际结果见 [`docs/evidence/d7/REPORT.md`](docs/evidence/d7/REPORT.md)。
 
 ## 实际进度登记
 
@@ -82,6 +89,7 @@
 | 2026-10-17 | D3（主 Agent 已审查通过） | `main` / `5529990` | 全量 pytest 29/29；D3 真实跨进程模型/MCP/HITL smoke 13 项检查通过；D2 POS/DISABLED/INSUFFICIENT 三场景回归通过 | 真实 401→200、订单字段、固定报告与单条工单交付见 `docs/evidence/d3/REPORT.md` |
 | 2026-10-17 | D4（主 Agent 已审查通过） | `main` / 本轮 D4 提交 | 全量 pytest **55/55**；D3 真实 smoke **13/13**；D2 三场景均 PASS，详见 `docs/evidence/d4/REPORT.md` | E04–E09 通过；无 Domain 回执的终态安全阻断 |
 | 2026-10-17 | D5（主 Agent 已审查通过） | `main` / D5 implementation commit（见 D5 报告） | 全量 pytest **62/62**；D5 真实模型/MCP **19/19**；D3 来源闭环及 D2 主体禁用/证据不足控制有真实轨迹 | 跨任务经验激活、撤销和跨进程不复用通过；详见 `docs/evidence/d5/REPORT.md` |
-| 2026-10-17 | D6（评测完成，待主 Agent 复核） | `main` / 运行代码 `f2c9403`；评测 Gold 冻结于 `151a1ce` | 全量 pytest **64/64**；E04–E10 映射控制测试唯一项 **45/45**；E01/E02/E03 新鲜真实模型场景均 PASS；E10 attempt 01 FAIL、attempt 02 PASS | 场景族 9 PASS / 1 PARTIAL；无 P0 安全红线失败。报告与结果矩阵见 `docs/evidence/d6/`；D7 未开始 |
+| 2026-10-17 | D6（历史评测冻结） | `main` / 运行代码 `f2c9403`；评测 Gold 冻结于 `151a1ce`；最终证据 `28c3e1a` | 全量 pytest **64/64**；E04–E10 映射控制测试唯一项 **45/45**；E01/E02/E03 新鲜真实模型场景均 PASS；E10 attempt 01 FAIL、attempt 02 PASS | 场景族 9 PASS / 1 PARTIAL；无 P0 安全红线失败；D7 不改写其结果 |
+| 2026-10-17 | D7（交付完成，等待主 Agent 验收） | 运行实现 `a2517fdbe2b66e4490867cc388aadc32ec5b5197`；最终交付 SHA 见 Git/交付消息，附件来源 SHA 见 MANIFEST | 首轮 E01 FAIL、pytest **61/64**；修正后 E01 **13/13**、恢复 **2/2**、pytest **64/64**；模型 7 / MCP 6 / 19,244 tokens | 仅修 Skill 导出 LF，未改 Agent/Domain 执行逻辑；离线包和源码/面试材料齐备；开发停止，外部审查未执行 |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。

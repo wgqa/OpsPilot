@@ -9,12 +9,62 @@
 **D4/D5 状态：** D4 恢复可靠性和 D5 Memory/Skill/Context Provenance 已通过主 Agent 审查。
 **D6 状态：** E01–E10 已形成新鲜运行矩阵；全量 pytest 64/64，E01–E03 真实模型场景通过，E10 保留一次 smoke 失败并在独立数据重跑通过；E10 族诚实记为 PARTIAL，安全控制未见 P0 失败。
 **唯一有效架构与验收规范：** [v1.0 实施基线](docs/baseline/v1.0-implementation-baseline.md)
-**当前实施状态：** D6 评测完成，交主 Agent 复核；D7 尚未开始。
+**D7 状态：** 干净环境发现并最小修复 Skill 导出换行问题；修正后真实 E01 13/13、两条真进程崩溃恢复 2/2、全量 pytest 64/64。首轮 E01 FAIL 与 61/64 回归保留，详见 [D7 报告](docs/evidence/d7/REPORT.md)。
+**当前实施状态：** D7 交付完成，开发停止，等待主 Agent 验收；独立第三方审计与用户最终审阅尚未执行。
+**运行实现 SHA：** `a2517fdbe2b66e4490867cc388aadc32ec5b5197`；最终交付 main SHA 用 `git rev-parse HEAD` 核对，离线附件的精确来源见包内 MANIFEST。D7 未改 Agent/Domain Python 逻辑。
 **逐项进度与测试结论：** [TASKS.md](TASKS.md)
 **D1 执行日志与报告：** [D1 报告](docs/evidence/d1/REPORT.md)
 **D2 任务卡与执行报告：** [D2 任务卡](docs/handoff/Luna-D2-implementation-brief.md) · [D2 报告](docs/evidence/d2/REPORT.md)
 **D3 真实运行轨迹与报告：** [D3 报告](docs/evidence/d3/REPORT.md) · [脱敏轨迹](docs/evidence/d3/TRACE.json) · [进程与测试日志](docs/evidence/d3/)
 **工程边界：** [AGENTS.md](AGENTS.md)
+
+## 从这里开始：最短可运行路线（PowerShell）
+
+在克隆或解压后的源码根目录打开 PowerShell，确认能看到 `opspilot/` 与 `requirements.lock.txt`。本项目已验证 Windows / CPython 3.14.0；离线审计 ZIP 解压后也包含完整运行源码与测试，但安装包源和模型服务仍需网络。
+
+```powershell
+python --version
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+notepad .env
+```
+
+在本地 `.env` 填 `OPSPILOT_MODEL_API_KEY`、`OPSPILOT_MODEL_NAME`；自定义模型端点再填 `OPSPILOT_MODEL_BASE_URL`，保存后关闭编辑器。密钥不能提交或发进报告。然后运行：
+
+```powershell
+$demoRun = Get-Date -Format 'yyyyMMdd-HHmmss'
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m opspilot.cli d3-smoke --db ".runtime/d7-demo-$demoRun.sqlite3" --checkpoint-db ".runtime/d7-demo-$demoRun-checkpoints.sqlite3" --evidence-dir ".runtime/d7-demo-$demoRun-evidence"
+Get-Content ".runtime/d7-demo-$demoRun-evidence/TRACE.json"
+.\.venv\Scripts\python.exe -m pytest -vv -s tests/test_d4_recovery.py -k 'langgraph_replays_committed' --basetemp=".runtime/d7-recovery-$demoRun"
+.\.venv\Scripts\python.exe -m pytest -vv -s --basetemp=".runtime/d7-full-$demoRun"
+```
+
+`d3-smoke` 会重置指定 Demo DB，上面每次使用新名称。检查自己输出的 `d3_smoke_result/checks`、原始 401 Evidence、VerificationReceipt 的同身份 200/`demo-order/CONFIRMED`、两笔独立 Ledger 和一条工单；不能只看到数据库版本变化就称恢复。模型失败或 BLOCKED 也需保留。**此自动演示由程序以 approver-a 模拟可信批准，不是人手决定**。
+
+真实人工 HITL 使用两个独立进程。终端 A 输入本次未使用的编号，初始化新 Demo DB，然后调查到审批中断：
+
+```powershell
+$manualRun = Read-Host '输入本次唯一编号'
+$db = ".runtime/d7-manual-$manualRun.sqlite3"
+$cp = ".runtime/d7-manual-$manualRun-checkpoints.sqlite3"
+if (Test-Path $db) { throw '该编号已用，请换新编号' }
+.\.venv\Scripts\python.exe -m opspilot.cli reset --scenario S1_POS --db $db
+.\.venv\Scripts\python.exe -m opspilot.cli d3-start --actor support-a --executor executor-a --db $db --checkpoint-db $cp
+```
+
+阅读输出的 Plan 目标、版本和 `plan_hash`。终端 B 在同一源码目录中输入相同编号，手动选择批准或拒绝；本地身份名只是 Demo 信任角色，不是生产登录认证：
+
+```powershell
+$manualRun = Read-Host '输入终端 A 的编号'
+$threadId = Read-Host '粘贴终端 A 的 thread_id'
+$planHash = Read-Host '核对 Plan 后粘贴 plan_hash'
+$decision = Read-Host '输入 APPROVED 或 REJECTED'
+.\.venv\Scripts\python.exe -m opspilot.cli d3-approve --actor approver-a --executor executor-a --thread-id $threadId --plan-hash $planHash --decision $decision --db ".runtime/d7-manual-$manualRun.sqlite3" --checkpoint-db ".runtime/d7-manual-$manualRun-checkpoints.sqlite3"
+```
+
+已审计来源与新鲜日志：[D7 报告/命令](docs/evidence/d7/REPORT.md) · [机器结果](docs/evidence/d7/RESULTS.json) · [一屏演示](docs/evidence/d7/DEMO.md) · [源码阅读地图](docs/evidence/d7/CODE_READING_MAP.md) · [STAR/追问](docs/evidence/d7/INTERVIEW.md) · [第三方交接与离线附件](docs/review-handoff/d7/REVIEW_BRIEF.md)。
 
 ## 产品目标与边界
 
@@ -29,7 +79,7 @@ D1 的 MCP 工具只读，服务端启动时绑定租户作用域。checkpoint s
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.lock.txt
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 需要真实模型 Function Calling 时，在本机编辑 `.env`，填写 `OPSPILOT_MODEL_API_KEY` 和 `OPSPILOT_MODEL_NAME`；使用自定义 OpenAI-compatible Chat Completions 端点时再填写 `OPSPILOT_MODEL_BASE_URL`。不要把密钥放进 Git、命令历史或测试日志。未配置必需值时，真实模型 smoke 会明确返回 `BLOCKED`，不会调用模型。D1 已用模型 `deepseek-flash` 实际完成一次工具调用。
@@ -128,7 +178,7 @@ D5 定向用例与 D1–D4 全量回归：
 .\.venv\Scripts\python -m pytest -q -s --basetemp=.runtime\pytest-d5
 ```
 
-本轮全量结果为 `62 passed`；完整运行轨迹见 [pytest-full.txt](docs/evidence/d5/pytest-full.txt)。
+D5 当轮全量结果为 `62 passed`；完整运行轨迹见 [pytest-full.txt](docs/evidence/d5/pytest-full.txt)。D7 修正后独立环境全量为 64/64，分母分开记录。
 
 日常可信人工管理入口为 `memory candidate --task-id <Task A ID> --actor support-a`、`memory confirm --memory-id <ID> --actor approver-a` 和 `memory revoke --memory-id <ID> --actor approver-a`；候选操作不自动激活。
 

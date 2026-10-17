@@ -1,0 +1,83 @@
+{
+  "source_sha": "a2517fdbe2b66e4490867cc388aadc32ec5b5197",
+  "working_directory": "D:\\学习\\OpsPilot-D7-repro-20261017T102036Z",
+  "runs": [
+    {
+      "label": "e01-real-model",
+      "command": [
+        "D:\\学习\\OpsPilot-D7-repro-20261017T102036Z\\.venv\\Scripts\\python.exe",
+        "-m",
+        "opspilot.cli",
+        "d3-smoke",
+        "--db",
+        ".runtime/d7-e01.sqlite3",
+        "--checkpoint-db",
+        ".runtime/d7-e01-checkpoints.sqlite3",
+        "--evidence-dir",
+        "docs/evidence/d7/e01"
+      ],
+      "pid": 36440,
+      "exit_code": 0,
+      "started_utc": "2026-10-17T10:21:36.366234+00:00",
+      "finished_utc": "2026-10-17T10:22:01.416580+00:00",
+      "log": "e01/run.txt"
+    },
+    {
+      "label": "d4-crash-recovery",
+      "command": [
+        "D:\\学习\\OpsPilot-D7-repro-20261017T102036Z\\.venv\\Scripts\\python.exe",
+        "D:\\学习\\OpsPilot-D7-repro-20261017T102036Z\\.runtime\\d7-capture.py"
+      ],
+      "pid": 36840,
+      "exit_code": 0,
+      "started_utc": "2026-10-17T10:22:01.421165+00:00",
+      "finished_utc": "2026-10-17T10:22:14.502039+00:00",
+      "log": "d4-recovery/pytest.txt"
+    },
+    {
+      "label": "pytest-full",
+      "command": [
+        "D:\\学习\\OpsPilot-D7-repro-20261017T102036Z\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "-vv",
+        "-s",
+        "--basetemp=.runtime/pytest-d7-full"
+      ],
+      "pid": 31040,
+      "exit_code": 0,
+      "started_utc": "2026-10-17T10:22:14.513618+00:00",
+      "finished_utc": "2026-10-17T10:23:15.930865+00:00",
+      "log": "pytest-full.txt"
+    },
+    {
+      "label": "syntax",
+      "command": [
+        "D:\\学习\\OpsPilot-D7-repro-20261017T102036Z\\.venv\\Scripts\\python.exe",
+        "-m",
+        "compileall",
+        "-q",
+        "opspilot",
+        "tests"
+      ],
+      "pid": 28120,
+      "exit_code": 0,
+      "started_utc": "2026-10-17T10:23:15.936086+00:00",
+      "finished_utc": "2026-10-17T10:23:16.077399+00:00",
+      "log": "syntax.txt"
+    },
+    {
+      "label": "environment",
+      "command": [
+        "D:\\学习\\OpsPilot-D7-repro-20261017T102036Z\\.venv\\Scripts\\python.exe",
+        "-c",
+        "import json,sys,platform,sqlite3; print(json.dumps(dict(python=sys.version, executable=sys.executable, platform=platform.platform(), sqlite=sqlite3.sqlite_version)))"
+      ],
+      "pid": 4264,
+      "exit_code": 0,
+      "started_utc": "2026-10-17T10:23:16.081989+00:00",
+      "finished_utc": "2026-10-17T10:23:16.285043+00:00",
+      "log": "environment.txt"
+    }
+  ]
+}
