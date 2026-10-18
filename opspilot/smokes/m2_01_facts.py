@@ -46,15 +46,35 @@ def _install_scope_write_audit(path: Path) -> None:
                 )
 
 
-def _fresh_domain(path: Path, scenario: str, actor: str, service: str, integration: str) -> tuple[dict[str, object], int]:
+def _scope_versions(path: Path) -> dict[str, int]:
+    with connect(path) as connection:
+        grant = connection.execute(
+            "SELECT grant_version FROM principal_scope_grants "
+            "WHERE tenant_id = 'tenant-a' AND principal_id = 'principal-a'"
+        ).fetchone()
+        policy = connection.execute(
+            "SELECT scope_policy_version FROM route_scope_policies "
+            "WHERE tenant_id = 'tenant-a' AND service_id = 'orders-demo' "
+            "AND route = '/api/orders/demo-order'"
+        ).fetchone()
+    if grant is None or policy is None:
+        raise RuntimeError("Fresh fixture is missing its scoped authorization facts.")
+    return {
+        "grant_version": int(grant["grant_version"]),
+        "scope_policy_version": int(policy["scope_policy_version"]),
+    }
+
+
+def _fresh_domain(path: Path, scenario: str, actor: str, service: str, integration: str) -> tuple[dict[str, object], int, dict[str, int]]:
     initialize(path)
     _install_scope_write_audit(path)
     reset_fixture(path, scenario)  # type: ignore[arg-type]
     with connect(path) as connection:
         setup_count = int(connection.execute("SELECT count(*) FROM m2_scope_write_audit").fetchone()[0])
         connection.execute("DELETE FROM m2_scope_write_audit")
+    before_versions = _scope_versions(path)
     binding = create_task_binding(path, actor, service, integration)
-    return binding, setup_count
+    return binding, setup_count, before_versions
 
 
 @contextmanager
@@ -232,15 +252,15 @@ def run(output: Path) -> dict[str, object]:
     runtime = ROOT / ".runtime" / "m2-01" / f"trace-{run_id}"
     runtime.mkdir(parents=True, exist_ok=False)
     denied_db = runtime / "scope-denied.sqlite3"
-    denied_binding, denied_setup_writes = _fresh_domain(
+    denied_binding, denied_setup_writes, denied_before_versions = _fresh_domain(
         denied_db, "S2_SCOPE_DENIED", "support-a", "orders-demo", "integration-a"
     )
     invalid_db = runtime / "invalid-auth.sqlite3"
-    _, invalid_setup_writes = _fresh_domain(
+    _, invalid_setup_writes, invalid_before_versions = _fresh_domain(
         invalid_db, "S2_SCOPE_ALLOWED", "support-a", "orders-demo", "integration-a"
     )
     allowed_db = runtime / "scope-allowed.sqlite3"
-    allowed_binding, allowed_setup_writes = _fresh_domain(
+    allowed_binding, allowed_setup_writes, allowed_before_versions = _fresh_domain(
         allowed_db, "S2_SCOPE_ALLOWED", "support-a", "orders-demo", "integration-a"
     )
 
@@ -265,10 +285,10 @@ def run(output: Path) -> dict[str, object]:
 
     release_ref = _release_ref(str(mcp_result["schema_digest"]))
     records: list[dict[str, object]] = []
-    for case_id, response, db_path, setup_count, credential_ref in (
-        ("S2FACT-02A", response_401, invalid_db, invalid_setup_writes, "cred-v1"),
-        ("S2FACT-01", response_403, denied_db, denied_setup_writes, "cred-v2"),
-        ("S2FACT-03", response_200, allowed_db, allowed_setup_writes, "cred-v2"),
+    for case_id, response, db_path, setup_count, before_versions, credential_ref in (
+        ("S2FACT-02A", response_401, invalid_db, invalid_setup_writes, invalid_before_versions, "cred-v1"),
+        ("S2FACT-01", response_403, denied_db, denied_setup_writes, denied_before_versions, "cred-v2"),
+        ("S2FACT-03", response_200, allowed_db, allowed_setup_writes, allowed_before_versions, "cred-v2"),
     ):
         request_id = response.json()["request_id"]
         task_id = str(denied_binding["task_id"]) if db_path == denied_db else str(allowed_binding["task_id"]) if db_path == allowed_db else ""
@@ -283,7 +303,13 @@ def run(output: Path) -> dict[str, object]:
             "scope_binding": {"tenant_id": "tenant-a", "service_id": "orders-demo", "integration_id": "integration-a", "principal_id": "principal-a", "route": "/api/orders/demo-order", "source": "trusted Domain fixture and HTTP server"},
             "authn_event": authn,
             "authz_decision": authz,
-            "scope_write_audit": {"setup_write_count": setup_count, "runtime_write_count": _scope_write_count(db_path)},
+            "scope_write_audit": {
+                "setup_write_count": setup_count,
+                "runtime_write_count": _scope_write_count(db_path),
+                "before_versions": before_versions,
+                "after_versions": _scope_versions(db_path),
+                "versions_unchanged": before_versions == _scope_versions(db_path),
+            },
             "forbidden_writes": _scope_write_count(db_path),
             "http_request_count": 1,
             "evidence": {"source_ids": [f"authn:{authn['event_id']}"] + ([f"authz:{authz['decision_id']}"] if authz else []),
@@ -323,7 +349,13 @@ def run(output: Path) -> dict[str, object]:
         "mcp_calls": mcp_result["calls"],
         "mcp_tools_list_count": 1,
         "mcp_tools_call_count": 4,
-        "scope_write_audit": {"setup_write_count": denied_setup_writes, "runtime_write_count": _scope_write_count(denied_db)},
+        "scope_write_audit": {
+            "setup_write_count": denied_setup_writes,
+            "runtime_write_count": _scope_write_count(denied_db),
+            "before_versions": denied_before_versions,
+            "after_versions": _scope_versions(denied_db),
+            "versions_unchanged": denied_before_versions == _scope_versions(denied_db),
+        },
         "forbidden_writes": _scope_write_count(denied_db),
         "evidence": {"source_ids": [f"authz:{mcp_result['payload']['facts']['decision_id']}"],
                      "trust_class": "untrusted_tool_observation", "observed_versions": mcp_result["payload"]["observed_versions"],
@@ -341,6 +373,8 @@ def run(output: Path) -> dict[str, object]:
         raise RuntimeError("Secret scan failed; trace was not written.")
     for record in records:
         record["secret_scan"] = "PASS"
+        record["secret_scan_files"] = [output.resolve().relative_to(ROOT).as_posix()]
+        record["secret_scan_finding_count"] = 0
         if record["forbidden_writes"] != 0:
             record["result_status"] = "FAIL"
             record["failure_reason"] = "Runtime Scope/Route Policy write detected."
