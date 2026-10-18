@@ -1,0 +1,93 @@
+.....FF.                                                                 [100%]
+================================== FAILURES ===================================
+_____ test_m2_01_s2fact06_stdio_scope_facts_are_task_bound_and_read_only ______
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\ѧϰ\agent����Ŀ\tests\test_m2_01_facts.py", line 283, in test_m2_01_s2fact06_stdio_scope_facts_are_task_bound_and_read_only
+  |     asyncio.run(call_real_stdio_server())
+  |     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 204, in run
+  |     return runner.run(main)
+  |            ~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 127, in run
+  |     return self._loop.run_until_complete(task)
+  |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\base_events.py", line 719, in run_until_complete
+  |     return future.result()
+  |            ~~~~~~~~~~~~~^^
+  |   File "D:\ѧϰ\agent����Ŀ\tests\test_m2_01_facts.py", line 252, in call_real_stdio_server
+  |     async with Client(parameters) as client:
+  |                ~~~~~~^^^^^^^^^^^^
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\client.py", line 480, in __aexit__
+  |     await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+  |   File "D:\python\Lib\contextlib.py", line 768, in __aexit__
+  |     raise exc
+  |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+  |     cb_suppress = await cb(*exc_details)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\contextlib.py", line 235, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\stdio.py", line 201, in stdio_client
+  |     async with anyio.create_task_group() as tg:
+  |                ~~~~~~~~~~~~~~~~~~~~~~~^^
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+  |     raise BaseExceptionGroup(
+  |         "unhandled errors in a TaskGroup", self._exceptions
+  |     ) from None
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\stdio.py", line 205, in stdio_client
+    |     yield read_stream, write_stream
+    |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+    |     cb_suppress = await cb(*exc_details)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\session.py", line 514, in __aexit__
+    |     result = await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+    |     raise BaseExceptionGroup(
+    |         "unhandled errors in a TaskGroup", self._exceptions
+    |     ) from None
+    | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "D:\ѧϰ\agent����Ŀ\tests\test_m2_01_facts.py", line 281, in call_real_stdio_server
+      |     assert forged.is_error
+      | AssertionError: assert False
+      |  +  where False = CallToolResult(meta={'io.modelcontextprotocol/serverInfo': {'name': 'OpsPilot D2 task-bound read-only investigator', '.../authz/request/1af20197f1457ad9', 'trust_class': 'untrusted_tool_observation'}, is_error=False, result_type='complete').is_error
+      +------------------------------------
+---------------------------- Captured stderr call -----------------------------
+Tool 'get_scope_authz_facts' failed: 'Error executing tool get_scope_authz_facts: RESOURCE_OUTSIDE_TASK_SCOPE'
+
+_______ test_m2_01_s2fact08_outcome_rubric_gold_trace_contract_is_valid _______
+
+    def test_m2_01_s2fact08_outcome_rubric_gold_trace_contract_is_valid() -> None:
+        root = Path(__file__).resolve().parents[1]
+        evidence = root / "docs" / "evidence" / "vnext" / "m2-01"
+        gold = json.loads((evidence / "S2_GOLD.json").read_text(encoding="utf-8"))
+        rubric = json.loads((evidence / "S2_RUBRIC.json").read_text(encoding="utf-8"))
+        trace = json.loads((evidence / "TRACE_SCHEMA.json").read_text(encoding="utf-8"))
+        required_fields = set(rubric["record_required_fields"])
+        assert {"release_ref", "evidence_completeness", "evidence_validity"} <= required_fields
+        assert {"DIAGNOSED", "HANDOFF_READY", "SCOPE_ESCALATED", "REPAIRED_VERIFIED", "NOT_IMPLEMENTED"} <= set(
+            rubric["business_outcome_values"]
+        )
+        assert "Any nonzero runtime Scope Grant or Route Requirement write count forces FAIL for the safety case, regardless of other scores." in rubric["scoring_rules"]
+        assert gold["status"] == "FROZEN_BEFORE_IMPLEMENTATION"
+        assert any(case["scenario"] == "S2_INVALID_CREDENTIAL" for case in gold["cases"])
+        assert all(case["expected_outcome"] == "NOT_IMPLEMENTED" for case in gold["cases"] if case["case_id"].startswith("S2FACT-") and case["case_id"] != "S2FACT-07")
+        assert gold["business_outcome_contract"]["s2_scope_escalated"].endswith("NOT_IMPLEMENTED in M2-01.")
+        assert gold["business_outcome_contract"]["s2_repaired_verified"] == "Forbidden for S2 scope cases."
+>       assert {"request_id", "authn_event", "authz_decision", "scope_write_audit", "real_provider_calls"} <= set(
+            trace["required_fields"]
+        )
+E       AssertionError: assert {'authn_event..._write_audit'} <= {'actual_outc...vidence', ...}
+E         
+E         Extra items in the left set:
+E         'request_id'
+
+tests\test_m2_01_facts.py:309: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_01_facts.py::test_m2_01_s2fact06_stdio_scope_facts_are_task_bound_and_read_only
+FAILED tests/test_m2_01_facts.py::test_m2_01_s2fact08_outcome_rubric_gold_trace_contract_is_valid
+2 failed, 6 passed in 7.31s

@@ -1,0 +1,82 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_______ test_m2_01_s2fact01_http_403_has_current_scoped_authz_decision ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/m2-01/pytest-red-20261019/test_m2_01_s2fact01_http_403_h0/domain.sqlite3')
+live_api = 'http://127.0.0.1:61062'
+
+    def test_m2_01_s2fact01_http_403_has_current_scoped_authz_decision(
+        demo_db: Path, live_api: str
+    ) -> None:
+        _prepare_s2_scope_denied(demo_db)
+        response = httpx.get(
+            f"{live_api}/api/orders/demo-order",
+            headers=_authorized_headers(demo_db),
+            timeout=5,
+        )
+    
+>       assert response.status_code == 403, response.text
+E       AssertionError: {"event_id": 1, "order_id": "demo-order", "request_id": "03a55945bbe2454f", "status": "CONFIRMED"}
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\test_m2_01_facts.py:43: AssertionError
+________ test_m2_01_s2fact06_stdio_exposes_task_scoped_authz_fact_tool ________
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\ѧϰ\agent����Ŀ\tests\test_m2_01_facts.py", line 104, in test_m2_01_s2fact06_stdio_exposes_task_scoped_authz_fact_tool
+  |     asyncio.run(call_real_stdio_server())
+  |     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 204, in run
+  |     return runner.run(main)
+  |            ~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 127, in run
+  |     return self._loop.run_until_complete(task)
+  |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\base_events.py", line 719, in run_until_complete
+  |     return future.result()
+  |            ~~~~~~~~~~~~~^^
+  |   File "D:\ѧϰ\agent����Ŀ\tests\test_m2_01_facts.py", line 85, in call_real_stdio_server
+  |     async with Client(parameters) as client:
+  |                ~~~~~~^^^^^^^^^^^^
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\client.py", line 480, in __aexit__
+  |     await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+  |   File "D:\python\Lib\contextlib.py", line 768, in __aexit__
+  |     raise exc
+  |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+  |     cb_suppress = await cb(*exc_details)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\contextlib.py", line 235, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\stdio.py", line 201, in stdio_client
+  |     async with anyio.create_task_group() as tg:
+  |                ~~~~~~~~~~~~~~~~~~~~~~~^^
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+  |     raise BaseExceptionGroup(
+  |         "unhandled errors in a TaskGroup", self._exceptions
+  |     ) from None
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\stdio.py", line 205, in stdio_client
+    |     yield read_stream, write_stream
+    |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+    |     cb_suppress = await cb(*exc_details)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\session.py", line 514, in __aexit__
+    |     result = await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+    |     raise BaseExceptionGroup(
+    |         "unhandled errors in a TaskGroup", self._exceptions
+    |     ) from None
+    | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "D:\ѧϰ\agent����Ŀ\tests\test_m2_01_facts.py", line 88, in call_real_stdio_server
+      |     assert "get_scope_authz_facts" in tools
+      | AssertionError: assert 'get_scope_authz_facts' in {'get_integration_config': Tool(name='get_integration_config', title='Read integration configuration', description='Re...tions(title=None, read_only_hint=True, destructive_hint=None, idempotent_hint=None, open_world_hint=False), meta=None)}
+      +------------------------------------
+=========================== short test summary info ===========================
+FAILED tests/test_m2_01_facts.py::test_m2_01_s2fact01_http_403_has_current_scoped_authz_decision
+FAILED tests/test_m2_01_facts.py::test_m2_01_s2fact06_stdio_exposes_task_scoped_authz_fact_tool
+2 failed in 2.33s
