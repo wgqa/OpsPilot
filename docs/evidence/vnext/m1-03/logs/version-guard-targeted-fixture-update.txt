@@ -1,0 +1,61 @@
+..F.................
+================================== FAILURES ===================================
+______ test_task_inspector_includes_successful_domain_observation_status ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/m103-version-guard-targeted-green/test_task_inspector_includes_s0/domain.sqlite3')
+
+    def test_task_inspector_includes_successful_domain_observation_status(demo_db: Path) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        task = create_task_with_initial_run(
+            demo_db, identity, session_id=session_id, service_id="orders-demo",
+            integration_id="integration-a", ticket_id="INC-A-OBS", initial_message="Investigate 401",
+            idempotency_key="inspector-domain-status-task",
+        )
+        task_id = str(task["task_id"])
+        with connect(demo_db) as connection:
+            binding = connection.execute("SELECT tenant_id, principal_id FROM task_bindings WHERE task_id = ?", (task_id,)).fetchone()
+            current_config = connection.execute(
+                "SELECT credential_ref, config_version FROM integrations WHERE tenant_id = ? AND integration_id = 'integration-a'",
+                (str(binding["tenant_id"]),),
+            ).fetchone()
+            now = datetime.now(timezone.utc).isoformat()
+            connection.execute(
+                """INSERT INTO d2_evidence
+                   (evidence_id, tenant_id, task_id, call_id, tool_call_id, resource_id, principal_id,
+                    data_source, fetched_at, observed_versions_json, fact_type, facts_json,
+                    original_result_ref, trust_class, digest)
+                   VALUES ('evidence-inspector-config', ?, ?, 'call-inspector', 'tool-inspector',
+                               'integration-a', ?, 'sqlite:integrations', ?, ?, 'integration_config',
+                           ?, 'observation://observation-inspector', 'untrusted_tool_observation', 'digest-inspector')""",
+                (str(binding["tenant_id"]), task_id, str(binding["principal_id"]), now,
+                 json.dumps({"config_version": int(current_config["config_version"])}),
+                 json.dumps({"integration_id": "integration-a", "principal_id": str(binding["principal_id"]),
+                             "credential_ref": str(current_config["credential_ref"]),
+                             "config_version": int(current_config["config_version"])})),
+            )
+            connection.execute(
+                """INSERT INTO d2_tool_observations
+                   (observation_id, task_id, call_id, tool_call_id, tool_name, argument_digest,
+                    status, progress_added, result_digest, evidence_id)
+                   VALUES ('observation-inspector', ?, 'call-inspector', 'tool-inspector',
+                           'get_integration_config', 'args-digest', 'OK', 1, 'result-digest',
+                           'evidence-inspector-config')""",
+                (task_id,),
+            )
+    
+        inspector = get_task_inspector(demo_db, identity, task_id)
+    
+        assert [item["fact_type"] for item in inspector["evidence"]] == ["integration_config"]
+>       assert inspector["evidence"][0]["facts"]["credential_ref"] == "credential-legacy"
+E       AssertionError: assert 'cred-v1' == 'credential-legacy'
+E         
+E         - credential-legacy
+E         + cred-v1
+
+tests\test_m1_chat.py:189: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_chat.py::test_task_inspector_includes_successful_domain_observation_status
+1 failed, 19 passed in 4.28s
+
+PYTEST_EXIT_CODE=1

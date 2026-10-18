@@ -15,6 +15,22 @@ from opspilot.domain.chat import (
     prepare_chat_attempt,
 )
 from opspilot.domain.database import connect
+from opspilot.domain.d2 import (
+    create_task_binding,
+    evaluate_evidence_gate,
+    get_auth_policy_fact,
+    get_integration_config_fact,
+    get_principal_status_fact,
+    probe_endpoint_fact,
+    record_tool_observation,
+)
+from opspilot.domain.d3 import (
+    activate_plan,
+    create_plan_from_gate,
+    execute_repair,
+    get_or_create_action_intent,
+    submit_plan_approval,
+)
 from opspilot.domain.task_control import (
     admit_task_message,
     claim_task_run,
@@ -138,6 +154,10 @@ def test_task_inspector_includes_successful_domain_observation_status(demo_db: P
     task_id = str(task["task_id"])
     with connect(demo_db) as connection:
         binding = connection.execute("SELECT tenant_id, principal_id FROM task_bindings WHERE task_id = ?", (task_id,)).fetchone()
+        current_config = connection.execute(
+            "SELECT credential_ref, config_version FROM integrations WHERE tenant_id = ? AND integration_id = 'integration-a'",
+            (str(binding["tenant_id"]),),
+        ).fetchone()
         now = datetime.now(timezone.utc).isoformat()
         connection.execute(
             """INSERT INTO d2_evidence
@@ -145,11 +165,13 @@ def test_task_inspector_includes_successful_domain_observation_status(demo_db: P
                 data_source, fetched_at, observed_versions_json, fact_type, facts_json,
                 original_result_ref, trust_class, digest)
                VALUES ('evidence-inspector-config', ?, ?, 'call-inspector', 'tool-inspector',
-                       'integration-a', ?, 'sqlite:integrations', ?, '{}', 'integration_config',
+                           'integration-a', ?, 'sqlite:integrations', ?, ?, 'integration_config',
                        ?, 'observation://observation-inspector', 'untrusted_tool_observation', 'digest-inspector')""",
             (str(binding["tenant_id"]), task_id, str(binding["principal_id"]), now,
+             json.dumps({"config_version": int(current_config["config_version"])}),
              json.dumps({"integration_id": "integration-a", "principal_id": str(binding["principal_id"]),
-                         "credential_ref": "credential-legacy", "config_version": 1})),
+                         "credential_ref": str(current_config["credential_ref"]),
+                         "config_version": int(current_config["config_version"])})),
         )
         connection.execute(
             """INSERT INTO d2_tool_observations
@@ -164,7 +186,7 @@ def test_task_inspector_includes_successful_domain_observation_status(demo_db: P
     inspector = get_task_inspector(demo_db, identity, task_id)
 
     assert [item["fact_type"] for item in inspector["evidence"]] == ["integration_config"]
-    assert inspector["evidence"][0]["facts"]["credential_ref"] == "credential-legacy"
+    assert inspector["evidence"][0]["facts"]["credential_ref"] == str(current_config["credential_ref"])
 
 
 def test_streaming_provider_identifier_uses_response_id_or_request_id_header() -> None:
@@ -210,6 +232,95 @@ def test_chat_04_revoked_memory_source_excludes_historical_assistant_message(dem
     exclusions = manifest["attempts"][0]["manifest"]["excluded_sources"]
     assert any(item.get("message_id") == first_answer["message_id"] and item["reason"] == "MEMORY_REVOKED_EXPIRED_OR_CHANGED"
                for item in exclusions)
+
+
+def test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer(
+    demo_db: Path, live_api: str,
+) -> None:
+    identity = trusted_identity(demo_db, "support-a")
+    binding = create_task_binding(
+        demo_db, "support-a", "orders-demo", "integration-a",
+    )
+    task_id, session_id = str(binding["task_id"]), str(binding["session_id"])
+    facts = [
+        ("get_integration_config", get_integration_config_fact(demo_db, task_id, "integration-a")),
+        ("get_principal_status", get_principal_status_fact(demo_db, task_id, "principal-a")),
+        ("get_auth_policy", get_auth_policy_fact(demo_db, task_id, "orders-demo")),
+        ("probe_endpoint", probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)),
+    ]
+    evidence_ids: list[str] = []
+    for index, (tool_name, fact) in enumerate(facts, 1):
+        observation = record_tool_observation(
+            demo_db, task_id=task_id, call_id=f"chat-version-call-{index}", attempt_id=None,
+            tool_call_id=f"chat-version-tool-{index}", tool_name=tool_name,
+            arguments={"index": index}, status="OK", result=fact,
+        )
+        evidence_ids.append(str(observation["evidence_id"]))
+    old_probe = facts[-1][1]
+    assert old_probe["facts"]["http_status"] == 401
+    assert old_probe["observed_versions"]["before"]["config_version"] == 7
+    assert old_probe["observed_versions"]["after"]["config_version"] == 7
+
+    first = _new_message(
+        demo_db, session_id, "Explain the current authentication result.",
+        key="chat-version-before-repair", task_id=task_id,
+    )
+    first_context = _claim_and_prepare(demo_db, str(first["run_id"]), _owner(demo_db))
+    first_prompt = "\n".join(str(item["content"]) for item in first_context["messages"])
+    assert "cred-v1" in first_prompt and '"http_status":401' in first_prompt
+    old_answer = _complete(
+        demo_db, _owner(demo_db), first_context,
+        "The current configuration uses cred-v1 at v7 and the endpoint returned HTTP 401.",
+    )
+
+    gate = evaluate_evidence_gate(demo_db, task_id, evidence_ids)
+    assert gate["decision"] == "READY"
+    plan = create_plan_from_gate(demo_db, task_id, "support-a", gate)
+    activate_plan(demo_db, task_id, str(plan["plan_hash"]), "support-a")
+    submit_plan_approval(
+        demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED",
+    )
+    intent = get_or_create_action_intent(
+        demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a",
+    )
+    repair = execute_repair(demo_db, str(intent["action_id"]), "executor-a", "chat-version-repair")
+    assert repair["status"] == "COMMITTED"
+    assert repair["before_version"] == 7 and repair["after_version"] == 8
+
+    second = _new_message(
+        demo_db, session_id, "What does the current evidence establish now?",
+        key="chat-version-after-repair", task_id=task_id,
+    )
+    second_owner = _owner(demo_db, owner_id="chat-version-worker-after-repair")
+    second_context = _claim_and_prepare(demo_db, str(second["run_id"]), second_owner)
+    second_prompt = "\n".join(str(item["content"]) for item in second_context["messages"])
+    assert "cred-v1" not in second_prompt
+    assert '"http_status":401' not in second_prompt
+    assert "The current configuration uses cred-v1 at v7" not in second_prompt
+
+    manifest = get_chat_manifest(demo_db, identity, str(second["run_id"]))["attempts"][0]["manifest"]
+    exclusions = manifest["excluded_sources"]
+    stale_evidence = set(evidence_ids[0:1] + evidence_ids[3:4])
+    excluded_evidence = {
+        str(item.get("source_id")): str(item["reason"])
+        for item in exclusions if item.get("source_id") is not None
+    }
+    assert stale_evidence <= set(excluded_evidence)
+    assert all(excluded_evidence[item] == "EVIDENCE_RESOURCE_VERSION_MISMATCH" for item in stale_evidence)
+    assert any(
+        item.get("message_id") == old_answer["message_id"]
+        and item["reason"] == "EVIDENCE_RESOURCE_VERSION_MISMATCH"
+        for item in exclusions
+    )
+    assert not (set(manifest["evidence_refs"][i]["evidence_id"] for i in range(len(manifest["evidence_refs"]))) & stale_evidence)
+    with connect(demo_db) as connection:
+        assert int(connection.execute(
+            "SELECT config_version FROM integrations WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+        ).fetchone()[0]) == 8
+        assert connection.execute(
+            "SELECT COUNT(*) FROM d2_evidence WHERE task_id = ? AND evidence_id IN (?, ?)",
+            (task_id, evidence_ids[0], evidence_ids[3]),
+        ).fetchone()[0] == 2
 
 
 def test_chat_05_restart_and_retry_persist_partial_chunks_and_commit_one_answer(demo_db: Path) -> None:

@@ -1,0 +1,87 @@
+F
+================================== FAILURES ===================================
+__ test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer __
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/m103-version-guard-red/test_chat_evidence_versions_ex0/domain.sqlite3')
+live_api = 'http://127.0.0.1:61905'
+
+    def test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        binding = create_task_binding(
+            demo_db, "support-a", "orders-demo", "integration-a", "INC-CHAT-VERSION",
+        )
+        task_id, session_id = str(binding["task_id"]), str(binding["session_id"])
+        facts = [
+            ("get_integration_config", get_integration_config_fact(demo_db, task_id, "integration-a")),
+            ("get_principal_status", get_principal_status_fact(demo_db, task_id, "principal-a")),
+            ("get_auth_policy", get_auth_policy_fact(demo_db, task_id, "orders-demo")),
+            ("probe_endpoint", probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)),
+        ]
+        evidence_ids: list[str] = []
+        for index, (tool_name, fact) in enumerate(facts, 1):
+            observation = record_tool_observation(
+                demo_db, task_id=task_id, call_id=f"chat-version-call-{index}", attempt_id=None,
+                tool_call_id=f"chat-version-tool-{index}", tool_name=tool_name,
+                arguments={"index": index}, status="OK", result=fact,
+            )
+            evidence_ids.append(str(observation["evidence_id"]))
+        old_probe = facts[-1][1]
+        assert old_probe["facts"]["http_status"] == 401
+        assert old_probe["observed_versions"]["before"]["config_version"] == 7
+        assert old_probe["observed_versions"]["after"]["config_version"] == 7
+    
+        first = _new_message(
+            demo_db, session_id, "Explain the current authentication result.",
+            key="chat-version-before-repair", task_id=task_id,
+        )
+        first_context = _claim_and_prepare(demo_db, str(first["run_id"]), _owner(demo_db))
+        first_prompt = "\n".join(str(item["content"]) for item in first_context["messages"])
+        assert "cred-v1" in first_prompt and '"http_status":401' in first_prompt
+        old_answer = _complete(
+            demo_db, _owner(demo_db), first_context,
+            "The current configuration uses cred-v1 at v7 and the endpoint returned HTTP 401.",
+        )
+    
+        gate = evaluate_evidence_gate(demo_db, task_id, evidence_ids)
+        assert gate["decision"] == "READY"
+>       plan = create_plan_from_gate(demo_db, task_id, "support-a", gate)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_chat.py:272: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\d3.py:372: in create_plan_from_gate
+    _activate_plan_in_transaction(connection, str(binding["tenant_id"]), task_id, plan_hash, actor_id, "ready_gate_plan")
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x000002C3BEBC3F10>
+tenant_id = 'tenant-a', task_id = 'task-844a35d5-ef8b-4c4a-bd25-46683f0ad576'
+plan_hash = 'fe99a54c2e3fa1ecf321ecce22464f9e0241f02f7e02e61018cf4bcd9b17333f'
+actor_id = 'support-a', reason = 'ready_gate_plan'
+
+    def _activate_plan_in_transaction(
+        connection: sqlite3.Connection,
+        tenant_id: str,
+        task_id: str,
+        plan_hash: str,
+        actor_id: str,
+        reason: str,
+    ) -> None:
+        _require_submitter(connection, task_id, actor_id)
+        plan = _load_plan(connection, tenant_id, task_id, plan_hash)
+        _assert_plan_control(connection, tenant_id, task_id, plan_hash)
+        ticket = connection.execute(
+            "SELECT 1 FROM tickets WHERE tenant_id = ? AND ticket_id = ?",
+            (tenant_id, plan["ticket_id"]),
+        ).fetchone()
+        if ticket is None:
+>           raise D3PreconditionRejected("TICKET_OUTSIDE_TASK_TENANT")
+E           opspilot.domain.d3.D3PreconditionRejected: TICKET_OUTSIDE_TASK_TENANT
+
+opspilot\domain\d3.py:194: D3PreconditionRejected
+=========================== short test summary info ===========================
+FAILED tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer
+1 failed in 0.51s
+
+PYTEST_EXIT_CODE=1

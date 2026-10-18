@@ -104,7 +104,13 @@ def _trusted_state(connection: sqlite3.Connection, task_id: str | None) -> tuple
     return public_state, _digest(_canonical(public_state))
 
 
-def _current_evidence(connection: sqlite3.Connection, task_id: str, state: dict[str, Any]) -> list[dict[str, Any]]:
+def _current_evidence(
+    connection: sqlite3.Connection,
+    task_id: str,
+    state: dict[str, Any],
+    *,
+    excluded_sources: list[dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
     binding = connection.execute(
         "SELECT tenant_id FROM task_bindings WHERE task_id = ?", (task_id,)
     ).fetchone()
@@ -118,6 +124,46 @@ def _current_evidence(connection: sqlite3.Connection, task_id: str, state: dict[
            ORDER BY e.fetched_at, e.evidence_id""",
         (task_id, str(binding["tenant_id"]), state["principal_id"]),
     ).fetchall()
+    current = connection.execute(
+        """SELECT b.integration_id, b.principal_id, b.service_id, i.credential_ref,
+                  i.config_version, p.status AS principal_status, p.principal_version,
+                  a.accepted_credential_ref, a.policy_version
+           FROM task_bindings AS b
+           JOIN integrations AS i
+             ON i.tenant_id = b.tenant_id AND i.integration_id = b.integration_id
+                AND i.principal_id = b.principal_id
+           JOIN principals AS p
+             ON p.tenant_id = b.tenant_id AND p.principal_id = b.principal_id
+           JOIN auth_policies AS a
+             ON a.tenant_id = b.tenant_id AND a.service_id = b.service_id
+           WHERE b.task_id = ? AND b.tenant_id = ? AND b.integration_id = ?
+             AND b.principal_id = ? AND b.service_id = ?""",
+        (task_id, str(binding["tenant_id"]), str(state["integration_id"]),
+         str(state["principal_id"]), str(state["service_id"])),
+    ).fetchone()
+    if current is None:
+        if excluded_sources is not None:
+            excluded_sources.extend(
+                {"source_id": str(row["evidence_id"]), "reason": "CURRENT_RESOURCE_STATE_UNAVAILABLE"}
+                for row in rows
+            )
+        return []
+    current_versions = {
+        "config_version": int(current["config_version"]),
+        "principal_version": int(current["principal_version"]),
+        "policy_version": int(current["policy_version"]),
+    }
+
+    def matches_snapshot(snapshot: Any) -> bool:
+        return (
+            isinstance(snapshot, dict)
+            and set(snapshot) == set(current_versions)
+            and all(
+                type(snapshot.get(key)) is int and snapshot[key] == value
+                for key, value in current_versions.items()
+            )
+        )
+
     now = _now()
     expected_tools = {
         "integration_config": "get_integration_config",
@@ -165,6 +211,55 @@ def _current_evidence(connection: sqlite3.Connection, task_id: str, state: dict[
             or facts.get("route") != "/api/orders/demo-order"
             or facts.get("auth_event_scope_valid") is not True
         ):
+            continue
+        if fact_type == "integration_config":
+            version_matches = (
+                isinstance(versions, dict)
+                and set(versions) == {"config_version"}
+                and type(versions.get("config_version")) is int
+                and versions["config_version"] == current_versions["config_version"]
+                and type(facts.get("config_version")) is int
+                and facts["config_version"] == current_versions["config_version"]
+                and facts.get("credential_ref") == current["credential_ref"]
+            )
+        elif fact_type == "principal_status":
+            version_matches = (
+                isinstance(versions, dict)
+                and set(versions) == {"principal_version"}
+                and type(versions.get("principal_version")) is int
+                and versions["principal_version"] == current_versions["principal_version"]
+                and type(facts.get("principal_version")) is int
+                and facts["principal_version"] == current_versions["principal_version"]
+                and facts.get("status") == current["principal_status"]
+            )
+        elif fact_type == "auth_policy":
+            version_matches = (
+                isinstance(versions, dict)
+                and set(versions) == {"policy_version"}
+                and type(versions.get("policy_version")) is int
+                and versions["policy_version"] == current_versions["policy_version"]
+                and type(facts.get("policy_version")) is int
+                and facts["policy_version"] == current_versions["policy_version"]
+                and facts.get("accepted_credential_ref") == current["accepted_credential_ref"]
+            )
+        else:
+            before = versions.get("before") if isinstance(versions, dict) else None
+            after = versions.get("after") if isinstance(versions, dict) else None
+            version_matches = (
+                isinstance(versions, dict)
+                and set(versions) == {"before", "after"}
+                and matches_snapshot(before)
+                and matches_snapshot(after)
+                and before == after
+                and facts.get("versions_stable_during_probe") is True
+                and facts.get("credential_ref") == current["credential_ref"]
+            )
+        if not version_matches:
+            if excluded_sources is not None:
+                excluded_sources.append({
+                    "source_id": str(row["evidence_id"]),
+                    "reason": "EVIDENCE_RESOURCE_VERSION_MISMATCH",
+                })
             continue
         safe_facts = {key: facts[key] for key in sorted(source_and_fields[1]) if key in facts}
         fact_digest = str(row["digest"])
@@ -217,10 +312,14 @@ def _message_source_valid(
     task_id: str | None,
     state_digest: str | None,
     evidence_by_id: dict[str, dict[str, Any]],
+    evidence_exclusion_reasons: dict[str, str],
     memories_by_id: dict[str, dict[str, Any]],
 ) -> tuple[bool, str | None]:
     sources = connection.execute(
-        "SELECT source_kind, source_ref, source_version, source_digest FROM chat_message_sources WHERE message_id = ?",
+        """SELECT source_kind, source_ref, source_version, source_digest FROM chat_message_sources
+           WHERE message_id = ?
+           ORDER BY CASE source_kind WHEN 'EVIDENCE' THEN 0 WHEN 'MEMORY' THEN 1
+                     WHEN 'TASK_STATE' THEN 2 ELSE 3 END, source_ref""",
         (row["message_id"],),
     ).fetchall()
     if not sources:
@@ -239,7 +338,7 @@ def _message_source_valid(
         elif kind == "EVIDENCE":
             current = evidence_by_id.get(ref)
             if current is None or str(current["digest"]) != digest:
-                return False, "EVIDENCE_EXPIRED_OR_OUT_OF_SCOPE"
+                return False, evidence_exclusion_reasons.get(ref, "EVIDENCE_EXPIRED_OR_OUT_OF_SCOPE")
             if task_id is None:
                 return False, "EVIDENCE_TASK_SCOPE_CHANGED"
         elif kind == "MEMORY":
@@ -288,9 +387,17 @@ def _prepare_context(connection: sqlite3.Connection, run: sqlite3.Row, model_id:
         if linked is None:
             raise TaskControlError("SESSION_TASK_LINK_REQUIRED")
     state, state_digest = _trusted_state(connection, task_id)
-    evidence = _current_evidence(connection, task_id, state) if task_id and state else []
+    excluded: list[dict[str, str]] = []
+    evidence = (
+        _current_evidence(connection, task_id, state, excluded_sources=excluded)
+        if task_id and state else []
+    )
     memories = _current_memories(connection, task_id, state)
     evidence_by_id = {str(item["evidence_id"]): item for item in evidence}
+    evidence_exclusion_reasons = {
+        str(item["source_id"]): str(item["reason"])
+        for item in excluded if item.get("source_id") is not None
+    }
     memories_by_id = {str(item["memory_id"]): item for item in memories}
 
     user_rows = connection.execute(
@@ -300,7 +407,6 @@ def _prepare_context(connection: sqlite3.Connection, run: sqlite3.Row, model_id:
     ).fetchall()
     user_rows = list(reversed(user_rows))
     selected: list[dict[str, Any]] = []
-    excluded: list[dict[str, str]] = []
     for message in user_rows:
         selected.append({
             "message_id": str(message["message_id"]), "role": "user",
@@ -322,7 +428,9 @@ def _prepare_context(connection: sqlite3.Connection, run: sqlite3.Row, model_id:
         valid, reason = _message_source_valid(
             connection, message, session_id=session_id, tenant_id=tenant_id,
             task_id=task_id, state_digest=state_digest,
-            evidence_by_id=evidence_by_id, memories_by_id=memories_by_id,
+            evidence_by_id=evidence_by_id,
+            evidence_exclusion_reasons=evidence_exclusion_reasons,
+            memories_by_id=memories_by_id,
         )
         if valid:
             assistant_valid.append({
@@ -395,7 +503,7 @@ def _prepare_context(connection: sqlite3.Connection, run: sqlite3.Row, model_id:
     evidence_refs = [item for item in evidence if str(item["evidence_id"]) in evidence_by_id]
     memory_refs = [item for item in memories if str(item["memory_id"]) in memories_by_id]
     for evidence_id in inherited_evidence_ids:
-        if evidence_id not in evidence_by_id:
+        if evidence_id not in evidence_by_id and evidence_id not in evidence_exclusion_reasons:
             excluded.append({"source_id": evidence_id, "reason": "EVIDENCE_EXPIRED_OR_OUT_OF_SCOPE"})
     for memory_id in inherited_memory_ids:
         if memory_id not in memories_by_id:

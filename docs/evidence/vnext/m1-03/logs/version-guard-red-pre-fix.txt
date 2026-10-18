@@ -1,0 +1,81 @@
+F
+================================== FAILURES ===================================
+__ test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer __
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/m103-version-guard-red-prefx/test_chat_evidence_versions_ex0/domain.sqlite3')
+live_api = 'http://127.0.0.1:58403'
+
+    def test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        binding = create_task_binding(
+            demo_db, "support-a", "orders-demo", "integration-a",
+        )
+        task_id, session_id = str(binding["task_id"]), str(binding["session_id"])
+        facts = [
+            ("get_integration_config", get_integration_config_fact(demo_db, task_id, "integration-a")),
+            ("get_principal_status", get_principal_status_fact(demo_db, task_id, "principal-a")),
+            ("get_auth_policy", get_auth_policy_fact(demo_db, task_id, "orders-demo")),
+            ("probe_endpoint", probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)),
+        ]
+        evidence_ids: list[str] = []
+        for index, (tool_name, fact) in enumerate(facts, 1):
+            observation = record_tool_observation(
+                demo_db, task_id=task_id, call_id=f"chat-version-call-{index}", attempt_id=None,
+                tool_call_id=f"chat-version-tool-{index}", tool_name=tool_name,
+                arguments={"index": index}, status="OK", result=fact,
+            )
+            evidence_ids.append(str(observation["evidence_id"]))
+        old_probe = facts[-1][1]
+        assert old_probe["facts"]["http_status"] == 401
+        assert old_probe["observed_versions"]["before"]["config_version"] == 7
+        assert old_probe["observed_versions"]["after"]["config_version"] == 7
+    
+        first = _new_message(
+            demo_db, session_id, "Explain the current authentication result.",
+            key="chat-version-before-repair", task_id=task_id,
+        )
+        first_context = _claim_and_prepare(demo_db, str(first["run_id"]), _owner(demo_db))
+        first_prompt = "\n".join(str(item["content"]) for item in first_context["messages"])
+        assert "cred-v1" in first_prompt and '"http_status":401' in first_prompt
+        old_answer = _complete(
+            demo_db, _owner(demo_db), first_context,
+            "The current configuration uses cred-v1 at v7 and the endpoint returned HTTP 401.",
+        )
+    
+        gate = evaluate_evidence_gate(demo_db, task_id, evidence_ids)
+        assert gate["decision"] == "READY"
+        plan = create_plan_from_gate(demo_db, task_id, "support-a", gate)
+        activate_plan(demo_db, task_id, str(plan["plan_hash"]), "support-a")
+        submit_plan_approval(
+            demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED",
+        )
+        intent = get_or_create_action_intent(
+            demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a",
+        )
+        repair = execute_repair(demo_db, str(intent["action_id"]), "executor-a", "chat-version-repair")
+        assert repair["status"] == "COMMITTED"
+        assert repair["before_version"] == 7 and repair["after_version"] == 8
+    
+        second = _new_message(
+            demo_db, session_id, "What does the current evidence establish now?",
+            key="chat-version-after-repair", task_id=task_id,
+        )
+        second_owner = _owner(demo_db, owner_id="chat-version-worker-after-repair")
+        second_context = _claim_and_prepare(demo_db, str(second["run_id"]), second_owner)
+        second_prompt = "\n".join(str(item["content"]) for item in second_context["messages"])
+>       assert "cred-v1" not in second_prompt
+E       assert 'cred-v1' not in 'You are Ops...tablish now?'
+E         
+E         'cred-v1' is contained here:
+E           ial_ref":"cred-v1","integration_id":"integration-a","principal_id":"principal-a"},"fetched_at":"2026-10-18T07:45:17.279+00:00","observed_versions":{"config_version":7}},{"evidence_id":"evidence-ab73618b-cb52-4f03-8a45-89a2f4c4d39d","fact_type":"principal_status","facts":{"principal_id":"principal-a","principal_version":2,"status":"ENABLED"},"fetched_at":"2026-10-18T07:45:17.281+00:00","observed_versions":{"principal_version":2}},{"evidence_id":"evidence-9808aac3-2c9f-49c9-a8cd-7f0d8408eb85","fact_type":"auth_policy","facts":{"accepted_credential_ref":"cred-v2...
+E         
+E         ...Full output truncated (5 lines hidden), use '-vv' to show
+
+tests\test_m1_chat.py:291: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer
+1 failed in 0.58s
+
+PYTEST_EXIT_CODE=1
