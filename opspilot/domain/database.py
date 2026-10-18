@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import hmac
+import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Literal
 
 
-Scenario = Literal["S1_POS", "S1_DISABLED"]
+Scenario = Literal[
+    "S1_POS",
+    "S1_DISABLED",
+    "S2_SCOPE_DENIED",
+    "S2_SCOPE_ALLOWED",
+    "S2_INVALID_CREDENTIAL",
+    "S2_RESOURCE_HIDDEN",
+]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tenants (
@@ -72,8 +81,53 @@ CREATE TABLE IF NOT EXISTS auth_events (
     service_id TEXT NOT NULL,
     route TEXT NOT NULL,
     result_code TEXT NOT NULL,
+    credential_policy_version INTEGER,
+    request_id TEXT,
     observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS principal_scope_grants (
+    tenant_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    granted_scopes_json TEXT NOT NULL,
+    grant_version INTEGER NOT NULL CHECK (grant_version >= 1),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, principal_id),
+    FOREIGN KEY (tenant_id, principal_id)
+        REFERENCES principals(tenant_id, principal_id)
+);
+CREATE TABLE IF NOT EXISTS route_scope_policies (
+    tenant_id TEXT NOT NULL,
+    service_id TEXT NOT NULL,
+    route TEXT NOT NULL,
+    required_scopes_json TEXT NOT NULL,
+    scope_policy_version INTEGER NOT NULL CHECK (scope_policy_version >= 1),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, service_id, route),
+    FOREIGN KEY (tenant_id, service_id)
+        REFERENCES services(tenant_id, service_id)
+);
+CREATE TABLE IF NOT EXISTS authz_events (
+    decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT NOT NULL UNIQUE,
+    authn_event_id INTEGER NOT NULL REFERENCES auth_events(event_id),
+    tenant_id TEXT NOT NULL,
+    principal_id TEXT NOT NULL,
+    service_id TEXT NOT NULL,
+    integration_id TEXT NOT NULL,
+    route TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('ALLOW', 'DENY')),
+    reason_code TEXT NOT NULL,
+    credential_policy_version INTEGER NOT NULL,
+    scope_policy_version INTEGER NOT NULL,
+    grant_version INTEGER NOT NULL,
+    required_scopes_json TEXT NOT NULL,
+    granted_scopes_json TEXT NOT NULL,
+    missing_scopes_json TEXT NOT NULL,
+    resource_binding_valid INTEGER NOT NULL CHECK (resource_binding_valid IN (0, 1)),
+    observed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS ix_authz_events_scope
+    ON authz_events (tenant_id, principal_id, service_id, observed_at);
 CREATE TABLE IF NOT EXISTS thread_owners (
     thread_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
@@ -710,7 +764,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 5:
+        if version > 6:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -783,12 +837,28 @@ def initialize(path: str | Path) -> None:
             version = 4
         if version < 5:
             connection.execute("PRAGMA user_version = 5")
+            version = 5
+        if version < 6:
+            columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(auth_events)").fetchall()
+            }
+            if "request_id" not in columns:
+                connection.execute("ALTER TABLE auth_events ADD COLUMN request_id TEXT")
+            if "credential_policy_version" not in columns:
+                connection.execute("ALTER TABLE auth_events ADD COLUMN credential_policy_version INTEGER")
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_auth_events_request_id "
+                "ON auth_events(request_id) WHERE request_id IS NOT NULL"
+            )
+            connection.execute("PRAGMA user_version = 6")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     """Reset local demo state. This function is never exposed as an Agent tool."""
     initialize(path)
     status_a = "DISABLED" if scenario == "S1_DISABLED" else "ENABLED"
+    s2_scenario = scenario.startswith("S2_")
     with connect(path) as connection:
         for table in (
             "chat_run_answers",
@@ -836,7 +906,10 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             "d2_model_traces",
             "d2_attempts",
             "task_bindings",
+            "authz_events",
             "auth_events",
+            "principal_scope_grants",
+            "route_scope_policies",
             "auth_policies",
             "services",
             "integrations",
@@ -884,9 +957,11 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
                 "INSERT INTO principals VALUES (?, ?, ?, ?)",
                 (tenant_id, f"principal-{suffix}", principal_status, 2),
             )
+            active_credential_ref = "cred-v2" if s2_scenario else "cred-v1"
+            config_version = 8 if s2_scenario else 7
             connection.execute(
                 "INSERT INTO integrations VALUES (?, ?, ?, ?, ?)",
-                (tenant_id, f"integration-{suffix}", f"principal-{suffix}", "cred-v1", 7),
+                (tenant_id, f"integration-{suffix}", f"principal-{suffix}", active_credential_ref, config_version),
             )
             connection.execute(
                 "INSERT INTO services VALUES (?, ?, ?, ?)",
@@ -895,6 +970,20 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             connection.execute(
                 "INSERT INTO auth_policies VALUES (?, ?, ?, ?)",
                 (tenant_id, "orders-demo", "cred-v2", 3),
+            )
+            granted_scopes = [] if (
+                tenant_id == "tenant-a" and scenario == "S2_SCOPE_DENIED"
+            ) else ["orders.read"]
+            connection.execute(
+                "INSERT INTO principal_scope_grants "
+                "(tenant_id, principal_id, granted_scopes_json, grant_version) VALUES (?, ?, ?, 1)",
+                (tenant_id, f"principal-{suffix}", json.dumps(granted_scopes, separators=(",", ":"))),
+            )
+            connection.execute(
+                "INSERT INTO route_scope_policies "
+                "(tenant_id, service_id, route, required_scopes_json, scope_policy_version) "
+                "VALUES (?, ?, ?, ?, 1)",
+                (tenant_id, "orders-demo", "/api/orders/demo-order", '["orders.read"]'),
             )
             connection.execute(
                 "INSERT INTO orders VALUES (?, ?, ?)",
@@ -966,22 +1055,136 @@ def record_auth_event(
     service_id: str,
     route: str,
     result_code: str,
+    request_id: str | None = None,
+    credential_policy_version: int | None = None,
 ) -> int:
     with connect(path) as connection:
         cursor = connection.execute(
             """INSERT INTO auth_events
-               (tenant_id, integration_id, principal_id, service_id, route, result_code)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (tenant_id, integration_id, principal_id, service_id, route, result_code),
+               (tenant_id, integration_id, principal_id, service_id, route, result_code,
+                request_id, credential_policy_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (tenant_id, integration_id, principal_id, service_id, route, result_code,
+             request_id, credential_policy_version),
         )
         return int(cursor.lastrowid)
+
+
+def authorize_business_request(
+    path: str | Path,
+    *,
+    tenant_id: str,
+    service_id: str,
+    route: str,
+    integration_id: str,
+    authorization: str,
+    request_id: str,
+) -> dict[str, object]:
+    """Persist one server-side Authn result and, only after success, its Authz decision."""
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        service = connection.execute(
+            """SELECT s.route, s.integration_id, i.principal_id, p.status AS principal_status,
+                      a.accepted_credential_ref, a.policy_version AS credential_policy_version,
+                      c.secret_value
+               FROM services AS s
+               JOIN integrations AS i
+                 ON i.tenant_id = s.tenant_id AND i.integration_id = s.integration_id
+               JOIN principals AS p
+                 ON p.tenant_id = i.tenant_id AND p.principal_id = i.principal_id
+               JOIN auth_policies AS a
+                 ON a.tenant_id = s.tenant_id AND a.service_id = s.service_id
+               JOIN credentials AS c
+                 ON c.tenant_id = a.tenant_id AND c.credential_ref = a.accepted_credential_ref
+               WHERE s.tenant_id = ? AND s.service_id = ?""",
+            (tenant_id, service_id),
+        ).fetchone()
+        if service is None or str(service["route"]) != route:
+            return {"http_status": 401, "request_id": request_id}
+        if integration_id != str(service["integration_id"]):
+            return {"http_status": 401, "request_id": request_id}
+
+        supplied_secret = authorization.removeprefix("Bearer ")
+        authenticated = (
+            authorization.startswith("Bearer ")
+            and hmac.compare_digest(supplied_secret, str(service["secret_value"]))
+            and service["principal_status"] == "ENABLED"
+        )
+        authn_result = "AUTH_ACCEPTED" if authenticated else "AUTH_REJECTED"
+        authn = connection.execute(
+            """INSERT INTO auth_events
+               (request_id, tenant_id, integration_id, principal_id, service_id, route,
+                result_code, credential_policy_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (request_id, tenant_id, integration_id, str(service["principal_id"]), service_id,
+             route, authn_result, int(service["credential_policy_version"])),
+        )
+        authn_event_id = int(authn.lastrowid)
+        if not authenticated:
+            return {
+                "http_status": 401,
+                "request_id": request_id,
+                "authn_event_id": authn_event_id,
+            }
+
+        grant = connection.execute(
+            """SELECT granted_scopes_json, grant_version FROM principal_scope_grants
+               WHERE tenant_id = ? AND principal_id = ?""",
+            (tenant_id, str(service["principal_id"])),
+        ).fetchone()
+        policy = connection.execute(
+            """SELECT required_scopes_json, scope_policy_version FROM route_scope_policies
+               WHERE tenant_id = ? AND service_id = ? AND route = ?""",
+            (tenant_id, service_id, route),
+        ).fetchone()
+        if grant is None or policy is None:
+            # Missing trusted authorization configuration fails closed and is not
+            # misrepresented as a known missing-scope root cause.
+            required_scopes: list[str] = []
+            granted_scopes: list[str] = []
+            missing_scopes: list[str] = []
+            scope_policy_version = int(policy["scope_policy_version"]) if policy else 0
+            grant_version = int(grant["grant_version"]) if grant else 0
+            outcome = "DENY"
+            reason_code = "AUTHZ_POLICY_UNAVAILABLE"
+        else:
+            required_scopes = sorted(set(json.loads(str(policy["required_scopes_json"]))))
+            granted_scopes = sorted(set(json.loads(str(grant["granted_scopes_json"]))))
+            missing_scopes = sorted(set(required_scopes) - set(granted_scopes))
+            scope_policy_version = int(policy["scope_policy_version"])
+            grant_version = int(grant["grant_version"])
+            outcome = "DENY" if missing_scopes else "ALLOW"
+            reason_code = "SCOPE_INSUFFICIENT" if missing_scopes else "SCOPE_GRANTED"
+        decision = connection.execute(
+            """INSERT INTO authz_events
+               (request_id, authn_event_id, tenant_id, principal_id, service_id, integration_id,
+                route, outcome, reason_code, credential_policy_version, scope_policy_version,
+                grant_version, required_scopes_json, granted_scopes_json, missing_scopes_json,
+                resource_binding_valid)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+            (request_id, authn_event_id, tenant_id, str(service["principal_id"]), service_id,
+             integration_id, route, outcome, reason_code,
+             int(service["credential_policy_version"]), scope_policy_version, grant_version,
+             json.dumps(required_scopes, separators=(",", ":")),
+             json.dumps(granted_scopes, separators=(",", ":")),
+             json.dumps(missing_scopes, separators=(",", ":"))),
+        )
+        return {
+            "http_status": 403 if outcome == "DENY" else 200,
+            "request_id": request_id,
+            "authn_event_id": authn_event_id,
+            "authz_event_id": int(decision.lastrowid),
+            "outcome": outcome,
+            "reason_code": reason_code,
+        }
 
 
 def get_auth_event(path: str | Path, tenant_id: str, event_id: int) -> dict[str, object]:
     with connect(path) as connection:
         row = connection.execute(
             """SELECT event_id, tenant_id, integration_id, principal_id,
-                      service_id, route, result_code, observed_at
+                      service_id, route, result_code, request_id,
+                      credential_policy_version, observed_at
                FROM auth_events WHERE tenant_id = ? AND event_id = ?""",
             (tenant_id, event_id),
         ).fetchone()

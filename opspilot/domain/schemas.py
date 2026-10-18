@@ -48,6 +48,11 @@ class AuthPolicyRequest(BaseModel):
     service_id: StrictStr = Field(min_length=1, max_length=64)
 
 
+class ScopeAuthzFactRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: StrictStr = Field(min_length=1, max_length=64)
+
+
 class EndpointProbeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     service_id: StrictStr = Field(min_length=1, max_length=64)

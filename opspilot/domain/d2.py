@@ -339,6 +339,144 @@ def get_auth_policy_fact(
     )
 
 
+def get_scope_authz_facts_fact(
+    path: str | Path, task_id: str, request_id: str
+) -> dict[str, object]:
+    """Read a decision only when its complete resource tuple matches TaskBinding."""
+    if not request_id or len(request_id) > 64 or any(ch.isspace() for ch in request_id):
+        raise ScopeDenied("Request is outside the immutable TaskBinding scope.")
+    binding = _bound_task(path, task_id)
+    with connect(path) as connection:
+        decision = connection.execute(
+            """SELECT z.*, n.request_id AS authn_request_id, n.result_code AS authn_result_code,
+                      n.credential_policy_version AS authn_credential_policy_version,
+                      n.tenant_id AS authn_tenant_id, n.principal_id AS authn_principal_id,
+                      n.service_id AS authn_service_id, n.integration_id AS authn_integration_id,
+                      n.route AS authn_route,
+                      a.policy_version AS current_credential_policy_version,
+                      g.grant_version AS current_grant_version,
+                      g.granted_scopes_json AS current_granted_scopes_json,
+                      p.scope_policy_version AS current_scope_policy_version,
+                      p.required_scopes_json AS current_required_scopes_json,
+                      s.route AS current_route, s.integration_id AS current_integration_id,
+                      i.principal_id AS current_principal_id
+               FROM authz_events AS z
+               JOIN auth_events AS n ON n.event_id = z.authn_event_id
+               JOIN services AS s ON s.tenant_id = z.tenant_id AND s.service_id = z.service_id
+               JOIN integrations AS i
+                 ON i.tenant_id = z.tenant_id AND i.integration_id = z.integration_id
+               LEFT JOIN auth_policies AS a
+                 ON a.tenant_id = z.tenant_id AND a.service_id = z.service_id
+               LEFT JOIN principal_scope_grants AS g
+                 ON g.tenant_id = z.tenant_id AND g.principal_id = z.principal_id
+               LEFT JOIN route_scope_policies AS p
+                 ON p.tenant_id = z.tenant_id AND p.service_id = z.service_id AND p.route = z.route
+               WHERE z.request_id = ?""",
+            (request_id,),
+        ).fetchone()
+    if decision is None or any(
+        decision[key] != binding[value]
+        for key, value in (
+            ("tenant_id", "tenant_id"),
+            ("service_id", "service_id"),
+            ("integration_id", "integration_id"),
+            ("principal_id", "principal_id"),
+        )
+    ):
+        raise ScopeDenied("Request is outside the immutable TaskBinding scope.")
+
+    facts: dict[str, object] = {
+        "decision_id": int(decision["decision_id"]),
+        "request_id": str(decision["request_id"]),
+        "authn_event_id": int(decision["authn_event_id"]),
+        "authn_request_id": decision["authn_request_id"],
+        "authn_result_code": decision["authn_result_code"],
+        "authn_credential_policy_version": decision["authn_credential_policy_version"],
+        "authn_tenant_id": decision["authn_tenant_id"],
+        "authn_principal_id": decision["authn_principal_id"],
+        "authn_service_id": decision["authn_service_id"],
+        "authn_integration_id": decision["authn_integration_id"],
+        "authn_route": decision["authn_route"],
+        "tenant_id": str(decision["tenant_id"]),
+        "principal_id": str(decision["principal_id"]),
+        "service_id": str(decision["service_id"]),
+        "integration_id": str(decision["integration_id"]),
+        "route": str(decision["route"]),
+        "outcome": str(decision["outcome"]),
+        "reason_code": str(decision["reason_code"]),
+        "credential_policy_version": int(decision["credential_policy_version"]),
+        "scope_policy_version": int(decision["scope_policy_version"]),
+        "grant_version": int(decision["grant_version"]),
+        "required_scopes": json.loads(str(decision["required_scopes_json"])),
+        "granted_scopes": json.loads(str(decision["granted_scopes_json"])),
+        "missing_scopes": json.loads(str(decision["missing_scopes_json"])),
+        "resource_binding_valid": bool(decision["resource_binding_valid"]),
+    }
+    currentness = "CURRENT"
+    reasons: list[str] = []
+    if (
+        facts["request_id"] != facts["authn_request_id"]
+        or facts["authn_result_code"] != "AUTH_ACCEPTED"
+        or facts["credential_policy_version"] != facts["authn_credential_policy_version"]
+        or facts["tenant_id"] != facts["authn_tenant_id"]
+        or facts["principal_id"] != facts["authn_principal_id"]
+        or facts["service_id"] != facts["authn_service_id"]
+        or facts["integration_id"] != facts["authn_integration_id"]
+        or facts["route"] != facts["authn_route"]
+        or facts["route"] != decision["current_route"]
+        or facts["integration_id"] != decision["current_integration_id"]
+        or facts["principal_id"] != decision["current_principal_id"]
+        or not facts["resource_binding_valid"]
+    ):
+        currentness = "CONFLICT"
+        reasons.append("REQUEST_EVENT_OR_RESOURCE_BINDING_MISMATCH")
+    elif (
+        facts["missing_scopes"] != sorted(set(facts["required_scopes"]) - set(facts["granted_scopes"]))
+        or (facts["missing_scopes"] and (facts["outcome"], facts["reason_code"]) != ("DENY", "SCOPE_INSUFFICIENT"))
+        or (not facts["missing_scopes"] and (facts["outcome"], facts["reason_code"]) != ("ALLOW", "SCOPE_GRANTED"))
+    ):
+        currentness = "CONFLICT"
+        reasons.append("AUTHZ_DECISION_SCOPE_DIFF_MISMATCH")
+    elif (
+        decision["current_credential_policy_version"] is None
+        or decision["current_grant_version"] is None
+        or decision["current_scope_policy_version"] is None
+    ):
+        currentness = "STALE"
+        reasons.append("CURRENT_AUTHORIZATION_SOURCE_UNAVAILABLE")
+    elif (
+        int(decision["credential_policy_version"]) != int(decision["current_credential_policy_version"])
+        or int(decision["grant_version"]) != int(decision["current_grant_version"])
+        or int(decision["scope_policy_version"]) != int(decision["current_scope_policy_version"])
+    ):
+        currentness = "STALE"
+        reasons.append("AUTHORIZATION_VERSION_CHANGED")
+    elif (
+        facts["required_scopes"] != sorted(set(json.loads(str(decision["current_required_scopes_json"]))))
+        or facts["granted_scopes"] != sorted(set(json.loads(str(decision["current_granted_scopes_json"]))))
+    ):
+        currentness = "CONFLICT"
+        reasons.append("AUTHORIZATION_FACTS_CHANGED_WITHOUT_VERSION")
+    facts["currentness"] = currentness
+    facts["currentness_reasons"] = reasons
+    facts["current_scope_policy_version"] = decision["current_scope_policy_version"]
+    facts["current_grant_version"] = decision["current_grant_version"]
+    return _fact(
+        binding,
+        fact_type="scope_authz_decision",
+        resource_id=str(binding["service_id"]),
+        data_source="sqlite:authz_events+principal_scope_grants+route_scope_policies",
+        observed_versions={
+            "credential_policy_version": int(decision["credential_policy_version"]),
+            "scope_policy_version": int(decision["scope_policy_version"]),
+            "grant_version": int(decision["grant_version"]),
+        },
+        facts=facts,
+        original_result_ref=f"domain://authz/request/{request_id}",
+        observed_at=str(decision["observed_at"]),
+    )
+
+
 def _live_versions(path: str | Path, binding: dict[str, object]) -> dict[str, object]:
     with connect(path) as connection:
         row = connection.execute(

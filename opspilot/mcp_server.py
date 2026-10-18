@@ -5,13 +5,15 @@ import asyncio
 import os
 import threading
 
+from pydantic import StrictStr
 from mcp.server import MCPServer
+from mcp.server.mcpserver.context import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from opspilot.config import DEFAULT_DB_PATH, database_path
 from opspilot.domain.database import get_integration_info, get_service_info, initialize
-from opspilot.domain.schemas import D2ToolFact, IntegrationInfoResponse, ServiceInfoResponse
+from opspilot.domain.schemas import D2ToolFact, IntegrationInfoResponse, ScopeAuthzFactRequest, ServiceInfoResponse
 
 
 def build_server(db_path: str, tenant_id: str) -> MCPServer:
@@ -46,7 +48,9 @@ def build_server(db_path: str, tenant_id: str) -> MCPServer:
     return server
 
 
-def build_task_server(db_path: str, task_id: str, business_api_url: str) -> MCPServer:
+def build_task_server(
+    db_path: str, task_id: str, business_api_url: str, *, include_scope_authz_facts: bool = False
+) -> MCPServer:
     """Build the D2 server; every call is scoped through a persisted TaskBinding."""
     from opspilot.domain.d2 import (
         ScopeDenied,
@@ -54,6 +58,7 @@ def build_task_server(db_path: str, task_id: str, business_api_url: str) -> MCPS
         get_auth_policy_fact,
         get_integration_config_fact,
         get_principal_status_fact,
+        get_scope_authz_facts_fact,
         get_task_binding,
         probe_endpoint_fact,
     )
@@ -105,6 +110,23 @@ def build_task_server(db_path: str, task_id: str, business_api_url: str) -> MCPS
             raise ToolError(error.error_code) from None
 
     @server.tool(
+        title="Read task-bound authorization decision facts",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
+    def get_scope_authz_facts(request_id: StrictStr, ctx: Context) -> D2ToolFact:
+        """Read the currentness of one HTTP decision bound to this task's fixed resources."""
+        raw_arguments = ctx._input_params.arguments if ctx._input_params is not None else None
+        if not isinstance(raw_arguments, dict) or set(raw_arguments) != {"request_id"}:
+            raise ToolError("INVALID_ARGUMENTS")
+        try:
+            request = ScopeAuthzFactRequest.model_validate({"request_id": request_id})
+            return D2ToolFact.model_validate(
+                get_scope_authz_facts_fact(trusted_db_path, task_id, request.request_id)
+            )
+        except ScopeDenied:
+            raise ToolError("RESOURCE_OUTSIDE_TASK_SCOPE") from None
+
+    @server.tool(
         title="Probe registered business endpoint",
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
@@ -123,6 +145,8 @@ def build_task_server(db_path: str, task_id: str, business_api_url: str) -> MCPS
         except ScopeDenied:
             raise ToolError("RESOURCE_OUTSIDE_TASK_SCOPE") from None
 
+    if not include_scope_authz_facts:
+        server.remove_tool("get_scope_authz_facts")
     return server
 
 
@@ -131,7 +155,7 @@ async def run(db_path: str, tenant_id: str) -> None:
     await server.run_stdio_async()
 
 
-async def run_task(db_path: str, task_id: str) -> None:
+async def run_task(db_path: str, task_id: str, *, include_scope_authz_facts: bool = False) -> None:
     from opspilot.domain.d2 import get_task_binding
     from opspilot.domain.api import make_server
 
@@ -146,7 +170,10 @@ async def run_task(db_path: str, task_id: str) -> None:
     api_thread.start()
     try:
         host, port = business_api.server_address
-        server = build_task_server(trusted_db_path, task_id, f"http://{host}:{port}")
+        server = build_task_server(
+            trusted_db_path, task_id, f"http://{host}:{port}",
+            include_scope_authz_facts=include_scope_authz_facts,
+        )
         await server.run_stdio_async()
     finally:
         business_api.shutdown()
@@ -159,9 +186,13 @@ def main() -> None:
     parser.add_argument("--db", default=os.environ.get("OPSPILOT_DB_PATH", str(DEFAULT_DB_PATH)))
     parser.add_argument("--tenant", default=os.environ.get("OPSPILOT_TENANT_ID", "tenant-a"))
     parser.add_argument("--binding-id", help="Run the D2 task-bound server using this trusted TaskBinding.")
+    parser.add_argument(
+        "--include-scope-authz-facts", action="store_true",
+        help="Expose the M2-01 read-only authorization fact tool for a deliberate S2 facts session.",
+    )
     args = parser.parse_args()
     if args.binding_id:
-        asyncio.run(run_task(args.db, args.binding_id))
+        asyncio.run(run_task(args.db, args.binding_id, include_scope_authz_facts=args.include_scope_authz_facts))
     else:
         asyncio.run(run(args.db, args.tenant))
 

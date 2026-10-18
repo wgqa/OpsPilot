@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import ipaddress
 import json
 import secrets
@@ -8,12 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from opspilot.domain.database import (
-    get_credential_secret,
-    get_service_info,
-    initialize,
-    record_auth_event,
-)
+from opspilot.domain.database import authorize_business_request, connect, initialize
 
 
 class DemoAPIHandler(BaseHTTPRequestHandler):
@@ -42,37 +36,34 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
         request_id = secrets.token_hex(8)
         integration_id = self.headers.get("X-Integration-ID", "")
         authorization = self.headers.get("Authorization", "")
+        decision = authorize_business_request(
+            db_path,
+            tenant_id=tenant_id,
+            service_id="orders-demo",
+            route=self.path,
+            integration_id=integration_id,
+            authorization=authorization,
+            request_id=request_id,
+        )
+        authn_event_id = decision.get("authn_event_id")
+        if int(decision["http_status"]) == 401:
+            payload: dict[str, object] = {"error": "UNAUTHORIZED", "request_id": request_id}
+            if authn_event_id is not None:
+                payload.update({"event_id": authn_event_id, "authn_event_id": authn_event_id})
+            self._respond(401, payload)
+            return
+        if int(decision["http_status"]) == 403:
+            self._respond(
+                403,
+                {
+                    "error": "FORBIDDEN",
+                    "request_id": request_id,
+                    "authn_event_id": authn_event_id,
+                    "authz_event_id": decision["authz_event_id"],
+                },
+            )
+            return
         try:
-            service = get_service_info(db_path, tenant_id, "orders-demo")
-            if integration_id != service["integration_id"]:
-                raise LookupError("Integration is outside the registered service binding.")
-            expected_secret = get_credential_secret(
-                db_path, tenant_id, str(service["accepted_credential_ref"])
-            )
-            supplied_secret = authorization.removeprefix("Bearer ")
-            authorized = (
-                authorization.startswith("Bearer ")
-                and hmac.compare_digest(supplied_secret, expected_secret)
-                and service["principal_status"] == "ENABLED"
-            )
-            result_code = "AUTH_ACCEPTED" if authorized else "AUTH_REJECTED"
-            event_id = record_auth_event(
-                db_path,
-                tenant_id,
-                str(service["integration_id"]),
-                str(service["principal_id"]),
-                "orders-demo",
-                str(service["route"]),
-                result_code,
-            )
-            if not authorized:
-                self._respond(
-                    401,
-                    {"error": "UNAUTHORIZED", "request_id": request_id, "event_id": event_id},
-                )
-                return
-            from opspilot.domain.database import connect
-
             with connect(db_path) as connection:
                 order = connection.execute(
                     "SELECT order_id, status FROM orders WHERE tenant_id = ? AND order_id = ?",
@@ -81,7 +72,12 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
             if order is None:
                 self._respond(
                     404,
-                    {"error": "ORDER_NOT_FOUND", "request_id": request_id, "event_id": event_id},
+                    {
+                        "error": "NOT_FOUND",
+                        "request_id": request_id,
+                        "authn_event_id": authn_event_id,
+                        "authz_event_id": decision["authz_event_id"],
+                    },
                 )
                 return
             self._respond(
@@ -90,7 +86,9 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
                     "order_id": str(order["order_id"]),
                     "status": str(order["status"]),
                     "request_id": request_id,
-                    "event_id": event_id,
+                    "event_id": authn_event_id,
+                    "authn_event_id": authn_event_id,
+                    "authz_event_id": decision["authz_event_id"],
                 },
             )
         except LookupError:
