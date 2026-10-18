@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "acceptance": "OpsPilot vNext M1-06",
+  "baseline_sha": "4aca4b5d3cbae511d36f65df3f9f0adc2849c723",
+  "final_sha": "d74517d925cebb6e99c38dbbc01919c8064a44ed",
+  "origin_main_sha_at_final_verification": "d74517d925cebb6e99c38dbbc01919c8064a44ed",
+  "status": "PASS_PENDING_MAIN_AGENT_REVIEW",
+  "m1_full_pass_claimed": false,
+  "m2_started": false,
+  "matrix": [
+    {
+      "id": "M1FIN-01",
+      "status": "PASS",
+      "evidence": ["ACCEPTANCE_PLAN.md", "RUNBOOK.md", "RUN_MANIFEST.json", "runs/20261018T115200Z/logs/environment.txt", "runs/20261018T115200Z/logs/pytest-full-final-d74517d.txt", "runs/20261018T115200Z/logs/frontend-typecheck-final-d74517d.txt", "runs/20261018T115200Z/logs/frontend-lint-final-d74517d.txt", "runs/20261018T115200Z/logs/frontend-build-final-d74517d.txt", "runs/20261018T115200Z/logs/pip-check-final-d74517d.txt", "runs/20261018T115200Z/logs/compileall-final-d74517d.txt", "runs/20261018T115200Z/m1-04-rerun-01/runs/20261018T115753Z/RESULTS.json", "runs/20261018T115200Z/m1-05/runs/20261018T115934Z/RESULTS.json"],
+      "result": "Final complete checks passed on d74517d; both browser smoke entrypoints ran against fresh Domain and Checkpoint SQLite files."
+    },
+    {
+      "id": "M1FIN-02",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/m1-04-rerun-01/runs/20261018T115753Z/RESULTS.json", "runs/20261018T115200Z/m1-04-rerun-01/runs/20261018T115753Z/logs", "runs/20261018T115200Z/m1-04-rerun-01/runs/20261018T115753Z/screenshots"],
+      "result": "Fresh Edge completed five real Provider chat responses, 16 Investigator Provider calls, 12 scoped MCP calls, distinct NL-A/NL-B prompt digests with the same trusted binding, persisted initial/correction input provenance, and restart recovery."
+    },
+    {
+      "id": "M1FIN-03",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/m1-05/runs/20261018T115934Z/RESULTS.json", "runs/20261018T115200Z/m1-05/runs/20261018T115934Z/logs", "runs/20261018T115200Z/m1-05/runs/20261018T115934Z/screenshots"],
+      "result": "Independent support and approver identities approved one immutable Plan; APPROVAL_RESUME resumed the source checkpoint; same-identity HTTP verification changed from 401 to 200 with order demo-order / CONFIRMED; one REPAIR and one DELIVER committed."
+    },
+    {
+      "id": "M1FIN-04",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/logs/pytest-directed-critical.txt", "runs/20261018T115200Z/logs/pytest-full-final-d74517d.txt", "tests/test_m1_web_approval.py::test_apr04_rejection_resumes_original_graph_without_action_intents", "tests/test_m1_task_control.py::test_n1_09_abort_before_old_checkpoint_resume_is_enforced_in_another_process", "tests/test_m1_web_approval.py::test_apr05_abort_after_approval_blocks_resume_before_checkpoint_access", "FAILURES.md"],
+      "result": "Fresh deterministic integration regression proves REJECTED resumes the original Graph with zero ActionIntent, action Ledger, delivery, or TicketEntry; abort guards are covered. This is not represented as a browser or Provider smoke."
+    },
+    {
+      "id": "M1FIN-05",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/logs/pytest-directed-critical.txt", "tests/test_m1_task_control.py::test_n1_09_abort_before_old_checkpoint_resume_is_enforced_in_another_process", "tests/test_m1_task_control.py::test_n1_10_correction_invalidates_old_run_and_new_run_binds_fresh_plan", "tests/test_m1_task_control.py::test_n1_11_repair_commit_survives_abort_and_old_checkpoint_cannot_deliver"],
+      "result": "N1-09/10/11 fresh process/transaction tests passed; committed REPAIR remains recorded and stale delivery is blocked."
+    },
+    {
+      "id": "M1FIN-06",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/m1-04-rerun-01/runs/20261018T115753Z/RESULTS.json", "runs/20261018T115200Z/m1-05/runs/20261018T115934Z/RESULTS.json", "runs/20261018T115200Z/logs/pytest-full-final-d74517d.txt"],
+      "result": "Fresh browser/API checks observed cross-tenant 404, unlisted Origin 403, approver read-only access 200 and no CHAT_READONLY approval/action; the complete authorization/security regression suite passed."
+    },
+    {
+      "id": "M1FIN-07",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/m1-05/runs/20261018T115934Z/RESULTS.json", "runs/20261018T115200Z/m1-05/runs/20261018T115934Z/logs/api-approval-crash.log", "runs/20261018T115200Z/m1-05/runs/20261018T115934Z/logs/api-repair-crash.log", "runs/20261018T115200Z/logs/pytest-directed-critical.txt"],
+      "result": "Real API processes exited 86 after approval COMMIT and 87 after REPAIR COMMIT before response; new PID recovery produced one approval, one REPAIR Ledger and one DELIVER Ledger. Unknown terminal checkpoint without Domain receipt remains blocked by D4 regression."
+    },
+    {
+      "id": "M1FIN-08",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/m1-04-rerun-01/runs/20261018T115753Z/RESULTS.json", "runs/20261018T115200Z/m1-04-rerun-01/runs/20261018T115753Z/screenshots", "runs/20261018T115200Z/m1-05/runs/20261018T115934Z/RESULTS.json", "runs/20261018T115200Z/logs/pytest-full-final-d74517d.txt", "runs/20261018T115200Z/logs/pytest-directed-critical.txt"],
+      "result": "After restart, Edge recovered persisted chat history. M1-05 has 849 unique increasing task event_seq values in 2..851 with a recorded gap at 846; read-only reconciliation found 850 matching committed Outbox events and zero missing or extra projections. Cursor/history recovery regressions passed."
+    },
+    {
+      "id": "M1FIN-09",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/logs/pytest-directed-critical.txt", "tests/test_m1_chat.py::test_chat_04_revoked_memory_source_excludes_historical_assistant_message", "tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer", "docs/evidence/vnext/m1-03/REPORT.md", "docs/evidence/vnext/m1-04/REPORT.md"],
+      "result": "Fresh regressions exclude revoked-source assistant history with MEMORY_REVOKED_EXPIRED_OR_CHANGED and stale v7 probe/dependent history with EVIDENCE_RESOURCE_VERSION_MISMATCH in ContextManifest."
+    },
+    {
+      "id": "M1FIN-10",
+      "status": "PASS",
+      "evidence": ["runs/20261018T115200Z/m1-05/runs/20261018T115934Z/RESULTS.json", "runs/20261018T115200Z/m1-04-rerun-01/runs/20261018T115753Z/RESULTS.json", "runs/20261018T115200Z/logs/pytest-directed-critical.txt", "runs/20261018T115200Z/logs/pytest-full-final-d74517d.txt"],
+      "result": "The active budget remained 7,877 ms both before and after CHAT_READONLY while awaiting approval; provider/MCP attempts and returned token usage are persisted; ACTION_OUTCOME_UNKNOWN regression remains fail-closed."
+    },
+    {
+      "id": "M1FIN-11",
+      "status": "PASS",
+      "evidence": ["ACCEPTANCE_PLAN.md", "PLAN_AMENDMENTS.md", "FAILURES.md", "RUN_MANIFEST.json", "EVIDENCE_INDEX.md", "runs/20261018T115200Z/logs/secret-scan-final.json", "docs/evidence/d6/REPORT.md", "docs/evidence/d7/REPORT.md"],
+      "result": "Fresh attempts, amendment, source/run provenance and secrets scan are indexed; prior D6 E10 PARTIAL and D7 initial failures remain intact."
+    },
+    {
+      "id": "M1FIN-12",
+      "status": "PASS",
+      "evidence": ["docs/learning/M1-06/STUDY_NOTES.md", "docs/learning/M1-06/INTERVIEW_QA.md", "docs/learning/HANDBOOK_MAP.md"],
+      "result": "Source-to-experiment reading route, one annotated end-to-end trace, 30-second and 2-minute interview answers, and scope/limitations are documented."
+    }
+  ],
+  "verification": {
+    "pytest_full": {"passed": 116, "failed": 0, "duration_seconds": 71.81, "commit": "d74517d925cebb6e99c38dbbc01919c8064a44ed"},
+    "pytest_directed": {"passed": 9, "failed": 0, "duration_seconds": 14.41},
+    "frontend": {"typecheck": "PASS", "lint": "PASS", "build": "PASS"},
+    "python": {"pip_check": "PASS", "compileall": "PASS"},
+    "browser_smokes": {"attempts": 3, "failed": 1, "passed": 2, "first_failure_preserved": true},
+    "real_provider": {"successful_responses_across_all_three_attempts": 47, "mcp_calls": 28, "reported_tokens": 110799},
+    "secret_scan": "PASS"
+  },
+  "limitations": [
+    "D6 E10 remains PARTIAL; do not reinterpret the isolated follow-up as an overall pass.",
+    "D5 Memory remains fixed and generic; no Memory effectiveness or long-term compression claim is made.",
+    "Demo IAM is two trusted local tenants/operators, not production IAM.",
+    "Only the fixed S1 loopback business route was exercised.",
+    "M1-06 acceptance is pending independent main-Agent review; M2 has not started."
+  ]
+}

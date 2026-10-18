@@ -9,3 +9,4 @@
 - **最小变更：** 仅修改 `frontend/e2e/m1-04-browser.mjs::login()`：SUPPORT 仍等待 `.rail-footer`；`approver-*` 等待 `.approval-center`。不改 UI、API、权限、输入、Gold、超时、测试范围或业务代码。
 - **独立重跑：** Amendment 后使用全新 Domain SQLite、Checkpoint SQLite、随机口令与监听端口，完整执行 M1-04 Edge smoke；原失败目录只读保留，修复后结果另开时间戳目录。随后必须新鲜复跑定向回归与完整 pytest。
 - **Gold 影响：** 无。仅修正页面就绪探针，使其指向当前角色页面；所有冻结的 M1FIN 判据、输入与安全断言不变。
+- **修复与复跑结果：** selector 修正提交 `d74517d925cebb6e99c38dbbc01919c8064a44ed`；fresh Run `20261018T115753Z` 为 `BROWSER_PASS_FULL_PYTEST_PENDING`，9 项 browser checks 中 8 项为 `true`，`NL-05` 明确留给 N1-09/10/11 定向测试。Fresh 完整 pytest 116/116、关键定向 pytest 9/9。原失败 Run 保持 `FAIL`，没有重写或从尝试分母中移除。
