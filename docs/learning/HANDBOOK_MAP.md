@@ -45,3 +45,13 @@
 | 第 6 章：Evidence Gate 与受控动作 | `domain.d2.evaluate_evidence_gate()` 仍是唯一 Gate；`domain.d3.save_local_report(run_id=...)` 对新控制版本下的非 READY 结果作 Run 级守卫；UI 的普通聊天没有审批或动作入口 | NL-03/06：403/Scope 输入无模型与 Evidence；只读威胁输入后 Task/Plan/控制版本/动作计数不变。NL-05 复跑 N1-10/11 | Study Notes 3、4；Q&A 3、4、6 |
 
 **贯通证据：** [M1-04 报告](../evidence/vnext/m1-04/REPORT.md)、[机器结果](../evidence/vnext/m1-04/RESULTS.json)、[案例集](../evidence/vnext/m1-04/CASES.md)、[学习笔记](M1-04/STUDY_NOTES.md)和[面试卡](M1-04/INTERVIEW_QA.md)。白皮书第 4–6 章参考链接见上方 M1-03 部分；章节作为对照阅读，不取代本仓库冻结合同。
+
+## M1-05：Web 双角色审批与原调查图恢复
+
+| 学习主题 | OpsPilot 实现位置 | 可复现实验 | 表达材料 |
+|---|---|---|---|
+| 第 4 章：Task、Run 与长程推进 | `domain/task_control.py::submit_web_plan_approval()` 在单事务中接受审批命令、唯一 `APPROVAL_RESUME` Run、可信恢复映射和 Outbox；`web/worker.py` 释放旧 Run 后只认领新 Run | APR-02/07：Trigger 注入验证全回滚；真实 API 在审批提交后退出，新进程恢复唯一队列 Run | `M1-05/STUDY_NOTES.md` 1、3；`INTERVIEW_QA.md` 2、4 |
+| 第 5 章：状态与来源边界 | `get_approval_resume_link()` 在读取 checkpoint 前验证租户、Task、Plan、审批、控制 revision、原 Run 与 checkpoint thread；`investigator.run_investigation()` 用新 Run 身份恢复原 thread | APR-03/07：旧调查 Run 保持 `WAITING_APPROVAL`；同一 checkpoint 沿原 Plan 继续；提交后的进程退出后仍只有一个 REPAIR Ledger | Study Notes 1、2；Q&A 1、3 |
+| 第 6 章：HITL、受控行动与交付 | `d3._submit_plan_approval_in_transaction()` 复用原 D3 授权规则；`get_task_outcome()` 从 Approval、Ledger、在线验证、冻结报告、DeliveryRecord 投影结果；Outbox 投影供 SSE 补发 | APR-03/04/09：独立 APPROVER 实际核对证据并拒绝/批准；S1 真实 HTTP 401→200；REJECTED 时无 ActionIntent/工单 | Study Notes 3、4；Q&A 2、4、5 |
+
+**贯通证据：** [M1-05 报告](../evidence/vnext/m1-05/REPORT.md)、[机器结果](../evidence/vnext/m1-05/RESULTS.json)、[失败与修复记录](../evidence/vnext/m1-05/ATTEMPTS.md)、[学习笔记](M1-05/STUDY_NOTES.md)和[面试卡](M1-05/INTERVIEW_QA.md)。白皮书第 4–6 章参考链接见上方 M1-03 部分；章节只作分析框架，项目的事务与权限合同以仓库冻结规格为准。

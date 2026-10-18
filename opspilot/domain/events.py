@@ -8,7 +8,7 @@ from typing import Any
 
 
 _PUBLIC_PAYLOAD_KEYS = {
-    "command_id", "message_id", "run_id", "task_id", "plan_hash", "action_id",
+    "command_id", "message_id", "run_id", "resume_run_id", "source_run_id", "task_id", "plan_hash", "action_id",
     "action_kind", "approval_id", "verification_id", "report_ref", "delivery_id",
     "sequence", "input_kind", "application_state", "control_revision", "error_code",
     "status", "decision", "reason_code", "task_status", "run_status", "attempt_id",

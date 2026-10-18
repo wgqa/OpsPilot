@@ -804,7 +804,8 @@ def build_investigation_graph(
         plan = get_plan_for_task(db_path, task_id, plan_hash, submitter_id)
         thread_id = str(get_task_binding(db_path, task_id)["thread_id"])
         approval = get_plan_approval(db_path, thread_id, plan_hash, submitter_id)
-        if state.get("approval_resume_id"):
+        resumed: object | None = None
+        if state.get("approval_resume_id") or approval is not None:
             resumed = interrupt({
                 "kind": "PLAN_APPROVAL_REQUIRED",
                 "task_id": task_id,
@@ -817,7 +818,7 @@ def build_investigation_graph(
                 raise RuntimeError("D3 resume command is not bound to the interrupted Plan.")
             if approval is None or approval.get("approval_id") != resumed.get("approval_id"):
                 raise RuntimeError("D3 resume command does not match a persisted approval record.")
-            if approval.get("approval_id") != state["approval_resume_id"]:
+            if state.get("approval_resume_id") and approval.get("approval_id") != state["approval_resume_id"]:
                 raise RuntimeError("D3 resume marker does not match the persisted approval record.")
         elif approval is None:
             resumed = interrupt({
@@ -839,6 +840,7 @@ def build_investigation_graph(
         return {
             "stage": "d3_approval_recorded",
             "approval_id": approval["approval_id"],
+            "approval_resume_id": approval["approval_id"] if resumed is not None else state.get("approval_resume_id"),
             "approval_decision": approval["decision"],
             "approver_id": approval["approver_id"],
         }
@@ -1081,9 +1083,12 @@ async def run_investigation(
     resolved_checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
     task_identity = None
     run_record: dict[str, object] | None = None
+    approval_resume_link: dict[str, object] | None = None
     critical_inputs: list[dict[str, object]] = []
     if run_id is not None:
-        from opspilot.domain.task_control import TaskControlError, get_task_run, trusted_identity
+        from opspilot.domain.task_control import (
+            TaskControlError, get_approval_resume_link, get_task_run, trusted_identity,
+        )
 
         task_identity = trusted_identity(resolved_db, actor_id)
         run_record = get_task_run(resolved_db, task_identity, run_id)
@@ -1092,6 +1097,17 @@ async def run_investigation(
         binding = get_task_binding(resolved_db, str(run_record["task_id"]))
         if task_id not in {str(binding["task_id"]), str(binding["thread_id"])}:
             raise TaskControlError("TASK_RUN_SCOPE_DENIED")
+        if str(run_record["kind"]) == "APPROVAL_RESUME":
+            if not resume or str(run_record["status"]) not in {"QUEUED", "INTERRUPTED_RECOVERABLE"}:
+                raise TaskControlError("TASK_RUN_NOT_RESUMABLE")
+            approval_resume_link = get_approval_resume_link(resolved_db, task_identity, run_id)
+            persisted_command = {
+                "approval_id": str(approval_resume_link["approval_id"]),
+                "plan_hash": str(approval_resume_link["plan_hash"]),
+            }
+            if resume_command is not None and resume_command != persisted_command:
+                raise TaskControlError("APPROVAL_RESUME_LINK_INVALID")
+            resume_command = persisted_command
     elif d3_mode and resume:
         # D3 authorization is checked before checkpoint construction or state access.
         from opspilot.domain.d3 import authorize_workflow_resume
@@ -1136,6 +1152,8 @@ async def run_investigation(
     checkpoint_thread_id = str(binding["thread_id"])
     if run_id is not None:
         checkpoint_thread_id = f"{checkpoint_thread_id}::{run_id}"
+    if approval_resume_link is not None:
+        checkpoint_thread_id = str(approval_resume_link["source_checkpoint_thread_id"])
     config = {"configurable": {"thread_id": checkpoint_thread_id} }
     os.environ["LANGGRAPH_STRICT_MSGPACK"] = "true"
     api_server = None
@@ -1167,9 +1185,17 @@ async def run_investigation(
             if task_identity is None:
                 raise RuntimeError("Task Run requires a verified identity.")
             if resume:
-                if run_record is None or str(run_record["status"]) not in {"WAITING_APPROVAL", "INTERRUPTED_RECOVERABLE"}:
+                if run_record is None:
                     raise TaskControlError("TASK_RUN_NOT_RESUMABLE")
-                resume_task_run(resolved_db, task_identity, run_id)
+                if (
+                    str(run_record["kind"]) == "APPROVAL_RESUME"
+                    and str(run_record["status"]) == "QUEUED"
+                ):
+                    claim_task_run(resolved_db, task_identity, run_id)
+                else:
+                    if str(run_record["status"]) not in {"WAITING_APPROVAL", "INTERRUPTED_RECOVERABLE"}:
+                        raise TaskControlError("TASK_RUN_NOT_RESUMABLE")
+                    resume_task_run(resolved_db, task_identity, run_id)
                 run_claimed = True
             else:
                 if run_record is None or str(run_record["status"]) != "QUEUED":
@@ -1210,6 +1236,19 @@ async def run_investigation(
                 if resume:
                     if not snapshot.values:
                         raise RuntimeError("No persisted graph state exists for the authorized thread.")
+                    if approval_resume_link is not None and str(snapshot.values.get("plan_hash", "")) != str(approval_resume_link["plan_hash"]):
+                        raise TaskControlError("APPROVAL_CHECKPOINT_PLAN_MISMATCH")
+                    if approval_resume_link is not None:
+                        state_stage = str(snapshot.values.get("stage", ""))
+                        if _snapshot_has_pending_interrupt(snapshot):
+                            if state_stage != "d3_plan_created" or "d3_human_approval" not in snapshot.next:
+                                raise TaskControlError("APPROVAL_CHECKPOINT_INTERRUPT_MISMATCH")
+                        elif state_stage not in {
+                            "d3_approval_recorded", "d3_repair_intent_persisted",
+                            "d3_repair_committed", "d3_verification_complete", "d3_report_frozen",
+                            "d3_deliver_intent_persisted", "complete",
+                        }:
+                            raise TaskControlError("APPROVAL_CHECKPOINT_STAGE_MISMATCH")
                     if snapshot.values.get("stage") == "complete":
                         if d3_mode:
                             from opspilot.domain.d3 import get_task_action_state
@@ -1284,7 +1323,6 @@ async def run_investigation(
                             await graph.ainvoke(
                                 Command(
                                     resume=persisted_command,
-                                    update={"approval_resume_id": approval["approval_id"]},
                                 ),
                                 config,
                             )

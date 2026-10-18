@@ -54,6 +54,55 @@ export interface Inspector {
   current_gate: Record<string, unknown>;
 }
 
+export interface PendingApproval {
+  task_id: string;
+  plan_hash: string;
+  plan_version: number;
+  created_at: string;
+  service_id: string;
+  integration_id: string;
+  ticket_id: string;
+  control_revision: number;
+  pending_critical_message_seq: number | null;
+}
+
+export interface PlanReview {
+  task_id: string;
+  plan_hash: string;
+  plan: Record<string, unknown>;
+  current_state: Record<string, unknown>;
+  evidence: Array<Record<string, unknown>>;
+  scope: Record<string, unknown>;
+}
+
+export interface ApprovalResult {
+  status: string;
+  task_id: string;
+  plan_hash: string;
+  decision: 'APPROVED' | 'REJECTED';
+  approval_id: string;
+  resume_run_id: string;
+  source_run_id?: string;
+  run_status?: string;
+  replayed: boolean;
+}
+
+export interface TaskOutcome {
+  task_id: string;
+  task_status: string;
+  business_outcome: string;
+  plan?: Record<string, unknown>;
+  approval?: Record<string, unknown> | null;
+  resume_link?: Record<string, unknown> | null;
+  resume_run?: Record<string, unknown> | null;
+  repair?: Record<string, unknown> | null;
+  verification?: Record<string, unknown> | null;
+  frozen_report?: Record<string, unknown> | null;
+  delivery?: Record<string, unknown> | null;
+  local_report?: Record<string, unknown> | null;
+  ticket_entry_count?: number;
+}
+
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) {
     super(code);
@@ -115,6 +164,19 @@ export const api = {
     return request<{ items: ChatChunk[] }>(`/api/runs/${encodeURIComponent(runId)}/chunks?after_seq=${afterSeq}`);
   },
   inspector(taskId: string) { return request<Inspector>(`/api/tasks/${encodeURIComponent(taskId)}/inspector`); },
+  pendingApprovals() { return request<{ items: PendingApproval[] }>('/api/approvals/pending'); },
+  planReview(taskId: string, planHash: string) {
+    return request<PlanReview>(`/api/tasks/${encodeURIComponent(taskId)}/plans/${encodeURIComponent(planHash)}/review`);
+  },
+  submitApproval(taskId: string, planHash: string, decision: 'APPROVED' | 'REJECTED', csrf: string) {
+    return request<ApprovalResult>(
+      `/api/tasks/${encodeURIComponent(taskId)}/plans/${encodeURIComponent(planHash)}/approval`, {
+        method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': crypto.randomUUID() },
+        body: JSON.stringify({ decision }),
+      },
+    );
+  },
+  outcome(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/outcome`); },
   eventHistory(sessionId: string, after: number) {
     return request<{ items: Array<Record<string, unknown>>; after: number }>(`/api/sessions/${encodeURIComponent(sessionId)}/events/history?after=${after}`);
   },

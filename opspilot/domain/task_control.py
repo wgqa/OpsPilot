@@ -316,6 +316,279 @@ def _record_command(
     )
 
 
+def submit_web_plan_approval(
+    path: str | Path,
+    identity: TrustedIdentity,
+    *,
+    task_id: str,
+    plan_hash: str,
+    decision: Literal["APPROVED", "REJECTED"],
+    idempotency_key: str,
+) -> dict[str, object]:
+    """Atomically persist approval, Web command, resume Run, link and Outbox."""
+    if decision not in {"APPROVED", "REJECTED"}:
+        raise TaskControlError("INVALID_REQUEST")
+    if not idempotency_key.strip() or len(idempotency_key) > 200:
+        raise TaskControlError("IDEMPOTENCY_KEY_REQUIRED")
+    target_ref = f"{task_id}:{plan_hash}"
+    request = {
+        "command_kind": "WEB_PLAN_APPROVAL", "target_ref": target_ref,
+        "task_id": task_id, "plan_hash": plan_hash, "decision": decision,
+    }
+    request_digest = _digest(request)
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _verify_identity(connection, identity)
+        if identity.role != "APPROVER":
+            raise TaskControlError("TASK_APPROVER_REQUIRED")
+        binding = connection.execute(
+            "SELECT * FROM task_bindings WHERE task_id = ? AND tenant_id = ?",
+            (task_id, identity.tenant_id),
+        ).fetchone()
+        if binding is None:
+            raise TaskControlError("TASK_SCOPE_DENIED")
+        duplicate = _find_idempotent_command(
+            connection, identity, idempotency_key, "WEB_PLAN_APPROVAL", target_ref, request_digest
+        )
+        if duplicate is not None:
+            return {**duplicate, "replayed": True}
+
+        existing = connection.execute(
+            """SELECT * FROM d3_approvals WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+            (identity.tenant_id, task_id, plan_hash),
+        ).fetchone()
+        if existing is not None:
+            if str(existing["approver_id"]) != identity.actor_id or str(existing["decision"]) != decision:
+                raise TaskControlError("APPROVAL_ALREADY_RECORDED")
+            link = connection.execute(
+                "SELECT * FROM approval_resume_links WHERE approval_id = ?",
+                (existing["approval_id"],),
+            ).fetchone()
+            if link is None:
+                raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+            command_id = f"command-{uuid.uuid4()}"
+            result = {
+                "status": "ACCEPTED", "task_id": task_id, "plan_hash": plan_hash,
+                "decision": decision, "approval_id": str(existing["approval_id"]),
+                "resume_run_id": str(link["resume_run_id"]),
+                "control_revision": int(link["control_revision"]),
+                "replayed": True,
+            }
+            _record_command(
+                connection, command_id=command_id, identity=identity,
+                command_kind="WEB_PLAN_APPROVAL", target_ref=target_ref,
+                idempotency_key=idempotency_key, request_digest=request_digest,
+                accepted_status="ACCEPTED", result=result, run_id=str(link["resume_run_id"]),
+            )
+            return result
+
+        from opspilot.domain.d3 import (
+            D3PreconditionRejected,
+            D3ScopeDenied,
+            _load_plan,
+            _submit_plan_approval_in_transaction,
+        )
+
+        plan_binding = connection.execute(
+            """SELECT * FROM d3_plan_control_bindings
+               WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+            (identity.tenant_id, task_id, plan_hash),
+        ).fetchone()
+        if plan_binding is None or plan_binding["task_run_id"] is None:
+            raise TaskControlError("APPROVAL_CHECKPOINT_BINDING_MISSING")
+        source_run_id = str(plan_binding["task_run_id"])
+        source = connection.execute(
+            """SELECT * FROM task_runs WHERE run_id = ? AND tenant_id = ? AND task_id = ?""",
+            (source_run_id, identity.tenant_id, task_id),
+        ).fetchone()
+        if (
+            source is None or str(source["kind"]) not in {"INVESTIGATE", "RESUME"}
+            or str(source["status"]) != "WAITING_APPROVAL"
+            or source["expected_control_revision"] is None
+            or int(source["expected_control_revision"]) != int(plan_binding["bound_control_revision"])
+            or int(source["consumed_message_seq"]) != int(plan_binding["consumed_message_seq"])
+            or str(binding["status"]) != "WAITING_APPROVAL"
+        ):
+            raise TaskControlError("TASK_NOT_WAITING_FOR_APPROVAL")
+        control = _control(connection, identity.tenant_id, task_id)
+        if str(control["terminal_state"]) != "ACTIVE":
+            raise TaskControlError("TASK_ABORTED")
+        if control["pending_critical_message_seq"] is not None:
+            raise TaskControlError("TASK_INPUT_PENDING")
+        revision = int(control["control_revision"])
+        if revision != int(plan_binding["bound_control_revision"]):
+            raise TaskControlError("TASK_CONTROL_STALE")
+        if int(control["applied_critical_message_seq"]) > int(plan_binding["consumed_message_seq"]):
+            raise TaskControlError("TASK_CONTROL_STALE")
+        plan = _load_plan(connection, identity.tenant_id, task_id, plan_hash)
+        current_resource = connection.execute(
+            """SELECT i.credential_ref, i.config_version, i.principal_id,
+                      p.status AS principal_status, p.principal_version,
+                      a.accepted_credential_ref, a.policy_version
+               FROM integrations i JOIN principals p ON p.tenant_id = i.tenant_id
+                 AND p.principal_id = i.principal_id
+               JOIN services s ON s.tenant_id = i.tenant_id AND s.integration_id = i.integration_id
+               JOIN auth_policies a ON a.tenant_id = s.tenant_id AND a.service_id = s.service_id
+               WHERE i.tenant_id = ? AND i.integration_id = ? AND s.service_id = ?""",
+            (identity.tenant_id, plan["integration_id"], plan["service_id"]),
+        ).fetchone()
+        if decision == "APPROVED":
+            if current_resource is None or str(current_resource["principal_id"]) != str(plan["principal_id"]):
+                raise TaskControlError("APPROVAL_TARGET_NOT_FOUND")
+            if str(current_resource["principal_status"]) != "ENABLED":
+                raise TaskControlError("PRINCIPAL_NOT_ENABLED_OR_MISMATCHED")
+            if (
+                int(current_resource["config_version"]) != int(plan["expected_config_version"])
+                or int(current_resource["principal_version"]) != int(plan["expected_principal_version"])
+                or int(current_resource["policy_version"]) != int(plan["expected_auth_policy_version"])
+                or str(current_resource["credential_ref"]) != str(plan["old_credential_ref"])
+                or str(current_resource["accepted_credential_ref"]) != str(plan["new_credential_ref"])
+            ):
+                raise TaskControlError("RESOURCE_VERSION_OR_CREDENTIAL_PRECONDITION_FAILED")
+        session = connection.execute(
+            """SELECT s.session_id FROM session_task_links l JOIN sessions s
+                 ON s.session_id = l.session_id AND s.tenant_id = l.tenant_id
+               WHERE l.task_id = ? AND l.tenant_id = ? AND s.owner_id = ?
+               ORDER BY l.is_primary DESC, l.linked_at LIMIT 1""",
+            (task_id, identity.tenant_id, str(binding["actor_id"])),
+        ).fetchone()
+        if session is None:
+            raise TaskControlError("SESSION_TASK_LINK_REQUIRED")
+
+        resume_run_id = f"run-{uuid.uuid4()}"
+        command_id = f"command-{uuid.uuid4()}"
+        now = _utc_now()
+        try:
+            approval = _submit_plan_approval_in_transaction(
+                connection, str(binding["thread_id"]), identity.actor_id,
+                plan_hash, decision, resume_run_id=resume_run_id,
+            )
+        except D3PreconditionRejected as error:
+            raise TaskControlError(str(error)) from error
+        except D3ScopeDenied as error:
+            # D3 scope errors are deliberately collapsed to the same non-enumerating result.
+            raise TaskControlError("APPROVAL_SCOPE_DENIED") from error
+        approval_id = str(approval["approval_id"])
+        checkpoint_thread_id = f"{binding['thread_id']}::{source_run_id}"
+        result = {
+            "status": "ACCEPTED", "task_id": task_id, "plan_hash": plan_hash,
+            "decision": decision, "approval_id": approval_id,
+            "resume_run_id": resume_run_id, "source_run_id": source_run_id,
+            "control_revision": revision, "run_status": "QUEUED", "replayed": False,
+        }
+        _record_command(
+            connection, command_id=command_id, identity=identity,
+            command_kind="WEB_PLAN_APPROVAL", target_ref=target_ref,
+            idempotency_key=idempotency_key, request_digest=request_digest,
+            accepted_status="ACCEPTED", result=result, run_id=resume_run_id,
+        )
+        connection.execute(
+            """INSERT INTO task_runs
+               (run_id, tenant_id, task_id, session_id, command_id, source_message_id,
+                kind, status, control_revision_at_start, expected_control_revision,
+                consumed_message_seq, applied_critical_message_seq, created_at)
+               VALUES (?, ?, ?, ?, ?, NULL, 'APPROVAL_RESUME', 'QUEUED', ?, ?, ?, ?, ?)""",
+            (resume_run_id, identity.tenant_id, task_id, str(session["session_id"]), command_id,
+             revision, revision, int(source["consumed_message_seq"]),
+             int(source["applied_critical_message_seq"]), now),
+        )
+        connection.execute(
+            """INSERT INTO approval_resume_links
+               (approval_id, tenant_id, task_id, plan_hash, source_investigation_run_id,
+                source_checkpoint_thread_id, resume_run_id, control_revision, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (approval_id, identity.tenant_id, task_id, plan_hash, source_run_id,
+             checkpoint_thread_id, resume_run_id, revision, now),
+        )
+        connection.execute(
+            """INSERT INTO worker_retry_state (run_id, retry_count, max_retries, updated_at)
+               VALUES (?, 0, 3, ?)""",
+            (resume_run_id, now),
+        )
+        _insert_outbox(
+            connection, identity.tenant_id, task_id, str(session["session_id"]),
+            "RUN", resume_run_id, "RUN_STATUS_QUEUED",
+            {"run_id": resume_run_id, "run_status": "QUEUED", "approval_id": approval_id,
+             "plan_hash": plan_hash},
+        )
+        _insert_outbox(
+            connection, identity.tenant_id, task_id, str(session["session_id"]),
+            "APPROVAL_RESUME", approval_id, "APPROVAL_RESUME_QUEUED",
+            {"task_id": task_id, "plan_hash": plan_hash, "approval_id": approval_id,
+             "decision": decision, "resume_run_id": resume_run_id},
+        )
+    return result
+
+
+def get_approval_resume_link(
+    path: str | Path, identity: TrustedIdentity, run_id: str
+) -> dict[str, object]:
+    """Validate the durable approval-to-checkpoint link before any checkpoint read."""
+    with connect(path) as connection:
+        _verify_identity(connection, identity)
+        run = connection.execute(
+            """SELECT r.*, s.owner_id FROM task_runs r JOIN sessions s
+                 ON s.session_id = r.session_id AND s.tenant_id = r.tenant_id
+               WHERE r.run_id = ? AND r.tenant_id = ?""",
+            (run_id, identity.tenant_id),
+        ).fetchone()
+        if run is None or str(run["kind"]) != "APPROVAL_RESUME" or str(run["owner_id"]) != identity.actor_id:
+            raise TaskControlError("TASK_RUN_SCOPE_DENIED")
+        return _validate_approval_resume_in_transaction(connection, run)
+
+
+def _validate_approval_resume_in_transaction(
+    connection: sqlite3.Connection, run: sqlite3.Row
+) -> dict[str, object]:
+    link = connection.execute(
+        """SELECT l.*, a.decision, a.approver_id, a.approved_plan_digest,
+                  r.status AS source_status, r.kind AS source_kind,
+                  r.consumed_message_seq AS source_consumed_message_seq,
+                  b.thread_id, b.status AS task_status,
+                  c.terminal_state, c.control_revision AS current_control_revision,
+                  c.pending_critical_message_seq, c.applied_critical_message_seq,
+                  pc.bound_control_revision, pc.consumed_message_seq AS plan_consumed_message_seq,
+                  auth.eligibility
+           FROM approval_resume_links l
+           JOIN d3_approvals a ON a.approval_id = l.approval_id
+           JOIN task_runs r ON r.run_id = l.source_investigation_run_id
+           JOIN task_bindings b ON b.tenant_id = l.tenant_id AND b.task_id = l.task_id
+           JOIN task_controls c ON c.tenant_id = l.tenant_id AND c.task_id = l.task_id
+           JOIN d3_plan_control_bindings pc ON pc.tenant_id = l.tenant_id
+             AND pc.task_id = l.task_id AND pc.plan_hash = l.plan_hash
+           JOIN d3_plan_authorizations auth ON auth.tenant_id = l.tenant_id
+             AND auth.task_id = l.task_id AND auth.plan_hash = l.plan_hash
+           WHERE l.resume_run_id = ? AND l.tenant_id = ? AND l.task_id = ?""",
+        (str(run["run_id"]), str(run["tenant_id"]), str(run["task_id"])),
+    ).fetchone()
+    if link is None:
+        raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+    expected_revision = run["expected_control_revision"]
+    if (
+        str(link["source_kind"]) not in {"INVESTIGATE", "RESUME"}
+        or str(link["source_status"]) != "WAITING_APPROVAL"
+        or str(link["thread_id"]) + "::" + str(link["source_investigation_run_id"])
+            != str(link["source_checkpoint_thread_id"])
+        or str(link["plan_hash"]) != str(link["approved_plan_digest"])
+        or int(link["control_revision"]) != int(link["bound_control_revision"])
+        or expected_revision is None
+        or int(link["control_revision"]) != int(expected_revision)
+        or int(link["control_revision"]) != int(link["current_control_revision"])
+        or link["terminal_state"] != "ACTIVE"
+        or link["pending_critical_message_seq"] is not None
+        or int(link["plan_consumed_message_seq"]) < int(link["applied_critical_message_seq"])
+        or link["eligibility"] != "ACTIVE"
+        or int(link["plan_consumed_message_seq"]) != int(link["source_consumed_message_seq"])
+        or str(link["decision"]) not in {"APPROVED", "REJECTED"}
+    ):
+        raise TaskControlError("TASK_CONTROL_STALE")
+    if str(link["decision"]) == "APPROVED" and str(link["task_status"]) not in {"APPROVED", "INTERRUPTED_RECOVERABLE"}:
+        raise TaskControlError("APPROVAL_RESUME_LINK_INVALID")
+    if str(link["decision"]) == "REJECTED" and str(link["task_status"]) != "COMPLETED":
+        raise TaskControlError("APPROVAL_RESUME_LINK_INVALID")
+    return {key: link[key] for key in link.keys()}
+
+
 def create_session(path: str | Path, identity: TrustedIdentity) -> dict[str, object]:
     initialize(path)
     session_id = f"session-{uuid.uuid4()}"
@@ -711,6 +984,8 @@ def claim_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) -> 
             ).fetchone()
             if active is not None:
                 raise TaskRunBusy()
+            if str(run["kind"]) == "APPROVAL_RESUME":
+                _validate_approval_resume_in_transaction(connection, run)
         now = _utc_now()
         if resumable_chat:
             connection.execute(
@@ -764,6 +1039,8 @@ def resume_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) ->
         ).fetchone()
         if active is not None:
             raise TaskRunBusy()
+        if str(run["kind"]) == "APPROVAL_RESUME":
+            _validate_approval_resume_in_transaction(connection, run)
         connection.execute(
             "UPDATE task_runs SET status = 'RUNNING', ended_at = NULL, blocked_reason = NULL WHERE run_id = ?",
             (run_id,),

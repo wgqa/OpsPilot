@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -21,6 +22,7 @@ from opspilot.domain.task_control import (
     create_session,
     create_task_with_initial_run,
     trusted_identity,
+    submit_web_plan_approval,
 )
 from opspilot.web.auth import (
     COOKIE_NAME,
@@ -31,7 +33,21 @@ from opspilot.web.auth import (
     revoke_session,
     verify_csrf,
 )
-from opspilot.web.schemas import AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest
+from opspilot.web.schemas import AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest, PlanApprovalRequest
+
+
+_M1_05_TEST_FAILPOINT: Callable[[str], None] | None = None
+
+
+def _run_m1_05_test_failpoint(name: str) -> None:
+    """Private subprocess-crash seam; never reachable from HTTP input."""
+    if _M1_05_TEST_FAILPOINT is not None:
+        _M1_05_TEST_FAILPOINT(name)
+    elif (
+        os.environ.get("OPSPILOT_ENABLE_M1_05_FAILPOINTS") == "1"
+        and os.environ.get("OPSPILOT_M1_05_CRASH_AT") == name
+    ):
+        os._exit(86)
 
 
 _STATUS_BY_CODE = {
@@ -56,6 +72,19 @@ _STATUS_BY_CODE = {
     "TASK_ABORTED": 409,
     "TASK_ALREADY_TERMINAL": 409,
     "TASK_CONTROL_STALE": 409,
+    "TASK_APPROVER_REQUIRED": 403,
+    "APPROVAL_SCOPE_DENIED": 403,
+    "APPROVAL_ALREADY_RECORDED": 409,
+    "APPROVAL_RESUME_LINK_MISSING": 409,
+    "APPROVAL_RESUME_LINK_INVALID": 409,
+    "APPROVAL_CHECKPOINT_BINDING_MISSING": 409,
+    "APPROVAL_ALREADY_RECORDED_WITH_DIFFERENT_SCOPE": 409,
+    "PLAN_NOT_CURRENTLY_REVIEWABLE": 409,
+    "PLAN_NOT_ACTIVE": 409,
+    "APPROVAL_TARGET_NOT_FOUND": 409,
+    "PRINCIPAL_NOT_ENABLED_OR_MISMATCHED": 409,
+    "RESOURCE_VERSION_OR_CREDENTIAL_PRECONDITION_FAILED": 409,
+    "TASK_NOT_WAITING_FOR_APPROVAL": 409,
     "TASK_INPUT_PENDING": 409,
     "TASK_REQUIRED_FOR_BUSINESS_RUN": 409,
     "CORRECTION_REQUIRES_TASK": 422,
@@ -351,6 +380,62 @@ def create_app(
 
         require_task_reader(context.identity, task_id)
         return get_task_inspector(resolved_db, context.identity, task_id)
+
+    @app.get("/api/approvals/pending")
+    async def get_pending_approvals(context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+        if context.identity.role != "APPROVER":
+            raise TaskControlError("TASK_APPROVER_REQUIRED")
+        from opspilot.domain.d3 import list_pending_plan_reviews
+
+        return {"items": list_pending_plan_reviews(
+            resolved_db, context.identity.actor_id, context.identity.tenant_id
+        )}
+
+    @app.get("/api/tasks/{task_id}/plans/{plan_hash}/review")
+    async def get_plan_review(
+        task_id: str, plan_hash: str, context: AuthContext = Depends(current_user)
+    ) -> dict[str, Any]:
+        if context.identity.role != "APPROVER":
+            raise TaskControlError("TASK_APPROVER_REQUIRED")
+        from opspilot.domain.d3 import D3PreconditionRejected, D3ScopeDenied, get_plan_review_for_approver
+
+        try:
+            return get_plan_review_for_approver(
+                resolved_db, context.identity.actor_id, context.identity.tenant_id, task_id, plan_hash
+            )
+        except D3ScopeDenied as error:
+            raise TaskControlError("TASK_SCOPE_DENIED") from error
+        except D3PreconditionRejected as error:
+            raise TaskControlError(str(error)) from error
+
+    @app.post("/api/tasks/{task_id}/plans/{plan_hash}/approval")
+    async def post_plan_approval(
+        task_id: str,
+        plan_hash: str,
+        body: PlanApprovalRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> Response:
+        key = require_idempotency_key(idempotency_key)
+        result = submit_web_plan_approval(
+            resolved_db, context.identity, task_id=task_id, plan_hash=plan_hash,
+            decision=body.decision, idempotency_key=key,
+        )
+        _run_m1_05_test_failpoint("approval_committed_before_http_response")
+        replayed = bool(result.get("replayed"))
+        return JSONResponse(result, status_code=200 if replayed else 202)
+
+    @app.get("/api/tasks/{task_id}/outcome")
+    async def get_task_outcome_route(
+        task_id: str, context: AuthContext = Depends(current_user)
+    ) -> dict[str, Any]:
+        require_task_reader(context.identity, task_id)
+        from opspilot.domain.d3 import D3ScopeDenied, get_task_outcome
+
+        try:
+            return get_task_outcome(resolved_db, task_id, context.identity.actor_id)
+        except D3ScopeDenied as error:
+            raise TaskControlError("TASK_SCOPE_DENIED") from error
 
     @app.get("/api/runs/{run_id}")
     async def get_run(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:

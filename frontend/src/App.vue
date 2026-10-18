@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, explainError, type ChatChunk, type Inspector, type MessageItem, type RunItem, type SessionItem } from './api';
+import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type SessionItem, type TaskOutcome } from './api';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -14,6 +14,10 @@ const sessionId = ref('');
 const messages = ref<MessageItem[]>([]);
 const taskId = ref('');
 const inspector = ref<Inspector | null>(null);
+const taskOutcome = ref<TaskOutcome | null>(null);
+const pendingApprovals = ref<PendingApproval[]>([]);
+const selectedReview = ref<PlanReview | null>(null);
+const approvalResult = ref<ApprovalResult | null>(null);
 const sessionEvents = ref<EventItem[]>([]);
 const draft = ref('');
 const initialSymptom = ref('');
@@ -37,6 +41,7 @@ let runPollTimer: number | undefined;
 let seenEventSeq = new Set<number>();
 
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
+const isApprover = computed(() => user.value?.role === 'APPROVER');
 const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run.kind !== 'CHAT_READONLY') ?? null);
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
 const displayStream = computed(() => activeChatRun.value?.status === 'RUNNING' && chunks.value.length > 0);
@@ -52,9 +57,9 @@ function dateLabel(value: unknown): string {
 
 function statusTone(value: unknown): string {
   const status = String(value ?? '').toUpperCase();
-  if (['SUCCEEDED', 'COMPLETED', 'ENABLED', 'ACTIVE', 'APPROVED', 'READY'].includes(status)) return 'good';
+  if (['SUCCEEDED', 'COMPLETED', 'ENABLED', 'ACTIVE', 'APPROVED', 'READY', 'DELIVERED'].includes(status)) return 'good';
   if (['FAILED', 'BLOCKED', 'ABORTED', 'REJECTED', 'DISABLED', 'INCONCLUSIVE'].includes(status)) return 'bad';
-  if (['WAITING_APPROVAL', 'WAITING_INPUT', 'QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE'].includes(status)) return 'warm';
+  if (['WAITING_APPROVAL', 'WAITING_INPUT', 'QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE', 'RECOVERED_NOT_DELIVERED', 'APPROVAL_ACCEPTED'].includes(status)) return 'warm';
   return 'neutral';
 }
 
@@ -65,7 +70,7 @@ function readableStatus(value: unknown): string {
     QUEUED: '排队中', RUNNING: '执行中', SUCCEEDED: '已完成', COMPLETED: '已完成',
     FAILED: '失败', BLOCKED: '已阻止', INCONCLUSIVE: '结论不足', ENABLED: '已启用',
     DISABLED: '已停用', ACTIVE: '生效中', APPROVED: '已批准', REJECTED: '已拒绝',
-    CHAT_READONLY: '只读聊天', INVESTIGATE: '调查',
+    CHAT_READONLY: '只读聊天', INVESTIGATE: '调查', APPROVAL_RESUME: '审批恢复',
   };
   return names[status] ?? status;
 }
@@ -80,7 +85,8 @@ async function login(): Promise<void> {
     csrf.value = result.csrf_token;
     sessionStorage.setItem('opspilot.csrf', result.csrf_token);
     password.value = '';
-    await loadSessions();
+    if (result.role === 'APPROVER') await loadPendingApprovals();
+    else await loadSessions();
     notice.value = '已通过本地可信身份登录。';
   } catch (error) {
     errorMessage.value = explainError(error);
@@ -93,7 +99,8 @@ async function restoreLogin(): Promise<void> {
   try {
     user.value = await api.me();
     if (!csrf.value) notice.value = '登录已恢复；请重新登录一次以继续发送或创建会话。';
-    await loadSessions();
+    if (user.value.role === 'APPROVER') await loadPendingApprovals();
+    else await loadSessions();
   } catch {
     user.value = null;
   }
@@ -113,6 +120,10 @@ async function logout(): Promise<void> {
   sessionId.value = '';
   messages.value = [];
   inspector.value = null;
+  taskOutcome.value = null;
+  pendingApprovals.value = [];
+  selectedReview.value = null;
+  approvalResult.value = null;
 }
 
 async function loadSessions(): Promise<void> {
@@ -120,6 +131,49 @@ async function loadSessions(): Promise<void> {
   sessions.value = response.items;
   if (sessions.value.length > 0 && !sessions.value.some((item) => item.session_id === sessionId.value)) {
     await selectSession(sessions.value[0].session_id);
+  }
+}
+
+async function loadPendingApprovals(): Promise<void> {
+  pendingApprovals.value = (await api.pendingApprovals()).items;
+}
+
+async function selectPendingApproval(item: PendingApproval): Promise<void> {
+  busy.value = true;
+  errorMessage.value = '';
+  approvalResult.value = null;
+  try {
+    selectedReview.value = await api.planReview(item.task_id, item.plan_hash);
+  } catch (error) {
+    selectedReview.value = null;
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function decideApproval(decision: 'APPROVED' | 'REJECTED'): Promise<void> {
+  const review = selectedReview.value;
+  if (!review || !csrf.value || busy.value) return;
+  const action = decision === 'APPROVED' ? '批准' : '拒绝';
+  const confirmed = window.confirm(
+    `${action}当前不可变 Plan ${review.plan_hash.slice(0, 14)}？\n\n` +
+    `目标：${String(review.plan.target_resource_id)}\n动作：REPAIR 与独立 DELIVER\n` +
+    '批准会创建唯一恢复 Run；拒绝会保存拒绝报告且不执行写入。',
+  );
+  if (!confirmed) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    approvalResult.value = await api.submitApproval(review.task_id, review.plan_hash, decision, csrf.value);
+    notice.value = decision === 'APPROVED'
+      ? '批准回执、恢复 Run 与事件已持久受理；受信 Worker 正在恢复原调查图。'
+      : '拒绝回执与恢复 Run 已持久受理；原调查图将写入拒绝报告，不会修复。';
+    await loadPendingApprovals();
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -146,6 +200,7 @@ async function selectSession(value: string): Promise<void> {
   taskId.value = '';
   messages.value = [];
   inspector.value = null;
+  taskOutcome.value = null;
   sessionEvents.value = [];
   chunks.value = [];
   activeChatRun.value = null;
@@ -190,6 +245,7 @@ async function refreshInspector(): Promise<void> {
   if (!taskId.value) return;
   try {
     inspector.value = await api.inspector(taskId.value);
+    if (user.value?.role === 'SUPPORT') taskOutcome.value = await api.outcome(taskId.value);
   } catch (error) {
     if (user.value?.role === 'APPROVER') errorMessage.value = explainError(error);
   }
@@ -348,7 +404,8 @@ function acceptEvent(item: EventItem): void {
   if (item.event_kind === 'CHAT_CHUNK_AVAILABLE' && runId && runId === activeChatRun.value?.run_id) {
     void loadChunks(runId);
   }
-  if (item.event_kind.startsWith('RUN_STATUS_') || item.event_kind === 'CHAT_ANSWER_COMMITTED') {
+  if (item.event_kind.startsWith('RUN_STATUS_') || item.event_kind === 'CHAT_ANSWER_COMMITTED'
+    || ['PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED', 'REPORT_FROZEN', 'DELIVERY_COMMITTED'].includes(item.event_kind)) {
     void refreshSessionMessagesOnly();
     if (taskId.value) void refreshInspector();
   }
@@ -376,6 +433,8 @@ function connectEvents(): void {
     'RUN_STATUS_SUCCEEDED', 'RUN_STATUS_FAILED', 'RUN_STATUS_BLOCKED', 'RUN_STATUS_WAITING_APPROVAL',
     'RUN_STATUS_WAITING_INPUT', 'RUN_STATUS_INTERRUPTED_RECOVERABLE', 'CHAT_CHUNK_AVAILABLE',
     'CHAT_ANSWER_COMMITTED', 'CHAT_ATTEMPT_FAILED', 'RUN_RETRY_INTERRUPTED_RECOVERABLE', 'RUN_RETRY_BLOCKED',
+    'PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED',
+    'REPORT_FROZEN', 'DELIVERY_COMMITTED',
   ]) source.addEventListener(name, listener);
   source.onerror = () => {
     source.close();
@@ -457,6 +516,74 @@ onBeforeUnmount(() => {
         </form>
         <p class="login-footnote">此演示仅绑定 loopback 本机地址，不代表生产 IAM。</p>
         <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}</div>
+      </div>
+    </section>
+
+    <section v-else-if="isApprover" class="approval-center">
+      <div class="approval-heading">
+        <div><span class="eyebrow">INDEPENDENT APPROVER · {{ user.tenant_id }}</span><h1>Plan 审批队列</h1><p>这里只显示当前租户等待审核的不可变计划。审批身份不能访问 Support 会话或代替其修改任务。</p></div>
+        <button class="outline-button" type="button" :disabled="busy" @click="loadPendingApprovals">刷新待办</button>
+      </div>
+      <div class="approval-grid">
+        <section class="approval-queue panel" aria-label="待审批计划">
+          <div class="section-heading"><h2>待处理</h2><span class="section-count">{{ pendingApprovals.length }}</span></div>
+          <div v-if="pendingApprovals.length === 0" class="muted-card">目前没有可审核的 S1 Plan。</div>
+          <button
+            v-for="item in pendingApprovals" :key="`${item.task_id}:${item.plan_hash}`"
+            class="approval-queue-item" :class="{ selected: selectedReview?.plan_hash === item.plan_hash }"
+            :data-plan-hash="item.plan_hash" type="button" :disabled="busy" @click="selectPendingApproval(item)"
+          >
+            <span class="status-badge warm">WAITING_APPROVAL</span>
+            <strong>Task {{ item.task_id.slice(0, 18) }}</strong>
+            <code>Plan {{ item.plan_hash.slice(0, 18) }}</code>
+            <small>{{ item.service_id }} · {{ item.integration_id }} · {{ item.ticket_id }}</small>
+          </button>
+        </section>
+        <section class="approval-review panel" aria-label="Plan 审核详情">
+          <div v-if="selectedReview" data-testid="approval-review">
+            <div class="approval-review-heading"><div><span class="eyebrow">FROZEN PLAN REVIEW</span><h2>核对动作范围</h2></div><span class="status-badge warm">待确认</span></div>
+            <div class="review-identity"><span>Task</span><code>{{ selectedReview.task_id }}</code><span>Plan hash</span><code>{{ selectedReview.plan_hash }}</code></div>
+            <div class="review-facts">
+              <div><span>目标资源</span><b>{{ String(selectedReview.plan.target_resource_id) }}</b></div>
+              <div><span>服务 / 集成</span><b>{{ String(selectedReview.plan.service_id) }} / {{ String(selectedReview.plan.integration_id) }}</b></div>
+              <div><span>主体</span><b>{{ String(selectedReview.plan.principal_id) }}</b></div>
+              <div><span>工单</span><b>{{ String(selectedReview.plan.ticket_id) }}</b></div>
+              <div><span>凭证引用变更</span><b>{{ String(selectedReview.plan.old_credential_ref) }} → {{ String(selectedReview.plan.new_credential_ref) }}</b></div>
+              <div><span>配置版本</span><b>{{ String(selectedReview.plan.expected_config_version) }} → {{ String((selectedReview.current_state.current_versions as Record<string, unknown> | null)?.config_version ?? '未知') }}</b></div>
+              <div><span>主体 / 策略版本</span><b>{{ String(selectedReview.plan.expected_principal_version) }} / {{ String(selectedReview.plan.expected_auth_policy_version) }}</b></div>
+              <div><span>任务控制版本</span><b>{{ String(selectedReview.current_state.control_revision) }}</b></div>
+              <div><span>当前授权状态</span><b>{{ selectedReview.current_state.version_compatible ? '版本匹配，可审批' : '版本已变化，禁止批准' }}</b></div>
+            </div>
+            <div v-if="!selectedReview.current_state.version_compatible" class="alert warm-alert" role="status">
+              当前资源与冻结 Plan 不兼容：{{ String(selectedReview.current_state.version_block_reason ?? 'PLAN_VERSION_MISMATCH') }}。可以拒绝此 Plan；批准会被服务端拒绝。
+            </div>
+            <div class="review-evidence"><div class="section-heading"><h3>Plan Evidence 引用</h3><span class="section-count">{{ selectedReview.evidence.length }}</span></div>
+              <div v-for="item in selectedReview.evidence" :key="String(item.evidence_id)" class="review-evidence-item">
+                <strong>{{ String(item.fact_type) }}</strong><code>{{ String(item.evidence_id) }}</code>
+                <small>observed_versions {{ JSON.stringify(item.observed_versions) }}</small>
+                <small>{{ JSON.stringify(item.facts) }}</small>
+              </div>
+            </div>
+            <div class="approval-scope-warning">批准范围：一次配置 REPAIR 与独立 DELIVER。审批不会直接执行动作；恢复由可信 Worker 使用原调查 Graph 和服务端 executor 完成。</div>
+            <div v-if="approvalResult" class="approval-result" data-testid="approval-result">
+              <strong>{{ approvalResult.decision === 'APPROVED' ? '批准已持久受理' : '拒绝已持久受理' }}</strong>
+              <small>Approval {{ approvalResult.approval_id }}</small>
+              <small>恢复 Run {{ approvalResult.resume_run_id }} · {{ approvalResult.replayed ? '幂等回查' : '已排队' }}</small>
+              <p v-if="approvalResult.decision === 'REJECTED'">该决定不会创建 REPAIR 或 DELIVER 写入。</p>
+            </div>
+            <div v-else class="approval-buttons">
+              <button class="outline-button" type="button" data-testid="reject-plan" :disabled="busy || !csrf" @click="decideApproval('REJECTED')">拒绝 Plan</button>
+              <button
+                class="primary-button" type="button" data-testid="approve-plan"
+                :disabled="busy || !csrf || !selectedReview.current_state.version_compatible"
+                @click="decideApproval('APPROVED')"
+              >批准并恢复原调查图 <span>→</span></button>
+            </div>
+          </div>
+          <div v-else class="approval-empty"><div class="inspector-empty-icon">◈</div><h2>选择一个待审核 Plan</h2><p>审核视图只包含最小任务范围、当前 Domain 版本和 Plan 所引用的 MCP Evidence，不提供聊天记录或凭证秘密。</p></div>
+          <div v-if="notice" class="notice-line" role="status">{{ notice }}</div>
+          <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}</div>
+        </section>
       </div>
     </section>
 
@@ -565,9 +692,21 @@ onBeforeUnmount(() => {
           </div>
           <div class="inspector-section">
             <div class="section-heading"><h3>计划与授权</h3><span class="read-only-label">只读</span></div>
-            <div class="plan-card"><div class="plan-row"><span>最新 Plan</span><b>{{ inspector.trusted_state.plan ? String((inspector.trusted_state.plan as Record<string, unknown>).plan_hash).slice(0, 14) : '尚未生成' }}</b></div><div class="plan-row"><span>审批状态</span><b>{{ readableStatus((inspector.trusted_state.plan as Record<string, unknown> | null)?.approval_decision ?? 'UNKNOWN') }}</b></div><p v-if="currentTaskStatus === 'WAITING_APPROVAL'">Task 正在等待可信审批。M1-04 只提供查看，不在聊天或此页面批准动作。</p><p v-else-if="currentTaskStatus">业务状态由可信 Domain 控制。用户线索与只读回答都不会改变审批资格或写入权限。</p>
+            <div class="plan-card"><div class="plan-row"><span>最新 Plan</span><b>{{ inspector.trusted_state.plan ? String((inspector.trusted_state.plan as Record<string, unknown>).plan_hash).slice(0, 14) : '尚未生成' }}</b></div><div class="plan-row"><span>审批状态</span><b>{{ readableStatus((inspector.trusted_state.plan as Record<string, unknown> | null)?.approval_decision ?? 'UNKNOWN') }}</b></div><p v-if="currentTaskStatus === 'WAITING_APPROVAL'">Task 正等待同租户独立 APPROVER 审批。聊天文本不能代签或授予动作权限。</p><p v-else-if="currentTaskStatus">业务状态由可信 Domain 控制。用户线索与只读回答都不会改变审批资格或写入权限。</p>
               <div v-for="item in inspector.plan_history" :key="String(item.plan_hash)" class="plan-history-row"><code>{{ String(item.plan_hash).slice(0, 14) }}</code><span>{{ readableStatus(item.eligibility) }} · {{ readableStatus(item.approval_decision ?? 'UNKNOWN') }}</span></div>
             </div>
+          </div>
+          <div v-if="taskOutcome" class="inspector-section outcome-section" data-testid="task-outcome">
+            <div class="section-heading"><h3>Domain 业务回执</h3><span class="status-badge" :class="statusTone(taskOutcome.business_outcome)">{{ String(taskOutcome.business_outcome) }}</span></div>
+            <div v-if="taskOutcome.business_outcome === 'DELIVERED'" class="outcome-message good-outcome">同身份业务调用已恢复，冻结报告和工单交付回执均已核对。</div>
+            <div v-else-if="taskOutcome.business_outcome === 'RECOVERED_NOT_DELIVERED'" class="outcome-message warm-outcome">业务已在线验证恢复，但工单尚未完成交付。</div>
+            <div v-else-if="taskOutcome.business_outcome === 'REJECTED'" class="outcome-message warm-outcome">审批者已拒绝；拒绝报告来自原调查图，没有执行业务写入。</div>
+            <div v-if="taskOutcome.approval" class="outcome-row">审批 <code>{{ String(taskOutcome.approval.approval_id) }}</code><span>{{ String(taskOutcome.approval.approver_id) }} · {{ String(taskOutcome.approval.decision) }}</span></div>
+            <div v-if="taskOutcome.repair" class="outcome-row">REPAIR <code>{{ String(taskOutcome.repair.ledger_id) }}</code><span>配置 v{{ String(taskOutcome.repair.before_version) }} → v{{ String(taskOutcome.repair.after_version) }}</span></div>
+            <div v-if="taskOutcome.verification" class="outcome-row">在线验证 <code>{{ String(taskOutcome.verification.verification_id) }}</code><span>HTTP {{ String(taskOutcome.verification.response_status) }} · {{ taskOutcome.verification.recovery_verified ? '业务字段通过' : '未恢复' }}</span></div>
+            <div v-if="taskOutcome.frozen_report" class="outcome-row">冻结报告 <code>{{ String(taskOutcome.frozen_report.report_ref) }}</code><span>v{{ String(taskOutcome.frozen_report.report_version) }}</span></div>
+            <div v-if="taskOutcome.delivery" class="outcome-row">DELIVER <code>{{ String(taskOutcome.delivery.delivery_id) }}</code><span>工单条目 {{ String(taskOutcome.delivery.ticket_entry_id) }}</span></div>
+            <div v-if="taskOutcome.local_report" class="outcome-row">拒绝报告 <code>{{ String(taskOutcome.local_report.report_ref) }}</code><span>{{ String(taskOutcome.local_report.outcome) }}</span></div>
           </div>
           <div class="inspector-section input-provenance-section">
             <div class="section-heading"><h3>用户线索 Provenance</h3><span class="read-only-label">未验证</span></div>
@@ -601,7 +740,7 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>新建 S1 调查并输入真实故障描述后，这里会显示来源引用、可信 Evidence 和确定性 Gate。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = true">新建调查任务</button></div>
-        <footer class="inspector-footer"><span>OpsPilot vNext · M1-04</span><span>LOOPBACK ONLY</span></footer>
+        <footer class="inspector-footer"><span>OpsPilot vNext · M1-05</span><span>LOOPBACK ONLY</span></footer>
       </aside>
     </section>
   </main>

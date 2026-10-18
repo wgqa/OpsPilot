@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -34,6 +35,12 @@ def _run_d4_test_failpoint(name: str, connection: sqlite3.Connection | None = No
     """Private monkeypatch seam for subprocess tests; never exposed to Agent tools or CLI."""
     if _D4_TEST_FAILPOINT is not None:
         _D4_TEST_FAILPOINT(name, connection)
+    elif (
+        name == "repair_after_commit_before_response"
+        and os.environ.get("OPSPILOT_ENABLE_M1_05_FAILPOINTS") == "1"
+        and os.environ.get("OPSPILOT_M1_05_CRASH_AT") == name
+    ):
+        os._exit(87)
 
 
 class D3Error(RuntimeError):
@@ -411,6 +418,29 @@ def cancel_plan(path: str | Path, task_id: str, plan_hash: str, actor_id: str, r
                 (generation, actor_id, reason.strip()[:500], now, binding["tenant_id"], task_id, plan_hash),
             )
             _write_plan_history(connection, str(binding["tenant_id"]), task_id, plan_hash, "CANCELLED", generation, actor_id, reason.strip()[:500])
+            resumable_runs = connection.execute(
+                """SELECT r.run_id, r.tenant_id, r.session_id FROM approval_resume_links l
+                   JOIN task_runs r ON r.run_id = l.resume_run_id
+                   WHERE l.tenant_id = ? AND l.task_id = ? AND l.plan_hash = ?
+                     AND r.status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')""",
+                (binding["tenant_id"], task_id, plan_hash),
+            ).fetchall()
+            now_for_runs = utc_now()
+            for resume_run in resumable_runs:
+                connection.execute(
+                    """UPDATE task_runs SET status = 'BLOCKED', ended_at = ?,
+                              blocked_reason = 'PLAN_CANCELLED' WHERE run_id = ?
+                       AND status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')""",
+                    (now_for_runs, resume_run["run_id"]),
+                )
+                write_outbox_event(
+                    connection, tenant_id=str(resume_run["tenant_id"]), task_id=task_id,
+                    session_id=str(resume_run["session_id"]), source_kind="RUN",
+                    source_id=str(resume_run["run_id"]), event_kind="RUN_STATUS_BLOCKED",
+                    payload={"run_id": str(resume_run["run_id"]), "run_status": "BLOCKED",
+                             "reason_code": "PLAN_CANCELLED"},
+                    created_at=now_for_runs,
+                )
             committed = connection.execute(
                 "SELECT 1 FROM d3_action_ledgers WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? AND status = 'COMMITTED' LIMIT 1",
                 (binding["tenant_id"], task_id, plan_hash),
@@ -499,70 +529,253 @@ def submit_plan_approval(
         raise ValueError("Approval decision must be APPROVED or REJECTED.")
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        binding = _binding_for_thread(connection, thread_id)
-        _require_approver(connection, approver_id, str(binding["tenant_id"]))
-        if approver_id == binding["actor_id"]:
-            raise D3ScopeDenied("The submitter cannot approve their own Plan.")
-        plan = _load_plan(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
-        auth = _authorization(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
-        actions = ["REPAIR", "DELIVER"]
-        approval_scope = {
-            "plan_hash": plan_hash,
-            "target_resource_id": plan["target_resource_id"],
-            "environment": plan["environment"],
-            "action_kinds": actions,
-            "ticket_id": plan["ticket_id"],
-            "plan_summary_digest": digest_json({
-                key: plan[key] for key in ("repair_action_type", "old_credential_ref", "new_credential_ref", "expected_config_version", "expected_principal_version", "expected_auth_policy_version", "verification_contract", "ticket_id")
-            }),
-        }
-        scope_json = canonical_json(approval_scope)
-        existing = connection.execute(
-            "SELECT * FROM d3_approvals WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?",
-            (binding["tenant_id"], binding["task_id"], plan_hash),
+        return _submit_plan_approval_in_transaction(
+            connection, thread_id, approver_id, plan_hash, decision
+        )
+
+
+def _submit_plan_approval_in_transaction(
+    connection: sqlite3.Connection,
+    thread_id: str,
+    approver_id: str,
+    plan_hash: str,
+    decision: Literal["APPROVED", "REJECTED"],
+    *,
+    resume_run_id: str | None = None,
+) -> dict[str, object]:
+    """Persist the original D3 approval contract in a caller-owned transaction."""
+    if decision not in {"APPROVED", "REJECTED"}:
+        raise ValueError("Approval decision must be APPROVED or REJECTED.")
+    binding = _binding_for_thread(connection, thread_id)
+    _require_approver(connection, approver_id, str(binding["tenant_id"]))
+    if approver_id == binding["actor_id"]:
+        raise D3ScopeDenied("The submitter cannot approve their own Plan.")
+    plan = _load_plan(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
+    auth = _authorization(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
+    actions = ["REPAIR", "DELIVER"]
+    approval_scope = {
+        "plan_hash": plan_hash,
+        "target_resource_id": plan["target_resource_id"],
+        "environment": plan["environment"],
+        "action_kinds": actions,
+        "ticket_id": plan["ticket_id"],
+        "plan_summary_digest": digest_json({
+            key: plan[key] for key in ("repair_action_type", "old_credential_ref", "new_credential_ref", "expected_config_version", "expected_principal_version", "expected_auth_policy_version", "verification_contract", "ticket_id")
+        }),
+    }
+    scope_json = canonical_json(approval_scope)
+    existing = connection.execute(
+        "SELECT * FROM d3_approvals WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?",
+        (binding["tenant_id"], binding["task_id"], plan_hash),
+    ).fetchone()
+    if existing is not None:
+        if existing["approver_id"] != approver_id or existing["decision"] != decision or existing["approval_scope_json"] != scope_json:
+            raise D3PreconditionRejected("APPROVAL_ALREADY_RECORDED_WITH_DIFFERENT_SCOPE")
+        # Exact approval replay is a history read, never a new grant.
+        return _row(existing) or {}
+    _assert_plan_control(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
+    if auth is None or auth["eligibility"] != "ACTIVE":
+        raise D3PreconditionRejected("PLAN_NOT_ACTIVE")
+    if binding["status"] != "WAITING_APPROVAL":
+        raise D3PreconditionRejected("TASK_NOT_WAITING_FOR_APPROVAL")
+    approval_id = f"approval-{uuid.uuid4()}"
+    decided_at = utc_now()
+    connection.execute(
+        """INSERT INTO d3_approvals
+           (approval_id, tenant_id, task_id, plan_hash, approver_id, approval_scope_json,
+            approved_plan_digest, target_resource_id, environment, action_kinds_json, decision, decided_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (approval_id, binding["tenant_id"], binding["task_id"], plan_hash, approver_id,
+         scope_json, plan_hash, plan["target_resource_id"], plan["environment"],
+         canonical_json(actions), decision, decided_at),
+    )
+    if decision == "APPROVED":
+        for kind in ("REPAIR", "DELIVER"):
+            connection.execute(
+                """INSERT INTO d3_action_permissions
+                   (tenant_id, task_id, plan_hash, approval_id, action_kind, state, changed_at)
+                   VALUES (?, ?, ?, ?, ?, 'AVAILABLE', ?)""",
+                (binding["tenant_id"], binding["task_id"], plan_hash, approval_id, kind, decided_at),
+            )
+        connection.execute("UPDATE task_bindings SET status = 'APPROVED' WHERE task_id = ?", (binding["task_id"],))
+    else:
+        connection.execute("UPDATE task_bindings SET status = 'COMPLETED' WHERE task_id = ?", (binding["task_id"],))
+    result = _row(connection.execute("SELECT * FROM d3_approvals WHERE approval_id = ?", (approval_id,)).fetchone()) or {}
+    payload: dict[str, object] = {
+        "task_id": str(binding["task_id"]), "plan_hash": plan_hash,
+        "approval_id": approval_id, "decision": decision,
+    }
+    if resume_run_id is not None:
+        payload["resume_run_id"] = resume_run_id
+    write_outbox_event(
+        connection, tenant_id=str(binding["tenant_id"]), task_id=str(binding["task_id"]),
+        source_kind="APPROVAL", source_id=approval_id,
+        event_kind="PLAN_APPROVED" if decision == "APPROVED" else "PLAN_REJECTED",
+        payload=payload,
+    )
+    return result
+
+
+def list_pending_plan_reviews(path: str | Path, actor_id: str, tenant_id: str) -> list[dict[str, object]]:
+    """Return only active, current approval work for a trusted tenant approver."""
+    with connect(path) as connection:
+        _require_approver(connection, actor_id, tenant_id)
+        rows = connection.execute(
+            """SELECT p.task_id, p.plan_hash, p.plan_version, p.created_at,
+                      b.service_id, b.integration_id, b.ticket_id,
+                      c.control_revision, c.pending_critical_message_seq
+               FROM d3_plans p
+               JOIN task_bindings b ON b.task_id = p.task_id AND b.tenant_id = p.tenant_id
+               JOIN task_controls c ON c.task_id = b.task_id AND c.tenant_id = b.tenant_id
+               JOIN d3_plan_authorizations a ON a.tenant_id = p.tenant_id
+                 AND a.task_id = p.task_id AND a.plan_hash = p.plan_hash
+               JOIN d3_plan_control_bindings pc ON pc.tenant_id = p.tenant_id
+                 AND pc.task_id = p.task_id AND pc.plan_hash = p.plan_hash
+               JOIN task_runs r ON r.run_id = pc.task_run_id AND r.task_id = p.task_id
+                 AND r.tenant_id = p.tenant_id
+               WHERE p.tenant_id = ? AND b.status = 'WAITING_APPROVAL'
+                 AND c.terminal_state = 'ACTIVE' AND c.pending_critical_message_seq IS NULL
+                 AND c.control_revision = pc.bound_control_revision
+                 AND c.applied_critical_message_seq <= pc.consumed_message_seq
+                 AND a.eligibility = 'ACTIVE' AND r.status = 'WAITING_APPROVAL'
+                 AND NOT EXISTS (SELECT 1 FROM d3_approvals ap WHERE ap.tenant_id = p.tenant_id
+                   AND ap.task_id = p.task_id AND ap.plan_hash = p.plan_hash)
+               ORDER BY p.created_at, p.task_id, p.plan_hash LIMIT 100""",
+            (tenant_id,),
+        ).fetchall()
+    return [{key: row[key] for key in row.keys()} for row in rows]
+
+
+def get_plan_review_for_approver(
+    path: str | Path, actor_id: str, tenant_id: str, task_id: str, plan_hash: str
+) -> dict[str, object]:
+    """Return the minimum sanitized review snapshot; never expose chat or secrets."""
+    with connect(path) as connection:
+        _require_approver(connection, actor_id, tenant_id)
+        binding = _row(connection.execute(
+            "SELECT * FROM task_bindings WHERE tenant_id = ? AND task_id = ?",
+            (tenant_id, task_id),
+        ).fetchone())
+        if binding is None:
+            raise D3ScopeDenied("Task is outside the approver tenant.")
+        control = _row(connection.execute(
+            "SELECT * FROM task_controls WHERE tenant_id = ? AND task_id = ?",
+            (tenant_id, task_id),
+        ).fetchone())
+        auth = _authorization(connection, tenant_id, task_id, plan_hash)
+        plan = _load_plan(connection, tenant_id, task_id, plan_hash)
+        plan_binding = connection.execute(
+            "SELECT * FROM d3_plan_control_bindings WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?",
+            (tenant_id, task_id, plan_hash),
         ).fetchone()
-        if existing is not None:
-            if existing["approver_id"] != approver_id or existing["decision"] != decision or existing["approval_scope_json"] != scope_json:
-                raise D3PreconditionRejected("APPROVAL_ALREADY_RECORDED_WITH_DIFFERENT_SCOPE")
-            # Exact approval replay is a history read, never a new grant. Return
-            # it even if Task control later invalidated its permissions.
-            return _row(existing) or {}
-        _assert_plan_control(connection, str(binding["tenant_id"]), str(binding["task_id"]), plan_hash)
-        if auth is None or auth["eligibility"] != "ACTIVE":
-            raise D3PreconditionRejected("PLAN_NOT_ACTIVE")
-        if binding["status"] != "WAITING_APPROVAL":
-            raise D3PreconditionRejected("TASK_NOT_WAITING_FOR_APPROVAL")
-        approval_id = f"approval-{uuid.uuid4()}"
-        decided_at = utc_now()
-        connection.execute(
-            """INSERT INTO d3_approvals
-               (approval_id, tenant_id, task_id, plan_hash, approver_id, approval_scope_json,
-                approved_plan_digest, target_resource_id, environment, action_kinds_json, decision, decided_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (approval_id, binding["tenant_id"], binding["task_id"], plan_hash, approver_id,
-             scope_json, plan_hash, plan["target_resource_id"], plan["environment"],
-             canonical_json(actions), decision, decided_at),
+        if (
+            control is None or plan_binding is None or auth is None
+            or auth["eligibility"] != "ACTIVE"
+            or binding["status"] != "WAITING_APPROVAL"
+            or control["terminal_state"] != "ACTIVE"
+            or control["pending_critical_message_seq"] is not None
+            or int(control["control_revision"]) != int(plan_binding["bound_control_revision"])
+        ):
+            raise D3PreconditionRejected("PLAN_NOT_CURRENTLY_REVIEWABLE")
+        versions = connection.execute(
+            """SELECT i.config_version, i.credential_ref, i.principal_id,
+                      p.principal_version, p.status AS principal_status,
+                      a.policy_version, a.accepted_credential_ref
+               FROM integrations i JOIN principals p ON p.tenant_id = i.tenant_id
+                 AND p.principal_id = i.principal_id
+               JOIN services s ON s.tenant_id = i.tenant_id AND s.integration_id = i.integration_id
+               JOIN auth_policies a ON a.tenant_id = s.tenant_id AND a.service_id = s.service_id
+               WHERE i.tenant_id = ? AND i.integration_id = ? AND s.service_id = ?""",
+            (tenant_id, plan["integration_id"], plan["service_id"]),
+        ).fetchone()
+        version_compatible = bool(
+            versions is not None
+            and str(versions["principal_id"]) == str(plan["principal_id"])
+            and str(versions["principal_status"]) == "ENABLED"
+            and int(versions["config_version"]) == int(plan["expected_config_version"])
+            and int(versions["principal_version"]) == int(plan["expected_principal_version"])
+            and int(versions["policy_version"]) == int(plan["expected_auth_policy_version"])
+            and str(versions["credential_ref"]) == str(plan["old_credential_ref"])
+            and str(versions["accepted_credential_ref"]) == str(plan["new_credential_ref"])
         )
-        if decision == "APPROVED":
-            for kind in ("REPAIR", "DELIVER"):
-                connection.execute(
-                    """INSERT INTO d3_action_permissions
-                       (tenant_id, task_id, plan_hash, approval_id, action_kind, state, changed_at)
-                       VALUES (?, ?, ?, ?, ?, 'AVAILABLE', ?)""",
-                    (binding["tenant_id"], binding["task_id"], plan_hash, approval_id, kind, decided_at),
-                )
-            connection.execute("UPDATE task_bindings SET status = 'APPROVED' WHERE task_id = ?", (binding["task_id"],))
+        if versions is None:
+            compatibility_reason = "APPROVAL_TARGET_NOT_FOUND"
+        elif str(versions["principal_id"]) != str(plan["principal_id"]):
+            compatibility_reason = "PRINCIPAL_BINDING_CHANGED"
+        elif str(versions["principal_status"]) != "ENABLED":
+            compatibility_reason = "PRINCIPAL_NOT_ENABLED_OR_MISMATCHED"
+        elif (
+            int(versions["config_version"]) != int(plan["expected_config_version"])
+            or int(versions["principal_version"]) != int(plan["expected_principal_version"])
+            or int(versions["policy_version"]) != int(plan["expected_auth_policy_version"])
+            or str(versions["credential_ref"]) != str(plan["old_credential_ref"])
+            or str(versions["accepted_credential_ref"]) != str(plan["new_credential_ref"])
+        ):
+            compatibility_reason = "RESOURCE_VERSION_OR_CREDENTIAL_PRECONDITION_FAILED"
         else:
-            connection.execute("UPDATE task_bindings SET status = 'COMPLETED' WHERE task_id = ?", (binding["task_id"],))
-        result = _row(connection.execute("SELECT * FROM d3_approvals WHERE approval_id = ?", (approval_id,)).fetchone())
-        write_outbox_event(
-            connection, tenant_id=str(binding["tenant_id"]), task_id=str(binding["task_id"]),
-            source_kind="APPROVAL", source_id=approval_id,
-            event_kind="PLAN_APPROVED" if decision == "APPROVED" else "PLAN_REJECTED",
-            payload={"task_id": str(binding["task_id"]), "plan_hash": plan_hash,
-                     "approval_id": approval_id, "decision": decision},
+            compatibility_reason = None
+        evidence: list[dict[str, object]] = []
+        evidence_ids = [str(value) for value in plan.get("required_evidence_ids", [])]
+        if evidence_ids:
+            placeholders = ",".join("?" for _ in evidence_ids)
+            evidence_rows = connection.execute(
+                f"""SELECT evidence_id, fact_type, fetched_at, observed_versions_json, facts_json
+                    FROM d2_evidence WHERE tenant_id = ? AND task_id = ?
+                    AND evidence_id IN ({placeholders}) ORDER BY fetched_at, evidence_id""",
+                (tenant_id, task_id, *evidence_ids),
+            ).fetchall()
+            safe_fact_keys = {
+                "service_id", "integration_id", "principal_id", "config_version",
+                "credential_ref", "status", "principal_version", "policy_version",
+                "accepted_credential_ref", "route", "response_status", "http_status",
+                "order_id", "order_status", "result_code",
+            }
+            for row in evidence_rows:
+                facts = json.loads(str(row["facts_json"]))
+                versions_json = json.loads(str(row["observed_versions_json"]))
+                evidence.append({
+                    "evidence_id": str(row["evidence_id"]),
+                    "fact_type": str(row["fact_type"]),
+                    "fetched_at": str(row["fetched_at"]),
+                    "observed_versions": versions_json,
+                    "facts": {key: value for key, value in facts.items() if key in safe_fact_keys},
+                })
+        plan_fields = (
+            "plan_id", "plan_version", "plan_hash", "service_id", "integration_id",
+            "principal_id", "target_resource_id", "environment", "repair_action_type",
+            "old_credential_ref", "new_credential_ref", "expected_config_version",
+            "expected_principal_version", "expected_auth_policy_version", "ticket_id",
+            "verification_contract", "required_evidence_ids", "allowed_delivery_fields",
         )
-    return result or {}
+        plan_view = {key: plan[key] for key in plan_fields if key in plan}
+        return {
+            "task_id": task_id,
+            "plan_hash": plan_hash,
+            "plan": plan_view,
+            "current_state": {
+                "task_status": str(binding["status"]),
+                "terminal_state": str(control["terminal_state"]),
+                "control_revision": int(control["control_revision"]),
+                "pending_critical_message_seq": control["pending_critical_message_seq"],
+                "plan_eligibility": str(auth["eligibility"]),
+                "current_versions": ({
+                    "config_version": int(versions["config_version"]),
+                    "principal_version": int(versions["principal_version"]),
+                    "auth_policy_version": int(versions["policy_version"]),
+                    "credential_ref": str(versions["credential_ref"]),
+                    "accepted_credential_ref": str(versions["accepted_credential_ref"]),
+                    "principal_status": str(versions["principal_status"]),
+                } if versions is not None else None),
+                "version_compatible": version_compatible,
+                "version_block_reason": compatibility_reason,
+            },
+            "evidence": evidence,
+            "scope": {
+                "actions": ["REPAIR", "DELIVER"],
+                "executor": "trusted service configuration",
+                "secrets_exposed": False,
+            },
+        }
 
 
 def _approval_for(connection: sqlite3.Connection, tenant_id: str, task_id: str, plan_hash: str) -> dict[str, object]:
@@ -1428,4 +1641,138 @@ def get_task_action_state(path: str | Path, task_id: str, actor_id: str) -> dict
         "delivery_records": [_row(row) for row in deliveries],
         "local_reports": [_row(row) for row in local_reports],
         "ticket_entries": get_task_ticket_entries(path, task_id, actor_id),
+    }
+
+
+def get_task_outcome(path: str | Path, task_id: str, actor_id: str) -> dict[str, object]:
+    """Return a small read-only projection of persisted approval and S1 receipts."""
+    binding = get_task_binding(path, task_id)
+    with connect(path) as connection:
+        operator = connection.execute(
+            "SELECT tenant_id, role FROM trusted_operators WHERE actor_id = ?", (actor_id,)
+        ).fetchone()
+        if (
+            operator is None or str(operator["tenant_id"]) != str(binding["tenant_id"])
+            or str(operator["role"]) != "SUPPORT" or actor_id != str(binding["actor_id"])
+        ):
+            raise D3ScopeDenied("Task outcome read scope check failed.")
+        plan = connection.execute(
+            """SELECT p.plan_hash, p.plan_version, a.eligibility
+               FROM d3_plans p LEFT JOIN d3_plan_authorizations a
+                 ON a.tenant_id = p.tenant_id AND a.task_id = p.task_id AND a.plan_hash = p.plan_hash
+               WHERE p.tenant_id = ? AND p.task_id = ?
+               ORDER BY p.plan_version DESC LIMIT 1""",
+            (binding["tenant_id"], task_id),
+        ).fetchone()
+        if plan is None:
+            return {"task_id": task_id, "task_status": str(binding["status"]), "business_outcome": "NO_PLAN"}
+        plan_hash = str(plan["plan_hash"])
+        approval = connection.execute(
+            """SELECT approval_id, approver_id, decision, decided_at FROM d3_approvals
+               WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+            (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+        resume_link = connection.execute(
+            """SELECT source_investigation_run_id, source_checkpoint_thread_id, resume_run_id,
+                      control_revision FROM approval_resume_links
+               WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+            (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+        resume_run = None
+        if resume_link is not None:
+            resume_run = connection.execute(
+                "SELECT run_id, kind, status, blocked_reason FROM task_runs WHERE run_id = ?",
+                (resume_link["resume_run_id"],),
+            ).fetchone()
+        repair = connection.execute(
+            """SELECT ledger_id, action_id, status, before_version, after_version, result_json
+               FROM d3_action_ledgers WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?
+                 AND action_kind = 'REPAIR' ORDER BY committed_at DESC LIMIT 1""",
+            (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+        deliver = connection.execute(
+            """SELECT ledger_id, action_id, status, result_json FROM d3_action_ledgers
+               WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? AND action_kind = 'DELIVER'
+               ORDER BY committed_at DESC LIMIT 1""",
+            (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+        verification = connection.execute(
+            """SELECT verification_id, response_status, recovery_verified, business_assertions_json
+               FROM d3_verification_receipts WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?
+               ORDER BY observed_at DESC LIMIT 1""",
+            (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+        report = connection.execute(
+            """SELECT report_ref, report_version, content_digest FROM d3_report_artifacts
+               WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? ORDER BY report_version DESC LIMIT 1""",
+            (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+        delivery = connection.execute(
+            """SELECT delivery_id, ticket_id, ticket_entry_id, report_ref, committed_at
+               FROM d3_delivery_records WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?
+               ORDER BY committed_at DESC LIMIT 1""",
+            (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+        ticket_entry_count = int(connection.execute(
+            "SELECT COUNT(*) FROM d3_ticket_resolution_entries WHERE tenant_id = ? AND task_id = ?",
+            (binding["tenant_id"], task_id),
+        ).fetchone()[0])
+        local_report = connection.execute(
+            """SELECT report_ref, outcome, content_digest FROM d3_local_reports
+               WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? ORDER BY created_at DESC LIMIT 1""",
+            (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+
+    approval_value = ({key: approval[key] for key in approval.keys()} if approval else None)
+    repair_value = None
+    if repair is not None:
+        result = json.loads(str(repair["result_json"]))
+        repair_value = {
+            "ledger_id": str(repair["ledger_id"]), "action_id": str(repair["action_id"]),
+            "status": str(repair["status"]), "before_version": repair["before_version"],
+            "after_version": repair["after_version"],
+            "credential_ref_before": result.get("credential_ref_before"),
+            "credential_ref_after": result.get("credential_ref_after"),
+        }
+    deliver_value = None
+    if deliver is not None:
+        receipt = json.loads(str(deliver["result_json"]))
+        deliver_value = {
+            "ledger_id": str(deliver["ledger_id"]), "action_id": str(deliver["action_id"]),
+            "status": str(deliver["status"]), "ticket_id": receipt.get("ticket_id"),
+            "ticket_entry_id": receipt.get("ticket_entry_id"),
+        }
+    verification_value = None
+    if verification is not None:
+        verification_value = {
+            "verification_id": str(verification["verification_id"]),
+            "response_status": int(verification["response_status"]),
+            "recovery_verified": bool(verification["recovery_verified"]),
+            "business_assertions": json.loads(str(verification["business_assertions_json"])),
+        }
+    if delivery is not None:
+        outcome = "DELIVERED"
+    elif repair is not None and verification is not None and bool(verification["recovery_verified"]):
+        outcome = "RECOVERED_NOT_DELIVERED"
+    elif approval is not None and str(approval["decision"]) == "REJECTED":
+        outcome = "REJECTED"
+    elif approval is not None and str(approval["decision"]) == "APPROVED":
+        outcome = "APPROVAL_ACCEPTED"
+    else:
+        outcome = "WAITING_APPROVAL" if str(binding["status"]) == "WAITING_APPROVAL" else "IN_PROGRESS"
+    return {
+        "task_id": task_id,
+        "task_status": str(binding["status"]),
+        "plan": {"plan_hash": plan_hash, "plan_version": int(plan["plan_version"]),
+                 "eligibility": str(plan["eligibility"]) if plan["eligibility"] else None},
+        "approval": approval_value,
+        "resume_link": ({key: resume_link[key] for key in resume_link.keys()} if resume_link else None),
+        "resume_run": ({key: resume_run[key] for key in resume_run.keys()} if resume_run else None),
+        "repair": repair_value,
+        "verification": verification_value,
+        "frozen_report": ({key: report[key] for key in report.keys()} if report else None),
+        "delivery": ({key: delivery[key] for key in delivery.keys()} if delivery else None),
+        "local_report": ({key: local_report[key] for key in local_report.keys()} if local_report else None),
+        "ticket_entry_count": ticket_entry_count,
+        "business_outcome": outcome,
     }

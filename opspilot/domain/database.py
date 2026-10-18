@@ -427,6 +427,21 @@ CREATE TABLE IF NOT EXISTS d3_approvals (
     decided_at TEXT NOT NULL,
     UNIQUE (tenant_id, task_id, plan_hash)
 );
+CREATE TABLE IF NOT EXISTS approval_resume_links (
+    approval_id TEXT PRIMARY KEY REFERENCES d3_approvals(approval_id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    source_investigation_run_id TEXT NOT NULL REFERENCES task_runs(run_id),
+    source_checkpoint_thread_id TEXT NOT NULL,
+    resume_run_id TEXT NOT NULL UNIQUE REFERENCES task_runs(run_id),
+    control_revision INTEGER NOT NULL CHECK (control_revision >= 0),
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, task_id, plan_hash),
+    FOREIGN KEY (tenant_id, task_id, plan_hash)
+        REFERENCES d3_plans(tenant_id, task_id, plan_hash) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_approval_resume_task ON approval_resume_links(tenant_id, task_id, created_at);
 CREATE TABLE IF NOT EXISTS d3_action_permissions (
     tenant_id TEXT NOT NULL,
     task_id TEXT NOT NULL,
@@ -695,7 +710,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 4:
+        if version > 5:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -765,6 +780,9 @@ def initialize(path: str | Path) -> None:
                     "ALTER TABLE d5_context_provenance ADD COLUMN task_run_control_json TEXT NOT NULL DEFAULT '{}'"
                 )
             connection.execute("PRAGMA user_version = 4")
+            version = 4
+        if version < 5:
+            connection.execute("PRAGMA user_version = 5")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -785,6 +803,7 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             "web_auth_sessions",
             "web_worker_state",
             "domain_outbox",
+            "approval_resume_links",
             "d3_plan_control_bindings",
             "task_runs",
             "messages",

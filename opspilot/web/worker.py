@@ -146,10 +146,10 @@ async def _process_run(
             mark_run_interrupted_by_worker, db_path, worker_id, run_id, "RUN_OWNER_NOT_SUPPORT"
         )
         return
-    resume = status == "INTERRUPTED_RECOVERABLE"
+    resume = status == "INTERRUPTED_RECOVERABLE" or str(run.get("kind")) == "APPROVAL_RESUME"
     remaining_ms = await asyncio.to_thread(begin_execution_interval, db_path, task_id)
     if remaining_ms <= 0:
-        if resume:
+        if status == "INTERRUPTED_RECOVERABLE":
             await asyncio.to_thread(resume_task_run, db_path, identity, run_id)
         else:
             await asyncio.to_thread(claim_task_run, db_path, identity, run_id)
