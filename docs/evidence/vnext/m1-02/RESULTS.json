@@ -1,0 +1,255 @@
+{
+  "cases": {
+    "N2-01": {
+      "evidence": "Real REPAIR Domain commit in child process followed by immediate process exit; new FastAPI process replays one event; Intent=1, committed Ledger=1, config_version=8.",
+      "process_evidence": "logs/n2-01-repair-event-recovery.jsonl",
+      "status": "PASS"
+    },
+    "N2-02": {
+      "evidence": "Actual SSE stream disconnect/reconnect; stable event_seq and Last-Event-ID precedence; history replay confirms durable duplicates can be deduplicated.",
+      "status": "PASS"
+    },
+    "N2-03": {
+      "evidence": "Synthetic historical committed-Ledger fixture only; reconciler adds one event and leaves Intent/Ledger/config version unchanged.",
+      "status": "PASS"
+    },
+    "N2-04": {
+      "evidence": "A Session-only CHAT_READONLY message is persisted and replayed; answer remains NOT_IMPLEMENTED and Run stays QUEUED.",
+      "status": "PASS"
+    },
+    "N2-05": {
+      "evidence": "Other tenant/owner cannot read or subscribe to Session Event history/stream; guessed Session returns 404.",
+      "status": "PASS"
+    },
+    "OPS-01": {
+      "evidence": "Actual Uvicorn worker process terminated while a model attempt and checkpoint were durable; next process recovers same Run and checkpoint to WAITING_APPROVAL without approval or action write.",
+      "process_evidence": "logs/worker-restart.jsonl",
+      "restart_record": {
+        "case": "OPS-01",
+        "checkpoint_bytes": 131072,
+        "final_run_status": "WAITING_APPROVAL",
+        "interrupted_recoverable_event_seen": true,
+        "phase": "after_restart",
+        "pid": 25412,
+        "run_id": "run-f32589dc-c47b-4a2b-9a32-33a61fae9b3c",
+        "same_run_id_reused": true,
+        "task_id": "task-c1366d9b-9074-4d9a-b016-916f1bac30a1"
+      },
+      "status": "PASS"
+    },
+    "OPS-02": {
+      "evidence": "Virtual-clock tests prove active-only deadline and downtime exclusion; worker-level expired budget blocks to INCONCLUSIVE without a model attempt; real restart retains D2 attempt accounting.",
+      "status": "PASS"
+    },
+    "WEB-01": {
+      "evidence": "Real HTTP: unauthenticated 401, forged identity headers do not change support-b scope; TestClient covers wrong password and spoofed body fields.",
+      "status": "PASS"
+    },
+    "WEB-02": {
+      "evidence": "Real HTTP: support-a, approver-a, support-b use separate cookie jars; cross-tenant Session/Task 404; approver abort 403; pending approver Task read 200.",
+      "status": "PASS"
+    },
+    "WEB-03": {
+      "evidence": "Real HTTP: first Task admission 202, replay 200 with same IDs, changed digest 409; Domain transaction counts and rollback are asserted in pytest.",
+      "status": "PASS"
+    },
+    "WEB-04": {
+      "evidence": "Injected TaskRun/critical-correction insert failures roll back; retry creates one accepted command and one revision transition.",
+      "status": "PASS"
+    },
+    "WEB-05": {
+      "evidence": "Real HTTP missing CSRF=403, wrong Origin=403; pytest covers expiry, logout, and fail-closed reads.",
+      "status": "PASS"
+    },
+    "WEB-06": {
+      "evidence": "Concurrent N1-05 claim has one RUNNING owner; CHAT_READONLY remains QUEUED/NOT_IMPLEMENTED and cannot change business Task state.",
+      "status": "PASS"
+    },
+    "WEB-07": {
+      "evidence": "Real loopback HTTP service process, actual model/MCP investigation, Task/Run wait for approval, client disconnect/reconnect and persisted event replay.",
+      "plan_hash": "ed7f966b3b7eb12909832134aa06347b2b9e22597e098b2090bf1973db5989e3",
+      "run_id": "run-f32589dc-c47b-4a2b-9a32-33a61fae9b3c",
+      "status": "PASS",
+      "task_id": "task-c1366d9b-9074-4d9a-b016-916f1bac30a1",
+      "task_status": "WAITING_APPROVAL"
+    }
+  },
+  "first_failures": [
+    {
+      "reason": "Smoke driver opened web-server.log before creating logs directory; no service/model request started.",
+      "record": "logs/attempts.md"
+    },
+    {
+      "reason": "Initial real restart was rejected by stale D3 revision-zero expression; corrected to distinguish None from integer zero.",
+      "record": "logs/attempts.md"
+    },
+    {
+      "reason": "Initial M1 targeted run expected schema version 1 after M1-02 migration to version 2; assertion updated, old log retained.",
+      "record": "logs/pytest-m1-02-attempt-1.txt"
+    },
+    {
+      "reason": "Windows byte-range lock release after process termination required bounded startup retry.",
+      "record": "logs/attempts.md"
+    }
+  ],
+  "git": {
+    "branch": "main",
+    "end_sha": null,
+    "remote": "origin/main",
+    "start_sha": "9658aa3a02513a41cfd40ce1e5974d49ec9fe9ed",
+    "status_at_report_generation": "implementation and evidence complete; commit/push pending"
+  },
+  "known_limits": [
+    "CHAT_READONLY responses are not implemented and remain QUEUED/NOT_IMPLEMENTED; M1-03/M1-04 scope is not claimed.",
+    "The initial Task free text is durably stored but current D2 fixed S1 prompt is not claimed to consume it.",
+    "Local password registry and SQLite/OS-lock worker are single-machine demonstration boundaries, not production IAM or distributed exactly-once.",
+    "N2-03 uses synthetic historical ledger fixture data; it validates event-only reconciliation, not a new business action.",
+    "The interrupted MODEL attempt is RESERVED with no response trace; whether the provider completed the request is unknown, so no successful response/token is claimed for it."
+  ],
+  "project": "OpsPilot vNext M1-02",
+  "real_model_mcp": {
+    "final_run_status": "WAITING_APPROVAL",
+    "final_task_status": "WAITING_APPROVAL",
+    "initial_probe_http_status": 401,
+    "interrupted_model_attempts_without_response_trace": 1,
+    "mcp_results": [
+      {
+        "evidence_id": "evidence-68bb0faa-3dba-40ff-9bef-9179c6d2a339",
+        "result_digest": "c8d5d645f7c2adc9408066ff8bfac794780de89943f0fad43e24c671a251810a",
+        "status": "OK",
+        "tool_name": "get_integration_config"
+      },
+      {
+        "evidence_id": "evidence-9dfe7bf6-33ab-49ce-a1b9-4ac620e03952",
+        "result_digest": "04ca929cd0c04428d005a1b0cbd1c438e07a6b4f38e46a22b59c0bf18f35e7b9",
+        "status": "OK",
+        "tool_name": "get_principal_status"
+      },
+      {
+        "evidence_id": "evidence-c374fdbb-57bf-4a3c-9ecb-bf6d5c13be5d",
+        "result_digest": "b79c538e818e04bc5451ef9f88d84b8bdabdd044e1e2a5d99e475382c42c5979",
+        "status": "OK",
+        "tool_name": "get_auth_policy"
+      },
+      {
+        "evidence_id": "evidence-4ba435bc-ec23-40f3-8850-62c3649a2e8a",
+        "result_digest": "0208331e5416cad9f678544420e330e2b7808906587e7fb012cb4b75d7dd2e11",
+        "status": "OK",
+        "tool_name": "probe_endpoint"
+      }
+    ],
+    "mcp_tool_attempt_limit": 6,
+    "mcp_tool_calls": 4,
+    "mcp_tool_names": [
+      "get_auth_policy",
+      "get_integration_config",
+      "get_principal_status",
+      "probe_endpoint"
+    ],
+    "model_attempt_limit": 8,
+    "model_attempts_total": 6,
+    "model_id": "deepseek-flash",
+    "same_s1_facts": [
+      {
+        "fact_type": "endpoint_probe",
+        "facts": {
+          "auth_event_result": "AUTH_REJECTED",
+          "business_order_id": null,
+          "business_order_status": null,
+          "credential_ref": "cred-v1",
+          "http_status": 401,
+          "integration_id": "integration-a",
+          "principal_id": "principal-a",
+          "route": "/api/orders/demo-order",
+          "service_id": "orders-demo"
+        }
+      },
+      {
+        "fact_type": "integration_config",
+        "facts": {
+          "config_version": 7,
+          "credential_ref": "cred-v1",
+          "integration_id": "integration-a",
+          "principal_id": "principal-a"
+        }
+      },
+      {
+        "fact_type": "principal_status",
+        "facts": {
+          "principal_id": "principal-a",
+          "principal_version": 2,
+          "status": "ENABLED"
+        }
+      },
+      {
+        "fact_type": "auth_policy",
+        "facts": {
+          "accepted_credential_ref": "cred-v2",
+          "policy_version": 3,
+          "service_id": "orders-demo"
+        }
+      }
+    ],
+    "status": "PASS",
+    "successful_provider_response_ids": [
+      "d80e711e-8c2d-4e1e-a3f5-92e87f1ce780",
+      "21ed004f-a1e4-47e8-9858-b526e4d8a1d5",
+      "9a9ae970-40b7-4da8-b67a-44748837cdb4",
+      "19107563-02d7-4ecd-8767-c841bdc1ac9d",
+      "29b97a5d-0977-4b75-b0b5-9caa8a4c3dc6"
+    ],
+    "successful_provider_responses": 5,
+    "token_usage_note": "Sum of five completed model traces; the RESERVED attempt interrupted by process termination has no provider response/token record and is not counted as a successful response.",
+    "token_usage_reported": {
+      "input_tokens": 11764,
+      "output_tokens": 864,
+      "total_tokens": 12628
+    },
+    "trace_log": "logs/real-model-taskrun.jsonl",
+    "unapproved_business_write_counts": {
+      "d3_action_intents": 0,
+      "d3_action_ledgers": 0,
+      "d3_approvals": 0,
+      "d3_delivery_records": 0,
+      "d3_report_artifacts": 0,
+      "d3_verification_receipts": 0
+    }
+  },
+  "run_date": "2026-10-18",
+  "schema_version": 1,
+  "scope": {
+    "m1_03_started": false,
+    "m1_05_web_approval_started": false,
+    "multi_agent_or_redis_added": false
+  },
+  "tests": {
+    "dependency_check": {
+      "log": "logs/pip-check.txt",
+      "status": "PASS"
+    },
+    "expected_historical_d6_failure_trace": {
+      "note": "The suite intentionally asserts the preserved historical first D3 smoke FAIL; pytest itself passes.",
+      "status": "PRESERVED_AND_ASSERTED",
+      "test": "tests/test_d6_smoke_evidence.py"
+    },
+    "full": {
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s --basetemp=.runtime\\m102-full-final-final",
+      "failed": 0,
+      "log": "logs/pytest-full.txt",
+      "passed": 91,
+      "status": "PASS"
+    },
+    "m1_targeted": {
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s tests\\test_m1_web_api.py tests\\test_m1_web_events.py tests\\test_m1_worker_recovery.py tests\\test_m1_event_process_recovery.py tests\\test_m1_task_control.py --basetemp=.runtime\\m102-targeted-final-final",
+      "failed": 0,
+      "log": "logs/pytest-m1-02.txt",
+      "passed": 27,
+      "status": "PASS"
+    },
+    "static_checks": {
+      "log": "logs/static-checks.txt",
+      "checks": ["compileall", "pip check", "RESULTS.json parse", "git diff --check"],
+      "status": "PASS"
+    }
+  }
+}

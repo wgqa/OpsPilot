@@ -219,6 +219,52 @@ CREATE TABLE IF NOT EXISTS domain_outbox (
     UNIQUE (source_kind, source_id, event_kind)
 );
 CREATE INDEX IF NOT EXISTS ix_domain_outbox_task ON domain_outbox(tenant_id, task_id, created_at);
+CREATE TABLE IF NOT EXISTS web_auth_sessions (
+    token_digest TEXT PRIMARY KEY,
+    actor_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    role TEXT NOT NULL CHECK (role IN ('SUPPORT', 'APPROVER')),
+    csrf_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_web_auth_sessions_expiry ON web_auth_sessions(expires_at, revoked_at);
+CREATE TABLE IF NOT EXISTS session_events (
+    event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    source_kind TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    event_kind TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    task_id TEXT,
+    run_id TEXT,
+    happened_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    UNIQUE (source_kind, source_id, event_kind),
+    FOREIGN KEY (session_id, tenant_id) REFERENCES sessions(session_id, tenant_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_session_events_cursor ON session_events(session_id, event_seq);
+CREATE TABLE IF NOT EXISTS web_worker_state (
+    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+    owner_id TEXT NOT NULL,
+    process_id INTEGER NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch > 0),
+    acquired_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS task_execution_budgets (
+    task_id TEXT PRIMARY KEY REFERENCES task_bindings(task_id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL,
+    active_elapsed_ms INTEGER NOT NULL DEFAULT 0 CHECK (active_elapsed_ms >= 0),
+    active_started_at TEXT,
+    heartbeat_at TEXT,
+    deadline_ms INTEGER NOT NULL CHECK (deadline_ms > 0),
+    deadline_reached_at TEXT,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (task_id, tenant_id) REFERENCES task_bindings(task_id, tenant_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_task_execution_budget_tenant ON task_execution_budgets(tenant_id, task_id);
 CREATE TABLE IF NOT EXISTS d2_attempts (
     attempt_id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
@@ -573,7 +619,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 1:
+        if version > 2:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -617,6 +663,9 @@ def initialize(path: str | Path) -> None:
                    WHERE c.control_revision = 0 AND c.pending_critical_message_seq IS NULL"""
             )
             connection.execute("PRAGMA user_version = 1")
+            version = 1
+        if version < 2:
+            connection.execute("PRAGMA user_version = 2")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -626,6 +675,10 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     with connect(path) as connection:
         for table in (
             "task_run_inputs",
+            "task_execution_budgets",
+            "session_events",
+            "web_auth_sessions",
+            "web_worker_state",
             "domain_outbox",
             "d3_plan_control_bindings",
             "task_runs",

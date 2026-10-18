@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from opspilot.domain.database import connect
+from opspilot.domain.database import connect, initialize
+from opspilot.domain.events import write_outbox_event
 
 
 MessageKind = Literal["CHAT_READONLY", "CORRECT_TASK_INPUT"]
@@ -251,13 +252,15 @@ def _insert_outbox(
     event_kind: str,
     payload: dict[str, object],
 ) -> None:
-    connection.execute(
-        """INSERT INTO domain_outbox
-           (event_id, tenant_id, task_id, session_id, source_kind, source_id,
-            event_kind, payload_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (f"event-{uuid.uuid4()}", tenant_id, task_id, session_id, source_kind, source_id,
-         event_kind, _canonical(payload), _utc_now()),
+    write_outbox_event(
+        connection,
+        tenant_id=tenant_id,
+        task_id=task_id,
+        session_id=session_id,
+        source_kind=source_kind,
+        source_id=source_id,
+        event_kind=event_kind,
+        payload=payload,
     )
 
 
@@ -314,6 +317,7 @@ def _record_command(
 
 
 def create_session(path: str | Path, identity: TrustedIdentity) -> dict[str, object]:
+    initialize(path)
     session_id = f"session-{uuid.uuid4()}"
     now = _utc_now()
     with connect(path) as connection:
@@ -323,7 +327,127 @@ def create_session(path: str | Path, identity: TrustedIdentity) -> dict[str, obj
             "INSERT INTO sessions (session_id, tenant_id, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
             (session_id, identity.tenant_id, identity.actor_id, now, now),
         )
+        _insert_outbox(
+            connection, identity.tenant_id, None, session_id, "SESSION", session_id,
+            "SESSION_CREATED", {"status": "CREATED"},
+        )
     return {"session_id": session_id, "tenant_id": identity.tenant_id, "owner_id": identity.actor_id, "created_at": now}
+
+
+def create_task_with_initial_run(
+    path: str | Path,
+    identity: TrustedIdentity,
+    *,
+    session_id: str,
+    service_id: str,
+    integration_id: str,
+    ticket_id: str,
+    initial_message: str,
+    idempotency_key: str,
+    deadline_ms: int = 300_000,
+) -> dict[str, object]:
+    """Atomically create a trusted S1 binding and its first Message/Command/Run."""
+    if not initial_message.strip():
+        raise ValueError("Initial message must be non-empty text.")
+    if not idempotency_key.strip() or len(idempotency_key) > 200:
+        raise ValueError("A non-empty idempotency key of at most 200 characters is required.")
+    if deadline_ms < 1000 or deadline_ms > 86_400_000:
+        raise ValueError("Investigation deadline must be between 1 second and 24 hours.")
+    initialize(path)
+    command_kind = "CREATE_TASK"
+    request = {
+        "command_kind": command_kind,
+        "target_ref": session_id,
+        "session_id": session_id,
+        "service_id": service_id,
+        "integration_id": integration_id,
+        "ticket_id": ticket_id,
+        "initial_message": initial_message,
+    }
+    request_digest = _digest(request)
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _verify_identity(connection, identity)
+        if identity.role != "SUPPORT":
+            raise TaskControlError("TASK_OWNER_REQUIRED")
+        duplicate = _find_idempotent_command(
+            connection, identity, idempotency_key, command_kind, session_id, request_digest
+        )
+        if duplicate is not None:
+            return {**duplicate, "replayed": True}
+        session = connection.execute(
+            "SELECT 1 FROM sessions WHERE session_id = ? AND tenant_id = ? AND owner_id = ?",
+            (session_id, identity.tenant_id, identity.actor_id),
+        ).fetchone()
+        if session is None:
+            raise TaskControlError("SESSION_SCOPE_DENIED")
+        try:
+            from opspilot.domain.d2 import ScopeDenied, _create_task_binding_in_transaction
+
+            binding = _create_task_binding_in_transaction(
+                connection, identity.actor_id, service_id, integration_id, ticket_id,
+                session_id=session_id,
+            )
+        except ScopeDenied as error:
+            raise TaskControlError("RESOURCE_NOT_FOUND") from error
+        task_id = str(binding["task_id"])
+        sequence = int(connection.execute(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM messages WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()[0])
+        message_id = f"message-{uuid.uuid4()}"
+        command_id = f"command-{uuid.uuid4()}"
+        run_id = f"run-{uuid.uuid4()}"
+        now = _utc_now()
+        body_digest = hashlib.sha256(initial_message.encode("utf-8")).hexdigest()
+        result = {
+            "status": "ACCEPTED", "command_id": command_id, "session_id": session_id,
+            "task_id": task_id, "thread_id": str(binding["thread_id"]),
+            "message_id": message_id, "run_id": run_id, "sequence": sequence,
+            "run_status": "QUEUED", "request_digest": request_digest,
+            "application_state": "RECEIVED_NOT_APPLIED", "replayed": False,
+        }
+        _record_command(
+            connection, command_id=command_id, identity=identity, command_kind=command_kind,
+            target_ref=session_id, idempotency_key=idempotency_key, request_digest=request_digest,
+            accepted_status="ACCEPTED", result=result, message_id=message_id, run_id=run_id,
+        )
+        connection.execute(
+            """INSERT INTO messages
+               (message_id, tenant_id, session_id, task_id, sequence, role, input_kind,
+                body, body_digest, command_id, created_at, application_state)
+               VALUES (?, ?, ?, ?, ?, 'USER', 'CHAT_READONLY', ?, ?, ?, ?, 'RECEIVED_NOT_APPLIED')""",
+            (message_id, identity.tenant_id, session_id, task_id, sequence,
+             initial_message, body_digest, command_id, now),
+        )
+        connection.execute(
+            """INSERT INTO task_runs
+               (run_id, tenant_id, task_id, session_id, command_id, source_message_id,
+                kind, status, control_revision_at_start, expected_control_revision,
+                consumed_message_seq, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'INVESTIGATE', 'QUEUED', 0, 0, ?, ?)""",
+            (run_id, identity.tenant_id, task_id, session_id, command_id, message_id, sequence, now),
+        )
+        connection.execute(
+            """INSERT INTO task_execution_budgets
+               (task_id, tenant_id, active_elapsed_ms, active_started_at, heartbeat_at,
+                deadline_ms, deadline_reached_at, updated_at)
+               VALUES (?, ?, 0, NULL, NULL, ?, NULL, ?)""",
+            (task_id, identity.tenant_id, deadline_ms, now),
+        )
+        _insert_outbox(
+            connection, identity.tenant_id, task_id, session_id, "COMMAND", command_id,
+            "TASK_CREATED", {"command_id": command_id, "message_id": message_id, "run_id": run_id,
+                             "task_id": task_id, "status": "QUEUED"},
+        )
+        _insert_outbox(
+            connection, identity.tenant_id, task_id, session_id, "COMMAND", command_id,
+            "MESSAGE_ACCEPTED", {"command_id": command_id, "message_id": message_id, "run_id": run_id,
+                                 "sequence": sequence, "input_kind": "CHAT_READONLY",
+                                 "application_state": "RECEIVED_NOT_APPLIED"},
+        )
+        connection.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", (now, session_id))
+    return result
 
 
 def admit_task_message(
@@ -759,6 +883,11 @@ def finish_task_run(
             "UPDATE task_runs SET status = ?, blocked_reason = ?, ended_at = ? WHERE run_id = ?",
             (status, blocked_reason, now, run_id),
         )
+        _insert_outbox(
+            connection, identity.tenant_id, str(run["task_id"]) if run["task_id"] is not None else None,
+            str(run["session_id"]), "RUN", run_id, f"RUN_STATUS_{status}",
+            {"run_id": run_id, "run_status": status, "reason_code": blocked_reason},
+        )
         if (
             run["task_id"] is not None
             and str(run["kind"]) != "CHAT_READONLY"
@@ -771,6 +900,8 @@ def finish_task_run(
                 "FAILED": "FAILED",
                 "BLOCKED": "BLOCKED",
             }[status]
+            if blocked_reason == "INVESTIGATION_DEADLINE_EXCEEDED":
+                projected = "INCONCLUSIVE"
             connection.execute(
                 "UPDATE task_bindings SET status = ? WHERE task_id = ? AND status != 'ABORTED'",
                 (projected, run["task_id"]),
@@ -791,3 +922,115 @@ def get_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) -> di
     if row is None:
         raise TaskControlError("TASK_RUN_SCOPE_DENIED")
     return {key: row[key] for key in row.keys()}
+
+
+def register_worker_owner(path: str | Path, owner_id: str, process_id: int) -> int:
+    """Persist a monotonically fenced local worker owner after acquiring its OS lock."""
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT epoch FROM web_worker_state WHERE singleton_id = 1"
+        ).fetchone()
+        epoch = int(row["epoch"]) + 1 if row is not None else 1
+        connection.execute(
+            """INSERT INTO web_worker_state (singleton_id, owner_id, process_id, epoch, acquired_at)
+               VALUES (1, ?, ?, ?, ?)
+               ON CONFLICT(singleton_id) DO UPDATE SET owner_id = excluded.owner_id,
+                 process_id = excluded.process_id, epoch = excluded.epoch, acquired_at = excluded.acquired_at""",
+            (owner_id, process_id, epoch, _utc_now()),
+        )
+    return epoch
+
+
+def recover_running_task_runs(path: str | Path, owner_id: str) -> list[str]:
+    """After exclusive OS lock acquisition, mark prior-process RUNNING runs recoverable."""
+    recovered: list[str] = []
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        owner = connection.execute(
+            "SELECT owner_id FROM web_worker_state WHERE singleton_id = 1"
+        ).fetchone()
+        if owner is None or str(owner["owner_id"]) != owner_id:
+            raise TaskControlError("WORKER_FENCE_STALE")
+        rows = connection.execute(
+            "SELECT * FROM task_runs WHERE status = 'RUNNING' AND kind != 'CHAT_READONLY' ORDER BY created_at"
+        ).fetchall()
+        for run in rows:
+            now = _utc_now()
+            connection.execute(
+                """UPDATE task_runs SET status = 'INTERRUPTED_RECOVERABLE', ended_at = ?,
+                          blocked_reason = 'WORKER_OWNER_RESTARTED'
+                   WHERE run_id = ? AND status = 'RUNNING'""",
+                (now, run["run_id"]),
+            )
+            if run["task_id"] is not None:
+                connection.execute(
+                    """UPDATE task_bindings SET status = 'INTERRUPTED_RECOVERABLE'
+                       WHERE task_id = ? AND status NOT IN ('ABORTED', 'COMPLETED')""",
+                    (run["task_id"],),
+                )
+            _insert_outbox(
+                connection, str(run["tenant_id"]),
+                str(run["task_id"]) if run["task_id"] is not None else None,
+                str(run["session_id"]), "RUN", str(run["run_id"]),
+                "RUN_STATUS_INTERRUPTED_RECOVERABLE",
+                {"run_id": str(run["run_id"]), "run_status": "INTERRUPTED_RECOVERABLE",
+                 "reason_code": "WORKER_OWNER_RESTARTED"},
+            )
+            recovered.append(str(run["run_id"]))
+    return recovered
+
+
+def mark_run_interrupted_by_worker(
+    path: str | Path, owner_id: str, run_id: str, reason: str
+) -> dict[str, object] | None:
+    """Fenced worker shutdown/timeout transition; does not touch TaskControl authority."""
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        owner = connection.execute(
+            "SELECT owner_id FROM web_worker_state WHERE singleton_id = 1"
+        ).fetchone()
+        if owner is None or str(owner["owner_id"]) != owner_id:
+            raise TaskControlError("WORKER_FENCE_STALE")
+        run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
+        if run is None or str(run["status"]) != "RUNNING":
+            return {key: run[key] for key in run.keys()} if run is not None else None
+        now = _utc_now()
+        status = "BLOCKED" if reason == "INVESTIGATION_DEADLINE_EXCEEDED" else "INTERRUPTED_RECOVERABLE"
+        connection.execute(
+            "UPDATE task_runs SET status = ?, ended_at = ?, blocked_reason = ? WHERE run_id = ? AND status = 'RUNNING'",
+            (status, now, reason, run_id),
+        )
+        if run["task_id"] is not None:
+            task_status = "INCONCLUSIVE" if status == "BLOCKED" else "INTERRUPTED_RECOVERABLE"
+            connection.execute(
+                """UPDATE task_bindings SET status = ? WHERE task_id = ?
+                   AND status NOT IN ('ABORTED', 'COMPLETED')""",
+                (task_status, run["task_id"]),
+            )
+        _insert_outbox(
+            connection, str(run["tenant_id"]),
+            str(run["task_id"]) if run["task_id"] is not None else None,
+            str(run["session_id"]), "RUN", run_id, f"RUN_STATUS_{status}",
+            {"run_id": run_id, "run_status": status, "reason_code": reason},
+        )
+        updated = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
+        return {key: updated[key] for key in updated.keys()}
+
+
+def next_worker_run(path: str | Path, excluded_run_ids: tuple[str, ...] = ()) -> dict[str, object] | None:
+    exclusion = ""
+    parameters: list[object] = []
+    if excluded_run_ids:
+        exclusion = f" AND r.run_id NOT IN ({','.join('?' for _ in excluded_run_ids)})"
+        parameters.extend(excluded_run_ids)
+    with connect(path) as connection:
+        row = connection.execute(
+            f"""SELECT r.* FROM task_runs AS r
+               WHERE r.kind != 'CHAT_READONLY' AND (r.status = 'QUEUED' OR r.status = 'INTERRUPTED_RECOVERABLE')
+                 {exclusion}
+               ORDER BY CASE r.status WHEN 'INTERRUPTED_RECOVERABLE' THEN 0 ELSE 1 END,
+                        r.created_at, r.run_id LIMIT 1""",
+            tuple(parameters),
+        ).fetchone()
+    return {key: row[key] for key in row.keys()} if row is not None else None

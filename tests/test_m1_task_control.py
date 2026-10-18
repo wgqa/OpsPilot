@@ -24,6 +24,7 @@ from opspilot.domain.d3 import (
     D3PreconditionRejected,
     D3ScopeDenied,
     activate_plan,
+    authorize_workflow_resume,
     create_plan_from_gate,
     execute_deliver,
     execute_repair,
@@ -236,6 +237,10 @@ def test_revision_zero_run_can_be_claimed_applied_and_resumed(demo_db: Path) -> 
 
     claimed = claim_task_run(demo_db, identity, run_id)
     assert claimed["expected_control_revision"] == 0 and claimed["status"] == "RUNNING"
+    authorized = authorize_workflow_resume(
+        demo_db, str(binding["thread_id"]), "support-a", run_id=run_id
+    )
+    assert authorized["task_id"] == binding["task_id"]
     applied = apply_pending_critical_inputs(demo_db, identity, run_id)
     assert applied["expected_control_revision"] == 0 and applied["inputs"] == []
     waiting = finish_task_run(demo_db, identity, run_id, "WAITING_APPROVAL")
@@ -635,7 +640,7 @@ def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
         plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert tuple(control) == ("ACTIVE", 0)
-    assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 1
+    assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 2
     print("M1_EVIDENCE " + json.dumps({
         "case": "migration",
         "user_version": version,

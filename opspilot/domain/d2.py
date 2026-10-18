@@ -66,83 +66,88 @@ def create_task_binding(
 ) -> dict[str, object]:
     """Create an immutable task binding from the local trusted operator registry."""
     initialize(path)
-    task_id = f"task-{uuid.uuid4()}"
-    thread_id = f"opspilot-{uuid.uuid4()}"
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        operator = connection.execute(
-            "SELECT tenant_id, role FROM trusted_operators WHERE actor_id = ?",
-            (actor_id,),
+        created = _create_task_binding_in_transaction(
+            connection, actor_id, service_id, integration_id, ticket_id, session_id=session_id
+        )
+        result = connection.execute("SELECT * FROM task_bindings WHERE task_id = ?", (created["task_id"],)).fetchone()
+    return {**_dict_row(result), "session_id": created["session_id"]}
+
+
+def _create_task_binding_in_transaction(
+    connection,
+    actor_id: str,
+    service_id: str,
+    integration_id: str,
+    ticket_id: str,
+    *,
+    session_id: str | None = None,
+) -> dict[str, object]:
+    """Shared trusted task-binding creation used by Domain and atomic Web admission."""
+    task_id = f"task-{uuid.uuid4()}"
+    thread_id = f"opspilot-{uuid.uuid4()}"
+    operator = connection.execute(
+        "SELECT tenant_id, role FROM trusted_operators WHERE actor_id = ?", (actor_id,)
+    ).fetchone()
+    if operator is None or operator["role"] != "SUPPORT":
+        raise ScopeDenied("The caller is not a trusted support operator.")
+    tenant_id = str(operator["tenant_id"])
+    resource = connection.execute(
+        """SELECT s.service_id, i.integration_id, i.principal_id
+           FROM services AS s
+           JOIN integrations AS i ON i.tenant_id = s.tenant_id AND i.integration_id = s.integration_id
+           JOIN principals AS p ON p.tenant_id = i.tenant_id AND p.principal_id = i.principal_id
+           WHERE s.tenant_id = ? AND s.service_id = ? AND i.integration_id = ?""",
+        (tenant_id, service_id, integration_id),
+    ).fetchone()
+    if resource is None:
+        raise ScopeDenied("Service and integration are not registered for the caller's tenant.")
+    now = utc_now()
+    connection.execute(
+        """INSERT INTO task_bindings
+           (task_id, thread_id, tenant_id, actor_id, service_id, integration_id,
+            principal_id, ticket_id, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CREATED')""",
+        (task_id, thread_id, tenant_id, actor_id, service_id, integration_id,
+         str(resource["principal_id"]), ticket_id),
+    )
+    connection.execute(
+        "INSERT INTO thread_owners (thread_id, tenant_id, owner_id) VALUES (?, ?, ?)",
+        (thread_id, tenant_id, actor_id),
+    )
+    connection.execute(
+        """INSERT INTO task_controls
+           (task_id, tenant_id, terminal_state, control_revision, pending_critical_message_seq,
+            applied_critical_message_seq, changed_at, changed_by, reason)
+           VALUES (?, ?, 'ACTIVE', 0, NULL, 0, ?, ?, 'task_created')""",
+        (task_id, tenant_id, now, actor_id),
+    )
+    if session_id is None:
+        session_id = f"session-{uuid.uuid4()}"
+        connection.execute(
+            """INSERT INTO sessions (session_id, tenant_id, owner_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (session_id, tenant_id, actor_id, now, now),
+        )
+    else:
+        session = connection.execute(
+            "SELECT 1 FROM sessions WHERE session_id = ? AND tenant_id = ? AND owner_id = ?",
+            (session_id, tenant_id, actor_id),
         ).fetchone()
-        if operator is None or operator["role"] != "SUPPORT":
-            raise ScopeDenied("The caller is not a trusted support operator.")
-        tenant_id = str(operator["tenant_id"])
-        row = connection.execute(
-            """SELECT s.service_id, i.integration_id, i.principal_id
-               FROM services AS s
-               JOIN integrations AS i
-                 ON i.tenant_id = s.tenant_id AND i.integration_id = s.integration_id
-               JOIN principals AS p
-                 ON p.tenant_id = i.tenant_id AND p.principal_id = i.principal_id
-               WHERE s.tenant_id = ? AND s.service_id = ?
-                 AND i.integration_id = ?""",
-            (tenant_id, service_id, integration_id),
-        ).fetchone()
-        if row is None:
-            raise ScopeDenied("Service and integration are not registered for the caller's tenant.")
-        connection.execute(
-            """INSERT INTO task_bindings
-               (task_id, thread_id, tenant_id, actor_id, service_id,
-                integration_id, principal_id, ticket_id, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CREATED')""",
-            (
-                task_id,
-                thread_id,
-                tenant_id,
-                actor_id,
-                service_id,
-                integration_id,
-                str(row["principal_id"]),
-                ticket_id,
-            ),
-        )
-        connection.execute(
-            "INSERT INTO thread_owners (thread_id, tenant_id, owner_id) VALUES (?, ?, ?)",
-            (thread_id, tenant_id, actor_id),
-        )
-        now = utc_now()
-        connection.execute(
-            """INSERT INTO task_controls
-               (task_id, tenant_id, terminal_state, control_revision,
-                pending_critical_message_seq, applied_critical_message_seq,
-                changed_at, changed_by, reason)
-               VALUES (?, ?, 'ACTIVE', 0, NULL, 0, ?, ?, 'task_created')""",
-            (task_id, tenant_id, now, actor_id),
-        )
-        if session_id is None:
-            session_id = f"session-{uuid.uuid4()}"
-            connection.execute(
-                """INSERT INTO sessions (session_id, tenant_id, owner_id, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (session_id, tenant_id, actor_id, now, now),
-            )
-        else:
-            session = connection.execute(
-                "SELECT 1 FROM sessions WHERE session_id = ? AND tenant_id = ? AND owner_id = ?",
-                (session_id, tenant_id, actor_id),
-            ).fetchone()
-            if session is None:
-                raise ScopeDenied("The session is not owned by the trusted task submitter.")
-        connection.execute(
-            """INSERT INTO session_task_links
-               (session_id, task_id, tenant_id, linked_at, is_primary)
-               VALUES (?, ?, ?, ?, 1)""",
-            (session_id, task_id, tenant_id, now),
-        )
-        result = connection.execute(
-            "SELECT * FROM task_bindings WHERE task_id = ?", (task_id,)
-        ).fetchone()
-    return {**_dict_row(result), "session_id": session_id}
+        if session is None:
+            raise ScopeDenied("The session is not owned by the trusted task submitter.")
+    connection.execute(
+        """INSERT INTO session_task_links (session_id, task_id, tenant_id, linked_at, is_primary)
+           VALUES (?, ?, ?, ?, 1)""",
+        (session_id, task_id, tenant_id, now),
+    )
+    return {
+        "task_id": task_id, "thread_id": thread_id, "tenant_id": tenant_id,
+        "actor_id": actor_id, "service_id": service_id, "integration_id": integration_id,
+        "principal_id": str(resource["principal_id"]), "session_id": session_id,
+        "created_at": now,
+    }
 
 
 def get_task_binding(path: str | Path, task_id: str) -> dict[str, object]:

@@ -1,0 +1,45 @@
+..............M1_EVIDENCE {"action_counts_after_restart": {"config_version": 8, "intent": 1, "ledger": 1, "repair_event": 1}, "case": "N2-01", "commit_process_pid": 26096, "http_status": 200, "new_api_process_pid": 9312, "repair_action_id": "action-5cc90acc-1897-4bae-bc77-c0990a2edeac", "repair_event_payload": {"action_id": "action-5cc90acc-1897-4bae-bc77-c0990a2edeac", "action_kind": "REPAIR", "plan_hash": "0396f8de73d055265562563134fff7de8776c82b976f4402290df393a231c728", "status": "COMMITTED", "task_id": "task-bc46301d-9d34-4ec4-8215-d5af12857ee2"}, "replayed_event_count": 1}
+.M1_EVIDENCE {"accepted_command_id": "command-c71c0da9-23c1-4aad-8100-9986bb5eb2f8", "accepted_message_id": "message-12b5e960-f0ec-4dff-9a4f-e6d8c20f7bb3", "accepted_run_id": "run-41fc65f4-0e1d-4270-ba00-e255f6ac8a9a", "case": "N1-01/02", "conflicting_digest": "IDEMPOTENCY_CONFLICT", "control_revision": 1, "failed_insert_rollback": "PASS", "retry_same_ids": true}
+.M1_EVIDENCE {"case": "N1-05", "claims": [["CLAIMED", "RUNNING"], ["REJECTED", "TASK_RUN_NOT_QUEUED"]], "running_count": 1}
+....M1_EVIDENCE {"abort_command_id": "command-370a9189-f1bf-4e79-8c48-c87050d6a5ce", "abort_control_revision": 1, "approval_count": 0, "case": "N1-09", "checkpoint_exists_before_resume": true, "child_process": {"event": "old_checkpoint_resume_blocked", "pid": 2320, "reason": "TASK_ABORTED", "thread_id": "opspilot-b9a83a61-e4b0-4833-aebe-ef05ec09a134"}, "intent_count": 0, "ledger_count": 0, "parent_pid": 18000, "plan_count": 0}
+.M1_EVIDENCE {"case": "N1-10", "config_version_after": 8, "consumed_control_revision": 2, "correction_message_id": "message-4a9f336f-66bb-4f63-95a4-03c387a0e63c", "correction_run_id": "run-2cd35147-0640-459a-8039-f29d2d31c7c1", "fresh_approval_id": "approval-285f13c2-2720-4718-97d8-b522e57adac5", "fresh_plan_hash": "f43027c60e78c12e29a4b14065a3c20c3b91f407c087c6d9c28e71b050e37ed7", "fresh_repair_ledger_id": "ledger-cfb58f1b-5602-4894-8e2b-f33df271feb3", "old_approval_id": "approval-5bb3c0c1-c645-434c-af37-edff2d872fe8", "old_plan_hash": "ff4b19375cbfda31ffbbc06911cb04897bf9167a8b7f4e866db8d47e9d020d5d", "old_repair_intent_id": "action-d34cbb3d-0321-435d-a176-2353bc57183f", "pending_error": "TASK_INPUT_PENDING", "post_apply_error": "TASK_CONTROL_STALE", "repair_ledger_count": 1}
+...M1_EVIDENCE {"abort_command_id": "command-93890f48-730b-4887-955c-00913e550a4e", "case": "N1-11", "child_process": {"event": "old_checkpoint_resume_blocked", "pid": 13564, "reason": "TASK_ABORTED", "thread_id": "opspilot-f01a5772-c385-42a3-8f50-da9f5241e718"}, "config_version_after": 8, "control_revision": 1, "deliver_ledger_count": 0, "delivery_record_count": 0, "parent_pid": 18000, "repair_history_read_after_abort": "PASS", "repair_ledger_count": 1, "repair_ledger_id": "ledger-792074c1-8270-47fe-a040-ece72baf25d1", "ticket_entry_count": 0}
+.F
+================================== FAILURES ===================================
+_____ test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/m102-targeted-final/test_schema_migration_is_idemp0/domain.sqlite3')
+live_api = 'http://127.0.0.1:57165'
+
+    def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
+        demo_db: Path, live_api: str
+    ) -> None:
+        from opspilot.domain.database import initialize
+    
+        binding, _, plan = _ready_task(demo_db, live_api, "migration")
+        task_id = str(binding["task_id"])
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_controls WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM session_task_links WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM sessions WHERE session_id = ?", (binding["session_id"],))
+            connection.execute("PRAGMA user_version = 0")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            control = connection.execute("SELECT terminal_state, control_revision FROM task_controls WHERE task_id = ?", (task_id,)).fetchone()
+            session_link = connection.execute("SELECT COUNT(*) FROM session_task_links WHERE task_id = ?", (task_id,)).fetchone()[0]
+            migrated_plan = connection.execute("SELECT plan_hash FROM d3_plans WHERE task_id = ?", (task_id,)).fetchone()[0]
+            plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        assert tuple(control) == ("ACTIVE", 0)
+>       assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 1
+E       AssertionError: assert (1 == 1 and '4cab7806b09c...3599dbd9eab6c' == '4cab7806b09c...3599dbd9eab6c'
+E         
+E         Skipping 53 identical leading characters in diff, use -v to show
+E           99dbd9eab6c and 1 == 1 and 2 == 1)
+
+tests\test_m1_task_control.py:643: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_task_control.py::test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash
+1 failed, 25 passed in 12.81s

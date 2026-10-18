@@ -3,7 +3,7 @@
 **主合同**：[`docs/baseline/v1.0-implementation-baseline.md`](docs/baseline/v1.0-implementation-baseline.md)
 **设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1–D5 已通过主 Agent 验收；D2 PR #2 合入 `main@171f028`。D6 E01–E10 评测及证据已完成，交主 Agent 复核。**
 
-**vNext 执行登记：** v1.0 基线继续约束 D1–D7 历史实现；vNext/M1-01 的当前范围依据 [v0.3 合同](docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md)、[M1-01 任务卡](docs/handoff/vnext/Luna-M1-01-implementation-task-card.md) 与 [候选实现基线](docs/baseline/vNext-product-baseline-candidate.md)。M1-01 本轮验证完成，待主 Agent 审查；不表示 M1 总体或第三方审查通过。
+**vNext 执行登记：** v1.0 基线继续约束 D1–D7 历史实现；vNext 范围依据 [v0.3 合同](docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md)、当前阶段任务卡与 [候选实现基线](docs/baseline/vNext-product-baseline-candidate.md)。M1-01 已通过主 Agent 验收；M1-02 实施与新鲜测试已完成，等待本轮源码/证据审查；不表示 M1 总体或第三方审查通过。
 
 > 本表只勾选已执行且有证据的项目。D1–D7 代表实际开发的相对顺序，**不是**把 2026-10-17—23 自动当作已经执行。评审阶段累计的时间不当作有效编码时间。
 
@@ -89,9 +89,21 @@
 - [x] D3 的 Plan、审批、ActionIntent、REPAIR、DELIVER 在 Domain 事务内校验 Task/Run/Plan 控制绑定；同身份历史已提交 Ledger 可回查，终态 Task 不会被后到 abort 覆盖。
 - [x] N1-09、N1-10、N1-11 新鲜通过；N1-09 与 N1-11 使用真实独立 OS 子进程恢复旧 checkpoint。N1-01/02 受理回滚与幂等、N1-05 独立连接争用及迁移回归通过。
 - [x] 本轮全量 pytest **73/73**；`compileall`、`pip check`、Git whitespace 检查通过；真实模型/MCP TaskRun smoke 与既有 D3 S1 401→200 smoke 各有本轮轨迹。报告与原始证据：[`docs/evidence/vnext/m1-01/REPORT.md`](docs/evidence/vnext/m1-01/REPORT.md)。
-- [ ] 主 Agent M1-01 审查（等待）；未实施 M1-02、Web/API/SSE 或多进程 worker lease。
+- [x] 主 Agent M1-01 审查通过；本节保留其实现与验收历史。
 
-**停止线**：本轮到 M1-01 为止；等待主 Agent 审查，不自行进入 M1-02。v0.3 附录 B 未获第三方重新签字，不把本轮测试称为第三方审批。
+**历史停止线**：M1-01 当时完成后停止等待主 Agent；v0.3 附录 B 未获第三方重新签字，不把阶段测试称为第三方审批。
+
+## vNext M1-02 — FastAPI 会话与可靠事件
+
+- [x] FastAPI 本地服务、随机 HttpOnly Session、服务端可信角色、Origin/CSRF、owner/tenant 鉴权；只绑定 loopback，拒绝多 worker。
+- [x] Session/Message/Task/Run API；Task、首条 Message、Command、INVESTIGATE Run、budget 与事件在 Domain 单事务原子受理，幂等重试返回原 IDs。
+- [x] 单实例后台 worker 复用既有 Investigator/TaskControl/LangGraph/D3 Domain；人工等待释放 worker；跨进程恢复复用同一 Run/checkpoint，revision 0 恢复权限回归通过；活跃 C1 超限转 BLOCKED/INCONCLUSIVE。
+- [x] Outbox → 持久 `session_events` → SSE；`Last-Event-ID` 游标回放、断线重连、旧 Ledger 只补事件，SSE 不触发副作用。
+- [x] WEB-01..07、N2-01..05、OPS-01..02 与 N1-09/10/11 fresh test 通过；完整 pytest **91/91**，M1 定向测试 **27/27**；5 个成功真实模型响应 trace、1 个进程退出时 RESERVED attempt、4 次真实 MCP tools/call。
+- [x] 报告、RESULTS、脱敏 HTTP/SSE/worker/模型日志、首次失败与修复记录、baseline/学习文档已提交到 `docs/evidence/vnext/m1-02/`。
+- [ ] 主 Agent M1-02 审查（等待）；M1-03 未开始。
+
+**停止线**：本轮到 M1-02 为止；提交并推送 main 后等待主 Agent 审查。不得自行进入 M1-03。
 
 ## 实际进度登记
 
@@ -105,5 +117,6 @@
 | 2026-10-17 | D6（历史评测冻结） | `main` / 运行代码 `f2c9403`；评测 Gold 冻结于 `151a1ce`；最终证据 `28c3e1a` | 全量 pytest **64/64**；E04–E10 映射控制测试唯一项 **45/45**；E01/E02/E03 新鲜真实模型场景均 PASS；E10 attempt 01 FAIL、attempt 02 PASS | 场景族 9 PASS / 1 PARTIAL；无 P0 安全红线失败；D7 不改写其结果 |
 | 2026-10-17 | D7（交付完成，等待主 Agent 验收） | 运行实现 `a2517fdbe2b66e4490867cc388aadc32ec5b5197`；最终交付 SHA 见 Git/交付消息，附件来源 SHA 见 MANIFEST | 首轮 E01 FAIL、pytest **61/64**；修正后 E01 **13/13**、恢复 **2/2**、pytest **64/64**；模型 7 / MCP 6 / 19,244 tokens | 仅修 Skill 导出 LF，未改 Agent/Domain 执行逻辑；离线包和源码/面试材料齐备；开发停止，外部审查未执行 |
 | 2026-10-18 | vNext M1-01（本轮测试完成，待主 Agent 审查） | 基于 `main@a53e13a4243cc6c7fa545b3e3a92b838596b6242`；交付 SHA 以本轮 Git 终点为准 | N1-09/10/11 通过；新鲜全量 pytest **73/73**；模型/MCP TaskRun、D3 S1 真实 smoke 通过 | 仅 M1-01；不声称 M1 总体或第三方审查通过；等待主 Agent 决定是否启动 M1-02 |
+| 2026-10-18 | vNext M1-02（实现完成，待主 Agent 审查） | 起点 `main@9658aa3a02513a41cfd40ce1e5974d49ec9fe9ed`；终点以本轮最新 main 提交为准 | 全量 pytest **91/91**；M1 定向 **27/27**；真实 HTTP 双身份、SSE、同一 Run 跨进程模型/MCP 恢复通过 | 仅 M1-02；真实 S1 等待审批且未发生审批/业务写入；M1-03 未开始 |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。

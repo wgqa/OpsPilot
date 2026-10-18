@@ -17,6 +17,7 @@ from opspilot.domain.d2 import (
     utc_now,
 )
 from opspilot.domain.database import connect, get_service_info
+from opspilot.domain.events import write_outbox_event
 from opspilot.domain.client import BUSINESS_ROUTE, probe_orders
 from opspilot.domain.task_control import (
     TaskControlError,
@@ -226,6 +227,11 @@ def _activate_plan_in_transaction(
     )
     _write_plan_history(connection, tenant_id, task_id, plan_hash, "ACTIVE", generation, actor_id, reason)
     connection.execute("UPDATE task_bindings SET status = 'WAITING_APPROVAL' WHERE task_id = ?", (task_id,))
+    write_outbox_event(
+        connection, tenant_id=tenant_id, task_id=task_id, source_kind="PLAN",
+        source_id=plan_hash, event_kind="PLAN_ACTIVATED",
+        payload={"task_id": task_id, "plan_hash": plan_hash, "status": "WAITING_APPROVAL"},
+    )
 
 
 def create_plan_from_gate(
@@ -457,7 +463,8 @@ def authorize_workflow_resume(
                 raise D3ScopeDenied("Persisted Run is outside the trusted task owner scope.")
             if str(run["status"]) != "RUNNING":
                 raise D3PreconditionRejected("TASK_RUN_NOT_ACTIVE")
-            if int(control["control_revision"]) != int(run["expected_control_revision"] or -1):
+            run_revision = run["expected_control_revision"]
+            if run_revision is None or int(control["control_revision"]) != int(run_revision):
                 raise D3PreconditionRejected("TASK_CONTROL_STALE")
             if int(run["consumed_message_seq"]) < int(control["applied_critical_message_seq"]):
                 raise D3PreconditionRejected("TASK_CONTROL_STALE")
@@ -548,6 +555,13 @@ def submit_plan_approval(
         else:
             connection.execute("UPDATE task_bindings SET status = 'COMPLETED' WHERE task_id = ?", (binding["task_id"],))
         result = _row(connection.execute("SELECT * FROM d3_approvals WHERE approval_id = ?", (approval_id,)).fetchone())
+        write_outbox_event(
+            connection, tenant_id=str(binding["tenant_id"]), task_id=str(binding["task_id"]),
+            source_kind="APPROVAL", source_id=approval_id,
+            event_kind="PLAN_APPROVED" if decision == "APPROVED" else "PLAN_REJECTED",
+            payload={"task_id": str(binding["task_id"]), "plan_hash": plan_hash,
+                     "approval_id": approval_id, "decision": decision},
+        )
     return result or {}
 
 
@@ -908,6 +922,13 @@ def execute_repair(path: str | Path, action_intent_id: str, executor_id: str, at
             (intent["action_id"], utc_now(), intent["tenant_id"], intent["task_id"], intent["plan_hash"]),
         )
         connection.execute("UPDATE task_bindings SET status = 'VERIFYING' WHERE task_id = ?", (intent["task_id"],))
+        write_outbox_event(
+            connection, tenant_id=str(intent["tenant_id"]), task_id=str(intent["task_id"]),
+            source_kind="ACTION_LEDGER", source_id=str(intent["action_id"]),
+            event_kind="REPAIR_COMMITTED",
+            payload={"task_id": str(intent["task_id"]), "plan_hash": str(intent["plan_hash"]),
+                     "action_id": str(intent["action_id"]), "action_kind": "REPAIR", "status": "COMMITTED"},
+        )
     _run_d4_test_failpoint("repair_after_commit_before_response")
     return ledger
 
@@ -1011,6 +1032,14 @@ def verify_repair_online(
         connection.execute(
             "UPDATE task_bindings SET status = ? WHERE task_id = ?",
             ("DELIVERY_PENDING" if verified else "FAILED", task_id),
+        )
+        write_outbox_event(
+            connection, tenant_id=str(binding["tenant_id"]), task_id=task_id,
+            source_kind="VERIFICATION", source_id=verification_id,
+            event_kind="VERIFICATION_COMPLETED",
+            payload={"task_id": task_id, "plan_hash": plan_hash,
+                     "verification_id": verification_id, "recovery_verified": verified,
+                     "response_status": probe.status_code},
         )
     return {
         "verification_id": verification_id,
@@ -1135,6 +1164,12 @@ def get_or_create_report(
                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
             (report_ref, binding["tenant_id"], task_id, plan_hash, repair_action_id,
              receipt["verification_id"], digest, content, created_at),
+        )
+        write_outbox_event(
+            connection, tenant_id=str(binding["tenant_id"]), task_id=task_id,
+            source_kind="REPORT", source_id=report_ref, event_kind="REPORT_FROZEN",
+            payload={"task_id": task_id, "plan_hash": plan_hash, "report_ref": report_ref,
+                     "report_version": 1, "status": "FROZEN"},
         )
         result = {
             "report_ref": report_ref,
@@ -1272,6 +1307,13 @@ def execute_deliver(path: str | Path, action_intent_id: str, executor_id: str, a
             (intent["action_id"], utc_now(), intent["tenant_id"], intent["task_id"], intent["plan_hash"]),
         )
         connection.execute("UPDATE task_bindings SET status = 'COMPLETED' WHERE task_id = ?", (intent["task_id"],))
+        write_outbox_event(
+            connection, tenant_id=str(intent["tenant_id"]), task_id=str(intent["task_id"]),
+            source_kind="ACTION_LEDGER", source_id=str(intent["action_id"]),
+            event_kind="DELIVERY_COMMITTED",
+            payload={"task_id": str(intent["task_id"]), "plan_hash": str(intent["plan_hash"]),
+                     "action_id": str(intent["action_id"]), "action_kind": "DELIVER", "status": "COMMITTED"},
+        )
         _run_d4_test_failpoint("deliver_before_commit", connection)
     _run_d4_test_failpoint("deliver_after_commit_before_response")
     return ledger
