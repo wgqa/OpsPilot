@@ -101,9 +101,18 @@
 - [x] Outbox → 持久 `session_events` → SSE；`Last-Event-ID` 游标回放、断线重连、旧 Ledger 只补事件，SSE 不触发副作用。
 - [x] WEB-01..07、N2-01..05、OPS-01..02 与 N1-09/10/11 fresh test 通过；完整 pytest **91/91**，M1 定向测试 **27/27**；5 个成功真实模型响应 trace、1 个进程退出时 RESERVED attempt、4 次真实 MCP tools/call。
 - [x] 报告、RESULTS、脱敏 HTTP/SSE/worker/模型日志、首次失败与修复记录、baseline/学习文档已提交到 `docs/evidence/vnext/m1-02/`。
-- [ ] 主 Agent M1-02 审查（等待）；M1-03 未开始。
+- [x] 主 Agent 已独立验收 M1-02；M1-03 仍需单独实现与验收。
 
-**停止线**：本轮到 M1-02 为止；提交并推送 main 后等待主 Agent 审查。不得自行进入 M1-03。
+**历史停止线**：M1-02 完成后曾停止等待主 Agent；验收通过后由用户单独启动 M1-03。
+
+## vNext M1-03 — Vue 对话工作台与真实多轮聊天
+
+- [x] Vue 3 + TypeScript + Vite 三栏工作台、真实浏览器操作、角色控制、HTTP 错误提示和持久任务检查器。
+- [x] 持久 `CHAT_READONLY` Run 调用真实模型；无 Task 三轮对话与 Task 等待审批时的真实 Evidence 追问均由 Provider 回答。
+- [x] Chunk、Assistant Message、ContextManifest、Outbox/SSE 游标和服务重启恢复可重放；CHAT_READONLY 不改变业务 Graph、TaskControl、Plan、Approval、ActionIntent 或 D3 写账本。
+- [x] CHAT-01..08、UI-01..02 及 M1-01/M1-02、D1–D7 回归新鲜通过；保留真实 Provider correlation ID/token、MCP、HTTP/SSE、Edge 截图和编号失败尝试日志。首次两次浏览器失败的原始 stdout 被 harness 覆写，失败细节据当时命令结果记录在 `FAILURE_HISTORY.md`。
+- [x] `docs/evidence/vnext/m1-03/REPORT.md`、`RESULTS.json`、完整日志及学习材料完成；M1-02 的结果 schema / SQLite user_version 差异单独核实且不改历史证据。
+- [x] 直接提交并推送 `main`；交主 Agent 独立审查后停止，不进入 M1-04/M1-05。
 
 ## 实际进度登记
 
@@ -117,6 +126,7 @@
 | 2026-10-17 | D6（历史评测冻结） | `main` / 运行代码 `f2c9403`；评测 Gold 冻结于 `151a1ce`；最终证据 `28c3e1a` | 全量 pytest **64/64**；E04–E10 映射控制测试唯一项 **45/45**；E01/E02/E03 新鲜真实模型场景均 PASS；E10 attempt 01 FAIL、attempt 02 PASS | 场景族 9 PASS / 1 PARTIAL；无 P0 安全红线失败；D7 不改写其结果 |
 | 2026-10-17 | D7（交付完成，等待主 Agent 验收） | 运行实现 `a2517fdbe2b66e4490867cc388aadc32ec5b5197`；最终交付 SHA 见 Git/交付消息，附件来源 SHA 见 MANIFEST | 首轮 E01 FAIL、pytest **61/64**；修正后 E01 **13/13**、恢复 **2/2**、pytest **64/64**；模型 7 / MCP 6 / 19,244 tokens | 仅修 Skill 导出 LF，未改 Agent/Domain 执行逻辑；离线包和源码/面试材料齐备；开发停止，外部审查未执行 |
 | 2026-10-18 | vNext M1-01（本轮测试完成，待主 Agent 审查） | 基于 `main@a53e13a4243cc6c7fa545b3e3a92b838596b6242`；交付 SHA 以本轮 Git 终点为准 | N1-09/10/11 通过；新鲜全量 pytest **73/73**；模型/MCP TaskRun、D3 S1 真实 smoke 通过 | 仅 M1-01；不声称 M1 总体或第三方审查通过；等待主 Agent 决定是否启动 M1-02 |
-| 2026-10-18 | vNext M1-02（实现完成，待主 Agent 审查） | 起点 `main@9658aa3a02513a41cfd40ce1e5974d49ec9fe9ed`；终点以本轮最新 main 提交为准 | 全量 pytest **91/91**；M1 定向 **27/27**；真实 HTTP 双身份、SSE、同一 Run 跨进程模型/MCP 恢复通过 | 仅 M1-02；真实 S1 等待审批且未发生审批/业务写入；M1-03 未开始 |
+| 2026-10-18 | vNext M1-02（主 Agent 已通过验收） | 起点 `main@9658aa3a02513a41cfd40ce1e5974d49ec9fe9ed`；实施 SHA `29829f5c84e74164b6374d51967ced2d2c105699` | 全量 pytest **91/91**；M1 定向 **27/27**；真实 HTTP 双身份、SSE、同一 Run 跨进程模型/MCP 恢复通过 | 业务 Task 等待审批且未发生审批/业务写入；本轮 M1-03 由用户单独授权 |
+| 2026-10-18 | vNext M1-03（本轮实施完成，待主 Agent 独立审查） | 起点 `main@9d49e726f75e49cab23efc93ff472b36c560dcf0`；源码实现终点与最终交付 SHA 见本轮 Git 历史/报告 | CHAT-01..08/UI-01..02 PASS；全量 pytest **101/101**、定向 **36/36**；真实 Edge、Provider、MCP、SSE 和服务重启证据见 `docs/evidence/vnext/m1-03/` | 两次最早浏览器原始 stdout 被 harness 覆写，已如实登记；不声称 M1 总体验收，不进入 M1-04/M1-05 |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。

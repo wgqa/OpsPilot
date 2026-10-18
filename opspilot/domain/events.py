@@ -13,6 +13,7 @@ _PUBLIC_PAYLOAD_KEYS = {
     "sequence", "input_kind", "application_state", "control_revision", "error_code",
     "status", "decision", "reason_code", "task_status", "run_status", "attempt_id",
     "recovery_verified", "report_version", "delivery_status", "ledger_id",
+    "chunk_id", "chunk_seq", "manifest_id", "answer_message_id", "model_attempt_id",
 }
 
 

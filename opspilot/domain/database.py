@@ -592,6 +592,80 @@ CREATE TABLE IF NOT EXISTS d5_context_provenance (
     error_class TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_d5_context_task ON d5_context_provenance(task_id, built_at);
+CREATE TABLE IF NOT EXISTS chat_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES task_bindings(task_id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES task_runs(run_id) ON DELETE CASCADE,
+    attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+    model_id TEXT NOT NULL,
+    prompt_digest TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('RESERVED', 'STREAMING', 'SUCCEEDED', 'FAILED', 'INTERRUPTED')),
+    provider_response_id TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER,
+    error_class TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    UNIQUE (run_id, attempt_no)
+);
+CREATE INDEX IF NOT EXISTS ix_chat_attempts_run ON chat_attempts(run_id, attempt_no);
+CREATE TABLE IF NOT EXISTS chat_context_manifests (
+    manifest_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL UNIQUE REFERENCES chat_attempts(attempt_id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES task_runs(run_id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    task_id TEXT,
+    selected_message_ids_json TEXT NOT NULL,
+    evidence_refs_json TEXT NOT NULL,
+    memory_refs_json TEXT NOT NULL,
+    model_call_refs_json TEXT NOT NULL,
+    excluded_sources_json TEXT NOT NULL,
+    truncation_json TEXT NOT NULL,
+    trusted_state_digest TEXT,
+    prompt_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_chat_context_run ON chat_context_manifests(run_id, created_at);
+CREATE TABLE IF NOT EXISTS chat_answer_chunks (
+    chunk_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL REFERENCES chat_attempts(attempt_id) ON DELETE CASCADE,
+    chunk_seq INTEGER NOT NULL CHECK (chunk_seq > 0),
+    body TEXT NOT NULL,
+    body_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (attempt_id, chunk_seq)
+);
+CREATE TABLE IF NOT EXISTS chat_message_sources (
+    message_id TEXT NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('MESSAGE', 'EVIDENCE', 'MEMORY', 'TASK_STATE', 'MODEL_ATTEMPT')),
+    source_ref TEXT NOT NULL,
+    source_version TEXT,
+    source_digest TEXT NOT NULL,
+    PRIMARY KEY (message_id, source_kind, source_ref)
+);
+CREATE INDEX IF NOT EXISTS ix_chat_message_sources_ref ON chat_message_sources(source_kind, source_ref);
+CREATE TABLE IF NOT EXISTS chat_run_answers (
+    run_id TEXT PRIMARY KEY REFERENCES task_runs(run_id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL UNIQUE REFERENCES messages(message_id) ON DELETE CASCADE,
+    attempt_id TEXT NOT NULL UNIQUE REFERENCES chat_attempts(attempt_id),
+    manifest_id TEXT NOT NULL REFERENCES chat_context_manifests(manifest_id),
+    body_digest TEXT NOT NULL,
+    committed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS worker_retry_state (
+    run_id TEXT PRIMARY KEY REFERENCES task_runs(run_id) ON DELETE CASCADE,
+    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    max_retries INTEGER NOT NULL DEFAULT 3 CHECK (max_retries BETWEEN 0 AND 10),
+    next_attempt_at TEXT,
+    last_error_code TEXT,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_worker_retry_due ON worker_retry_state(next_attempt_at, retry_count);
 """
 
 
@@ -619,7 +693,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 2:
+        if version > 3:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -666,6 +740,14 @@ def initialize(path: str | Path) -> None:
             version = 1
         if version < 2:
             connection.execute("PRAGMA user_version = 2")
+            version = 2
+        if version < 3:
+            connection.execute(
+                """INSERT OR IGNORE INTO worker_retry_state (run_id, retry_count, max_retries, next_attempt_at, updated_at)
+                   SELECT run_id, 0, 3, NULL, created_at FROM task_runs
+                   WHERE status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')"""
+            )
+            connection.execute("PRAGMA user_version = 3")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -674,6 +756,12 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     status_a = "DISABLED" if scenario == "S1_DISABLED" else "ENABLED"
     with connect(path) as connection:
         for table in (
+            "chat_run_answers",
+            "chat_message_sources",
+            "chat_answer_chunks",
+            "chat_context_manifests",
+            "chat_attempts",
+            "worker_retry_state",
             "task_run_inputs",
             "task_execution_budgets",
             "session_events",

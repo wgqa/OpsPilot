@@ -429,6 +429,11 @@ def create_task_with_initial_run(
             (run_id, identity.tenant_id, task_id, session_id, command_id, message_id, sequence, now),
         )
         connection.execute(
+            """INSERT INTO worker_retry_state (run_id, retry_count, max_retries, updated_at)
+               VALUES (?, 0, 3, ?)""",
+            (run_id, now),
+        )
+        connection.execute(
             """INSERT INTO task_execution_budgets
                (task_id, tenant_id, active_elapsed_ms, active_started_at, heartbeat_at,
                 deadline_ms, deadline_reached_at, updated_at)
@@ -574,6 +579,12 @@ def admit_task_message(
             (run_id, identity.tenant_id, task_id, session_id, command_id, message_id,
              run_kind, expected_revision, expected_revision, seq, now),
         )
+        if input_kind == "CHAT_READONLY":
+            connection.execute(
+                """INSERT INTO worker_retry_state (run_id, retry_count, max_retries, updated_at)
+                   VALUES (?, 0, 3, ?)""",
+                (run_id, now),
+            )
         _insert_outbox(
             connection, identity.tenant_id, task_id, session_id, "COMMAND", command_id,
             "MESSAGE_ACCEPTED",
@@ -676,7 +687,8 @@ def claim_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) -> 
         ).fetchone()
         if session is None or str(session["owner_id"]) != identity.actor_id or identity.role != "SUPPORT":
             raise TaskControlError("TASK_RUN_SCOPE_DENIED")
-        if str(run["status"]) != "QUEUED":
+        resumable_chat = str(run["kind"]) == "CHAT_READONLY" and str(run["status"]) == "INTERRUPTED_RECOVERABLE"
+        if str(run["status"]) != "QUEUED" and not resumable_chat:
             raise TaskControlError("TASK_RUN_NOT_QUEUED")
         if str(run["kind"]) != "CHAT_READONLY":
             if run["task_id"] is None:
@@ -700,10 +712,18 @@ def claim_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) -> 
             if active is not None:
                 raise TaskRunBusy()
         now = _utc_now()
-        connection.execute(
-            "UPDATE task_runs SET status = 'RUNNING', started_at = ? WHERE run_id = ? AND status = 'QUEUED'",
-            (now, run_id),
-        )
+        if resumable_chat:
+            connection.execute(
+                """UPDATE task_runs SET status = 'RUNNING', started_at = COALESCE(started_at, ?),
+                          ended_at = NULL, blocked_reason = NULL
+                   WHERE run_id = ? AND status = 'INTERRUPTED_RECOVERABLE'""",
+                (now, run_id),
+            )
+        else:
+            connection.execute(
+                "UPDATE task_runs SET status = 'RUNNING', started_at = ? WHERE run_id = ? AND status = 'QUEUED'",
+                (now, run_id),
+            )
         current = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
         return {key: current[key] for key in current.keys()}
 
@@ -953,29 +973,60 @@ def recover_running_task_runs(path: str | Path, owner_id: str) -> list[str]:
         if owner is None or str(owner["owner_id"]) != owner_id:
             raise TaskControlError("WORKER_FENCE_STALE")
         rows = connection.execute(
-            "SELECT * FROM task_runs WHERE status = 'RUNNING' AND kind != 'CHAT_READONLY' ORDER BY created_at"
+            "SELECT * FROM task_runs WHERE status = 'RUNNING' ORDER BY created_at"
         ).fetchall()
         for run in rows:
             now = _utc_now()
             connection.execute(
-                """UPDATE task_runs SET status = 'INTERRUPTED_RECOVERABLE', ended_at = ?,
-                          blocked_reason = 'WORKER_OWNER_RESTARTED'
-                   WHERE run_id = ? AND status = 'RUNNING'""",
-                (now, run["run_id"]),
+                """INSERT OR IGNORE INTO worker_retry_state
+                   (run_id, retry_count, max_retries, next_attempt_at, last_error_code, updated_at)
+                   VALUES (?, 0, 3, NULL, NULL, ?)""",
+                (run["run_id"], now),
             )
-            if run["task_id"] is not None:
+            retry = connection.execute(
+                "SELECT retry_count, max_retries FROM worker_retry_state WHERE run_id = ?",
+                (run["run_id"],),
+            ).fetchone()
+            retry_count, max_retries = int(retry["retry_count"]), int(retry["max_retries"])
+            if retry_count >= max_retries:
+                recovered_status, reason_code = "BLOCKED", "WORKER_RETRY_EXHAUSTED"
+                next_attempt_at = None
+            else:
+                retry_count += 1
+                delay = max(2, min(30, 2 ** retry_count))
+                recovered_status, reason_code = "INTERRUPTED_RECOVERABLE", "WORKER_OWNER_RESTARTED"
+                next_attempt_at = connection.execute(
+                    "SELECT datetime('now', ?)", (f"+{delay} seconds",)
+                ).fetchone()[0]
+            connection.execute(
+                """UPDATE worker_retry_state SET retry_count = ?, next_attempt_at = ?,
+                          last_error_code = ?, updated_at = ? WHERE run_id = ?""",
+                (retry_count, next_attempt_at, reason_code, now, run["run_id"]),
+            )
+            connection.execute(
+                """UPDATE task_runs SET status = ?, ended_at = ?, blocked_reason = ?
+                   WHERE run_id = ? AND status = 'RUNNING'""",
+                (recovered_status, now, reason_code, run["run_id"]),
+            )
+            if run["kind"] == "CHAT_READONLY":
                 connection.execute(
-                    """UPDATE task_bindings SET status = 'INTERRUPTED_RECOVERABLE'
+                    "UPDATE chat_attempts SET status = 'INTERRUPTED', error_class = 'WorkerRestarted', completed_at = ? "
+                    "WHERE run_id = ? AND status IN ('RESERVED', 'STREAMING')",
+                    (now, run["run_id"]),
+                )
+            elif run["task_id"] is not None:
+                connection.execute(
+                    """UPDATE task_bindings SET status = ?
                        WHERE task_id = ? AND status NOT IN ('ABORTED', 'COMPLETED')""",
-                    (run["task_id"],),
+                    ("INCONCLUSIVE" if recovered_status == "BLOCKED" else "INTERRUPTED_RECOVERABLE", run["task_id"]),
                 )
             _insert_outbox(
                 connection, str(run["tenant_id"]),
                 str(run["task_id"]) if run["task_id"] is not None else None,
                 str(run["session_id"]), "RUN", str(run["run_id"]),
-                "RUN_STATUS_INTERRUPTED_RECOVERABLE",
-                {"run_id": str(run["run_id"]), "run_status": "INTERRUPTED_RECOVERABLE",
-                 "reason_code": "WORKER_OWNER_RESTARTED"},
+                f"RUN_STATUS_{recovered_status}",
+                {"run_id": str(run["run_id"]), "run_status": recovered_status,
+                 "reason_code": reason_code},
             )
             recovered.append(str(run["run_id"]))
     return recovered
@@ -1001,7 +1052,13 @@ def mark_run_interrupted_by_worker(
             "UPDATE task_runs SET status = ?, ended_at = ?, blocked_reason = ? WHERE run_id = ? AND status = 'RUNNING'",
             (status, now, reason, run_id),
         )
-        if run["task_id"] is not None:
+        if run["kind"] == "CHAT_READONLY":
+            connection.execute(
+                "UPDATE chat_attempts SET status = 'INTERRUPTED', error_class = ?, completed_at = ? "
+                "WHERE run_id = ? AND status IN ('RESERVED', 'STREAMING')",
+                (reason[:100], now, run_id),
+            )
+        elif run["task_id"] is not None:
             task_status = "INCONCLUSIVE" if status == "BLOCKED" else "INTERRUPTED_RECOVERABLE"
             connection.execute(
                 """UPDATE task_bindings SET status = ? WHERE task_id = ?
@@ -1018,19 +1075,80 @@ def mark_run_interrupted_by_worker(
         return {key: updated[key] for key in updated.keys()}
 
 
+def schedule_worker_retry(
+    path: str | Path, owner_id: str, run_id: str, *, error_code: str, base_delay_seconds: int = 2
+) -> dict[str, object]:
+    """Persist bounded retry/backoff for a recoverable Run under the current worker fence."""
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        owner = connection.execute("SELECT owner_id FROM web_worker_state WHERE singleton_id = 1").fetchone()
+        if owner is None or str(owner["owner_id"]) != owner_id:
+            raise TaskControlError("WORKER_FENCE_STALE")
+        run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
+        if run is None:
+            raise TaskControlError("TASK_RUN_NOT_FOUND")
+        if str(run["status"]) != "INTERRUPTED_RECOVERABLE":
+            return {"run_id": run_id, "status": str(run["status"]), "retry_scheduled": False}
+        now = _utc_now()
+        connection.execute(
+            """INSERT OR IGNORE INTO worker_retry_state
+               (run_id, retry_count, max_retries, next_attempt_at, last_error_code, updated_at)
+               VALUES (?, 0, 3, NULL, NULL, ?)""",
+            (run_id, now),
+        )
+        state = connection.execute("SELECT * FROM worker_retry_state WHERE run_id = ?", (run_id,)).fetchone()
+        retries = int(state["retry_count"])
+        maximum = int(state["max_retries"])
+        if retries >= maximum:
+            reason = "WORKER_RETRY_EXHAUSTED"
+            connection.execute(
+                "UPDATE task_runs SET status = 'BLOCKED', blocked_reason = ?, ended_at = ? WHERE run_id = ?",
+                (reason, now, run_id),
+            )
+            if run["kind"] != "CHAT_READONLY" and run["task_id"] is not None:
+                connection.execute(
+                    "UPDATE task_bindings SET status = 'INCONCLUSIVE' WHERE task_id = ? AND status NOT IN ('ABORTED', 'COMPLETED')",
+                    (run["task_id"],),
+                )
+            next_time = None
+            status = "BLOCKED"
+        else:
+            retries += 1
+            delay = max(1, min(30, base_delay_seconds * (2 ** (retries - 1))))
+            connection.execute(
+                """UPDATE worker_retry_state SET retry_count = ?,
+                          next_attempt_at = datetime('now', ?), last_error_code = ?, updated_at = ?
+                   WHERE run_id = ?""",
+                (retries, f"+{delay} seconds", error_code[:100], now, run_id),
+            )
+            next_time = connection.execute(
+                "SELECT next_attempt_at FROM worker_retry_state WHERE run_id = ?", (run_id,)
+            ).fetchone()[0]
+            status = "INTERRUPTED_RECOVERABLE"
+        _insert_outbox(
+            connection, str(run["tenant_id"]), str(run["task_id"]) if run["task_id"] else None,
+            str(run["session_id"]), "RUN", run_id, f"RUN_RETRY_{status}",
+            {"run_id": run_id, "run_status": status,
+             "reason_code": "WORKER_RETRY_EXHAUSTED" if status == "BLOCKED" else error_code[:100]},
+        )
+    return {"run_id": run_id, "status": status, "retry_count": retries,
+            "max_retries": maximum, "next_attempt_at": next_time, "retry_scheduled": status != "BLOCKED"}
+
+
 def next_worker_run(path: str | Path, excluded_run_ids: tuple[str, ...] = ()) -> dict[str, object] | None:
-    exclusion = ""
-    parameters: list[object] = []
-    if excluded_run_ids:
-        exclusion = f" AND r.run_id NOT IN ({','.join('?' for _ in excluded_run_ids)})"
-        parameters.extend(excluded_run_ids)
+    # `excluded_run_ids` remains accepted for M1-02 callers, but retries are now
+    # governed by persisted backoff so a transient failure cannot be hidden by
+    # a process-local set for the lifetime of the worker.
     with connect(path) as connection:
         row = connection.execute(
-            f"""SELECT r.* FROM task_runs AS r
-               WHERE r.kind != 'CHAT_READONLY' AND (r.status = 'QUEUED' OR r.status = 'INTERRUPTED_RECOVERABLE')
-                 {exclusion}
-               ORDER BY CASE r.status WHEN 'INTERRUPTED_RECOVERABLE' THEN 0 ELSE 1 END,
-                        r.created_at, r.run_id LIMIT 1""",
-            tuple(parameters),
+            """SELECT r.* FROM task_runs AS r
+               LEFT JOIN worker_retry_state AS w ON w.run_id = r.run_id
+               WHERE r.kind IN ('CHAT_READONLY', 'INVESTIGATE', 'RESUME', 'APPROVAL_RESUME', 'RECONCILE')
+                 AND r.status IN ('QUEUED', 'INTERRUPTED_RECOVERABLE')
+                 AND (w.run_id IS NULL OR (w.retry_count <= w.max_retries
+                      AND (w.next_attempt_at IS NULL OR w.next_attempt_at <= CURRENT_TIMESTAMP)))
+                 AND r.run_id NOT IN (SELECT value FROM json_each(?))
+               ORDER BY r.created_at, r.run_id LIMIT 1""",
+            (__import__("json").dumps(list(excluded_run_ids)),),
         ).fetchone()
     return {key: row[key] for key in row.keys()} if row is not None else None

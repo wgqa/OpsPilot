@@ -10,15 +10,42 @@
 **D6 状态：** E01–E10 已形成新鲜运行矩阵；全量 pytest 64/64，E01–E03 真实模型场景通过，E10 保留一次 smoke 失败并在独立数据重跑通过；E10 族诚实记为 PARTIAL，安全控制未见 P0 失败。
 **v1.0 / D1–D7 实施规范：** [v1.0 实施基线](docs/baseline/v1.0-implementation-baseline.md)
 **D7 状态：** 干净环境发现并最小修复 Skill 导出换行问题；修正后真实 E01 13/13、两条真进程崩溃恢复 2/2、全量 pytest 64/64。首轮 E01 FAIL 与 61/64 回归保留，详见 [D7 报告](docs/evidence/d7/REPORT.md)。
-**当前实施状态：** D7 交付完成，开发停止，等待主 Agent 验收；独立第三方审计与用户最终审阅尚未执行。
-**vNext / M1-01 状态：** 本轮在 `main` 完成 Task 终止、关键纠错与业务提交的 Domain 事务裁决；N1-09/10/11、全量 pytest 73/73、真实模型/MCP TaskRun smoke 与 D3 S1 回归均有本轮证据。当前等待主 Agent 审查；M1-02、Web/HTTP 对话接入及后台 worker 尚未实现。vNext 执行范围见 [v0.3 合同](docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md)、[M1-01 任务卡](docs/handoff/vnext/Luna-M1-01-implementation-task-card.md) 与 [候选实现基线](docs/baseline/vNext-product-baseline-candidate.md)；候选基线不代表第三方签字或 M1 总体验收。
+**v1.0 / D1–D7 状态：** D7 交付完成并通过主 Agent 验收；独立第三方审计与用户最终审阅尚未执行。
+**vNext / M1-01、M1-02 状态：** 两阶段均已通过主 Agent 独立验收。M1-01 完成 Task 终止与关键纠错原子裁决；M1-02 完成 FastAPI、可信身份、单实例 Worker、Domain Outbox 与 SSE。历史实现和证据分别见 [M1-01 报告](docs/evidence/vnext/m1-01/REPORT.md) 与 [M1-02 报告](docs/evidence/vnext/m1-02/REPORT.md)。
+**vNext / M1-03 状态：** Vue 工作台与真实持久只读聊天已在 `main` 实施；完整结果见 [M1-03 报告](docs/evidence/vnext/m1-03/REPORT.md)、[机器结果](docs/evidence/vnext/m1-03/RESULTS.json) 与 [学习材料](docs/learning/M1-03/)。尚待主 Agent 独立审查；不代表 M1 总体验收或 Web 审批已完成。
+**vNext 执行范围：** 以 [v0.3 合同](docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md)、[候选实现基线](docs/baseline/vNext-product-baseline-candidate.md) 和当前阶段授权任务卡为准；候选基线不代表第三方签字。
 **运行实现 SHA：** `a2517fdbe2b66e4490867cc388aadc32ec5b5197`；最终交付 main SHA 用 `git rev-parse HEAD` 核对，离线附件的精确来源见包内 MANIFEST。D7 未改 Agent/Domain Python 逻辑。
 **逐项进度与测试结论：** [TASKS.md](TASKS.md)
 **M1-01 新鲜运行证据：** [M1-01 报告](docs/evidence/vnext/m1-01/REPORT.md) · [机器结果](docs/evidence/vnext/m1-01/RESULTS.json) · [原始日志与失败尝试](docs/evidence/vnext/m1-01/)
+**M1-02 新鲜运行证据：** [M1-02 报告](docs/evidence/vnext/m1-02/REPORT.md) · [机器结果](docs/evidence/vnext/m1-02/RESULTS.json) · [原始日志](docs/evidence/vnext/m1-02/logs/)
+**M1-03 新鲜运行证据：** [M1-03 报告](docs/evidence/vnext/m1-03/REPORT.md) · [机器结果](docs/evidence/vnext/m1-03/RESULTS.json) · [原始日志和截图](docs/evidence/vnext/m1-03/)
 **D1 执行日志与报告：** [D1 报告](docs/evidence/d1/REPORT.md)
 **D2 任务卡与执行报告：** [D2 任务卡](docs/handoff/Luna-D2-implementation-brief.md) · [D2 报告](docs/evidence/d2/REPORT.md)
 **D3 真实运行轨迹与报告：** [D3 报告](docs/evidence/d3/REPORT.md) · [脱敏轨迹](docs/evidence/d3/TRACE.json) · [进程与测试日志](docs/evidence/d3/)
 **工程边界：** [AGENTS.md](AGENTS.md)
+
+## vNext 本地 Vue 工作台（M1-03）
+
+在本地 `.env` 配置模型端点、演示账户口令，并确保模型密钥不进入 Git。终端 A 启动单实例 FastAPI：
+
+```powershell
+$env:OPSPILOT_WEB_ORIGIN = 'http://127.0.0.1:5173'
+$env:OPSPILOT_DB_PATH = '.runtime\workbench.sqlite3'
+$env:OPSPILOT_CHECKPOINT_DB_PATH = '.runtime\workbench-checkpoints.sqlite3'
+New-Item -ItemType Directory -Path .runtime -Force | Out-Null
+.\.venv\Scripts\python.exe -m opspilot.web.server --host 127.0.0.1 --port 8000
+```
+
+终端 B 启动 Vue 开发服务（浏览器只访问 Vite 同源地址；API 请求由本地代理转发）：
+
+```powershell
+Set-Location frontend
+npm ci
+$env:OPSPILOT_API_ORIGIN = 'http://127.0.0.1:8000'
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+打开 `http://127.0.0.1:5173`，使用 `.env` 中配置的 SUPPORT 演示身份登录。M1-03 支持真实多轮只读聊天和固定 `orders-demo / integration-a` S1 调查；Task 到达 WAITING_APPROVAL 后只能查看与追问，审批、配置修改和工单交付仍不提供 Web 操作。本地 SQLite 与演示账户仅适用于单机演示。
 
 ## 从这里开始：最短可运行路线（PowerShell）
 

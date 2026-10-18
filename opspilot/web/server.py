@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 import uvicorn
 
@@ -19,7 +20,8 @@ def main() -> int:
         parser.error("Port must be between 1 and 65535.")
     if args.workers != 1:
         parser.error("OpsPilot local execution requires exactly one Uvicorn worker process.")
-    app = create_app(expected_origin=f"http://{args.host}:{args.port}")
+    expected_origin = os.environ.get("OPSPILOT_WEB_ORIGIN", f"http://{args.host}:{args.port}")
+    app = create_app(expected_origin=expected_origin)
     uvicorn.run(app, host=args.host, port=args.port, workers=1, reload=False, log_level="info")
     return 0
 

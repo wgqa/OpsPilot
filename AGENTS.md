@@ -46,9 +46,9 @@
 - 在 D1 中只完成 D1 范围；不以常规实现选择为由引入额外审批，也不扩展到 D2 及后续阶段。
 - 归档文件中的旧方案和任务卡仅供溯源。实施时只按根目录本文件、`TASKS.md`、当前阶段任务书及唯一有效的 v1.0 基线执行。
 
-## vNext M1-02 的范围衔接
+## vNext M1-03 的范围衔接
 
 - v1.0 基线继续约束 D1–D7 历史能力及其回归；vNext 任务不得覆盖或重写这些冻结合同。
-- vNext/M1-02 的范围依据 `docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md` 与本轮提供的 M1-02 任务卡（开发目录原件；实现证据见 `docs/evidence/vnext/m1-02/REPORT.md`）；`docs/baseline/vNext-product-baseline-candidate.md` 是待审实现快照，不表示第三方签字或 M1 总体验收。若合同冲突，停止相关变更并提交变更说明，由主 Agent 裁决。
-- M1-01 已通过主 Agent 验收；本轮 M1-02 已实施、测试并提交到 `main`，当前等待主 Agent 审查。当前用户要求单人直接在 `main` 开发、提交并推送，不新建分支或 PR。未经主 Agent 验收，不自行进入 M1-03。
-- M1-02 仅增加 FastAPI/本地可信身份、Session/Message/Task/Run API、单实例后台执行、Domain Outbox 与 SSE；所有 TaskControl、LangGraph、D3 Domain 合同继续是唯一业务状态权威。不得把 Graph checkpoint 当作 Task 权限事实来源；用户关键纠错仍是未信任输入，不能提升为 Evidence 或审批授权。
+- vNext/M1-03 的范围依据 `docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md`、`docs/baseline/{API_CONTRACT,STATE_TRANSITIONS,ACCESS_MATRIX,EVENT_RECOVERY,MEMORY_LINEAGE}.md` 与用户本轮提供的 M1-03 任务卡。`docs/baseline/vNext-product-baseline-candidate.md` 是待审实现快照，不表示第三方签字或 M1 总体验收。若合同冲突，停止相关变更并提交变更说明，由主 Agent 裁决。
+- M1-01 与 M1-02 均已通过主 Agent 独立验收。当前用户授权只实施 M1-03；按单人工作流直接在 `main` 开发、测试、提交并推送，不新建分支或 PR。M1-03 完成后停止并等待主 Agent 审查，不自行进入 M1-04/M1-05。
+- M1-03 交付 Vue 工作台与持久真实只读聊天。CHAT_READONLY 不进入业务 Investigator Graph，不改变业务 Task/审批/Plan/ActionIntent；TaskControl、LangGraph、D3 Domain 继续是唯一业务状态权威。不得把 Graph checkpoint 当作 Task 权限事实来源；用户关键纠错仍是未信任输入，不能提升为 Evidence 或审批授权。

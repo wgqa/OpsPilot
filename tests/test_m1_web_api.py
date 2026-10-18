@@ -271,7 +271,7 @@ def test_web_06_readonly_chat_remains_queued_and_does_not_change_task_state(
         headers={**headers, "Idempotency-Key": "web-06-chat"},
         json={"task_id": task["task_id"], "input_kind": "CHAT_READONLY", "body": "What is the status?"},
     )
-    assert chat.status_code == 202 and chat.json()["answer_status"] == "NOT_IMPLEMENTED"
+    assert chat.status_code == 202 and chat.json()["answer_status"] == "QUEUED"
     run = web_client.get(f"/api/runs/{chat.json()['run_id']}")
     task_view = web_client.get(f"/api/tasks/{task['task_id']}")
     assert run.status_code == 200 and run.json()["status"] == "QUEUED"

@@ -64,18 +64,20 @@ _STATUS_BY_CODE = {
 
 
 def _public_run(row: Any) -> dict[str, Any]:
+    status = str(row["status"])
+    kind = str(row["kind"])
     return {
         "run_id": str(row["run_id"]),
         "task_id": str(row["task_id"]) if row["task_id"] is not None else None,
         "session_id": str(row["session_id"]),
         "source_message_id": str(row["source_message_id"]) if row["source_message_id"] else None,
-        "kind": str(row["kind"]),
-        "status": str(row["status"]),
+        "kind": kind,
+        "status": status,
         "waiting_reason": str(row["blocked_reason"]) if row["blocked_reason"] else None,
         "created_at": str(row["created_at"]),
         "started_at": str(row["started_at"]) if row["started_at"] else None,
         "ended_at": str(row["ended_at"]) if row["ended_at"] else None,
-        "answer_status": "NOT_IMPLEMENTED" if row["kind"] == "CHAT_READONLY" else None,
+        "answer_status": ("COMPLETED" if status == "SUCCEEDED" else status) if kind == "CHAT_READONLY" else None,
     }
 
 
@@ -283,6 +285,18 @@ def create_app(
         return {**{key: row[key] for key in row.keys()},
                 "tasks": [{key: link[key] for key in link.keys()} for link in links]}
 
+    @app.get("/api/sessions/{session_id}/runs")
+    async def get_session_runs(
+        session_id: str, context: AuthContext = Depends(current_user)
+    ) -> dict[str, Any]:
+        require_session_owner(context.identity, session_id)
+        with connect(resolved_db) as connection:
+            rows = connection.execute(
+                "SELECT * FROM task_runs WHERE session_id = ? AND tenant_id = ? ORDER BY created_at, run_id",
+                (session_id, context.identity.tenant_id),
+            ).fetchall()
+        return {"items": [_public_run(row) for row in rows]}
+
     @app.post("/api/sessions/{session_id}/tasks", status_code=202)
     async def post_task(
         session_id: str,
@@ -329,6 +343,15 @@ def create_app(
             ).fetchall()
         return {"items": [_public_run(row) for row in rows]}
 
+    @app.get("/api/tasks/{task_id}/inspector")
+    async def get_task_inspector_route(
+        task_id: str, context: AuthContext = Depends(current_user)
+    ) -> dict[str, Any]:
+        from opspilot.domain.chat import get_task_inspector
+
+        require_task_reader(context.identity, task_id)
+        return get_task_inspector(resolved_db, context.identity, task_id)
+
     @app.get("/api/runs/{run_id}")
     async def get_run(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
         with connect(resolved_db) as connection:
@@ -344,6 +367,24 @@ def create_app(
             require_session_owner(context.identity, str(row["session_id"]))
         return _public_run(row)
 
+    @app.get("/api/runs/{run_id}/chunks")
+    async def get_run_chunks(
+        run_id: str,
+        after_seq: int = Query(default=0, ge=0),
+        limit: int = Query(default=500, ge=1, le=1000),
+        context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.chat import get_chat_chunks
+
+        return {"items": get_chat_chunks(resolved_db, context.identity, run_id, after_seq=after_seq, limit=limit),
+                "after_seq": after_seq}
+
+    @app.get("/api/runs/{run_id}/context")
+    async def get_run_context(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+        from opspilot.domain.chat import get_chat_manifest
+
+        return get_chat_manifest(resolved_db, context.identity, run_id)
+
     @app.post("/api/sessions/{session_id}/messages", status_code=202)
     async def post_message(
         session_id: str,
@@ -356,7 +397,12 @@ def create_app(
             input_kind=body.input_kind, body=body.body,
             idempotency_key=require_idempotency_key(idempotency_key),
         )
-        return {**result, "answer_status": "NOT_IMPLEMENTED" if body.input_kind == "CHAT_READONLY" else None}
+        answer_status = None
+        if body.input_kind == "CHAT_READONLY":
+            from opspilot.domain.chat import public_chat_answer_status
+
+            answer_status = public_chat_answer_status(resolved_db, str(result["run_id"]))
+        return {**result, "answer_status": answer_status}
 
     @app.get("/api/sessions/{session_id}/messages")
     async def get_messages(
@@ -373,7 +419,14 @@ def create_app(
                    ORDER BY sequence LIMIT ?""",
                 (session_id, context.identity.tenant_id, after_seq, limit),
             ).fetchall()
-        return {"items": [{key: row[key] for key in row.keys()} for row in rows]}
+        items = []
+        for row in rows:
+            item = {key: row[key] for key in row.keys()}
+            if str(row["role"]) == "ASSISTANT" or str(row["input_kind"]) == "CHAT_READONLY":
+                item["application_state"] = None
+                item["applied_run_id"] = None
+            items.append(item)
+        return {"items": items}
 
     @app.post("/api/tasks/{task_id}/abort", status_code=202)
     async def post_abort(

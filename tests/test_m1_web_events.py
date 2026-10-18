@@ -44,7 +44,7 @@ def test_n2_02_n2_04_sse_reconnect_cursor_precedence_and_no_fake_chat(demo_db: P
             headers={**headers, "Idempotency-Key": "n2-04-readonly"},
             json={"body": "private user statement 401 marker", "input_kind": "CHAT_READONLY"},
         )
-        assert accepted.status_code == 202 and accepted.json()["answer_status"] == "NOT_IMPLEMENTED"
+        assert accepted.status_code == 202 and accepted.json()["answer_status"] == "QUEUED"
         run = client.get(f"/api/runs/{accepted.json()['run_id']}")
         assert run.status_code == 200 and run.json()["status"] == "QUEUED"
 
