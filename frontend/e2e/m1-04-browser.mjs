@@ -38,7 +38,8 @@ async function login(actorId, password) {
   await page.getByLabel('本地口令').fill(password);
   await page.getByRole('button', { name: '登录工作台' }).click();
   try {
-    await expect(page.locator('.rail-footer')).toBeVisible({ timeout: 15000 });
+    const readySelector = actorId.startsWith('approver-') ? '.approval-center' : '.rail-footer';
+    await expect(page.locator(readySelector)).toBeVisible({ timeout: 15000 });
   } catch {
     const message = await page.locator('[role="alert"]').innerText().catch(() => 'login did not complete');
     const origin = records.findLast((record) => record.type === 'login_origin')?.origin ?? 'missing';
