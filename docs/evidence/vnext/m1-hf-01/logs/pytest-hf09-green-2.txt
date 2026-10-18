@@ -1,0 +1,82 @@
+FF....F                                                                  [100%]
+================================== FAILURES ===================================
+_ test_hf09_approval_resume_authority_changes_fail_closed[abort-TASK_CONTROL_STALE] _
+tests\test_m1_web_approval.py:700: in test_hf09_approval_resume_authority_changes_fail_closed
+    assert response.status_code == 202, response.text
+E   AssertionError: {"code":"IDEMPOTENCY_CONFLICT"}
+E   assert 409 == 202
+E    +  where 409 = <Response [409 Conflict]>.status_code
+_ test_hf09_approval_resume_authority_changes_fail_closed[correction-TASK_CONTROL_STALE] _
+tests\test_m1_web_approval.py:709: in test_hf09_approval_resume_authority_changes_fail_closed
+    assert response.status_code == 202, response.text
+E   AssertionError: {"code":"IDEMPOTENCY_CONFLICT"}
+E   assert 409 == 202
+E    +  where 409 = <Response [409 Conflict]>.status_code
+______ test_hf09_approval_resume_without_checkpoint_does_not_cold_start _______
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\ѧϰ\agent����Ŀ\tests\test_m1_web_approval.py", line 805, in test_hf09_approval_resume_without_checkpoint_does_not_cold_start
+  |     asyncio.run(run_investigation(
+  |     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  |         str(task["task_id"]), "support-a", db_path=demo_db,
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         checkpoint_db_path=empty_checkpoint, resume=True, d3_mode=True,
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         executor_id="executor-a", run_id=str(accepted.json()["resume_run_id"]),
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |     ))
+  |     ^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 204, in run
+  |     return runner.run(main)
+  |            ~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 127, in run
+  |     return self._loop.run_until_complete(task)
+  |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\base_events.py", line 719, in run_until_complete
+  |     return future.result()
+  |            ~~~~~~~~~~~~~^^
+  |   File "D:\ѧϰ\agent����Ŀ\opspilot\investigator.py", line 1213, in run_investigation
+  |     async with Client(server_params) as mcp_client:
+  |                ~~~~~~^^^^^^^^^^^^^^^
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\client.py", line 480, in __aexit__
+  |     await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+  |   File "D:\python\Lib\contextlib.py", line 768, in __aexit__
+  |     raise exc
+  |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+  |     cb_suppress = await cb(*exc_details)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\contextlib.py", line 235, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\stdio.py", line 201, in stdio_client
+  |     async with anyio.create_task_group() as tg:
+  |                ~~~~~~~~~~~~~~~~~~~~~~~^^
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+  |     raise BaseExceptionGroup(
+  |         "unhandled errors in a TaskGroup", self._exceptions
+  |     ) from None
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\stdio.py", line 205, in stdio_client
+    |     yield read_stream, write_stream
+    |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+    |     cb_suppress = await cb(*exc_details)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\session.py", line 514, in __aexit__
+    |     result = await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+    |     raise BaseExceptionGroup(
+    |         "unhandled errors in a TaskGroup", self._exceptions
+    |     ) from None
+    | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "D:\ѧϰ\agent����Ŀ\opspilot\investigator.py", line 1238, in run_investigation
+      |     raise RuntimeError("No persisted graph state exists for the authorized thread.")
+      | RuntimeError: No persisted graph state exists for the authorized thread.
+      +------------------------------------
+=========================== short test summary info ===========================
+FAILED tests/test_m1_web_approval.py::test_hf09_approval_resume_authority_changes_fail_closed[abort-TASK_CONTROL_STALE]
+FAILED tests/test_m1_web_approval.py::test_hf09_approval_resume_authority_changes_fail_closed[correction-TASK_CONTROL_STALE]
+FAILED tests/test_m1_web_approval.py::test_hf09_approval_resume_without_checkpoint_does_not_cold_start
+3 failed, 4 passed, 13 deselected in 5.15s

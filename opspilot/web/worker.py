@@ -27,6 +27,8 @@ from opspilot.domain.task_control import (
     claim_task_run,
     schedule_worker_retry,
     trusted_identity,
+    record_worker_run_failure,
+    worker_owner_matches,
 )
 
 
@@ -87,7 +89,9 @@ class SingleInstanceWorker:
         if self._handle is None or self.epoch is None:
             raise RuntimeError("Worker must be registered before recovery.")
         await asyncio.to_thread(recover_abandoned_execution_intervals, str(self.db_path))
-        return await asyncio.to_thread(recover_running_task_runs, str(self.db_path), self.owner_id)
+        return await asyncio.to_thread(
+            recover_running_task_runs, str(self.db_path), self.owner_id, self.epoch
+        )
 
     def release(self) -> None:
         if self._handle is None:
@@ -128,12 +132,13 @@ async def _heartbeat_budget(db_path: str, task_id: str, stopped: asyncio.Event) 
             await asyncio.to_thread(heartbeat_execution_interval, db_path, task_id)
 
 
-async def _process_run(
+async def _process_run_inner(
     db_path: Path,
     checkpoint_path: Path,
     worker_id: str,
     executor_id: str,
     run: dict[str, object],
+    worker_epoch: int | None,
 ) -> None:
     from opspilot.investigator import run_investigation
 
@@ -143,19 +148,17 @@ async def _process_run(
     identity = await asyncio.to_thread(trusted_identity, db_path, actor_id)
     if identity.role != "SUPPORT":
         await asyncio.to_thread(
-            mark_run_interrupted_by_worker, db_path, worker_id, run_id, "RUN_OWNER_NOT_SUPPORT"
+            mark_run_interrupted_by_worker, db_path, worker_id, run_id,
+            "RUN_OWNER_NOT_SUPPORT", worker_epoch,
         )
         return
     resume = status == "INTERRUPTED_RECOVERABLE" or str(run.get("kind")) == "APPROVAL_RESUME"
     remaining_ms = await asyncio.to_thread(begin_execution_interval, db_path, task_id)
     if remaining_ms <= 0:
-        if status == "INTERRUPTED_RECOVERABLE":
-            await asyncio.to_thread(resume_task_run, db_path, identity, run_id)
-        else:
-            await asyncio.to_thread(claim_task_run, db_path, identity, run_id)
         await asyncio.to_thread(
-            finish_task_run, db_path, identity, run_id, "BLOCKED",
-            blocked_reason="INVESTIGATION_DEADLINE_EXCEEDED",
+            record_worker_run_failure, db_path, worker_id, run_id,
+            error_code="INVESTIGATION_DEADLINE_EXCEEDED", retryable=False,
+            worker_epoch=worker_epoch,
         )
         await asyncio.to_thread(end_execution_interval, db_path, task_id)
         return
@@ -179,18 +182,18 @@ async def _process_run(
     except asyncio.TimeoutError:
         await asyncio.to_thread(
             mark_run_interrupted_by_worker, db_path, worker_id, run_id,
-            "INVESTIGATION_DEADLINE_EXCEEDED",
+            "INVESTIGATION_DEADLINE_EXCEEDED", worker_epoch,
         )
     except asyncio.CancelledError:
         await asyncio.to_thread(
             mark_run_interrupted_by_worker, db_path, worker_id, run_id,
-            "WORKER_SHUTDOWN_RECOVERABLE",
+            "WORKER_SHUTDOWN_RECOVERABLE", worker_epoch,
         )
         raise
     except Exception:
-        # run_investigation persists its own interrupted outcome after it claims a
-        # Run. Do not expose provider/MCP exception text in worker logs or API DTOs.
-        pass
+        # The fenced wrapper classifies and persists the failure after cleanup.
+        # Keep exception text and stack out of browser DTOs and worker logs.
+        raise
     finally:
         stop_heartbeat.set()
         heartbeat.cancel()
@@ -205,6 +208,44 @@ async def _process_run(
         await asyncio.to_thread(
             schedule_worker_retry, db_path, worker_id, run_id,
             error_code="INVESTIGATION_RECOVERABLE_FAILURE",
+            worker_epoch=worker_epoch,
+        )
+
+
+def _worker_error_class(error: BaseException) -> tuple[str, bool]:
+    if isinstance(error, BaseExceptionGroup):
+        for nested in error.exceptions:
+            code, retryable = _worker_error_class(nested)
+            if code != "WORKER_RUN_FAILED":
+                return code, retryable
+    if isinstance(error, TaskControlError):
+        return error.code, error.code == "TASK_RUN_BUSY"
+    if "Missing required model configuration:" in str(error):
+        return "MODEL_CONFIGURATION_MISSING", False
+    if isinstance(error, ValueError):
+        return "WORKER_INPUT_INVALID", False
+    return "WORKER_RUN_FAILED", True
+
+
+async def _process_run(
+    db_path: Path,
+    checkpoint_path: Path,
+    worker_id: str,
+    executor_id: str,
+    run: dict[str, object],
+    worker_epoch: int | None = None,
+) -> None:
+    try:
+        await _process_run_inner(
+            db_path, checkpoint_path, worker_id, executor_id, run, worker_epoch
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        error_code, retryable = _worker_error_class(error)
+        await asyncio.to_thread(
+            record_worker_run_failure, db_path, worker_id, str(run["run_id"]),
+            error_code=error_code, retryable=retryable, worker_epoch=worker_epoch,
         )
 
 
@@ -379,12 +420,12 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
 
 async def _dispatch_run(
     db_path: Path, checkpoint_path: Path, worker_id: str, executor_id: str,
-    run: dict[str, object],
+    run: dict[str, object], worker_epoch: int | None = None,
 ) -> None:
     if str(run["kind"]) == "CHAT_READONLY":
         await _process_chat_run(db_path, worker_id, run)
     else:
-        await _process_run(db_path, checkpoint_path, worker_id, executor_id, run)
+        await _process_run(db_path, checkpoint_path, worker_id, executor_id, run, worker_epoch)
 
 
 async def run_worker(
@@ -394,13 +435,39 @@ async def run_worker(
     worker_id: str,
     executor_id: str,
     poll_interval: float = 0.2,
+    worker_epoch: int | None = None,
 ) -> None:
     resolved_db = Path(db_path).resolve()
     resolved_checkpoint = Path(checkpoint_db_path).resolve()
     while True:
+        if not await asyncio.to_thread(
+            worker_owner_matches, str(resolved_db), worker_id, worker_epoch
+        ):
+            raise TaskControlError("WORKER_FENCE_STALE")
         run = await asyncio.to_thread(next_worker_run, str(resolved_db))
         if run is None:
             await asyncio.sleep(poll_interval)
             continue
-        run_id = str(run["run_id"])
-        await _dispatch_run(resolved_db, resolved_checkpoint, worker_id, executor_id, run)
+        try:
+            await _dispatch_run(
+                resolved_db, resolved_checkpoint, worker_id, executor_id, run, worker_epoch
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            if isinstance(error, TaskControlError) and error.code == "WORKER_FENCE_STALE":
+                raise
+            error_code, retryable = _worker_error_class(error)
+            if str(run["kind"]) == "CHAT_READONLY":
+                from opspilot.domain.chat import fail_chat_run_without_attempt
+
+                await asyncio.to_thread(
+                    fail_chat_run_without_attempt, resolved_db, worker_id,
+                    str(run["run_id"]), error_code,
+                )
+            else:
+                await asyncio.to_thread(
+                    record_worker_run_failure, resolved_db, worker_id,
+                    str(run["run_id"]), error_code=error_code, retryable=retryable,
+                    worker_epoch=worker_epoch,
+                )

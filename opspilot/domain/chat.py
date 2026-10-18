@@ -1074,12 +1074,12 @@ def fail_chat_run_without_attempt(path: str | Path, worker_id: str, run_id: str,
         run = connection.execute(
             "SELECT * FROM task_runs WHERE run_id = ? AND kind = 'CHAT_READONLY'", (run_id,)
         ).fetchone()
-        if run is None or str(run["status"]) != "RUNNING":
+        if run is None or str(run["status"]) not in {"QUEUED", "RUNNING"}:
             return
         now = _now_text()
         safe_reason = reason[:100]
         connection.execute(
-            "UPDATE task_runs SET status = 'FAILED', blocked_reason = ?, ended_at = ? WHERE run_id = ? AND status = 'RUNNING'",
+            "UPDATE task_runs SET status = 'FAILED', blocked_reason = ?, ended_at = ? WHERE run_id = ? AND status IN ('QUEUED', 'RUNNING')",
             (safe_reason, now, run_id),
         )
         write_outbox_event(

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "task": "M1-HF-01",
+  "baseline": "8e7c48ad9a8fa0fff51c0cf69d3717eeaac62842",
+  "acceptance_plan_commit": "2d8da783672d831b36d8832448d589ea1bfd115b",
+  "branch": "main",
+  "result": "PASS_PENDING_MAIN_AGENT_REVIEW",
+  "m2_release_gate": "BLOCKED_PENDING_MAIN_AGENT_REVIEW",
+  "scenarios": [
+    {"id":"HF-01","status":"PASS","tests":["test_hf01_aborted_expired_recoverable_run_does_not_starve_next_task"],"evidence":["logs/pytest-hf01-red-venv.txt","logs/pytest-hf01-green-2.txt","logs/pytest-targeted-final.txt"]},
+    {"id":"HF-02","status":"PASS","tests":["test_hf02_stale_run_after_correction_is_blocked_and_new_run_progresses"],"evidence":["logs/pytest-hf02-red.txt","logs/pytest-hf02-green-2.txt","logs/pytest-targeted-final.txt"]},
+    {"id":"HF-03","status":"PASS","tests":["test_hf03_preclaim_failure_is_bounded_and_worker_continues"],"evidence":["logs/pytest-hf03-red.txt","logs/pytest-hf03-green-1.txt","logs/pytest-targeted-final.txt"]},
+    {"id":"HF-04","status":"PASS","tests":["test_hf04_hf05_hf06_approval_resume_recovers_after_domain_commit[repair-VERIFYING]","test_hf04_hf06_approval_resume_recovers_after_real_process_exit[repair-repair_after_commit_before_response]"],"evidence":["logs/pytest-hf04-hf05-hf06-red-original-gate.txt","logs/pytest-hf04-process-repair-green-1.txt"]},
+    {"id":"HF-05","status":"PASS","tests":["test_hf04_hf05_hf06_approval_resume_recovers_after_domain_commit[verification-DELIVERY_PENDING]","test_hf04_hf05_hf06_approval_resume_recovers_after_domain_commit[report-DELIVERY_PENDING]"],"evidence":["logs/pytest-hf04-hf05-hf06-green-1.txt","logs/pytest-targeted-final.txt"]},
+    {"id":"HF-06","status":"PASS","tests":["test_hf04_hf05_hf06_approval_resume_recovers_after_domain_commit[deliver-COMPLETED]","test_hf04_hf06_approval_resume_recovers_after_real_process_exit[deliver-deliver_after_commit_before_response]"],"evidence":["logs/pytest-hf06-process-deliver-green-1.txt","logs/pytest-targeted-final.txt"]},
+    {"id":"HF-07","status":"PASS","tests":["test_hf07_hf08_initial_investigation_recovers_before_first_checkpoint_in_new_process[hf07_claim-after_claim]"],"evidence":["logs/pytest-hf07-hf08-red-original.txt","logs/pytest-hf07-hf08-green-1.txt","logs/pytest-targeted-final.txt"]},
+    {"id":"HF-08","status":"PASS","tests":["test_hf07_hf08_initial_investigation_recovers_before_first_checkpoint_in_new_process[hf08_correction-after_correction_applied]"],"evidence":["logs/pytest-hf07-hf08-green-1.txt","logs/pytest-hf07-hf09-green-2.txt","logs/pytest-targeted-final.txt"]},
+    {"id":"HF-09","status":"PASS","tests":["test_hf09_approval_resume_authority_changes_fail_closed","test_hf09_missing_action_receipt_fails_closed","test_hf09_approval_resume_without_checkpoint_does_not_cold_start","test_hf09_missing_checkpoint_with_existing_plan_or_action_fails_closed","test_hf09_precheckpoint_task_control_change_rejects_resume_before_checkpoint_access"],"evidence":["logs/pytest-hf09-cold-recovery-final.txt","logs/pytest-hf09-precheckpoint-control-green-1.txt","logs/pytest-targeted-final.txt"]},
+    {"id":"HF-10","status":"PASS","tests":["test_hf10_health_reports_api_and_worker_liveness_separately"],"evidence":["logs/pytest-hf10-red.txt","logs/pytest-hf10-green-1.txt","logs/pytest-targeted-final.txt"]}
+  ],
+  "validation": {
+    "full_pytest": {"command":".venv\\Scripts\\python.exe -m pytest -q --basetemp .runtime/pytest-m1-hf-full-final-20261019-1","passed":140,"failed":0,"log":"logs/pytest-full-final.txt"},
+    "targeted_pytest": {"command":".venv\\Scripts\\python.exe -m pytest -q tests/test_m1_hf_worker.py tests/test_m1_web_approval.py --basetemp .runtime/pytest-m1-hf-targeted-final-20261019-1","passed":31,"failed":0,"log":"logs/pytest-targeted-final.txt"},
+    "python_compileall": {"status":"PASS","log":"logs/compileall.txt"},
+    "pip_check": {"status":"PASS","log":"logs/pip-check.txt"},
+    "git_diff_check": {"status":"PASS","log":"logs/git-diff-check.txt"}
+  },
+  "runtime": {"python":"3.14.0","locked_dependencies":"requirements.lock.txt","complete_versions_log":"logs/runtime-versions.txt"},
+  "external_calls": {"real_model_provider":false,"deterministic_model_prompt_capture":true,"real_mcp_stdio_server":true,"mcp_tools_list":true,"mcp_tools_call":false,"real_business_system":false,"browser_smoke":false},
+  "limitations": ["Local single-instance SQLite demo only; no production IAM or multi-worker claim.","Real external LLM provider and business systems were not called.","M2 release remains blocked until main-agent review."]
+}

@@ -145,6 +145,10 @@ def create_app(
         project_outbox(str(resolved_db))
         worker = None
         worker_task: asyncio.Task[None] | None = None
+        app.state.worker_task = None
+        app.state.worker_id = None
+        app.state.worker_epoch = None
+        app.state.worker_loop = asyncio.get_running_loop()
         if start_worker:
             from opspilot.web.worker import SingleInstanceWorker, run_worker
 
@@ -158,10 +162,13 @@ def create_app(
                     checkpoint_path,
                     worker_id=worker.owner_id,
                     executor_id=executor_id,
+                    worker_epoch=worker.epoch,
                 ),
                 name="opspilot-domain-run-worker",
             )
             app.state.worker_id = worker.owner_id
+            app.state.worker_epoch = worker.epoch
+            app.state.worker_task = worker_task
         try:
             yield
         finally:
@@ -179,6 +186,11 @@ def create_app(
     app.state.expected_origin = origin
     app.state.heartbeat_seconds = max(0.05, heartbeat_seconds)
     app.state.cookie_secure = origin.lower().startswith("https://")
+    app.state.worker_configured = bool(start_worker)
+    app.state.worker_task = None
+    app.state.worker_id = None
+    app.state.worker_epoch = None
+    app.state.worker_loop = None
 
     async def current_user(request: Request) -> AuthContext:
         return authenticate_session(resolved_db, request.cookies.get(COOKIE_NAME))
@@ -250,7 +262,28 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
-        return {"status": "ok", "mode": "local-single-instance", "worker": bool(start_worker)}
+        worker_status = "disabled"
+        if app.state.worker_configured:
+            worker_status = "stopped"
+            task = app.state.worker_task
+            if task is not None and not task.done():
+                with connect(resolved_db) as connection:
+                    owner = connection.execute(
+                        "SELECT owner_id, epoch FROM web_worker_state WHERE singleton_id = 1"
+                    ).fetchone()
+                if (
+                    owner is not None
+                    and str(owner["owner_id"]) == str(app.state.worker_id)
+                    and int(owner["epoch"]) == int(app.state.worker_epoch)
+                ):
+                    worker_status = "running"
+        worker_ready = worker_status == "running"
+        return {
+            "status": "ok" if worker_ready else "degraded",
+            "mode": "local-single-instance",
+            "api": "alive",
+            "worker": {"status": worker_status, "ready": worker_ready},
+        }
 
     @app.post("/api/auth/login")
     async def login(request: Request, body: LoginRequest, response: Response) -> dict[str, Any]:

@@ -582,11 +582,309 @@ def _validate_approval_resume_in_transaction(
         or str(link["decision"]) not in {"APPROVED", "REJECTED"}
     ):
         raise TaskControlError("TASK_CONTROL_STALE")
-    if str(link["decision"]) == "APPROVED" and str(link["task_status"]) not in {"APPROVED", "INTERRUPTED_RECOVERABLE"}:
-        raise TaskControlError("APPROVAL_RESUME_LINK_INVALID")
-    if str(link["decision"]) == "REJECTED" and str(link["task_status"]) != "COMPLETED":
+    if not _approval_resume_domain_stage_is_consistent(connection, link):
         raise TaskControlError("APPROVAL_RESUME_LINK_INVALID")
     return {key: link[key] for key in link.keys()}
+
+
+def _approval_resume_domain_stage_is_consistent(
+    connection: sqlite3.Connection, link: sqlite3.Row
+) -> bool:
+    """Require the TaskBinding phase to agree with immutable same-Plan receipts."""
+    tenant_id, task_id, plan_hash = (
+        str(link["tenant_id"]), str(link["task_id"]), str(link["plan_hash"])
+    )
+    decision = str(link["decision"])
+    task_status = str(link["task_status"])
+    approval_id = str(link["approval_id"])
+    intents = connection.execute(
+        """SELECT * FROM d3_action_intents WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?
+           ORDER BY action_kind""",
+        (tenant_id, task_id, plan_hash),
+    ).fetchall()
+    ledgers = connection.execute(
+        """SELECT * FROM d3_action_ledgers WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?
+           ORDER BY action_kind""",
+        (tenant_id, task_id, plan_hash),
+    ).fetchall()
+    receipts = connection.execute(
+        """SELECT * FROM d3_verification_receipts WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+        (tenant_id, task_id, plan_hash),
+    ).fetchall()
+    reports = connection.execute(
+        """SELECT * FROM d3_report_artifacts WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+        (tenant_id, task_id, plan_hash),
+    ).fetchall()
+    deliveries = connection.execute(
+        """SELECT * FROM d3_delivery_records WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+        (tenant_id, task_id, plan_hash),
+    ).fetchall()
+    entries = connection.execute(
+        """SELECT * FROM d3_ticket_resolution_entries WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+        (tenant_id, task_id, plan_hash),
+    ).fetchall()
+    local_reports = connection.execute(
+        """SELECT * FROM d3_local_reports WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+        (tenant_id, task_id, plan_hash),
+    ).fetchall()
+
+    if decision == "REJECTED":
+        if task_status != "COMPLETED" or any((intents, ledgers, receipts, reports, deliveries, entries)):
+            return False
+        for report in local_reports:
+            serialized = str(report["immutable_content_json"])
+            if (
+                str(report["outcome"]) != "REJECTED"
+                or hashlib.sha256(serialized.encode("utf-8")).hexdigest() != str(report["content_digest"])
+            ):
+                return False
+        return True
+    if decision != "APPROVED" or len(intents) > 2 or len(ledgers) > 2 or len(receipts) > 1 or len(reports) > 1 or len(deliveries) > 1 or len(entries) > 1 or local_reports:
+        return False
+
+    plan_row = connection.execute(
+        "SELECT canonical_plan_json FROM d3_plans WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?",
+        (tenant_id, task_id, plan_hash),
+    ).fetchone()
+    if plan_row is None:
+        return False
+    try:
+        plan = json.loads(str(plan_row["canonical_plan_json"]))
+    except (TypeError, ValueError):
+        return False
+    permissions = connection.execute(
+        """SELECT action_kind, state, approval_id, used_by_action_id FROM d3_action_permissions
+           WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
+        (tenant_id, task_id, plan_hash),
+    ).fetchall()
+    permission_by_kind = {str(item["action_kind"]): item for item in permissions}
+    if set(permission_by_kind) != {"REPAIR", "DELIVER"} or any(
+        str(item["approval_id"]) != approval_id for item in permissions
+    ):
+        return False
+    intent_by_kind = {str(item["action_kind"]): item for item in intents}
+    ledger_by_kind = {str(item["action_kind"]): item for item in ledgers}
+    if len(intent_by_kind) != len(intents) or len(ledger_by_kind) != len(ledgers):
+        return False
+    if set(ledger_by_kind) - set(intent_by_kind):
+        return False
+
+    for kind, intent in intent_by_kind.items():
+        serialized = str(intent["canonical_request_json"])
+        try:
+            request = json.loads(serialized)
+        except (TypeError, ValueError):
+            return False
+        if (
+            kind not in {"REPAIR", "DELIVER"}
+            or request.get("tenant_id") != tenant_id
+            or request.get("task_id") != task_id
+            or request.get("plan_hash") != plan_hash
+            or request.get("action_kind") != kind
+            or request.get("approval_id") != approval_id
+            or serialized != _canonical(request)
+            or hashlib.sha256(serialized.encode("utf-8")).hexdigest() != str(intent["request_digest"])
+            or str(intent["approval_id"]) != approval_id
+        ):
+            return False
+
+    repair_intent = intent_by_kind.get("REPAIR")
+    repair_ledger = ledger_by_kind.get("REPAIR")
+    if repair_ledger is not None:
+        if repair_intent is None or not _approval_resume_ledger_matches_intent(repair_ledger, repair_intent):
+            return False
+        if str(repair_ledger["status"]) != "COMMITTED":
+            return False
+        try:
+            repair_result = json.loads(str(repair_ledger["result_json"]))
+        except (TypeError, ValueError):
+            return False
+        expected_before = int(plan["expected_config_version"])
+        if (
+            int(repair_ledger["before_version"] or -1) != expected_before
+            or int(repair_ledger["after_version"] or -1) != expected_before + 1
+            or repair_result.get("action_id") != str(repair_intent["action_id"])
+            or repair_result.get("plan_hash") != plan_hash
+            or repair_result.get("config_version_before") != expected_before
+            or repair_result.get("config_version_after") != expected_before + 1
+            or repair_result.get("credential_ref_before") != plan.get("old_credential_ref")
+            or repair_result.get("credential_ref_after") != plan.get("new_credential_ref")
+        ):
+            return False
+        repair_permission = permission_by_kind["REPAIR"]
+        if (
+            str(repair_permission["state"]) != "CONSUMED"
+            or str(repair_permission["used_by_action_id"]) != str(repair_intent["action_id"])
+        ):
+            return False
+    elif any((receipts, reports, deliveries, entries)) or "DELIVER" in intent_by_kind or "DELIVER" in ledger_by_kind:
+        return False
+    else:
+        repair_permission = permission_by_kind["REPAIR"]
+        if str(repair_permission["state"]) != "AVAILABLE" or repair_permission["used_by_action_id"] is not None:
+            return False
+
+    receipt = receipts[0] if receipts else None
+    if receipt is not None:
+        if repair_intent is None or repair_ledger is None:
+            return False
+        try:
+            observed = json.loads(str(receipt["probe_observed_versions_json"]))
+            assertions = json.loads(str(receipt["business_assertions_json"]))
+        except (TypeError, ValueError):
+            return False
+        expected_versions = {
+            "config_version": int(plan["expected_config_version"]) + 1,
+            "principal_version": int(plan["expected_principal_version"]),
+            "auth_policy_version": int(plan["expected_auth_policy_version"]),
+        }
+        if (
+            str(receipt["repair_action_id"]) != str(repair_intent["action_id"])
+            or str(receipt["service_id"]) != str(plan["service_id"])
+            or str(receipt["integration_id"]) != str(plan["integration_id"])
+            or str(receipt["principal_id"]) != str(plan["principal_id"])
+            or str(receipt["business_route"]) != str(plan["verification_contract"]["route"])
+            or int(receipt["response_status"]) != 200
+            or int(receipt["recovery_verified"]) != 1
+            or observed != expected_versions
+            or any(value is not True for key, value in assertions.items() if key not in {"request_id", "auth_event_id", "response_body"})
+            or not assertions.get("request_id")
+            or not assertions.get("auth_event_id")
+        ):
+            return False
+    elif reports or deliveries or entries or "DELIVER" in intent_by_kind or "DELIVER" in ledger_by_kind:
+        return False
+
+    report = reports[0] if reports else None
+    if report is not None:
+        if receipt is None or repair_intent is None or repair_ledger is None:
+            return False
+        serialized = str(report["immutable_content_json"])
+        if hashlib.sha256(serialized.encode("utf-8")).hexdigest() != str(report["content_digest"]):
+            return False
+        try:
+            body = json.loads(serialized)
+            body_receipt = body.get("verification_receipt")
+            body_repair = body.get("repair_ledger")
+        except (TypeError, ValueError):
+            return False
+        if (
+            str(report["repair_action_id"]) != str(repair_intent["action_id"])
+            or str(report["verification_id"]) != str(receipt["verification_id"])
+            or body.get("business_outcome") != "RECOVERED"
+            or body.get("tenant_id") != tenant_id
+            or body.get("task_id") != task_id
+            or body.get("plan_hash") != plan_hash
+            or not isinstance(body_receipt, dict)
+            or body_receipt.get("verification_id") != str(receipt["verification_id"])
+            or not isinstance(body_repair, dict)
+            or body_repair.get("action_id") != str(repair_intent["action_id"])
+        ):
+            return False
+
+    deliver_intent = intent_by_kind.get("DELIVER")
+    deliver_ledger = ledger_by_kind.get("DELIVER")
+    delivery = deliveries[0] if deliveries else None
+    entry = entries[0] if entries else None
+    if deliver_intent is not None:
+        if report is None or receipt is None:
+            return False
+        request = json.loads(str(deliver_intent["canonical_request_json"]))
+        parameters = request.get("action_parameters")
+        if (
+            not isinstance(parameters, dict)
+            or parameters.get("report_ref") != str(report["report_ref"])
+            or parameters.get("report_version") != int(report["report_version"])
+            or parameters.get("content_digest") != str(report["content_digest"])
+            or parameters.get("verification_id") != str(receipt["verification_id"])
+        ):
+            return False
+    deliver_permission = permission_by_kind["DELIVER"]
+    if deliver_ledger is not None:
+        if (
+            str(deliver_permission["state"]) != "CONSUMED"
+            or str(deliver_permission["used_by_action_id"]) != str(deliver_intent["action_id"] if deliver_intent else "")
+        ):
+            return False
+    elif str(deliver_permission["state"]) != "AVAILABLE" or deliver_permission["used_by_action_id"] is not None:
+        return False
+    elif deliver_ledger is not None or delivery is not None or entry is not None:
+        return False
+
+    delivered = deliver_ledger is not None or delivery is not None or entry is not None
+    if delivered:
+        if (
+            deliver_intent is None or deliver_ledger is None or delivery is None or entry is None
+            or not _approval_resume_ledger_matches_intent(deliver_ledger, deliver_intent)
+            or str(deliver_ledger["status"]) != "COMMITTED"
+            or str(delivery["delivery_action_id"]) != str(deliver_intent["action_id"])
+            or str(delivery["plan_hash"]) != plan_hash
+            or str(delivery["ticket_id"]) != str(plan["ticket_id"])
+            or str(delivery["report_ref"]) != str(report["report_ref"])
+            or str(delivery["report_version"]) != str(report["report_version"])
+            or str(delivery["ticket_entry_id"]) != str(entry["entry_id"])
+            or str(entry["delivery_action_id"]) != str(deliver_intent["action_id"])
+            or str(entry["ticket_id"]) != str(plan["ticket_id"])
+        ):
+            return False
+        try:
+            delivery_receipt = json.loads(str(delivery["delivery_receipt_json"]))
+            ledger_receipt = json.loads(str(deliver_ledger["result_json"]))
+            entry_content = str(entry["content_json"])
+        except (TypeError, ValueError):
+            return False
+        if (
+            hashlib.sha256(entry_content.encode("utf-8")).hexdigest() != str(entry["content_digest"])
+            or delivery_receipt != ledger_receipt
+            or delivery_receipt.get("delivery_action_id") != str(deliver_intent["action_id"])
+            or delivery_receipt.get("ticket_entry_id") != str(entry["entry_id"])
+            or delivery_receipt.get("report_ref") != str(report["report_ref"])
+            or delivery_receipt.get("verification_id") != str(receipt["verification_id"])
+            or delivery_receipt.get("status") != "COMMITTED"
+        ):
+            return False
+        return task_status == "COMPLETED"
+    # Before REPAIR commits, and after REPAIR but before the first verification,
+    # the live resources must still match the exact version expected by that
+    # phase. Later delivery replay is tied to the immutable verification receipt.
+    if receipt is None:
+        current = connection.execute(
+            """SELECT i.credential_ref, i.config_version, i.principal_id,
+                      p.status AS principal_status, p.principal_version,
+                      a.policy_version
+               FROM integrations i
+               JOIN principals p ON p.tenant_id = i.tenant_id AND p.principal_id = i.principal_id
+               JOIN services s ON s.tenant_id = i.tenant_id AND s.integration_id = i.integration_id
+               JOIN auth_policies a ON a.tenant_id = s.tenant_id AND a.service_id = s.service_id
+               WHERE i.tenant_id = ? AND i.integration_id = ? AND s.service_id = ?""",
+            (tenant_id, plan["integration_id"], plan["service_id"]),
+        ).fetchone()
+        config_version = int(plan["expected_config_version"]) + (1 if repair_ledger is not None else 0)
+        credential_ref = plan["new_credential_ref"] if repair_ledger is not None else plan["old_credential_ref"]
+        if (
+            current is None
+            or str(current["principal_id"]) != str(plan["principal_id"])
+            or str(current["principal_status"]) != "ENABLED"
+            or str(current["credential_ref"]) != str(credential_ref)
+            or int(current["config_version"]) != config_version
+            or int(current["principal_version"]) != int(plan["expected_principal_version"])
+            or int(current["policy_version"]) != int(plan["expected_auth_policy_version"])
+        ):
+            return False
+    if task_status == "COMPLETED":
+        return False
+    if receipt is not None:
+        return task_status in {"DELIVERY_PENDING", "INTERRUPTED_RECOVERABLE"}
+    if repair_ledger is not None:
+        return task_status in {"VERIFYING", "INTERRUPTED_RECOVERABLE"}
+    return task_status in {"APPROVED", "INTERRUPTED_RECOVERABLE"}
+
+
+def _approval_resume_ledger_matches_intent(ledger: sqlite3.Row, intent: sqlite3.Row) -> bool:
+    return all(
+        str(ledger[key]) == str(intent[key])
+        for key in ("tenant_id", "task_id", "plan_hash", "action_kind", "action_id", "idempotency_key", "request_digest", "approval_id")
+    ) and hashlib.sha256(str(ledger["result_json"]).encode("utf-8")).hexdigest() == str(ledger["result_digest"])
 
 
 def create_session(path: str | Path, identity: TrustedIdentity) -> dict[str, object]:
@@ -807,11 +1105,24 @@ def admit_task_message(
                 connection, identity.tenant_id, task_id, identity.actor_id, "critical_input_received"
             )
             connection.execute("UPDATE task_bindings SET status = 'WAITING_INPUT' WHERE task_id = ?", (task_id,))
-            connection.execute(
-                """UPDATE task_runs SET status = 'BLOCKED', ended_at = ?, blocked_reason = 'TASK_CONTROL_STALE'
-                   WHERE task_id = ? AND kind != 'CHAT_READONLY' AND status IN ('QUEUED', 'RUNNING')""",
-                (now, task_id),
-            )
+            stale_runs = connection.execute(
+                """SELECT run_id, session_id, tenant_id FROM task_runs
+                   WHERE task_id = ? AND kind != 'CHAT_READONLY'
+                     AND status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')""",
+                (task_id,),
+            ).fetchall()
+            for stale_run in stale_runs:
+                connection.execute(
+                    """UPDATE task_runs SET status = 'BLOCKED', ended_at = ?, blocked_reason = 'TASK_CONTROL_STALE'
+                       WHERE run_id = ? AND status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')""",
+                    (now, stale_run["run_id"]),
+                )
+                _insert_outbox(
+                    connection, str(stale_run["tenant_id"]), task_id, str(stale_run["session_id"]),
+                    "RUN", str(stale_run["run_id"]), "RUN_STATUS_BLOCKED",
+                    {"run_id": str(stale_run["run_id"]), "run_status": "BLOCKED",
+                     "reason_code": "TASK_CONTROL_STALE"},
+                )
             expected_revision = new_revision
             run_kind = "INVESTIGATE"
         else:
@@ -920,11 +1231,24 @@ def abort_task(
                WHERE task_id = ? AND tenant_id = ?""",
             (new_revision, now, identity.actor_id, reason.strip()[:500], task_id, identity.tenant_id),
         )
-        connection.execute(
-            """UPDATE task_runs SET status = 'BLOCKED', ended_at = ?, blocked_reason = 'TASK_ABORTED'
-               WHERE task_id = ? AND kind != 'CHAT_READONLY' AND status IN ('QUEUED', 'RUNNING')""",
-            (now, task_id),
-        )
+        active_runs = connection.execute(
+            """SELECT run_id, session_id, tenant_id FROM task_runs
+               WHERE task_id = ? AND kind != 'CHAT_READONLY'
+                 AND status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')""",
+            (task_id,),
+        ).fetchall()
+        for active_run in active_runs:
+            connection.execute(
+                """UPDATE task_runs SET status = 'BLOCKED', ended_at = ?, blocked_reason = 'TASK_ABORTED'
+                   WHERE run_id = ? AND status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')""",
+                (now, active_run["run_id"]),
+            )
+            _insert_outbox(
+                connection, str(active_run["tenant_id"]), task_id, str(active_run["session_id"]),
+                "RUN", str(active_run["run_id"]), "RUN_STATUS_BLOCKED",
+                {"run_id": str(active_run["run_id"]), "run_status": "BLOCKED",
+                 "reason_code": "TASK_ABORTED"},
+            )
         connection.execute("UPDATE task_bindings SET status = 'ABORTED' WHERE task_id = ?", (task_id,))
         result = {
             "status": "ACCEPTED",
@@ -1200,7 +1524,7 @@ def finish_task_run(
             if blocked_reason == "INVESTIGATION_DEADLINE_EXCEEDED":
                 projected = "INCONCLUSIVE"
             connection.execute(
-                "UPDATE task_bindings SET status = ? WHERE task_id = ? AND status != 'ABORTED'",
+                "UPDATE task_bindings SET status = ? WHERE task_id = ? AND status NOT IN ('ABORTED', 'COMPLETED')",
                 (projected, run["task_id"]),
             )
         updated = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
@@ -1239,16 +1563,41 @@ def register_worker_owner(path: str | Path, owner_id: str, process_id: int) -> i
     return epoch
 
 
-def recover_running_task_runs(path: str | Path, owner_id: str) -> list[str]:
+def _assert_worker_fence(
+    connection: sqlite3.Connection, owner_id: str, worker_epoch: int | None = None
+) -> sqlite3.Row:
+    owner = connection.execute(
+        "SELECT owner_id, epoch FROM web_worker_state WHERE singleton_id = 1"
+    ).fetchone()
+    if (
+        owner is None
+        or str(owner["owner_id"]) != owner_id
+        or (worker_epoch is not None and int(owner["epoch"]) != int(worker_epoch))
+    ):
+        raise TaskControlError("WORKER_FENCE_STALE")
+    return owner
+
+
+def worker_owner_matches(path: str | Path, owner_id: str, worker_epoch: int | None = None) -> bool:
+    with connect(path) as connection:
+        owner = connection.execute(
+            "SELECT owner_id, epoch FROM web_worker_state WHERE singleton_id = 1"
+        ).fetchone()
+    return bool(
+        owner is not None
+        and str(owner["owner_id"]) == owner_id
+        and (worker_epoch is None or int(owner["epoch"]) == int(worker_epoch))
+    )
+
+
+def recover_running_task_runs(
+    path: str | Path, owner_id: str, worker_epoch: int | None = None
+) -> list[str]:
     """After exclusive OS lock acquisition, mark prior-process RUNNING runs recoverable."""
     recovered: list[str] = []
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        owner = connection.execute(
-            "SELECT owner_id FROM web_worker_state WHERE singleton_id = 1"
-        ).fetchone()
-        if owner is None or str(owner["owner_id"]) != owner_id:
-            raise TaskControlError("WORKER_FENCE_STALE")
+        _assert_worker_fence(connection, owner_id, worker_epoch)
         rows = connection.execute(
             "SELECT * FROM task_runs WHERE status = 'RUNNING' ORDER BY created_at"
         ).fetchall()
@@ -1310,16 +1659,13 @@ def recover_running_task_runs(path: str | Path, owner_id: str) -> list[str]:
 
 
 def mark_run_interrupted_by_worker(
-    path: str | Path, owner_id: str, run_id: str, reason: str
+    path: str | Path, owner_id: str, run_id: str, reason: str,
+    worker_epoch: int | None = None,
 ) -> dict[str, object] | None:
     """Fenced worker shutdown/timeout transition; does not touch TaskControl authority."""
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        owner = connection.execute(
-            "SELECT owner_id FROM web_worker_state WHERE singleton_id = 1"
-        ).fetchone()
-        if owner is None or str(owner["owner_id"]) != owner_id:
-            raise TaskControlError("WORKER_FENCE_STALE")
+        _assert_worker_fence(connection, owner_id, worker_epoch)
         run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
         if run is None or str(run["status"]) != "RUNNING":
             return {key: run[key] for key in run.keys()} if run is not None else None
@@ -1353,14 +1699,13 @@ def mark_run_interrupted_by_worker(
 
 
 def schedule_worker_retry(
-    path: str | Path, owner_id: str, run_id: str, *, error_code: str, base_delay_seconds: int = 2
+    path: str | Path, owner_id: str, run_id: str, *, error_code: str,
+    base_delay_seconds: int = 2, worker_epoch: int | None = None,
 ) -> dict[str, object]:
     """Persist bounded retry/backoff for a recoverable Run under the current worker fence."""
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        owner = connection.execute("SELECT owner_id FROM web_worker_state WHERE singleton_id = 1").fetchone()
-        if owner is None or str(owner["owner_id"]) != owner_id:
-            raise TaskControlError("WORKER_FENCE_STALE")
+        _assert_worker_fence(connection, owner_id, worker_epoch)
         run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
         if run is None:
             raise TaskControlError("TASK_RUN_NOT_FOUND")
@@ -1410,6 +1755,130 @@ def schedule_worker_retry(
         )
     return {"run_id": run_id, "status": status, "retry_count": retries,
             "max_retries": maximum, "next_attempt_at": next_time, "retry_scheduled": status != "BLOCKED"}
+
+
+def record_worker_run_failure(
+    path: str | Path,
+    owner_id: str,
+    run_id: str,
+    *,
+    error_code: str,
+    retryable: bool,
+    worker_epoch: int | None = None,
+    base_delay_seconds: int = 2,
+) -> dict[str, object]:
+    """Persist one worker-local failure under the current single-instance fence.
+
+    TaskControl and completed business state are rechecked in this transaction so
+    stale work cannot overwrite an abort, correction, or committed delivery.
+    """
+    safe_code = "".join(char for char in error_code.upper() if char.isalnum() or char == "_")[:100]
+    safe_code = safe_code or "WORKER_RUN_FAILED"
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _assert_worker_fence(connection, owner_id, worker_epoch)
+        run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
+        if run is None:
+            raise TaskControlError("TASK_RUN_NOT_FOUND")
+        current_status = str(run["status"])
+        if current_status not in {"QUEUED", "RUNNING", "INTERRUPTED_RECOVERABLE"}:
+            return {"run_id": run_id, "status": current_status, "recorded": False}
+
+        final_code = safe_code
+        is_expected_control_stop = False
+        task_status: str | None = None
+        if run["task_id"] is not None and str(run["kind"]) != "CHAT_READONLY":
+            binding = connection.execute(
+                "SELECT status FROM task_bindings WHERE task_id = ? AND tenant_id = ?",
+                (run["task_id"], run["tenant_id"]),
+            ).fetchone()
+            control = connection.execute(
+                "SELECT * FROM task_controls WHERE task_id = ? AND tenant_id = ?",
+                (run["task_id"], run["tenant_id"]),
+            ).fetchone()
+            if binding is not None and str(binding["status"]) == "ABORTED":
+                final_code, is_expected_control_stop = "TASK_ABORTED", True
+            elif control is not None and str(control["terminal_state"]) != "ACTIVE":
+                final_code, is_expected_control_stop = "TASK_ABORTED", True
+            elif control is None:
+                final_code, is_expected_control_stop = "TASK_CONTROL_MIGRATION_REQUIRED", True
+            elif (
+                run["expected_control_revision"] is not None
+                and int(run["expected_control_revision"]) != int(control["control_revision"])
+            ):
+                final_code, is_expected_control_stop = "TASK_CONTROL_STALE", True
+            elif (
+                control["pending_critical_message_seq"] is not None
+                and int(run["consumed_message_seq"]) < int(control["pending_critical_message_seq"])
+            ):
+                final_code, is_expected_control_stop = "TASK_INPUT_PENDING", True
+            if binding is not None:
+                task_status = str(binding["status"])
+
+        can_retry = retryable and not is_expected_control_stop
+        now = _utc_now()
+        connection.execute(
+            """INSERT OR IGNORE INTO worker_retry_state
+               (run_id, retry_count, max_retries, next_attempt_at, last_error_code, updated_at)
+               VALUES (?, 0, 3, NULL, NULL, ?)""",
+            (run_id, now),
+        )
+        retry = connection.execute(
+            "SELECT retry_count, max_retries FROM worker_retry_state WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        retry_count = int(retry["retry_count"])
+        max_retries = int(retry["max_retries"])
+        if can_retry and retry_count < max_retries:
+            retry_count += 1
+            delay_seconds = max(1, min(30, base_delay_seconds * (2 ** (retry_count - 1))))
+            next_attempt_at = connection.execute(
+                "SELECT datetime('now', ?)", (f"+{delay_seconds} seconds",)
+            ).fetchone()[0]
+            status = "INTERRUPTED_RECOVERABLE"
+            reason = final_code
+            connection.execute(
+                """UPDATE worker_retry_state SET retry_count = ?, next_attempt_at = ?,
+                          last_error_code = ?, updated_at = ? WHERE run_id = ?""",
+                (retry_count, next_attempt_at, final_code, now, run_id),
+            )
+        else:
+            status = "BLOCKED"
+            reason = "WORKER_RETRY_EXHAUSTED" if can_retry else final_code
+            next_attempt_at = None
+            connection.execute(
+                """UPDATE worker_retry_state SET next_attempt_at = NULL,
+                          last_error_code = ?, updated_at = ? WHERE run_id = ?""",
+                (final_code, now, run_id),
+            )
+        changed = connection.execute(
+            """UPDATE task_runs SET status = ?, ended_at = ?, blocked_reason = ?
+               WHERE run_id = ? AND status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')""",
+            (status, now, reason, run_id),
+        ).rowcount
+        if changed == 0:
+            current = connection.execute("SELECT status FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
+            return {"run_id": run_id, "status": str(current["status"]), "recorded": False}
+
+        if task_status not in {None, "ABORTED", "COMPLETED", "WAITING_INPUT", "WAITING_APPROVAL"}:
+            projected = "INTERRUPTED_RECOVERABLE" if status == "INTERRUPTED_RECOVERABLE" else "INCONCLUSIVE"
+            connection.execute(
+                """UPDATE task_bindings SET status = ? WHERE task_id = ? AND tenant_id = ?
+                   AND status NOT IN ('ABORTED', 'COMPLETED', 'WAITING_INPUT', 'WAITING_APPROVAL')""",
+                (projected, run["task_id"], run["tenant_id"]),
+            )
+        event_kind = "RUN_RETRY_INTERRUPTED_RECOVERABLE" if status == "INTERRUPTED_RECOVERABLE" else "RUN_STATUS_BLOCKED"
+        _insert_outbox(
+            connection, str(run["tenant_id"]), str(run["task_id"]) if run["task_id"] else None,
+            str(run["session_id"]), "RUN", run_id, event_kind,
+            {"run_id": run_id, "run_status": status, "reason_code": reason,
+             "attempt": retry_count if can_retry else None,
+             "max_attempts": max_retries if can_retry else None},
+        )
+        return {
+            "run_id": run_id, "status": status, "reason_code": reason,
+            "retry_count": retry_count, "max_retries": max_retries,
+            "next_attempt_at": next_attempt_at, "recorded": True,
+        }
 
 
 def next_worker_run(path: str | Path, excluded_run_ids: tuple[str, ...] = ()) -> dict[str, object] | None:

@@ -1232,10 +1232,47 @@ async def run_investigation(
                     run_id=run_id,
                     interrupt_after_for_test=_interrupt_after_for_test,
                 )
+                checkpoint_tuple = await checkpointer.aget_tuple(config)
                 snapshot = await graph.aget_state(config)
-                if resume:
-                    if not snapshot.values:
+                cold_start_state: dict[str, object] | None = None
+                if resume and checkpoint_tuple is None and not snapshot.values:
+                    if approval_resume_link is not None:
                         raise RuntimeError("No persisted graph state exists for the authorized thread.")
+                    if run_record is None or str(run_record.get("kind")) != "INVESTIGATE":
+                        raise TaskControlError("INITIAL_CHECKPOINT_RECOVERY_RUN_KIND_INVALID")
+                    from opspilot.domain.investigation_context import load_initial_checkpoint_recovery_context
+
+                    recovered_context = load_initial_checkpoint_recovery_context(
+                        resolved_db, task_id, run_id,
+                    )
+                    current_evidence_ids = _current_task_evidence_ids(resolved_db, task_id)
+                    current_gate = (
+                        evaluate_evidence_gate(resolved_db, task_id, current_evidence_ids)
+                        if current_evidence_ids else {}
+                    )
+                    cold_start_state = {
+                        "task_binding_id": task_id,
+                        "stage": "created",
+                        # Attempt counts and execution budget are Domain-persisted; cold recovery
+                        # continues from them instead of granting a new allowance.
+                        "budget": attempt_counts(resolved_db, task_id),
+                        "diagnosis_draft": {},
+                        "evidence_ids": current_evidence_ids,
+                        "tool_observations": [],
+                        "pending_call_refs": [],
+                        "gate_decision": current_gate,
+                        # Inputs are loaded read-only from the original Message and task_run_inputs.
+                        # In particular, this path must never consume an already-applied correction again.
+                        "critical_input_messages": [
+                            dict(item) for item in recovered_context["inputs"]
+                            if item.get("kind") == "CRITICAL_CORRECTION"
+                        ],
+                    }
+                if cold_start_state is not None:
+                    await graph.ainvoke(cold_start_state, config)
+                elif resume:
+                    if not snapshot.values:
+                        raise RuntimeError("Persisted graph checkpoint has no recoverable graph values.")
                     if approval_resume_link is not None and str(snapshot.values.get("plan_hash", "")) != str(approval_resume_link["plan_hash"]):
                         raise TaskControlError("APPROVAL_CHECKPOINT_PLAN_MISMATCH")
                     if approval_resume_link is not None:
@@ -1333,7 +1370,7 @@ async def run_investigation(
                     else:
                         await graph.ainvoke(None, config)
                 else:
-                    if snapshot.values:
+                    if checkpoint_tuple is not None or snapshot.values:
                         raise RuntimeError("Task already has a checkpoint; use the authorized resume command.")
                     current_evidence_ids = (
                         _current_task_evidence_ids(resolved_db, task_id) if critical_inputs else []

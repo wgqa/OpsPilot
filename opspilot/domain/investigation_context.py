@@ -167,6 +167,77 @@ def load_investigation_context(path: str | Path, task_id: str, run_id: str) -> d
         return _read_context(connection, task_id, run_id)
 
 
+def load_initial_checkpoint_recovery_context(
+    path: str | Path, task_id: str, run_id: str
+) -> dict[str, Any]:
+    """Validate the only Domain state that may cold-initialize a missing Graph checkpoint.
+
+    Recovery is limited to an active INVESTIGATE Run whose original accepted inputs
+    remain complete and current. Any D3 plan or action phase means a missing graph
+    checkpoint could hide work that must be reconciled instead of replayed.
+    """
+    plan_tables = (
+        "d3_plans",
+        "d3_plan_control_bindings",
+        "d3_plan_authorizations",
+        "d3_plan_authorization_history",
+        "d3_approvals",
+        "approval_resume_links",
+        "d3_action_permissions",
+    )
+    action_tables = (
+        "d3_action_intents",
+        "d3_action_ledgers",
+        "d3_verification_receipts",
+        "d3_report_artifacts",
+        "d3_delivery_records",
+        "d3_ticket_resolution_entries",
+    )
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        selected = _read_context(connection, task_id, run_id)
+        run = connection.execute(
+            "SELECT kind, status, tenant_id FROM task_runs WHERE run_id = ? AND task_id = ?",
+            (run_id, task_id),
+        ).fetchone()
+        if run is None or str(run["kind"]) != "INVESTIGATE":
+            raise InvestigationContextInvalid("INITIAL_CHECKPOINT_RECOVERY_RUN_KIND_INVALID")
+        if str(run["status"]) != "RUNNING":
+            raise InvestigationContextInvalid("TASK_RUN_NOT_ACTIVE")
+        inputs = list(selected.get("inputs", []))
+        if (
+            not inputs
+            or inputs[0].get("kind") != "INITIAL_SYMPTOM"
+            or not inputs[0].get("message_id")
+            or str(inputs[0].get("provenance")) != "USER_INPUT_UNTRUSTED"
+        ):
+            raise InvestigationContextInvalid("INITIAL_CHECKPOINT_RECOVERY_SOURCE_REQUIRED")
+        binding = connection.execute(
+            "SELECT status FROM task_bindings WHERE task_id = ? AND tenant_id = ?",
+            (task_id, str(run["tenant_id"])),
+        ).fetchone()
+        if binding is None or str(binding["status"]) in {
+            "ABORTED", "COMPLETED", "WAITING_APPROVAL", "VERIFYING", "DELIVERY_PENDING",
+        }:
+            raise InvestigationContextInvalid("INITIAL_CHECKPOINT_RECOVERY_TASK_PHASE_INVALID")
+
+        for table in action_tables:
+            existing = connection.execute(
+                f"SELECT 1 FROM {table} WHERE tenant_id = ? AND task_id = ? LIMIT 1",
+                (str(run["tenant_id"]), task_id),
+            ).fetchone()
+            if existing is not None:
+                raise InvestigationContextInvalid("ACTION_OUTCOME_UNKNOWN")
+        for table in plan_tables:
+            existing = connection.execute(
+                f"SELECT 1 FROM {table} WHERE tenant_id = ? AND task_id = ? LIMIT 1",
+                (str(run["tenant_id"]), task_id),
+            ).fetchone()
+            if existing is not None:
+                raise InvestigationContextInvalid("INITIAL_CHECKPOINT_RECOVERY_DOMAIN_ACTIVITY")
+    return selected
+
+
 def validate_task_run_context_in_transaction(
     connection: sqlite3.Connection,
     task_id: str,
