@@ -220,6 +220,96 @@ def test_n1_05_one_worker_claims_the_durable_run(demo_db: Path) -> None:
     print("M1_EVIDENCE " + json.dumps({"case": "N1-05", "claims": results, "running_count": 1}, sort_keys=True))
 
 
+def test_revision_zero_run_can_be_claimed_applied_and_resumed(demo_db: Path) -> None:
+    binding = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a", "INC-M1-REVISION-ZERO")
+    identity = trusted_identity(demo_db, "support-a")
+    run_id = "run-m1-revision-zero"
+    with connect(demo_db) as connection:
+        connection.execute(
+            """INSERT INTO task_runs
+               (run_id, tenant_id, task_id, session_id, command_id, kind, status,
+                control_revision_at_start, expected_control_revision, consumed_message_seq,
+                applied_critical_message_seq, created_at)
+               VALUES (?, ?, ?, ?, ?, 'INVESTIGATE', 'QUEUED', 0, 0, 0, 0, '2026-10-18T00:00:00+00:00')""",
+            (run_id, binding["tenant_id"], binding["task_id"], binding["session_id"], "command-m1-revision-zero"),
+        )
+
+    claimed = claim_task_run(demo_db, identity, run_id)
+    assert claimed["expected_control_revision"] == 0 and claimed["status"] == "RUNNING"
+    applied = apply_pending_critical_inputs(demo_db, identity, run_id)
+    assert applied["expected_control_revision"] == 0 and applied["inputs"] == []
+    waiting = finish_task_run(demo_db, identity, run_id, "WAITING_APPROVAL")
+    assert waiting["status"] == "WAITING_APPROVAL"
+
+    resumed = resume_task_run(demo_db, identity, run_id)
+    assert resumed["expected_control_revision"] == 0 and resumed["status"] == "RUNNING"
+    resumed_inputs = apply_pending_critical_inputs(demo_db, identity, run_id)
+    assert resumed_inputs["expected_control_revision"] == 0 and resumed_inputs["inputs"] == []
+    finish_task_run(demo_db, identity, run_id, "WAITING_APPROVAL")
+    with connect(demo_db) as connection:
+        control = connection.execute(
+            "SELECT control_revision FROM task_controls WHERE task_id = ?", (binding["task_id"],)
+        ).fetchone()[0]
+        task_status = connection.execute(
+            "SELECT status FROM task_bindings WHERE task_id = ?", (binding["task_id"],)
+        ).fetchone()[0]
+    assert control == 0 and task_status == "WAITING_APPROVAL"
+
+
+def test_chat_readonly_run_does_not_change_business_task_lifecycle(demo_db: Path, live_api: str) -> None:
+    binding, _, plan = _ready_task(demo_db, live_api, "chat-readonly-lifecycle")
+    task_id = str(binding["task_id"])
+    identity = trusted_identity(demo_db, "support-a")
+
+    chat = admit_task_message(
+        demo_db, identity, session_id=str(binding["session_id"]), task_id=task_id,
+        input_kind="CHAT_READONLY", body="Explain the current investigation status.",
+        idempotency_key="m1-chat-readonly-before-approval",
+    )
+    chat_run = claim_task_run(demo_db, identity, str(chat["run_id"]))
+    assert chat_run["kind"] == "CHAT_READONLY"
+    finish_task_run(demo_db, identity, str(chat["run_id"]), "SUCCEEDED")
+    with connect(demo_db) as connection:
+        status_after_chat = connection.execute(
+            "SELECT status FROM task_bindings WHERE task_id = ?", (task_id,)
+        ).fetchone()[0]
+    assert status_after_chat == "WAITING_APPROVAL"
+
+    approval = submit_plan_approval(
+        demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED"
+    )
+    assert approval["decision"] == "APPROVED"
+    repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+    repair = execute_repair(demo_db, str(repair_intent["action_id"]), "executor-a", "m1-chat-readonly-repair")
+    receipt = verify_repair_online(
+        demo_db, task_id, str(plan["plan_hash"]), str(repair_intent["action_id"]), "executor-a", live_api
+    )
+    assert receipt["recovery_verified"] is True
+    get_or_create_report(demo_db, task_id, str(plan["plan_hash"]), str(repair_intent["action_id"]), "executor-a")
+    delivery_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "DELIVER", "executor-a")
+    delivery = execute_deliver(demo_db, str(delivery_intent["action_id"]), "executor-a", "m1-chat-readonly-deliver")
+    assert repair["status"] == delivery["status"] == "COMMITTED"
+
+    completed_chat = admit_task_message(
+        demo_db, identity, session_id=str(binding["session_id"]), task_id=task_id,
+        input_kind="CHAT_READONLY", body="Summarize the completed business task.",
+        idempotency_key="m1-chat-readonly-after-completion",
+    )
+    claim_task_run(demo_db, identity, str(completed_chat["run_id"]))
+    finish_task_run(demo_db, identity, str(completed_chat["run_id"]), "SUCCEEDED")
+    with connect(demo_db) as connection:
+        final_status = connection.execute(
+            "SELECT status FROM task_bindings WHERE task_id = ?", (task_id,)
+        ).fetchone()[0]
+        ledger_counts = connection.execute(
+            """SELECT action_kind, COUNT(*) AS count FROM d3_action_ledgers
+               WHERE task_id = ? GROUP BY action_kind""",
+            (task_id,),
+        ).fetchall()
+    assert final_status == "COMPLETED"
+    assert {row["action_kind"]: row["count"] for row in ledger_counts} == {"DELIVER": 1, "REPAIR": 1}
+
+
 def test_abort_is_owner_scoped_idempotent_and_does_not_overwrite_completion(demo_db: Path) -> None:
     binding = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a", "INC-M1-ABORT")
     owner = trusted_identity(demo_db, "support-a")

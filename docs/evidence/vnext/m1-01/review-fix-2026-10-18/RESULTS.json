@@ -1,0 +1,49 @@
+{
+  "stage": "M1-01 review follow-up",
+  "status": "PASS",
+  "base_sha": "e35eeab5f7fdf00c3af466ea84bf5ba5aafc50fb",
+  "branch": "main",
+  "revision_zero": {
+    "status": "PASS",
+    "functions": [
+      "claim_task_run",
+      "resume_task_run",
+      "apply_pending_critical_inputs"
+    ],
+    "behavior": "integer revision 0 remains valid; only None is missing"
+  },
+  "chat_readonly_task_projection": {
+    "status": "PASS",
+    "waiting_approval_preserved_after_readonly_success": true,
+    "approval_repair_verification_delivery_after_readonly": "PASS",
+    "completed_task_preserved_after_readonly_success": true,
+    "repair_ledger_count": 1,
+    "deliver_ledger_count": 1
+  },
+  "targeted_tests": {
+    "command": ".\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_m1_task_control.py -k \"revision_zero or chat_readonly\" --basetemp=.runtime/m101-review-fix-cases",
+    "passed": 2,
+    "deselected": 9,
+    "evidence": "logs/pytest-revision-zero-and-readonly.txt"
+  },
+  "m1_test_file": {
+    "command": ".\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_m1_task_control.py --basetemp=.runtime/m101-review-fix-focused",
+    "passed": 11,
+    "failed": 0,
+    "evidence": "logs/pytest-m1-focused.txt"
+  },
+  "full_pytest": {
+    "command": ".\\.venv\\Scripts\\python.exe -m pytest -q -s --basetemp=.runtime/m101-review-fix-full",
+    "passed": 75,
+    "failed": 0,
+    "duration_seconds": 50.71,
+    "evidence": "logs/pytest-full.txt",
+    "expected_injected_failure_event": "Existing provider-timeout evidence-preservation test emits d3_smoke_result FAIL and passes its assertion"
+  },
+  "static_checks": {
+    "compileall": "PASS",
+    "pip_check": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "m1_02_started": false
+}

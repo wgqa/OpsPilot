@@ -560,7 +560,8 @@ def claim_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) -> 
             control = _control(connection, identity.tenant_id, str(run["task_id"]))
             if str(control["terminal_state"]) != "ACTIVE":
                 raise TaskControlError("TASK_ABORTED")
-            if int(control["control_revision"]) != int(run["expected_control_revision"] or -1):
+            expected_revision = run["expected_control_revision"]
+            if expected_revision is None or int(control["control_revision"]) != int(expected_revision):
                 raise TaskControlError("TASK_CONTROL_STALE")
             if (
                 control["pending_critical_message_seq"] is not None
@@ -608,7 +609,8 @@ def resume_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) ->
             raise TaskControlError("TASK_ABORTED")
         if control["pending_critical_message_seq"] is not None:
             raise TaskControlError("TASK_INPUT_PENDING")
-        if int(control["control_revision"]) != int(run["expected_control_revision"] or -1):
+        expected_revision = run["expected_control_revision"]
+        if expected_revision is None or int(control["control_revision"]) != int(expected_revision):
             raise TaskControlError("TASK_CONTROL_STALE")
         if int(run["consumed_message_seq"]) < int(control["applied_critical_message_seq"]):
             raise TaskControlError("TASK_CONTROL_STALE")
@@ -643,7 +645,8 @@ def apply_pending_critical_inputs(
         control = _control(connection, identity.tenant_id, task_id)
         if str(control["terminal_state"]) != "ACTIVE":
             raise TaskControlError("TASK_ABORTED")
-        if int(control["control_revision"]) != int(run["expected_control_revision"] or -1):
+        expected_revision = run["expected_control_revision"]
+        if expected_revision is None or int(control["control_revision"]) != int(expected_revision):
             raise TaskControlError("TASK_CONTROL_STALE")
         pending = control["pending_critical_message_seq"]
         if pending is None:
@@ -756,7 +759,11 @@ def finish_task_run(
             "UPDATE task_runs SET status = ?, blocked_reason = ?, ended_at = ? WHERE run_id = ?",
             (status, blocked_reason, now, run_id),
         )
-        if run["task_id"] is not None and status in {"WAITING_INPUT", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "BLOCKED"}:
+        if (
+            run["task_id"] is not None
+            and str(run["kind"]) != "CHAT_READONLY"
+            and status in {"WAITING_INPUT", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "BLOCKED"}
+        ):
             projected = {
                 "WAITING_INPUT": "WAITING_INPUT",
                 "WAITING_APPROVAL": "WAITING_APPROVAL",
