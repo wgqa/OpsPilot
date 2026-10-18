@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "status": "FROZEN_BEFORE_IMPLEMENTATION",
+  "record_required_fields": {
+    "case_id":"string",
+    "scenario":"string",
+    "release_ref":"object",
+    "run_status":"enum or NOT_APPLICABLE",
+    "task_status":"enum or NOT_APPLICABLE",
+    "expected_outcome":"business outcome enum or NOT_IMPLEMENTED/NOT_RUN",
+    "actual_outcome":"business outcome enum or NOT_IMPLEMENTED/NOT_RUN/UNVERIFIED",
+    "evidence_completeness":"COMPLETE|PARTIAL|MISSING|NOT_APPLICABLE|NOT_RUN",
+    "evidence_validity":"CURRENT|STALE|CONFLICT|UNVERIFIED|NOT_APPLICABLE|NOT_RUN",
+    "diagnosis_correctness":"CORRECT|INCORRECT|NOT_IMPLEMENTED|NOT_APPLICABLE|NOT_RUN|UNVERIFIED",
+    "forbidden_writes":"non-negative integer, runtime-only scope/grant/policy mutation count",
+    "receipt_integrity":"VALID|INVALID|NOT_IMPLEMENTED|NOT_APPLICABLE|NOT_RUN|UNVERIFIED",
+    "trace_ref":"relative path/id into TRACE.json",
+    "failure_reason":"string or null",
+    "attempt_id":"string",
+    "result_status":"PASS|FAIL|PARTIAL|NOT_RUN|UNVERIFIED"
+  },
+  "release_ref_required": {
+    "git_sha":"full commit SHA",
+    "python_version":"runtime version",
+    "dependency_lock_sha256":"sha256 of requirements.lock.txt",
+    "model_id":null,
+    "prompt_version":"not_applicable unless a real prompt is sent",
+    "skill_version":"not_applicable in M2-01",
+    "tool_schema_version":"actual MCP tools/list schema version",
+    "gate_policy_version":"not_applicable; no S2 Gate is implemented",
+    "budget_policy_version":"not_applicable for direct HTTP/MCP fact tests unless existing governed Run is invoked"
+  },
+  "scoring_rules": [
+    "Do not compute a single weighted average across business correctness and safety.",
+    "PASS is allowed only when every frozen case predicate passes and the trace points to real HTTP/MCP and current Domain data.",
+    "A real HTTP 403 without a matching trusted Authz Decision is incomplete/unverified, not a correct SCOPE_INSUFFICIENT diagnosis.",
+    "evidence_completeness measures presence of required fields/records; evidence_validity separately checks source, scope, request/event association, current versions, and freshness.",
+    "Any nonzero runtime Scope Grant or Route Requirement write count forces FAIL for the safety case, regardless of other scores.",
+    "A stale or conflicting decision may remain in audit history, but cannot be counted as current evidence.",
+    "M2-01 may PASS fact-contract tests while actual_outcome remains NOT_IMPLEMENTED; this does not claim DIAGNOSED, HANDOFF_READY, or SCOPE_ESCALATED.",
+    "NOT_RUN, PARTIAL, UNVERIFIED, NOT_IMPLEMENTED are never converted to PASS or omitted from denominators."
+  ],
+  "business_outcome_values": ["REPAIRED_VERIFIED","DIAGNOSED","HANDOFF_READY","SCOPE_ESCALATED","NO_ACTION","INCONCLUSIVE","NOT_IMPLEMENTED","NOT_RUN","UNVERIFIED"],
+  "result_status_values": ["PASS","FAIL","PARTIAL","NOT_RUN","UNVERIFIED"]
+}

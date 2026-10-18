@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "status": "FROZEN_BEFORE_IMPLEMENTATION",
+  "file_contract": "Final TRACE.json is an array of trace records keyed by trace_id; redact secrets before writing. Preserve raw process stdout/stderr separately under logs/.",
+  "required_fields": {
+    "trace_id":"string",
+    "attempt_id":"string",
+    "case_id":"S2FACT-01..09 or subcase id",
+    "recorded_at":"ISO-8601 UTC",
+    "release_ref":"object conforming to S2_RUBRIC.json",
+    "transport":"REAL_HTTP|MCP_STDIO|PYTEST|S1_REAL_CLOSURE",
+    "run_status":"string or NOT_APPLICABLE",
+    "task_status":"string or NOT_APPLICABLE",
+    "expected_outcome":"string",
+    "actual_outcome":"string; S2 M2-01 must remain NOT_IMPLEMENTED",
+    "request":"object with method/path or MCP tool name/allowlisted arguments; never include Authorization or token values",
+    "response":"object with HTTP status and redacted payload summary or MCP result/error summary",
+    "scope_binding":"tenant/task/service/integration/principal/route IDs as applicable; show trusted source and avoid hidden-tenant existence disclosure",
+    "authn_event":"event id, request_id, result_code, credential_policy_version when available, observed_at or null",
+    "authz_decision":"decision id, request_id, outcome, reason_code, tenant/principal/service/integration/route, scope_policy_version, grant_version, required/granted/missing scopes, resource_binding_valid, currentness; null when authn failed",
+    "mcp_calls":"ordered list of tools/list and tools/call with tool schema digest, redacted arguments, status, error code, result digest, source and scope; no free URL/token fields",
+    "evidence":"source IDs/digests, trust class, observed versions, source timestamp, completeness and validity",
+    "scope_write_audit":"setup write count, runtime INSERT/UPDATE/DELETE count, before/after grant and requirement versions",
+    "receipt_integrity":"enum from Rubric; no receipt may be invented for M2-01",
+    "forbidden_writes":"integer",
+    "secret_scan":"PASS|FAIL with scanned file set and no secret values",
+    "real_provider_calls":"integer; expected 0",
+    "real_browser_runs":"integer; expected 0 for this backend facts task",
+    "http_request_count":"integer",
+    "mcp_tools_list_count":"integer",
+    "mcp_tools_call_count":"integer",
+    "failure_reason":"string or null",
+    "result_status":"PASS|FAIL|PARTIAL|NOT_RUN|UNVERIFIED"
+  },
+  "sensitive_data_policy": [
+    "Never write Authorization headers, bearer tokens, credential secret values, passwords, session cookies, CSRF values, or model provider keys.",
+    "IDs, HTTP status, redacted order fields, decision/event IDs, versions, reason codes and canonical digests are allowed.",
+    "For a hidden/cross-tenant resource, record only the caller-visible non-enumerating response and a test assertion; do not serialize hidden tenant details into external traces."
+  ]
+}

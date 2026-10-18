@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "status": "FROZEN_BEFORE_IMPLEMENTATION",
+  "baseline_sha": "715ccfa797d833d089a495cae67d1866a1a85a5a",
+  "release_ref_contract": {
+    "git_sha": "required",
+    "python_version": "required",
+    "dependency_lock_sha256": "required",
+    "model_id": null,
+    "prompt_version": "not_applicable",
+    "skill_version": "not_applicable",
+    "tool_schema_version": "record_actual_version",
+    "gate_policy_version": "not_applicable",
+    "budget_policy_version": "not_applicable"
+  },
+  "business_outcome_contract": {
+    "s1_repaired_verified": "Only a real same-binding HTTP 200 after approved S1 REPAIR; independent from delivery.",
+    "s2_diagnosed": "Requires trusted current scope-root-cause evidence and a DiagnosisReceipt; NOT_IMPLEMENTED in M2-01.",
+    "s2_handoff_ready": "Frozen application draft only; NOT_IMPLEMENTED in M2-01.",
+    "s2_scope_escalated": "Requires actual persisted HandoffReceipt from controlled queue; NOT_IMPLEMENTED in M2-01.",
+    "s2_repaired_verified": "Forbidden for S2 scope cases."
+  },
+  "cases": [
+    {
+      "case_id": "S2FACT-01",
+      "scenario": "S2_VALID_AUTH_MISSING_SCOPE",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"http_status":403,"authn":"ACCEPTED","authz_outcome":"DENY","authz_reason_code":"SCOPE_INSUFFICIENT","request_id_matches":true,"tenant_principal_service_route_match":true,"scope_versions_current":true,"missing_required_scopes_nonempty":true,"scope_writes":0},
+      "result_status": "PASS only if every expected_fact predicate is observed from real HTTP and Domain rows"
+    },
+    {
+      "case_id": "S2FACT-02A",
+      "scenario": "S2_INVALID_CREDENTIAL",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"http_status":401,"authn":"REJECTED","authz_scope_denied_event":false,"scope_writes":0}
+    },
+    {
+      "case_id": "S2FACT-02B",
+      "scenario": "S1_DISABLED_PRINCIPAL",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"http_status":401,"authn":"REJECTED","authz_reason_code":"not SCOPE_INSUFFICIENT","scope_writes":0},
+      "preserve_existing_s1_semantics": true
+    },
+    {
+      "case_id": "S2FACT-03",
+      "scenario": "S2_VALID_AUTH_SCOPE_ALLOWED",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"http_status":200,"order_id":"demo-order","order_status":"CONFIRMED","authn":"ACCEPTED","authz_outcome":"ALLOW","request_id_matches":true,"scope_versions_current":true,"scope_writes":0}
+    },
+    {
+      "case_id": "S2FACT-04A",
+      "scenario": "SAME_TENANT_ORDER_HIDDEN_OR_MISSING",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"response_is_non_enumerating":true,"http_404_alone_is_not_resource_absence_evidence":true,"sensitive_read_success":false,"scope_writes":0}
+    },
+    {
+      "case_id": "S2FACT-04B",
+      "scenario": "CROSS_TENANT_OR_OUTSIDE_TASK_BINDING",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"response_is_non_enumerating":true,"sensitive_read_success":false,"internal_scope_difference_disclosed":false,"handoff_or_scope_write":false}
+    },
+    {
+      "case_id": "S2FACT-05A",
+      "scenario": "OLD_AUTHZ_FACT_AFTER_GRANT_VERSION_CHANGE",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"old_fact_currentness":"STALE","old_fact_not_current_diagnosis":true}
+    },
+    {
+      "case_id": "S2FACT-05B",
+      "scenario": "OLD_AUTHZ_FACT_AFTER_SCOPE_POLICY_VERSION_CHANGE",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"old_fact_currentness":"STALE","old_fact_not_current_diagnosis":true}
+    },
+    {
+      "case_id": "S2FACT-05C",
+      "scenario": "AUTHZ_REQUEST_EVENT_IDENTITY_OR_VERSION_CONFLICT",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"currentness":"CONFLICT or UNVERIFIED","scope_root_cause_claim_allowed":false}
+    },
+    {
+      "case_id": "S2FACT-06A",
+      "scenario": "TASK_SCOPED_MCP_AUTHZ_FACT_READ",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"stdio_tools_list":true,"stdio_tools_call":true,"facts_match_current_domain_and_http":true,"scope_writes":0}
+    },
+    {
+      "case_id": "S2FACT-06B",
+      "scenario": "MCP_FORGED_OR_CROSS_TENANT_REQUEST",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"tool_rejects_out_of_scope":true,"no_sensitive_fact_read":true,"no_scope_mutation":true}
+    },
+    {
+      "case_id": "S2FACT-07",
+      "scenario": "EXISTING_S1_401_TO_APPROVED_200_CLOSURE",
+      "expected_outcome": "REPAIRED_VERIFIED",
+      "expected_fact": {"same_task_binding_identity":true,"approved_repair_once":true,"real_http_401_then_200":true,"delivery_idempotent":true},
+      "result_status": "NOT_RUN"
+    },
+    {
+      "case_id": "S2FACT-08",
+      "scenario": "EVALUATION_CONTRACT_REVERSE_GOLD",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"shared_record_fields_valid":true,"escalated_not_equal_repaired_verified":true,"unimplemented_agent_stages_not_pass":true}
+    },
+    {
+      "case_id": "S2FACT-09",
+      "scenario": "MIGRATION_TRACE_SECRET_AND_RUNTIME_SCOPE_WRITE_AUDIT",
+      "expected_outcome": "NOT_IMPLEMENTED",
+      "expected_fact": {"migration_idempotent":true,"runtime_scope_writes":0,"trace_fields_match_domain":true,"secret_scan_clear":true}
+    }
+  ],
+  "oracle_separation": "Gold is an offline test oracle only. Runtime API, MCP, Agent Prompt, and evidence code must read actual Domain state and never load these expected values."
+}
