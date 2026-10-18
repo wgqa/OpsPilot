@@ -2,7 +2,7 @@
 
 - **任务范围：** Web 双角色审批、持久审批恢复 Run、原 LangGraph Checkpoint 恢复及真实 S1 受控业务闭环。仅实现 M1-05。
 - **开发起点：** `main@688aad851d7677b3a03b420408d524a05d3103a9`。
-- **实现提交：** 见机器结果 `RESULTS.json` 的 `implementation_end_sha`；本轮最新 main 提交 SHA 也在最终交付消息中给出。
+- **实现提交：** `3a0a0f4d9448538def1d977f01403f4061cff548`（实现及完整证据）；本轮最新 main 提交 SHA 也在最终交付消息中给出。
 **结果：** APR-01 至 APR-10 均有通过证据；完整 pytest、定向测试、真实 Edge/Provider/MCP/HTTP smoke 与前端/依赖检查通过。失败尝试和修复保留在 [`ATTEMPTS.md`](ATTEMPTS.md)。
 
 ## 实现与事务合同
