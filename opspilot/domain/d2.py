@@ -434,12 +434,20 @@ def reserve_attempt(
     tool_name: str | None = None,
     argument_digest: str | None = None,
     context_provenance: dict[str, object] | None = None,
+    task_run_control: dict[str, object] | None = None,
 ) -> tuple[str, int]:
     if kind not in {"MODEL", "MCP"} or limit < 1:
         raise ValueError("Invalid D2 attempt kind or limit.")
     attempt_id = f"attempt-{uuid.uuid4()}"
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
+        if task_run_control is None and context_provenance is not None:
+            candidate = context_provenance.get("task_run_control")
+            task_run_control = candidate if isinstance(candidate, dict) and candidate else None
+        if task_run_control is not None:
+            from opspilot.domain.investigation_context import validate_task_run_context_in_transaction
+
+            validate_task_run_context_in_transaction(connection, task_id, task_run_control)
         binding = connection.execute(
             "SELECT task_id FROM task_bindings WHERE task_id = ?", (task_id,)
         ).fetchone()
@@ -467,8 +475,12 @@ def reserve_attempt(
             skill = context_provenance.get("selected_skill")
             memories = context_provenance.get("selected_memories", [])
             evidence_ids = context_provenance.get("evidence_ids", [])
-            if not isinstance(memories, list) or not isinstance(evidence_ids, list):
+            input_refs = context_provenance.get("selected_input_messages", [])
+            run_control = context_provenance.get("task_run_control", {})
+            if not isinstance(memories, list) or not isinstance(evidence_ids, list) or not isinstance(input_refs, list):
                 raise ValueError("Context Provenance source lists must be arrays.")
+            if not isinstance(run_control, dict):
+                raise ValueError("Task Run control provenance must be an object.")
             insert_context_provenance_in_transaction(
                 connection,
                 task_id=task_id,
@@ -481,6 +493,8 @@ def reserve_attempt(
                 selected_skill=skill if isinstance(skill, dict) else None,
                 selected_memories=[item for item in memories if isinstance(item, dict)],
                 evidence_ids=[str(item) for item in evidence_ids],
+                selected_input_messages=[item for item in input_refs if isinstance(item, dict)],
+                task_run_control=run_control,
             )
     return attempt_id, used + 1
 

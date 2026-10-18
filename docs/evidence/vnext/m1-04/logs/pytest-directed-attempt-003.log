@@ -1,0 +1,198 @@
+F............                                                            [100%]
+================================== FAILURES ===================================
+_ test_initial_symptom_is_selected_from_run_source_and_has_no_synthetic_status _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-m1-04-run3/test_initial_symptom_is_select0/domain.sqlite3')
+
+    def test_initial_symptom_is_selected_from_run_source_and_has_no_synthetic_status(demo_db: Path) -> None:
+        identity, created = _create_task(
+            demo_db, "����ƾ֤�ֻ��󶩵� API һֱ��ʾδ��֤�����ʵ��ǰ�����", "nl-initial",
+        )
+        run_id, task_id = str(created["run_id"]), str(created["task_id"])
+        claim_task_run(demo_db, identity, run_id)
+        applied = apply_pending_critical_inputs(demo_db, identity, run_id)
+        assert applied["inputs"] == []
+    
+        metadata: dict[str, object] = {}
+        messages = _prompt_messages(
+            demo_db, task_id, {"evidence_ids": [], "tool_observations": []},
+            context_metadata=metadata, run_id=run_id,
+        )
+        prompt = "\n".join(str(message.content) for message in messages)
+        control = metadata["task_run_control"]
+        refs = metadata["selected_input_messages"]
+    
+        assert "����ƾ֤�ֻ��󶩵� API һֱ��ʾδ��֤" in prompt
+        assert "reported_http_status" not in prompt
+        assert "current_facts_source" in prompt and "MCP Evidence" in prompt
+        assert control["run_id"] == run_id
+        assert control["source_message_id"] == created["message_id"]
+        assert control["expected_control_revision"] == 0
+        assert control["consumed_message_seq"] == created["sequence"]
+        assert refs[0]["message_id"] == created["message_id"]
+        assert refs[0]["kind"] == "INITIAL_SYMPTOM"
+        assert refs[0]["provenance"] == "USER_INPUT_UNTRUSTED"
+    
+        prompt_digest = digest_json([{"role": message.type, "content": message.content} for message in messages])
+        attempt_id, _ = reserve_attempt(
+            demo_db, task_id, "MODEL", 8, call_id="nl-initial-provenance-call",
+            argument_digest=prompt_digest,
+            context_provenance={
+                "model_id": "test-model", "prompt_version": PROMPT_VERSION,
+                "prompt_digest": prompt_digest, "tool_schema_version": "test-schema-v1",
+                "tool_schema_digest": digest_json([]), **metadata,
+            },
+        )
+        persisted = list_context_provenance(demo_db, task_id, "support-a")[0]
+>       inspector = get_task_inspector(demo_db, identity, task_id)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_dynamic_investigation.py:75: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-m1-04-run3/test_initial_symptom_is_select0/domain.sqlite3')
+identity = TrustedIdentity(actor_id='support-a', tenant_id='tenant-a', role='SUPPORT')
+task_id = 'task-b3a250cf-57aa-4a35-a692-92f4005f69f7'
+
+    def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str) -> dict[str, Any]:
+        with connect(path) as connection:
+            _verify_identity(connection, identity)
+            binding = connection.execute(
+                "SELECT b.* FROM task_bindings b WHERE b.task_id = ? AND b.tenant_id = ?",
+                (task_id, identity.tenant_id),
+            ).fetchone()
+            if binding is None:
+                raise TaskControlError("TASK_SCOPE_DENIED")
+            if identity.role == "SUPPORT" and str(binding["actor_id"]) != identity.actor_id:
+                raise TaskControlError("TASK_SCOPE_DENIED")
+            if identity.role == "APPROVER":
+                allowed = connection.execute(
+                    """SELECT 1 FROM d3_plans p JOIN d3_plan_authorizations a
+                         ON a.tenant_id = p.tenant_id AND a.task_id = p.task_id AND a.plan_hash = p.plan_hash
+                       WHERE p.task_id = ? AND p.tenant_id = ? AND a.eligibility = 'ACTIVE'
+                         AND ? = 'WAITING_APPROVAL' LIMIT 1""",
+                    (task_id, identity.tenant_id, binding["status"]),
+                ).fetchone()
+                if allowed is None:
+                    raise TaskControlError("TASK_SCOPE_DENIED")
+            elif identity.role != "SUPPORT":
+                raise TaskControlError("TASK_SCOPE_DENIED")
+            trusted_state, _ = _trusted_state(connection, task_id)
+            evidence = _current_evidence(connection, task_id, trusted_state)
+            observations = connection.execute(
+                """SELECT observation_id, tool_name, status, progress_added, error_class, result_digest,
+                          evidence_id, created_at FROM d2_tool_observations
+                   WHERE task_id = ? ORDER BY created_at DESC, observation_id DESC LIMIT 50""",
+                (task_id,),
+            ).fetchall()
+            runs = connection.execute(
+                """SELECT r.run_id, r.kind, r.status, r.blocked_reason, r.source_message_id,
+                          r.expected_control_revision, r.consumed_message_seq,
+                          r.applied_critical_message_seq, r.created_at, r.started_at, r.ended_at,
+                          (SELECT COUNT(*) FROM chat_attempts a WHERE a.run_id = r.run_id) AS chat_attempt_count
+                   FROM task_runs r WHERE r.task_id = ? AND r.tenant_id = ? ORDER BY r.created_at DESC LIMIT 50""",
+                (task_id, identity.tenant_id),
+            ).fetchall()
+            task_input_messages = connection.execute(
+                """SELECT m.message_id, m.sequence, m.input_kind, m.body_digest,
+                          m.application_state, m.applied_run_id, c.command_kind,
+                          r.control_revision_at_start, r.expected_control_revision AS applied_control_revision
+                   FROM messages m JOIN commands c ON c.command_id = m.command_id
+                   LEFT JOIN task_runs r ON r.run_id = c.run_id
+                   WHERE m.task_id = ? AND (c.command_kind = 'CREATE_TASK' OR m.input_kind = 'CORRECT_TASK_INPUT')
+                   ORDER BY m.sequence""",
+                (task_id,),
+            ).fetchall()
+            model = connection.execute(
+                """SELECT model_id, provider_response_id, status, usage_json, prompt_digest, created_at
+                   FROM d2_model_traces WHERE task_id = ? ORDER BY created_at DESC LIMIT 20""",
+                (task_id,),
+            ).fetchall()
+            chats = connection.execute(
+                """SELECT a.attempt_id, a.run_id, a.attempt_no, a.model_id, a.status,
+                          a.provider_response_id, a.input_tokens, a.output_tokens, a.total_tokens,
+                          a.error_class, a.created_at, a.completed_at
+                   FROM chat_attempts a WHERE a.task_id = ? ORDER BY a.created_at DESC LIMIT 20""",
+                (task_id,),
+            ).fetchall()
+            investigator_contexts = connection.execute(
+                """SELECT call_id, attempt_id, model_id, prompt_version, prompt_digest,
+                          model_status, error_class, selected_input_messages_json,
+                          task_run_control_json, evidence_ids_json, built_at
+                   FROM d5_context_provenance WHERE task_id = ?
+                   ORDER BY built_at DESC, call_id DESC LIMIT 20""",
+                (task_id,),
+            ).fetchall()
+        from opspilot.domain.d2 import evaluate_evidence_gate
+    
+        try:
+            gate = evaluate_evidence_gate(path, task_id, [str(item["evidence_id"]) for item in evidence])
+        except Exception:
+            gate = {"decision": "INCONCLUSIVE", "reason_code": "GATE_SNAPSHOT_UNAVAILABLE"}
+        return {
+            "task": {key: binding[key] for key in ("task_id", "tenant_id", "service_id", "integration_id", "principal_id", "ticket_id", "status")},
+            "trusted_state": trusted_state,
+>           "plan_history": [{key: row[key] for key in row.keys()} for row in plan_history],
+                                                                              ^^^^^^^^^^^^
+            "evidence": evidence,
+            "observations": [{key: row[key] for key in row.keys()} for row in observations],
+            "runs": [{key: row[key] for key in row.keys()} for row in runs],
+            "task_input_messages": [{
+                "message_id": str(row["message_id"]),
+                "sequence": int(row["sequence"]),
+                "kind": "INITIAL_SYMPTOM" if row["command_kind"] == "CREATE_TASK" else "CRITICAL_CORRECTION",
+                "input_kind": str(row["input_kind"]),
+                "digest": str(row["body_digest"]),
+                "provenance": "USER_INPUT_UNTRUSTED",
+                "application_state": str(row["application_state"]),
+                "applied_run_id": str(row["applied_run_id"]) if row["applied_run_id"] else None,
+                "accepted_control_revision": int(row["control_revision_at_start"] or 0),
+                "applied_control_revision": (
+                    int(row["applied_control_revision"])
+                    if row["applied_control_revision"] is not None else None
+                ),
+            } for row in task_input_messages],
+            "investigation_model_traces": [{
+                "model_id": str(row["model_id"]), "provider_response_id": str(row["provider_response_id"]) if row["provider_response_id"] else None,
+                "status": str(row["status"]), "usage": json.loads(str(row["usage_json"])),
+                "prompt_digest": str(row["prompt_digest"]), "created_at": str(row["created_at"]),
+            } for row in model],
+            "chat_model_attempts": [{key: row[key] for key in row.keys()} for row in chats],
+            "investigator_context_provenance": [{
+                "call_id": str(row["call_id"]),
+                "attempt_id": str(row["attempt_id"]),
+                "model_id": str(row["model_id"]),
+                "prompt_version": str(row["prompt_version"]),
+                "prompt_digest": str(row["prompt_digest"]),
+                "model_status": str(row["model_status"]),
+                "error_class": str(row["error_class"]) if row["error_class"] else None,
+                "selected_input_messages": [
+                    {key: item.get(key) for key in (
+                        "message_id", "sequence", "digest", "kind", "input_kind", "provenance",
+                        "accepted_control_revision", "applied_control_revision",
+                    )}
+                    for item in json.loads(str(row["selected_input_messages_json"]))
+                    if isinstance(item, dict)
+                ],
+                "task_run_control": {
+                    key: json.loads(str(row["task_run_control_json"])).get(key)
+                    for key in (
+                        "run_id", "source_message_id", "expected_control_revision",
+                        "current_control_revision", "consumed_message_seq",
+                        "applied_critical_message_seq", "pending_critical_message_seq",
+                    )
+                },
+                "evidence_ids": json.loads(str(row["evidence_ids_json"])),
+                "built_at": str(row["built_at"]),
+            } for row in investigator_contexts],
+            "current_gate": {
+                key: gate.get(key)
+                for key in ("decision", "reason_code", "missing_predicates", "checked_fact_ids", "conflicting_evidence_ids")
+            },
+        }
+E       NameError: name 'plan_history' is not defined
+
+opspilot\domain\chat.py:977: NameError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_dynamic_investigation.py::test_initial_symptom_is_selected_from_run_source_and_has_no_synthetic_status
+1 failed, 12 passed in 2.87s

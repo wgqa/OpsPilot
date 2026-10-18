@@ -586,6 +586,8 @@ CREATE TABLE IF NOT EXISTS d5_context_provenance (
     selected_skill_digest TEXT,
     selected_memories_json TEXT NOT NULL,
     evidence_ids_json TEXT NOT NULL,
+    selected_input_messages_json TEXT NOT NULL DEFAULT '[]',
+    task_run_control_json TEXT NOT NULL DEFAULT '{}',
     built_at TEXT NOT NULL,
     model_status TEXT NOT NULL DEFAULT 'PREPARED',
     completed_at TEXT,
@@ -693,7 +695,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 3:
+        if version > 4:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -748,6 +750,21 @@ def initialize(path: str | Path) -> None:
                    WHERE status IN ('QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE')"""
             )
             connection.execute("PRAGMA user_version = 3")
+            version = 3
+        if version < 4:
+            columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(d5_context_provenance)").fetchall()
+            }
+            if "selected_input_messages_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE d5_context_provenance ADD COLUMN selected_input_messages_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "task_run_control_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE d5_context_provenance ADD COLUMN task_run_control_json TEXT NOT NULL DEFAULT '{}'"
+                )
+            connection.execute("PRAGMA user_version = 4")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:

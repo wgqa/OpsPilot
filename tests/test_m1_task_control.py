@@ -425,8 +425,9 @@ def test_n1_10_correction_invalidates_old_run_and_new_run_binds_fresh_plan(
     prompt = _prompt_messages(
         demo_db, task_id,
         {"evidence_ids": old_plan["required_evidence_ids"], "critical_input_messages": applied["inputs"]},
+        run_id=str(correction["run_id"]),
     )
-    assert "untrusted_user_corrections" in prompt[1].content
+    assert "untrusted_user_inputs" in prompt[1].content
     assert applied["inputs"][0]["body"] in prompt[1].content
     assert "USER_INPUT_UNTRUSTED" in prompt[1].content
     with pytest.raises(D3PreconditionRejected, match="TASK_CONTROL_STALE"):
@@ -640,7 +641,7 @@ def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
         plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert tuple(control) == ("ACTIVE", 0)
-    assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 3
+    assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 4
     print("M1_EVIDENCE " + json.dumps({
         "case": "migration",
         "user_version": version,

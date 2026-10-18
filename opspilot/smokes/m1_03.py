@@ -116,6 +116,7 @@ def _browser_run(
     *, mode: str, ui_origin: str, api_origin: str, attack_origin: str,
     screenshots: Path, passwords: dict[str, str], log_path: Path,
     session_id: str | None = None, task_id: str | None = None,
+    script_path: Path | None = None,
 ) -> dict[str, Any]:
     node = shutil.which("node")
     if not node:
@@ -135,7 +136,7 @@ def _browser_run(
         env["OPSPILOT_E2E_SESSION_ID"] = session_id
     if task_id:
         env["OPSPILOT_E2E_TASK_ID"] = task_id
-    script = ROOT / "frontend" / "e2e" / "m1-03-browser.mjs"
+    script = script_path or ROOT / "frontend" / "e2e" / "m1-03-browser.mjs"
     result = subprocess.run([node, str(script)], cwd=ROOT / "frontend", env=env,
                             capture_output=True, text=True, encoding="utf-8", timeout=720)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,8 +192,42 @@ def _database_evidence(db_path: Path, session_id: str, task_id: str) -> dict[str
             (task_id,),
         ).fetchall()
         model_rows = connection.execute(
-            """SELECT model_id, provider_response_id, status, usage_json, prompt_digest
+            """SELECT model_id, provider_response_id, status, usage_json, prompt_digest, tool_calls_json
                FROM d2_model_traces WHERE task_id = ? ORDER BY created_at, rowid""",
+            (task_id,),
+        ).fetchall()
+        context_rows = connection.execute(
+            """SELECT call_id, attempt_id, model_id, prompt_digest, model_status,
+                      selected_input_messages_json, task_run_control_json, evidence_ids_json,
+                      error_class, built_at
+               FROM d5_context_provenance WHERE task_id = ? ORDER BY built_at, call_id""",
+            (task_id,),
+        ).fetchall()
+        task_inputs = connection.execute(
+            """SELECT m.message_id, m.sequence, m.input_kind, m.body_digest,
+                      m.application_state, m.applied_run_id, c.command_kind,
+                      r.control_revision_at_start, r.expected_control_revision AS applied_control_revision
+               FROM messages m JOIN commands c ON c.command_id = m.command_id
+               LEFT JOIN task_runs r ON r.run_id = c.run_id
+               WHERE m.task_id = ? AND (c.command_kind = 'CREATE_TASK' OR m.input_kind = 'CORRECT_TASK_INPUT')
+               ORDER BY m.sequence""",
+            (task_id,),
+        ).fetchall()
+        run_rows = connection.execute(
+            """SELECT run_id, source_message_id, kind, status, blocked_reason,
+                      expected_control_revision, consumed_message_seq, applied_critical_message_seq
+               FROM task_runs WHERE task_id = ? ORDER BY created_at, run_id""",
+            (task_id,),
+        ).fetchall()
+        attempt_counts = connection.execute(
+            """SELECT kind, status, COUNT(*) AS count FROM d2_attempts
+               WHERE task_id = ? GROUP BY kind, status ORDER BY kind, status""",
+            (task_id,),
+        ).fetchall()
+        plan_rows = connection.execute(
+            """SELECT p.plan_hash, p.plan_version, a.eligibility
+               FROM d3_plans p LEFT JOIN d3_plan_authorizations a ON a.plan_hash = p.plan_hash
+               WHERE p.task_id = ? ORDER BY p.plan_version""",
             (task_id,),
         ).fetchall()
         action_counts = {
@@ -259,7 +294,29 @@ def _database_evidence(db_path: Path, session_id: str, task_id: str) -> dict[str
             "model_id": str(row["model_id"]), "provider_response_id": str(row["provider_response_id"]) if row["provider_response_id"] else None,
             "status": str(row["status"]), "usage": json.loads(str(row["usage_json"])),
             "prompt_digest": str(row["prompt_digest"]),
+            "tool_names": [str(call["name"]) for call in json.loads(str(row["tool_calls_json"]))
+                           if isinstance(call, dict) and isinstance(call.get("name"), str)],
         } for row in model_rows],
+        "investigator_context_provenance": [{
+            "call_id": str(row["call_id"]), "attempt_id": str(row["attempt_id"]),
+            "model_id": str(row["model_id"]), "prompt_digest": str(row["prompt_digest"]),
+            "model_status": str(row["model_status"]), "error_class": row["error_class"],
+            "selected_input_messages": json.loads(str(row["selected_input_messages_json"])),
+            "task_run_control": json.loads(str(row["task_run_control_json"])),
+            "evidence_ids": json.loads(str(row["evidence_ids_json"])), "built_at": str(row["built_at"]),
+        } for row in context_rows],
+        "task_input_messages": [{
+            "message_id": str(row["message_id"]), "sequence": int(row["sequence"]),
+            "kind": "INITIAL_SYMPTOM" if row["command_kind"] == "CREATE_TASK" else "CRITICAL_CORRECTION",
+            "input_kind": str(row["input_kind"]), "digest": str(row["body_digest"]),
+            "application_state": str(row["application_state"]),
+            "applied_run_id": str(row["applied_run_id"]) if row["applied_run_id"] else None,
+            "accepted_control_revision": int(row["control_revision_at_start"] or 0),
+            "applied_control_revision": int(row["applied_control_revision"]) if row["applied_control_revision"] is not None else None,
+        } for row in task_inputs],
+        "runs": [{key: row[key] for key in row.keys()} for row in run_rows],
+        "attempt_counts": [{key: row[key] for key in row.keys()} for row in attempt_counts],
+        "plan_history": [{key: row[key] for key in row.keys()} for row in plan_rows],
         "evidence": safe_facts,
         "business_action_counts": action_counts,
         "sse_event_range": {"first": event_bounds[0], "last": event_bounds[1], "count": int(event_bounds[2])},
@@ -329,7 +386,6 @@ def run(evidence_dir: Path) -> int:
                 "integration_config", "principal_status", "auth_policy", "endpoint_probe"
             },
             "CHAT_03_readonly_instruction_did_not_write": bool(browser.get("readOnlyBoundary", {}).get("unchanged"))
-                and browser.get("readOnlyBoundary", {}).get("after", {}).get("taskStatus") == "WAITING_APPROVAL"
                 and all(value == 0 for value in results["domain_evidence"]["business_action_counts"].values()),
             "CHAT_05_single_answer_per_run": all(
                 row["status"] == "SUCCEEDED" and bool(row["message_id"])

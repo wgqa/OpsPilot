@@ -1,0 +1,39 @@
+...............F................                                         [100%]
+================================== FAILURES ===================================
+_____ test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-m1-04-directed-final/test_schema_migration_is_idemp0/domain.sqlite3')
+live_api = 'http://127.0.0.1:64100'
+
+    def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
+        demo_db: Path, live_api: str
+    ) -> None:
+        from opspilot.domain.database import initialize
+    
+        binding, _, plan = _ready_task(demo_db, live_api, "migration")
+        task_id = str(binding["task_id"])
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_controls WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM session_task_links WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM sessions WHERE session_id = ?", (binding["session_id"],))
+            connection.execute("PRAGMA user_version = 0")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            control = connection.execute("SELECT terminal_state, control_revision FROM task_controls WHERE task_id = ?", (task_id,)).fetchone()
+            session_link = connection.execute("SELECT COUNT(*) FROM session_task_links WHERE task_id = ?", (task_id,)).fetchone()[0]
+            migrated_plan = connection.execute("SELECT plan_hash FROM d3_plans WHERE task_id = ?", (task_id,)).fetchone()[0]
+            plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        assert tuple(control) == ("ACTIVE", 0)
+>       assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 3
+E       AssertionError: assert (1 == 1 and '9b1455fcaa5e...2032bde50fe4f' == '9b1455fcaa5e...2032bde50fe4f'
+E         
+E         Skipping 53 identical leading characters in diff, use -v to show
+E           32bde50fe4f and 1 == 1 and 4 == 3)
+
+tests\test_m1_task_control.py:644: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_task_control.py::test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash
+1 failed, 31 passed in 10.38s

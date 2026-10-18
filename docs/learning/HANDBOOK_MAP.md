@@ -34,3 +34,14 @@
 | 第 10 章：同步/异步边界 | FastAPI 只受理消息，单实例 Worker 调真实 Provider；前端 EventSource + Run/Chunk 恢复 | `UI-01/02`：浏览器交互、Origin/CSRF、角色和租户访问、SSE 重连与服务重启 | Study Notes 5；Q&A 2/6 |
 
 **贯通证据：** [M1-03 报告](../evidence/vnext/m1-03/REPORT.md)、[机器结果](../evidence/vnext/m1-03/RESULTS.json)、[学习笔记](M1-03/STUDY_NOTES.md)、[面试卡](M1-03/INTERVIEW_QA.md)。本阶段采用的白皮书映射参考 [第 4 章](https://github.com/aliyun/ai-agent-handbook/blob/main/02-build/%E7%AC%AC%204%20%E7%AB%A0%20%E4%BB%BB%E5%8A%A1%EF%BC%9A%E7%BC%96%E6%8E%92%E3%80%81%E9%95%BF%E7%A8%8B%E6%8E%A8%E8%BF%9B%E4%B8%8E%E5%8D%8F%E4%BD%9C%E6%B5%81%E8%BD%AC.md)、[第 5 章](https://github.com/aliyun/ai-agent-handbook/blob/main/02-build/%E7%AC%AC%205%20%E7%AB%A0%20%E4%BF%A1%E6%81%AF%EF%BC%9A%E4%B8%8A%E4%B8%8B%E6%96%87%E3%80%81%E7%8A%B6%E6%80%81%E4%B8%8E%E5%8F%AF%E5%A4%8D%E7%94%A8%E8%83%BD%E5%8A%9B%E8%B5%84%E4%BA%A7.md)、[第 6 章](https://github.com/aliyun/ai-agent-handbook/blob/main/02-build/%E7%AC%AC%206%20%E7%AB%A0%20%E8%A1%8C%E5%8A%A8%EF%BC%9A%E5%8F%97%E6%8E%A7%E6%89%A7%E8%A1%8C%E3%80%81%E9%AA%8C%E8%AF%81%E5%8F%8D%E9%A6%88%E4%B8%8E%E4%BA%A4%E4%BB%98%E5%87%86%E5%A4%87.md)、[第 8 章](https://github.com/aliyun/ai-agent-handbook/blob/main/03-run/%E7%AC%AC%208%20%E7%AB%A0%20Agent%20%E7%8A%B6%E6%80%81%E5%AD%98%E5%82%A8%E4%B8%8E%E8%AF%AD%E4%B9%89%E8%B5%84%E4%BA%A7.md)和[第 10 章](https://github.com/aliyun/ai-agent-handbook/blob/main/03-run/%E7%AC%AC%2010%20%E7%AB%A0%20%20Agent%20%E5%BC%82%E6%AD%A5%E4%BB%BB%E5%8A%A1%E4%B8%8E%E8%87%AA%E5%8A%A8%E5%8C%96%E6%B5%81%E7%A8%8B.md)。
+
+
+## M1-04：自然语言驱动调查与关键纠错
+
+| 学习主题 | OpsPilot 实现位置 | 可复现实验 | 表达材料 |
+|---|---|---|---|
+| 第 4 章：Task、Run 与图的边界 | `domain/task_control.py` 持久化初始 Message、`source_message_id` 与 `TaskRun`；`domain/investigation_context.py` 按可信绑定选择初始描述和已应用更正；`investigator.py` 在图 intake 处理明确的 S1 范围请求 | NL-01/03/04：真实 Edge 输入、403 Scope 请求安全等待、正式更正消费到新 Run | `M1-04/STUDY_NOTES.md` 1、2；`INTERVIEW_QA.md` 1、2、4 |
+| 第 5 章：Prompt Context 与来源 Provenance | `investigator._prompt_messages()` 将用户输入标为 `USER_INPUT_UNTRUSTED`，记录 Message/Run/控制高水位、Prompt digest 与 Context Provenance；更正 Run 只复用 `domain.chat._current_evidence()` 验过版本的同 Task MCP Evidence | NL-A/NL-B 有不同 Prompt digest 和真实 MCP 工具顺序；NL-C 同时携带初始描述和更正，控制 revision=2 | Study Notes 2、3；Q&A 1、2、5 |
+| 第 6 章：Evidence Gate 与受控动作 | `domain.d2.evaluate_evidence_gate()` 仍是唯一 Gate；`domain.d3.save_local_report(run_id=...)` 对新控制版本下的非 READY 结果作 Run 级守卫；UI 的普通聊天没有审批或动作入口 | NL-03/06：403/Scope 输入无模型与 Evidence；只读威胁输入后 Task/Plan/控制版本/动作计数不变。NL-05 复跑 N1-10/11 | Study Notes 3、4；Q&A 3、4、6 |
+
+**贯通证据：** [M1-04 报告](../evidence/vnext/m1-04/REPORT.md)、[机器结果](../evidence/vnext/m1-04/RESULTS.json)、[案例集](../evidence/vnext/m1-04/CASES.md)、[学习笔记](M1-04/STUDY_NOTES.md)和[面试卡](M1-04/INTERVIEW_QA.md)。白皮书第 4–6 章参考链接见上方 M1-03 部分；章节作为对照阅读，不取代本仓库冻结合同。

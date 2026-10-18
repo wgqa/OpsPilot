@@ -911,6 +911,16 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
             raise TaskControlError("TASK_SCOPE_DENIED")
         trusted_state, _ = _trusted_state(connection, task_id)
         evidence = _current_evidence(connection, task_id, trusted_state)
+        plan_history = connection.execute(
+            """SELECT p.plan_hash, p.plan_version, a.eligibility,
+                      ap.decision AS approval_decision, p.created_at
+               FROM d3_plans p
+               LEFT JOIN d3_plan_authorizations a ON a.plan_hash = p.plan_hash
+               LEFT JOIN d3_approvals ap ON ap.plan_hash = p.plan_hash
+               WHERE p.task_id = ? AND p.tenant_id = ?
+               ORDER BY p.plan_version DESC LIMIT 20""",
+            (task_id, identity.tenant_id),
+        ).fetchall()
         observations = connection.execute(
             """SELECT observation_id, tool_name, status, progress_added, error_class, result_digest,
                       evidence_id, created_at FROM d2_tool_observations
@@ -918,13 +928,26 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
             (task_id,),
         ).fetchall()
         runs = connection.execute(
-            """SELECT r.run_id, r.kind, r.status, r.blocked_reason, r.created_at, r.started_at, r.ended_at,
+            """SELECT r.run_id, r.kind, r.status, r.blocked_reason, r.source_message_id,
+                      r.expected_control_revision, r.consumed_message_seq,
+                      r.applied_critical_message_seq, r.created_at, r.started_at, r.ended_at,
                       (SELECT COUNT(*) FROM chat_attempts a WHERE a.run_id = r.run_id) AS chat_attempt_count
                FROM task_runs r WHERE r.task_id = ? AND r.tenant_id = ? ORDER BY r.created_at DESC LIMIT 50""",
             (task_id, identity.tenant_id),
         ).fetchall()
+        task_input_messages = connection.execute(
+            """SELECT m.message_id, m.sequence, m.input_kind, m.body_digest,
+                      m.application_state, m.applied_run_id, c.command_kind,
+                      r.control_revision_at_start, r.expected_control_revision AS applied_control_revision
+               FROM messages m JOIN commands c ON c.command_id = m.command_id
+               LEFT JOIN task_runs r ON r.run_id = c.run_id
+               WHERE m.task_id = ? AND (c.command_kind = 'CREATE_TASK' OR m.input_kind = 'CORRECT_TASK_INPUT')
+               ORDER BY m.sequence""",
+            (task_id,),
+        ).fetchall()
         model = connection.execute(
-            """SELECT model_id, provider_response_id, status, usage_json, prompt_digest, created_at
+            """SELECT model_id, provider_response_id, status, usage_json, prompt_digest,
+                      tool_calls_json, created_at
                FROM d2_model_traces WHERE task_id = ? ORDER BY created_at DESC LIMIT 20""",
             (task_id,),
         ).fetchall()
@@ -935,18 +958,85 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                FROM chat_attempts a WHERE a.task_id = ? ORDER BY a.created_at DESC LIMIT 20""",
             (task_id,),
         ).fetchall()
+        investigator_contexts = connection.execute(
+            """SELECT call_id, attempt_id, model_id, prompt_version, prompt_digest,
+                      model_status, error_class, selected_input_messages_json,
+                      task_run_control_json, evidence_ids_json, built_at
+               FROM d5_context_provenance WHERE task_id = ?
+               ORDER BY built_at DESC, call_id DESC LIMIT 20""",
+            (task_id,),
+        ).fetchall()
+    from opspilot.domain.d2 import evaluate_evidence_gate
+
+    try:
+        gate = evaluate_evidence_gate(path, task_id, [str(item["evidence_id"]) for item in evidence])
+    except Exception:
+        gate = {"decision": "INCONCLUSIVE", "reason_code": "GATE_SNAPSHOT_UNAVAILABLE"}
     return {
         "task": {key: binding[key] for key in ("task_id", "tenant_id", "service_id", "integration_id", "principal_id", "ticket_id", "status")},
         "trusted_state": trusted_state,
+        "plan_history": [{key: row[key] for key in row.keys()} for row in plan_history],
         "evidence": evidence,
         "observations": [{key: row[key] for key in row.keys()} for row in observations],
         "runs": [{key: row[key] for key in row.keys()} for row in runs],
+        "task_input_messages": [{
+            "message_id": str(row["message_id"]),
+            "sequence": int(row["sequence"]),
+            "kind": "INITIAL_SYMPTOM" if row["command_kind"] == "CREATE_TASK" else "CRITICAL_CORRECTION",
+            "input_kind": str(row["input_kind"]),
+            "digest": str(row["body_digest"]),
+            "provenance": "USER_INPUT_UNTRUSTED",
+            "application_state": str(row["application_state"]),
+            "applied_run_id": str(row["applied_run_id"]) if row["applied_run_id"] else None,
+            "accepted_control_revision": int(row["control_revision_at_start"] or 0),
+            "applied_control_revision": (
+                int(row["applied_control_revision"])
+                if row["applied_control_revision"] is not None else None
+            ),
+        } for row in task_input_messages],
         "investigation_model_traces": [{
             "model_id": str(row["model_id"]), "provider_response_id": str(row["provider_response_id"]) if row["provider_response_id"] else None,
             "status": str(row["status"]), "usage": json.loads(str(row["usage_json"])),
-            "prompt_digest": str(row["prompt_digest"]), "created_at": str(row["created_at"]),
+            "prompt_digest": str(row["prompt_digest"]),
+            "tool_names": [
+                str(item["name"])
+                for item in json.loads(str(row["tool_calls_json"]))
+                if isinstance(item, dict) and isinstance(item.get("name"), str)
+            ],
+            "created_at": str(row["created_at"]),
         } for row in model],
         "chat_model_attempts": [{key: row[key] for key in row.keys()} for row in chats],
+        "investigator_context_provenance": [{
+            "call_id": str(row["call_id"]),
+            "attempt_id": str(row["attempt_id"]),
+            "model_id": str(row["model_id"]),
+            "prompt_version": str(row["prompt_version"]),
+            "prompt_digest": str(row["prompt_digest"]),
+            "model_status": str(row["model_status"]),
+            "error_class": str(row["error_class"]) if row["error_class"] else None,
+            "selected_input_messages": [
+                {key: item.get(key) for key in (
+                    "message_id", "sequence", "digest", "kind", "input_kind", "provenance",
+                    "accepted_control_revision", "applied_control_revision",
+                )}
+                for item in json.loads(str(row["selected_input_messages_json"]))
+                if isinstance(item, dict)
+            ],
+            "task_run_control": {
+                key: json.loads(str(row["task_run_control_json"])).get(key)
+                for key in (
+                    "run_id", "source_message_id", "expected_control_revision",
+                    "current_control_revision", "consumed_message_seq",
+                    "applied_critical_message_seq", "pending_critical_message_seq",
+                )
+            },
+            "evidence_ids": json.loads(str(row["evidence_ids_json"])),
+            "built_at": str(row["built_at"]),
+        } for row in investigator_contexts],
+        "current_gate": {
+            key: gate.get(key)
+            for key in ("decision", "reason_code", "missing_predicates", "checked_fact_ids", "stale_or_conflicting_ids")
+        },
     }
 
 

@@ -16,6 +16,9 @@ const taskId = ref('');
 const inspector = ref<Inspector | null>(null);
 const sessionEvents = ref<EventItem[]>([]);
 const draft = ref('');
+const initialSymptom = ref('');
+const correctionDraft = ref('');
+const showTaskForm = ref(false);
 const busy = ref(false);
 const loading = ref(false);
 const errorMessage = ref('');
@@ -37,6 +40,9 @@ const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run.kind !== 'CHAT_READONLY') ?? null);
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
 const displayStream = computed(() => activeChatRun.value?.status === 'RUNNING' && chunks.value.length > 0);
+const latestContextProvenance = computed(() => inspector.value?.investigator_context_provenance[0] ?? null);
+const latestSelectedInputs = computed(() => Array.isArray(latestContextProvenance.value?.selected_input_messages)
+  ? latestContextProvenance.value.selected_input_messages as Array<Record<string, unknown>> : []);
 
 function dateLabel(value: unknown): string {
   if (typeof value !== 'string' || !value) return '—';
@@ -190,12 +196,15 @@ async function refreshInspector(): Promise<void> {
 }
 
 async function createDemoTask(): Promise<void> {
-  if (!sessionId.value || !csrf.value) return;
+  const symptom = initialSymptom.value.trim();
+  if (!sessionId.value || !csrf.value || !symptom) return;
   busy.value = true;
   errorMessage.value = '';
-  notice.value = '正在通过固定 S1 orders-demo / integration-a 场景建立真实调查。';
+  notice.value = '正在通过固定 S1 orders-demo / integration-a 绑定启动调查；故障描述作为未验证用户输入记录。';
   try {
-    const created = await api.createTask(sessionId.value, csrf.value);
+    const created = await api.createTask(sessionId.value, symptom, csrf.value);
+    initialSymptom.value = '';
+    showTaskForm.value = false;
     taskId.value = created.task_id;
     await refreshSession();
     await watchRun(created.run_id);
@@ -227,6 +236,54 @@ async function sendMessage(): Promise<void> {
   }
 }
 
+async function submitCriticalCorrection(): Promise<void> {
+  const body = correctionDraft.value.trim();
+  if (!sessionId.value || !taskId.value || !body || !csrf.value || busy.value) return;
+  const confirmed = window.confirm(
+    '关键更正会中断当前业务调查 Run、提升 Task 控制版本并使旧 Plan/审批失效。\n\n确认这是正式纠错，并继续提交？',
+  );
+  if (!confirmed) return;
+  busy.value = true;
+  errorMessage.value = '';
+  notice.value = '正在原子接收关键更正；旧 Run 与审批资格将由 TaskControl 重新裁决。';
+  try {
+    const accepted = await api.send(sessionId.value, body, taskId.value, csrf.value, 'CORRECT_TASK_INPUT');
+    correctionDraft.value = '';
+    await refreshSessionMessagesOnly();
+    await refreshInspector();
+    await watchRun(accepted.run_id);
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function sourceKind(message: MessageItem): string | null {
+  const trustedRef = inspector.value?.task_input_messages.find((item) => item.message_id === message.message_id);
+  if (trustedRef) return String(trustedRef.kind ?? 'USER_INPUT_UNTRUSTED');
+  const ref = latestSelectedInputs.value.find((item) => item.message_id === message.message_id);
+  if (ref) return String(ref.kind ?? 'USER_INPUT_UNTRUSTED');
+  if (message.input_kind === 'CORRECT_TASK_INPUT') return 'CRITICAL_CORRECTION';
+  return null;
+}
+
+function readableInputKind(value: unknown): string {
+  return value === 'INITIAL_SYMPTOM' ? '初始故障描述' : value === 'CRITICAL_CORRECTION' ? '关键更正' : '用户输入';
+}
+
+function readableGate(value: unknown): string {
+  const gate = String(value ?? 'INCONCLUSIVE');
+  return ({ READY: '证据满足 Plan 候选条件', NEED_MORE: '证据仍需补充', NO_ACTION: '当前事实不允许动作', INCONCLUSIVE: '证据不足或存在冲突' } as Record<string, string>)[gate] ?? gate;
+}
+
+function readableRunReason(value: unknown): string {
+  const reason = String(value ?? '');
+  if (reason === 'S1_SCOPE_CHANGE_UNSUPPORTED') return 'S1 仅能核实已绑定的订单路由。若只需只读调查，请提交关键更正明确范围。';
+  if (reason === 'INPUT_REQUIRED') return '需要补充调查信息。';
+  return reason;
+}
+
 async function refreshSessionMessagesOnly(): Promise<void> {
   if (!sessionId.value) return;
   messages.value = (await api.messages(sessionId.value)).items;
@@ -248,7 +305,7 @@ async function watchRun(runId: string): Promise<void> {
       polls += 1;
       try {
         const run = await api.run(runId);
-        activeChatRun.value = run;
+        if (run.kind === 'CHAT_READONLY') activeChatRun.value = run;
         if (run.kind === 'CHAT_READONLY') await loadChunks(runId);
         if (['SUCCEEDED', 'FAILED', 'BLOCKED', 'WAITING_APPROVAL', 'WAITING_INPUT'].includes(run.status) || polls >= 240) {
           if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
@@ -431,19 +488,24 @@ onBeforeUnmount(() => {
           </div>
           <div class="toolbar-actions">
             <span v-if="taskId" class="task-chip"><i></i>{{ taskId.slice(0, 16) }}</span>
-            <button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="createDemoTask">＋ 创建 S1 演示调查</button>
+            <button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = !showTaskForm">＋ 新建调查任务</button>
             <button class="inspector-toggle" type="button" aria-label="显示 Task 检查器" @click="narrowInspectorOpen = !narrowInspectorOpen">▤</button>
           </div>
         </div>
 
-        <div class="demo-notice"><span class="notice-icon">i</span><span>业务调查使用固定 <b>orders-demo / integration-a</b> S1 场景。自然语言驱动调查会在 M1-04 提供。</span></div>
+        <div class="demo-notice"><span class="notice-icon">i</span><span>业务调查使用可信绑定 <b>orders-demo / integration-a</b> 与固定订单路由。用户描述和关键更正只提供调查线索，真实状态来自当前 MCP Evidence。</span></div>
+        <form v-if="showTaskForm && canCreateTask" class="task-input-card" data-testid="new-task-form" @submit.prevent="createDemoTask">
+          <div><span class="eyebrow">NEW INVESTIGATION</span><h2>描述实际故障</h2><p>请写下你观察到的现象。状态码未确认时可以明确说明；资源仍由服务端绑定。</p></div>
+          <textarea v-model="initialSymptom" data-testid="initial-symptom-input" rows="3" maxlength="20000" placeholder="例如：昨晚凭证轮换后订单 API 一直提示未认证，请核实当前情况。" :disabled="busy || !csrf"></textarea>
+          <div class="task-input-actions"><span>输入会以未验证用户来源加入 Investigator 上下文。</span><button class="primary-button" type="submit" :disabled="!initialSymptom.trim() || busy || !csrf">启动调查 <span>→</span></button></div>
+        </form>
 
         <div class="conversation-scroll" data-testid="conversation" aria-live="polite">
           <div v-if="!sessionId" class="welcome-state">
             <div class="orbit-illustration"><span class="orbit-core">OP</span><i></i><b></b></div>
             <span class="eyebrow">INCIDENT RESPONSE, WITH EVIDENCE</span>
             <h2>从可信证据开始</h2>
-            <p>创建会话后，你可以追问当前事实、查看真实运行过程，也可以启动固定的 S1 演示调查。</p>
+            <p>创建会话后，你可以进行只读追问、提交实际故障描述启动 S1 调查，并查看来源明确的运行过程。</p>
             <button class="primary-button" :disabled="busy || !csrf" type="button" @click="createSession">创建第一个会话 <span>→</span></button>
           </div>
           <div v-else-if="messages.length === 0 && !loading" class="empty-conversation">
@@ -452,7 +514,7 @@ onBeforeUnmount(() => {
           <article v-for="message in messages" :key="message.message_id" class="message-row" :class="message.role.toLowerCase()" :data-message-id="message.message_id">
             <div class="message-avatar">{{ message.role === 'USER' ? user.actor_id.slice(-1).toUpperCase() : '✳' }}</div>
             <div class="message-content">
-              <div class="message-meta"><strong>{{ message.role === 'USER' ? user.actor_id : 'OpsPilot' }}</strong><span>{{ dateLabel(message.created_at) }}</span><span v-if="message.role === 'USER' && message.task_id" class="message-task">关联 Task</span></div>
+              <div class="message-meta"><strong>{{ message.role === 'USER' ? user.actor_id : 'OpsPilot' }}</strong><span>{{ dateLabel(message.created_at) }}</span><span v-if="sourceKind(message)" class="message-task">{{ readableInputKind(sourceKind(message)) }} · 未验证</span><span v-else-if="message.role === 'USER' && message.task_id" class="message-task">只读对话</span></div>
               <div class="message-bubble">{{ message.body }}</div>
             </div>
           </article>
@@ -488,7 +550,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="inspector-section">
             <div class="section-heading"><h3>当前运行</h3><span class="section-count">{{ inspector.runs.length }}</span></div>
-            <div v-if="latestBusinessRun" class="run-card"><div class="run-icon">⌁</div><div class="run-copy"><strong>{{ readableStatus(latestBusinessRun.kind) }}</strong><small>{{ readableStatus(latestBusinessRun.status) }}<template v-if="latestBusinessRun.blocked_reason"> · {{ latestBusinessRun.blocked_reason }}</template></small></div><span class="status-dot" :class="statusTone(latestBusinessRun.status)"></span></div>
+            <div v-if="latestBusinessRun" class="run-card"><div class="run-icon">⌁</div><div class="run-copy"><strong>{{ readableStatus(latestBusinessRun.kind) }}</strong><small>{{ readableStatus(latestBusinessRun.status) }}<template v-if="latestBusinessRun.blocked_reason"> · {{ readableRunReason(latestBusinessRun.blocked_reason) }}</template></small></div><span class="status-dot" :class="statusTone(latestBusinessRun.status)"></span></div>
             <div v-else class="muted-card">尚未关联业务调查 Run。</div>
             <div v-if="activeChatRun" class="run-card chat-run-card"><div class="run-icon chat-run-icon">✳</div><div class="run-copy"><strong>只读聊天回答</strong><small>{{ readableStatus(activeChatRun.status) }}<template v-if="activeChatRun.waiting_reason"> · {{ activeChatRun.waiting_reason }}</template></small></div><span class="status-dot" :class="statusTone(activeChatRun.status)"></span></div>
           </div>
@@ -503,7 +565,28 @@ onBeforeUnmount(() => {
           </div>
           <div class="inspector-section">
             <div class="section-heading"><h3>计划与授权</h3><span class="read-only-label">只读</span></div>
-            <div class="plan-card"><div class="plan-row"><span>Plan</span><b>{{ inspector.trusted_state.plan ? String((inspector.trusted_state.plan as Record<string, unknown>).plan_hash).slice(0, 14) : '尚未生成' }}</b></div><div class="plan-row"><span>审批状态</span><b>{{ readableStatus((inspector.trusted_state.plan as Record<string, unknown> | null)?.approval_decision ?? 'UNKNOWN') }}</b></div><p v-if="currentTaskStatus === 'WAITING_APPROVAL'">Task 正在等待审批。M1-03 只提供查看，不在聊天或此页面批准动作。</p><p v-else-if="currentTaskStatus">业务状态由可信 Domain 控制。只读回答不会改变审批资格或写入权限。</p></div>
+            <div class="plan-card"><div class="plan-row"><span>最新 Plan</span><b>{{ inspector.trusted_state.plan ? String((inspector.trusted_state.plan as Record<string, unknown>).plan_hash).slice(0, 14) : '尚未生成' }}</b></div><div class="plan-row"><span>审批状态</span><b>{{ readableStatus((inspector.trusted_state.plan as Record<string, unknown> | null)?.approval_decision ?? 'UNKNOWN') }}</b></div><p v-if="currentTaskStatus === 'WAITING_APPROVAL'">Task 正在等待可信审批。M1-04 只提供查看，不在聊天或此页面批准动作。</p><p v-else-if="currentTaskStatus">业务状态由可信 Domain 控制。用户线索与只读回答都不会改变审批资格或写入权限。</p>
+              <div v-for="item in inspector.plan_history" :key="String(item.plan_hash)" class="plan-history-row"><code>{{ String(item.plan_hash).slice(0, 14) }}</code><span>{{ readableStatus(item.eligibility) }} · {{ readableStatus(item.approval_decision ?? 'UNKNOWN') }}</span></div>
+            </div>
+          </div>
+          <div class="inspector-section input-provenance-section">
+            <div class="section-heading"><h3>用户线索 Provenance</h3><span class="read-only-label">未验证</span></div>
+            <div v-if="latestSelectedInputs.length === 0" class="muted-card">尚无模型调用上下文；已提交消息仍保存在会话与 Task Run 中。</div>
+            <div v-for="item in latestSelectedInputs" :key="String(item.message_id ?? item.digest)" class="provenance-row">
+              <span class="trace-icon">↳</span><span><strong>{{ readableInputKind(item.kind) }}</strong><small>{{ String(item.message_id ?? 'legacy fallback') }} · #{{ item.sequence ?? '—' }} · {{ String(item.provenance) }}</small><small>Digest {{ String(item.digest).slice(0, 16) }} · 控制版本 {{ item.applied_control_revision ?? item.accepted_control_revision ?? '—' }}</small></span>
+            </div>
+            <div v-if="latestContextProvenance?.task_run_control" class="run-control-meta">
+              <span>Run <code>{{ String((latestContextProvenance.task_run_control as Record<string, unknown>).run_id ?? '—') }}</code></span>
+              <span>当前控制版本 <b>{{ String((latestContextProvenance.task_run_control as Record<string, unknown>).current_control_revision ?? '—') }}</b></span>
+              <span>消耗序号高水位 <b>{{ String((latestContextProvenance.task_run_control as Record<string, unknown>).consumed_message_seq ?? '—') }}</b></span>
+            </div>
+            <div class="gate-card"><span>确定性 Evidence Gate</span><b>{{ readableGate(inspector.current_gate.decision) }}</b><small>{{ String(inspector.current_gate.reason_code ?? '—') }} · 当前有效 Evidence {{ Array.isArray(inspector.current_gate.checked_fact_ids) ? (inspector.current_gate.checked_fact_ids as unknown[]).length : 0 }} 项</small></div>
+          </div>
+          <div v-if="canCreateTask && taskId" class="inspector-section correction-section">
+            <div class="section-heading"><h3>正式关键更正</h3><span class="status-badge warm">会提升控制版本</span></div>
+            <p class="correction-warning">提交后会中断正在运行的业务调查，并让旧 Plan 与审批失效；新调查 Run 会重新消费更正。</p>
+            <textarea v-model="correctionDraft" data-testid="critical-correction-input" rows="3" maxlength="20000" placeholder="更正：请说明新核实的事实或应优先调查的线索。" :disabled="busy || !csrf"></textarea>
+            <button class="outline-button" type="button" data-testid="submit-critical-correction" :disabled="!correctionDraft.trim() || busy || !csrf" @click="submitCriticalCorrection">提交关键更正</button>
           </div>
           <div class="inspector-section">
             <div class="section-heading"><h3>MCP 与模型轨迹</h3><span class="section-count">{{ inspector.observations.length + inspector.investigation_model_traces.length + inspector.chat_model_attempts.length }}</span></div>
@@ -517,8 +600,8 @@ onBeforeUnmount(() => {
             <div v-for="item in sessionEvents.slice(0, 12)" :key="item.event_seq" class="timeline-item"><span class="timeline-dot"></span><div><strong>{{ item.event_kind.replaceAll('_', ' ') }}</strong><small>{{ dateLabel(item.happened_at) }} · #{{ item.event_seq }}</small></div></div>
           </div>
         </template>
-        <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>创建固定 S1 演示调查后，这里会显示真实 Task、Run、证据摘要和事件。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="createDemoTask">创建 S1 演示调查</button></div>
-        <footer class="inspector-footer"><span>OpsPilot vNext · M1-03</span><span>LOOPBACK ONLY</span></footer>
+        <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>新建 S1 调查并输入真实故障描述后，这里会显示来源引用、可信 Evidence 和确定性 Gate。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = true">新建调查任务</button></div>
+        <footer class="inspector-footer"><span>OpsPilot vNext · M1-04</span><span>LOOPBACK ONLY</span></footer>
       </aside>
     </section>
   </main>

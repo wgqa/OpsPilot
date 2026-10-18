@@ -410,6 +410,8 @@ def insert_context_provenance_in_transaction(
     selected_skill: dict[str, str] | None,
     selected_memories: list[dict[str, object]],
     evidence_ids: list[str],
+    selected_input_messages: list[dict[str, object]] | None = None,
+    task_run_control: dict[str, object] | None = None,
 ) -> str:
     """Validate current memory rows and register provenance in reserve_attempt's transaction."""
     binding = _trusted_binding(connection, task_id)
@@ -446,14 +448,15 @@ def insert_context_provenance_in_transaction(
            (call_id, task_id, attempt_id, model_id, prompt_version, prompt_digest,
             tool_schema_version, tool_schema_digest, selected_skill_name,
             selected_skill_version, selected_skill_digest, selected_memories_json,
-            evidence_ids_json, built_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            evidence_ids_json, selected_input_messages_json, task_run_control_json, built_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (call_id, task_id, attempt_id, model_id, prompt_version, prompt_digest,
          tool_schema_version, tool_schema_digest,
          selected_skill.get("name") if selected_skill else None,
          selected_skill.get("version") if selected_skill else None,
          selected_skill.get("digest") if selected_skill else None,
-         canonical_json(memory_refs), canonical_json(evidence_ids), _now_text()),
+         canonical_json(memory_refs), canonical_json(evidence_ids),
+         canonical_json(selected_input_messages or []), canonical_json(task_run_control or {}), _now_text()),
     )
     return call_id
 
@@ -508,6 +511,8 @@ def list_context_provenance(
         item = dict(raw)
         item["selected_memories"] = json.loads(str(item.pop("selected_memories_json")))
         item["evidence_ids"] = json.loads(str(item.pop("evidence_ids_json")))
+        item["selected_input_messages"] = json.loads(str(item.pop("selected_input_messages_json", "[]")))
+        item["task_run_control"] = json.loads(str(item.pop("task_run_control_json", "{}")))
         item["prompt_digest_matches_trace"] = item.get("model_trace_prompt_digest") in (None, item["prompt_digest"])
         results.append(item)
     return results

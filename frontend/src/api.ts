@@ -43,11 +43,15 @@ export interface ChatChunk {
 export interface Inspector {
   task: Record<string, unknown>;
   trusted_state: Record<string, unknown>;
+  plan_history: Array<Record<string, unknown>>;
   evidence: Array<Record<string, unknown>>;
   observations: Array<Record<string, unknown>>;
   runs: Array<Record<string, unknown>>;
   investigation_model_traces: Array<Record<string, unknown>>;
   chat_model_attempts: Array<Record<string, unknown>>;
+  task_input_messages: Array<Record<string, unknown>>;
+  investigator_context_provenance: Array<Record<string, unknown>>;
+  current_gate: Record<string, unknown>;
 }
 
 export class ApiError extends Error {
@@ -91,18 +95,18 @@ export const api = {
   },
   messages(sessionId: string) { return request<{ items: MessageItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=500`); },
   sessionRuns(sessionId: string) { return request<{ items: RunItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`); },
-  send(sessionId: string, body: string, taskId: string | null, csrf: string) {
-    return request<{ run_id: string; message_id: string; sequence: number; answer_status: string }>(
+  send(sessionId: string, body: string, taskId: string | null, csrf: string, inputKind: 'CHAT_READONLY' | 'CORRECT_TASK_INPUT' = 'CHAT_READONLY') {
+    return request<{ run_id: string; message_id: string; sequence: number; answer_status: string | null; input_kind: string }>(
       `/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': crypto.randomUUID() },
-        body: JSON.stringify({ body, task_id: taskId, input_kind: 'CHAT_READONLY' }),
+        body: JSON.stringify({ body, task_id: taskId, input_kind: inputKind }),
       },
     );
   },
-  createTask(sessionId: string, csrf: string) {
+  createTask(sessionId: string, initialMessage: string, csrf: string) {
     return request<{ task_id: string; run_id: string; status: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
       method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': crypto.randomUUID() },
-      body: JSON.stringify({ initial_message: 'Investigate the existing orders-demo integration-a 401 incident using the approved S1 demo.' }),
+      body: JSON.stringify({ initial_message: initialMessage }),
     });
   },
   runs(taskId: string) { return request<{ items: RunItem[] }>(`/api/tasks/${encodeURIComponent(taskId)}/runs`); },

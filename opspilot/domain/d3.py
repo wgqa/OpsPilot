@@ -1325,6 +1325,8 @@ def save_local_report(
     outcome: str,
     content: dict[str, object],
     plan_hash: str | None = None,
+    *,
+    run_id: str | None = None,
 ) -> dict[str, object]:
     binding = get_task_binding(path, task_id)
     if {"tenant_id", "task_id", "outcome", "schema_version"} & set(content):
@@ -1335,7 +1337,19 @@ def save_local_report(
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         if plan_hash is None:
-            _assert_control(connection, str(binding["tenant_id"]), task_id, 0, allow_completed=True)
+            if run_id is None:
+                _assert_control(connection, str(binding["tenant_id"]), task_id, 0, allow_completed=True)
+            else:
+                run = connection.execute(
+                    "SELECT expected_control_revision FROM task_runs WHERE run_id = ? AND tenant_id = ? AND task_id = ?",
+                    (run_id, binding["tenant_id"], task_id),
+                ).fetchone()
+                if run is None:
+                    raise D3PreconditionRejected("TASK_RUN_NOT_FOUND")
+                _assert_control(
+                    connection, str(binding["tenant_id"]), task_id,
+                    int(run["expected_control_revision"]), run_id=run_id, allow_completed=True,
+                )
         else:
             _assert_plan_control(connection, str(binding["tenant_id"]), task_id, plan_hash, allow_completed=True)
         existing = connection.execute(

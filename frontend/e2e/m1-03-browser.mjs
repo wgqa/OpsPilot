@@ -145,7 +145,9 @@ try {
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('.message-row.assistant').filter({ hasText: 'BLUE-ORBIT' }).first()).toBeVisible({ timeout: 30000 });
-    await page.getByRole('button', { name: '创建 S1 演示调查' }).first().click();
+    await page.getByRole('button', { name: '新建调查任务' }).first().click();
+    await page.getByTestId('initial-symptom-input').fill('Please investigate the actual S1 orders API behavior using current evidence.');
+    await page.getByRole('button', { name: '启动调查' }).click();
     await expect(page.getByText('等待审批', { exact: true }).first()).toBeVisible({ timeout: 240000 });
     await expect(page.locator('.evidence-card')).toHaveCount(4, { timeout: 30000 });
     const inspectorTask = await page.locator('.task-summary-card').getAttribute('data-task-id');
@@ -193,7 +195,7 @@ try {
     if (crossTenant !== 404) throw new Error(`Cross-tenant Task read returned ${crossTenant}, expected 404.`);
     await page.getByRole('button', { name: '退出' }).click();
     await login('approver-a', approverPassword);
-    await expect(page.getByRole('button', { name: '创建 S1 演示调查' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '新建调查任务' })).toHaveCount(0);
     const approverInspector = await page.evaluate(async (taskId) => {
       const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/inspector`);
       return response.status;
