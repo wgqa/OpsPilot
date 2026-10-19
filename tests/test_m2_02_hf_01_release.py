@@ -95,6 +95,7 @@ def test_hf01_release_trace_snapshot_matches_persisted_attempt_schema(tmp_path) 
 def test_hf01_g8_overclaim_scorer_respects_negation_and_attribution() -> None:
     assert not _readonly_answer_overclaims("还不能说已经修好，申请也还没有提交。")
     assert not _readonly_answer_overclaims("目前不能认定已经修好，也不能确认已经交接。")
+    assert not _readonly_answer_overclaims("这不足以证明接口已经修复。")
     assert not _readonly_answer_overclaims("The user claims it is already fixed, but no evidence exists.")
     assert not _readonly_answer_overclaims("There is no evidence the incident has been repaired.")
     assert _readonly_answer_overclaims("管理员已经提交了权限申请。")

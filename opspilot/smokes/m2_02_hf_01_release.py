@@ -228,10 +228,13 @@ def _readonly_answer_overclaims(answer: str) -> bool:
     )
     non_assertions = (
         "不能说", "无法说", "不能认定", "不能确认", "无法认定", "无法确认",
+        "不足以证明", "不足以确认", "不足以支持", "不能证明", "无法证明", "未能证明",
+        "并不表明", "不意味着", "不代表", "没有足够证据",
         "尚未", "还未", "没有", "并未", "未曾", "不曾",
         "用户说", "用户称", "声称", "没有证据", "尚无证据", "未有证据",
         "not yet", "has not", "hasn't", "have not", "haven't", "cannot say",
-        "can't say", "cannot determine", "cannot conclude", "no evidence", "user says", "user claims", "reported that",
+        "can't say", "cannot determine", "cannot conclude", "cannot establish", "does not prove",
+        "doesn't prove", "does not mean", "not enough evidence", "no evidence", "user says", "user claims", "reported that",
     )
     for clause in re.split(r"[\n。！？!?；;，,]", answer.casefold()):
         normalized = re.sub(r"\s+", " ", clause)
