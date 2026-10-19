@@ -322,6 +322,7 @@ CREATE INDEX IF NOT EXISTS ix_task_execution_budget_tenant ON task_execution_bud
 CREATE TABLE IF NOT EXISTS d2_attempts (
     attempt_id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    run_id TEXT,
     kind TEXT NOT NULL CHECK (kind IN ('MODEL', 'MCP')),
     call_id TEXT NOT NULL,
     tool_call_id TEXT,
@@ -399,6 +400,50 @@ CREATE TABLE IF NOT EXISTS d2_reports (
     immutable_content_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS s2_gate_traces (
+    trace_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    run_id TEXT REFERENCES task_runs(run_id),
+    decision TEXT NOT NULL CHECK (decision IN ('NOT_APPLICABLE', 'DIAGNOSED', 'NEED_MORE', 'NO_ACTION', 'INCONCLUSIVE')),
+    reason_code TEXT NOT NULL,
+    request_id TEXT,
+    decision_id INTEGER,
+    evidence_ids_json TEXT NOT NULL,
+    evidence_digests_json TEXT NOT NULL,
+    predicate_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_s2_gate_trace_task ON s2_gate_traces(task_id, created_at);
+CREATE TABLE IF NOT EXISTS s2_diagnosis_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    run_id TEXT NOT NULL REFERENCES task_runs(run_id),
+    request_id TEXT NOT NULL,
+    decision_id INTEGER NOT NULL,
+    gate_policy_version TEXT NOT NULL,
+    predicate_json TEXT NOT NULL,
+    evidence_ids_json TEXT NOT NULL,
+    evidence_digests_json TEXT NOT NULL,
+    observed_versions_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, task_id, run_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS ix_s2_receipt_task ON s2_diagnosis_receipts(task_id, created_at);
+CREATE TABLE IF NOT EXISTS s2_handoff_drafts (
+    draft_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    receipt_id TEXT NOT NULL REFERENCES s2_diagnosis_receipts(receipt_id),
+    version INTEGER NOT NULL CHECK (version > 0),
+    content_json TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, task_id, receipt_id),
+    UNIQUE (tenant_id, task_id, version)
+);
+CREATE INDEX IF NOT EXISTS ix_s2_draft_task ON s2_handoff_drafts(task_id, version);
 CREATE TABLE IF NOT EXISTS d2_tool_faults (
     task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
     tool_name TEXT NOT NULL,
@@ -654,6 +699,7 @@ CREATE TABLE IF NOT EXISTS d5_context_provenance (
     selected_skill_version TEXT,
     selected_skill_digest TEXT,
     selected_memories_json TEXT NOT NULL,
+    selected_knowledge_json TEXT NOT NULL DEFAULT '[]',
     evidence_ids_json TEXT NOT NULL,
     selected_input_messages_json TEXT NOT NULL DEFAULT '[]',
     task_run_control_json TEXT NOT NULL DEFAULT '{}',
@@ -764,7 +810,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 6:
+        if version > 7:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -852,6 +898,23 @@ def initialize(path: str | Path) -> None:
                 "ON auth_events(request_id) WHERE request_id IS NOT NULL"
             )
             connection.execute("PRAGMA user_version = 6")
+            version = 6
+        if version < 7:
+            attempt_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(d2_attempts)").fetchall()
+            }
+            if "run_id" not in attempt_columns:
+                connection.execute("ALTER TABLE d2_attempts ADD COLUMN run_id TEXT")
+            provenance_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(d5_context_provenance)").fetchall()
+            }
+            if "selected_knowledge_json" not in provenance_columns:
+                connection.execute(
+                    "ALTER TABLE d5_context_provenance ADD COLUMN selected_knowledge_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            connection.execute("PRAGMA user_version = 7")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -875,6 +938,9 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             "domain_outbox",
             "approval_resume_links",
             "d3_plan_control_bindings",
+            "s2_handoff_drafts",
+            "s2_diagnosis_receipts",
+            "s2_gate_traces",
             "task_runs",
             "messages",
             "commands",

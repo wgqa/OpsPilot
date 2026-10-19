@@ -38,6 +38,7 @@ const conversationEnd = ref<HTMLElement | null>(null);
 let eventSource: EventSource | null = null;
 let reconnectTimer: number | undefined;
 let runPollTimer: number | undefined;
+let loadingChunksRunId: string | null = null;
 let seenEventSeq = new Set<number>();
 
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
@@ -48,6 +49,8 @@ const displayStream = computed(() => activeChatRun.value?.status === 'RUNNING' &
 const latestContextProvenance = computed(() => inspector.value?.investigator_context_provenance[0] ?? null);
 const latestSelectedInputs = computed(() => Array.isArray(latestContextProvenance.value?.selected_input_messages)
   ? latestContextProvenance.value.selected_input_messages as Array<Record<string, unknown>> : []);
+const latestSelectedKnowledge = computed(() => Array.isArray(latestContextProvenance.value?.selected_knowledge)
+  ? latestContextProvenance.value.selected_knowledge as Array<Record<string, unknown>> : []);
 
 function dateLabel(value: unknown): string {
   if (typeof value !== 'string' || !value) return '—';
@@ -330,7 +333,7 @@ function readableInputKind(value: unknown): string {
 
 function readableGate(value: unknown): string {
   const gate = String(value ?? 'INCONCLUSIVE');
-  return ({ READY: '证据满足 Plan 候选条件', NEED_MORE: '证据仍需补充', NO_ACTION: '当前事实不允许动作', INCONCLUSIVE: '证据不足或存在冲突' } as Record<string, string>)[gate] ?? gate;
+  return ({ READY: '证据满足 Plan 候选条件', DIAGNOSED: '可信 Scope 诊断通过', HANDOFF_READY: '申请草稿已冻结', NEED_MORE: '证据仍需补充', NO_ACTION: '当前事实不允许动作', INCONCLUSIVE: '证据不足或存在冲突' } as Record<string, string>)[gate] ?? gate;
 }
 
 function readableRunReason(value: unknown): string {
@@ -346,10 +349,19 @@ async function refreshSessionMessagesOnly(): Promise<void> {
 }
 
 async function loadChunks(runId: string): Promise<void> {
-  const response = await api.chunks(runId, lastChunkSeq.value);
-  if (response.items.length > 0) {
-    chunks.value.push(...response.items);
+  if (loadingChunksRunId === runId) return;
+  loadingChunksRunId = runId;
+  try {
+    const response = await api.chunks(runId, lastChunkSeq.value);
+    if (activeChatRun.value?.run_id !== runId || response.items.length === 0) return;
+    const merged = new Map(chunks.value.map((chunk) => [chunk.chunk_seq, chunk]));
+    for (const chunk of response.items) {
+      if (!merged.has(chunk.chunk_seq)) merged.set(chunk.chunk_seq, chunk);
+    }
+    chunks.value = [...merged.values()].sort((left, right) => left.chunk_seq - right.chunk_seq);
     lastChunkSeq.value = Math.max(lastChunkSeq.value, ...response.items.map((item) => item.chunk_seq));
+  } finally {
+    if (loadingChunksRunId === runId) loadingChunksRunId = null;
   }
 }
 
@@ -701,6 +713,12 @@ onBeforeUnmount(() => {
             <div v-if="taskOutcome.business_outcome === 'DELIVERED'" class="outcome-message good-outcome">同身份业务调用已恢复，冻结报告和工单交付回执均已核对。</div>
             <div v-else-if="taskOutcome.business_outcome === 'RECOVERED_NOT_DELIVERED'" class="outcome-message warm-outcome">业务已在线验证恢复，但工单尚未完成交付。</div>
             <div v-else-if="taskOutcome.business_outcome === 'REJECTED'" class="outcome-message warm-outcome">审批者已拒绝；拒绝报告来自原调查图，没有执行业务写入。</div>
+            <div v-else-if="taskOutcome.business_outcome === 'HANDOFF_READY'" class="outcome-message warm-outcome">可信证据已完成诊断，权限申请草稿已冻结；尚未提交、未入队、权限未生效，S2 业务也未恢复。</div>
+            <div v-else-if="taskOutcome.business_outcome === 'DIAGNOSED'" class="outcome-message warm-outcome">已形成可信诊断回执；申请草稿仍待冻结，尚未提交或改变任何授权。</div>
+            <div v-else-if="taskOutcome.business_outcome === 'INCONCLUSIVE'" class="outcome-message warm-outcome">当前权限事实已变化或不足，旧诊断不能作为当前结论。</div>
+            <div v-if="taskOutcome.diagnosis_receipt" class="outcome-row"><span>诊断回执</span><code>{{ String((taskOutcome.diagnosis_receipt as Record<string, unknown>).receipt_id) }}</code><span>Request {{ String((taskOutcome.diagnosis_receipt as Record<string, unknown>).request_id) }}</span></div>
+            <div v-if="taskOutcome.draft" class="outcome-row"><span>冻结申请草稿</span><code>{{ String((taskOutcome.draft as Record<string, unknown>).draft_id) }}</code><span>摘要 {{ String((taskOutcome.draft as Record<string, unknown>).content_digest).slice(0, 16) }} · 未提交</span></div>
+            <div v-if="taskOutcome.draft" class="outcome-message warm-outcome">草稿中的缺失 Scope 仅供后续人工评估，不是授权结果：{{ JSON.stringify(((taskOutcome.draft as Record<string, unknown>).content as Record<string, unknown>).missing_scopes ?? []) }}</div>
             <div v-if="taskOutcome.approval" class="outcome-row">审批 <code>{{ String(taskOutcome.approval.approval_id) }}</code><span>{{ String(taskOutcome.approval.approver_id) }} · {{ String(taskOutcome.approval.decision) }}</span></div>
             <div v-if="taskOutcome.repair" class="outcome-row">REPAIR <code>{{ String(taskOutcome.repair.ledger_id) }}</code><span>配置 v{{ String(taskOutcome.repair.before_version) }} → v{{ String(taskOutcome.repair.after_version) }}</span></div>
             <div v-if="taskOutcome.verification" class="outcome-row">在线验证 <code>{{ String(taskOutcome.verification.verification_id) }}</code><span>HTTP {{ String(taskOutcome.verification.response_status) }} · {{ taskOutcome.verification.recovery_verified ? '业务字段通过' : '未恢复' }}</span></div>
@@ -719,6 +737,8 @@ onBeforeUnmount(() => {
               <span>当前控制版本 <b>{{ String((latestContextProvenance.task_run_control as Record<string, unknown>).current_control_revision ?? '—') }}</b></span>
               <span>消耗序号高水位 <b>{{ String((latestContextProvenance.task_run_control as Record<string, unknown>).consumed_message_seq ?? '—') }}</b></span>
             </div>
+            <div v-if="latestContextProvenance?.selected_skill" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).name) }} · v{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).version) }}</strong><small>Skill SHA-256 {{ String((latestContextProvenance.selected_skill as Record<string, unknown>).digest).slice(0, 16) }}</small></span></div>
+            <div v-for="item in latestSelectedKnowledge" :key="String(item.document_id)" class="trace-row"><span class="trace-icon">▤</span><span><strong>{{ String(item.document_id) }} · v{{ String(item.version) }}</strong><small>{{ String(item.source) }} · SHA-256 {{ String(item.digest).slice(0, 16) }}</small></span></div>
             <div class="gate-card"><span>确定性 Evidence Gate</span><b>{{ readableGate(inspector.current_gate.decision) }}</b><small>{{ String(inspector.current_gate.reason_code ?? '—') }} · 当前有效 Evidence {{ Array.isArray(inspector.current_gate.checked_fact_ids) ? (inspector.current_gate.checked_fact_ids as unknown[]).length : 0 }} 项</small></div>
           </div>
           <div v-if="canCreateTask && taskId" class="inspector-section correction-section">
@@ -740,7 +760,7 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>新建 S1 调查并输入真实故障描述后，这里会显示来源引用、可信 Evidence 和确定性 Gate。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = true">新建调查任务</button></div>
-        <footer class="inspector-footer"><span>OpsPilot vNext · M1-05</span><span>LOOPBACK ONLY</span></footer>
+        <footer class="inspector-footer"><span>OpsPilot vNext · M2-02</span><span>LOOPBACK ONLY</span></footer>
       </aside>
     </section>
   </main>

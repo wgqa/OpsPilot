@@ -285,5 +285,6 @@ def test_schema_v3_database_adds_context_input_provenance_columns(demo_db: Path)
     with connect(demo_db) as connection:
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(d5_context_provenance)")}
-    assert version == 6
+    assert version == 7
+    assert "selected_knowledge_json" in columns
     assert {"selected_input_messages_json", "task_run_control_json"}.issubset(columns)

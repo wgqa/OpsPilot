@@ -1665,6 +1665,11 @@ def get_task_outcome(path: str | Path, task_id: str, actor_id: str) -> dict[str,
             (binding["tenant_id"], task_id),
         ).fetchone()
         if plan is None:
+            from opspilot.domain.s2_diagnosis import get_s2_task_outcome
+
+            s2_outcome = get_s2_task_outcome(path, task_id)
+            if s2_outcome.get("business_outcome") != "NO_S2_DIAGNOSIS":
+                return s2_outcome
             return {"task_id": task_id, "task_status": str(binding["status"]), "business_outcome": "NO_PLAN"}
         plan_hash = str(plan["plan_hash"])
         approval = connection.execute(

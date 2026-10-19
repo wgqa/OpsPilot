@@ -360,7 +360,9 @@ def _message_source_valid(
     return True, None
 
 
-def _prepare_context(connection: sqlite3.Connection, run: sqlite3.Row, model_id: str) -> dict[str, Any]:
+def _prepare_context(
+    connection: sqlite3.Connection, run: sqlite3.Row, model_id: str, db_path: str | Path,
+) -> dict[str, Any]:
     tenant_id, session_id = str(run["tenant_id"]), str(run["session_id"])
     task_id = str(run["task_id"]) if run["task_id"] is not None else None
     source_message_id = str(run["source_message_id"] or "")
@@ -387,6 +389,27 @@ def _prepare_context(connection: sqlite3.Connection, run: sqlite3.Row, model_id:
         if linked is None:
             raise TaskControlError("SESSION_TASK_LINK_REQUIRED")
     state, state_digest = _trusted_state(connection, task_id)
+    if task_id and state is not None:
+        from opspilot.domain.s2_diagnosis import get_s2_task_outcome
+
+        s2_outcome = get_s2_task_outcome(db_path, task_id)
+        if s2_outcome.get("business_outcome") != "NO_S2_DIAGNOSIS":
+            receipt = s2_outcome.get("diagnosis_receipt")
+            draft = s2_outcome.get("draft")
+            state["s2_outcome"] = {
+                "business_outcome": s2_outcome.get("business_outcome"),
+                "currentness": s2_outcome.get("currentness"),
+                "reason_code": s2_outcome.get("reason_code"),
+                "diagnosis_receipt_id": receipt.get("receipt_id") if isinstance(receipt, dict) else None,
+                "request_id": receipt.get("request_id") if isinstance(receipt, dict) else None,
+                "draft_id": draft.get("draft_id") if isinstance(draft, dict) else None,
+                "draft_digest": draft.get("content_digest") if isinstance(draft, dict) else None,
+                "draft_content": draft.get("content") if isinstance(draft, dict) else None,
+                "submitted": bool(s2_outcome.get("submitted", False)),
+                "scope_authorized": bool(s2_outcome.get("scope_authorized", False)),
+                "handoff_receipt": s2_outcome.get("handoff_receipt"),
+            }
+            state_digest = _digest(_canonical(state))
     excluded: list[dict[str, str]] = []
     evidence = (
         _current_evidence(connection, task_id, state, excluded_sources=excluded)
@@ -561,7 +584,7 @@ def prepare_chat_attempt(path: str | Path, run_id: str, worker_id: str, model_id
             raise TaskControlError("SESSION_SCOPE_DENIED")
         actor = trusted_identity(path, str(owner["owner_id"]))
         _verify_identity(connection, actor)
-        prepared = _prepare_context(connection, run, model_id)
+        prepared = _prepare_context(connection, run, model_id, path)
         prompt_digest = _digest(_canonical(prepared["messages"]))
         attempt_id = f"chat-attempt-{uuid.uuid4()}"
         manifest_id = f"chat-manifest-{uuid.uuid4()}"
@@ -960,7 +983,8 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
         ).fetchall()
         investigator_contexts = connection.execute(
             """SELECT call_id, attempt_id, model_id, prompt_version, prompt_digest,
-                      model_status, error_class, selected_input_messages_json,
+                      model_status, error_class, selected_skill_name, selected_skill_version,
+                      selected_skill_digest, selected_knowledge_json, selected_input_messages_json,
                       task_run_control_json, evidence_ids_json, built_at
                FROM d5_context_provenance WHERE task_id = ?
                ORDER BY built_at DESC, call_id DESC LIMIT 20""",
@@ -972,6 +996,24 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
         gate = evaluate_evidence_gate(path, task_id, [str(item["evidence_id"]) for item in evidence])
     except Exception:
         gate = {"decision": "INCONCLUSIVE", "reason_code": "GATE_SNAPSHOT_UNAVAILABLE"}
+    from opspilot.domain.s2_diagnosis import get_s2_task_outcome
+
+    s2_outcome = get_s2_task_outcome(path, task_id)
+    with connect(path) as connection:
+        s2_gate_row = connection.execute(
+            """SELECT decision, reason_code, evidence_ids_json FROM s2_gate_traces
+               WHERE task_id = ? ORDER BY created_at DESC, trace_id DESC LIMIT 1""",
+            (task_id,),
+        ).fetchone()
+    if s2_gate_row is not None:
+        gate = {
+            "decision": str(s2_gate_row["decision"]),
+            "reason_code": str(s2_gate_row["reason_code"]),
+            "checked_fact_ids": json.loads(str(s2_gate_row["evidence_ids_json"])),
+        }
+        if s2_outcome.get("currentness") == "INVALIDATED_BY_CURRENT_FACTS":
+            gate["decision"] = "INCONCLUSIVE"
+            gate["reason_code"] = s2_outcome.get("reason_code")
     return {
         "task": {key: binding[key] for key in ("task_id", "tenant_id", "service_id", "integration_id", "principal_id", "ticket_id", "status")},
         "trusted_state": trusted_state,
@@ -1012,6 +1054,12 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
             "model_id": str(row["model_id"]),
             "prompt_version": str(row["prompt_version"]),
             "prompt_digest": str(row["prompt_digest"]),
+            "selected_skill": ({
+                "name": str(row["selected_skill_name"]),
+                "version": str(row["selected_skill_version"]),
+                "digest": str(row["selected_skill_digest"]),
+            } if row["selected_skill_name"] else None),
+            "selected_knowledge": json.loads(str(row["selected_knowledge_json"])),
             "model_status": str(row["model_status"]),
             "error_class": str(row["error_class"]) if row["error_class"] else None,
             "selected_input_messages": [
@@ -1037,6 +1085,7 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
             key: gate.get(key)
             for key in ("decision", "reason_code", "missing_predicates", "checked_fact_ids", "stale_or_conflicting_ids")
         },
+        "s2_outcome": s2_outcome if s2_outcome.get("business_outcome") != "NO_S2_DIAGNOSIS" else None,
     }
 
 

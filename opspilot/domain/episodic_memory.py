@@ -410,6 +410,7 @@ def insert_context_provenance_in_transaction(
     selected_skill: dict[str, str] | None,
     selected_memories: list[dict[str, object]],
     evidence_ids: list[str],
+    selected_knowledge: list[dict[str, object]] | None = None,
     selected_input_messages: list[dict[str, object]] | None = None,
     task_run_control: dict[str, object] | None = None,
 ) -> str:
@@ -439,6 +440,26 @@ def insert_context_provenance_in_transaction(
         memory_refs.append({"memory_id": memory_id, "version": version})
     if selected_skill is not None and not all(selected_skill.get(key) for key in ("name", "version", "digest")):
         raise ContextAssetInvalidated("Selected Skill provenance is incomplete.")
+    knowledge_refs: list[dict[str, str]] = []
+    if selected_knowledge:
+        from opspilot.domain.knowledge_assets import load_scope_knowledge
+
+        valid_assets = load_scope_knowledge(str(binding["service_id"]), include_legacy=True)
+        valid_refs = {
+            (item["document_id"], item["version"], item["digest"], item["source"], item["valid_from"])
+            for item in valid_assets
+        }
+        for selected in selected_knowledge:
+            ref = tuple(str(selected.get(key, "")) for key in (
+                "document_id", "version", "digest", "source", "valid_from",
+            ))
+            if ref not in valid_refs:
+                raise ContextAssetInvalidated("Selected Knowledge changed or is not applicable to this TaskBinding.")
+            knowledge_refs.append({
+                key: str(selected[key]) for key in (
+                    "document_id", "version", "digest", "source", "valid_from",
+                )
+            })
     call_id = str(connection.execute(
         "SELECT call_id FROM d2_attempts WHERE attempt_id = ? AND task_id = ? AND kind = 'MODEL'",
         (attempt_id, task_id),
@@ -448,14 +469,15 @@ def insert_context_provenance_in_transaction(
            (call_id, task_id, attempt_id, model_id, prompt_version, prompt_digest,
             tool_schema_version, tool_schema_digest, selected_skill_name,
             selected_skill_version, selected_skill_digest, selected_memories_json,
-            evidence_ids_json, selected_input_messages_json, task_run_control_json, built_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            selected_knowledge_json, evidence_ids_json, selected_input_messages_json,
+            task_run_control_json, built_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (call_id, task_id, attempt_id, model_id, prompt_version, prompt_digest,
          tool_schema_version, tool_schema_digest,
          selected_skill.get("name") if selected_skill else None,
          selected_skill.get("version") if selected_skill else None,
          selected_skill.get("digest") if selected_skill else None,
-         canonical_json(memory_refs), canonical_json(evidence_ids),
+         canonical_json(memory_refs), canonical_json(knowledge_refs), canonical_json(evidence_ids),
          canonical_json(selected_input_messages or []), canonical_json(task_run_control or {}), _now_text()),
     )
     return call_id
@@ -475,10 +497,6 @@ def finish_context_provenance(
 def assert_task_skill_compatible(
     path: str | Path, task_id: str, selected_skill: dict[str, str] | None
 ) -> None:
-    current = (
-        (selected_skill.get("name"), selected_skill.get("version"), selected_skill.get("digest"))
-        if selected_skill else (None, None, None)
-    )
     with connect(path) as connection:
         _trusted_binding(connection, task_id)
         rows = connection.execute(
@@ -486,8 +504,38 @@ def assert_task_skill_compatible(
                FROM d5_context_provenance WHERE task_id = ? AND selected_skill_name IS NOT NULL""",
             (task_id,),
         ).fetchall()
-    if any((row["selected_skill_name"], row["selected_skill_version"], row["selected_skill_digest"]) != current for row in rows):
-        raise SkillCompatibilityError("The Skill version or digest changed during this task; stop and review before continuing.")
+    # M2-02 adds one separately scoped S2 method Skill. A Task may move between
+    # the two reviewed methods when current trusted facts show the other path;
+    # a selected Skill's own version/digest remains frozen for that Task.
+    from opspilot.skill_assets import SCOPE_PROBLEM_TYPE, load_applicable_skill
+
+    approved_names = {"auth-incident-triage", "auth-scope-triage"}
+    expected_by_name = {
+        "auth-incident-triage": load_applicable_skill("auth_401"),
+        "auth-scope-triage": load_applicable_skill(SCOPE_PROBLEM_TYPE),
+    }
+    if selected_skill is not None:
+        name = str(selected_skill.get("name", ""))
+        expected = expected_by_name.get(name)
+        if (
+            expected is None or name not in approved_names
+            or any(selected_skill.get(key) != expected.get(key) for key in ("name", "version", "digest"))
+        ):
+            raise SkillCompatibilityError("The selected Skill is not a currently verified OpsPilot Skill asset.")
+    for row in rows:
+        name = str(row["selected_skill_name"])
+        expected = expected_by_name.get(name)
+        if (
+            expected is None or name not in approved_names
+            or row["selected_skill_version"] != expected.get("version")
+            or row["selected_skill_digest"] != expected.get("digest")
+        ):
+            raise SkillCompatibilityError("A previously selected Skill version or digest changed during this task.")
+        if selected_skill is not None and name == str(selected_skill.get("name")) and (
+            row["selected_skill_version"] != selected_skill.get("version")
+            or row["selected_skill_digest"] != selected_skill.get("digest")
+        ):
+            raise SkillCompatibilityError("The selected Skill version or digest changed during this task.")
 
 
 def list_context_provenance(
@@ -510,6 +558,7 @@ def list_context_provenance(
     for raw in rows:
         item = dict(raw)
         item["selected_memories"] = json.loads(str(item.pop("selected_memories_json")))
+        item["selected_knowledge"] = json.loads(str(item.pop("selected_knowledge_json", "[]")))
         item["evidence_ids"] = json.loads(str(item.pop("evidence_ids_json")))
         item["selected_input_messages"] = json.loads(str(item.pop("selected_input_messages_json", "[]")))
         item["task_run_control"] = json.loads(str(item.pop("task_run_control_json", "{}")))

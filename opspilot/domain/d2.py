@@ -518,10 +518,14 @@ def probe_endpoint_fact(
         integration_id=str(binding["integration_id"]),
     )
     after = _live_versions(path, binding)
+    authn_event_id = result.event_id
+    if authn_event_id is None and isinstance(result.body.get("authn_event_id"), int):
+        authn_event_id = int(result.body["authn_event_id"])
+    authz_event_id = result.body.get("authz_event_id")
     event: dict[str, object] | None = None
-    if result.event_id is not None:
+    if authn_event_id is not None:
         try:
-            event = get_auth_event(path, str(binding["tenant_id"]), result.event_id)
+            event = get_auth_event(path, str(binding["tenant_id"]), authn_event_id)
         except LookupError:
             event = None
     event_matches = bool(
@@ -540,7 +544,9 @@ def probe_endpoint_fact(
         "route": result.route,
         "http_status": result.status_code,
         "request_id": result.request_id,
-        "auth_event_id": result.event_id,
+        "auth_event_id": authn_event_id,
+        "authn_event_id": authn_event_id,
+        "authz_event_id": int(authz_event_id) if isinstance(authz_event_id, int) else None,
         "auth_event_observed_at": event.get("observed_at") if event else None,
         "auth_event_result": event.get("result_code") if event else None,
         "auth_event_scope_valid": event_matches,
@@ -573,6 +579,7 @@ def reserve_attempt(
     argument_digest: str | None = None,
     context_provenance: dict[str, object] | None = None,
     task_run_control: dict[str, object] | None = None,
+    run_id: str | None = None,
 ) -> tuple[str, int]:
     if kind not in {"MODEL", "MCP"} or limit < 1:
         raise ValueError("Invalid D2 attempt kind or limit.")
@@ -591,6 +598,16 @@ def reserve_attempt(
         ).fetchone()
         if binding is None:
             raise ScopeDenied("Attempt cannot be reserved without a trusted TaskBinding.")
+        if run_id is not None:
+            run = connection.execute(
+                "SELECT task_id, kind, status FROM task_runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if (
+                run is None or str(run["task_id"]) != task_id
+                or str(run["kind"]) == "CHAT_READONLY" or str(run["status"]) != "RUNNING"
+            ):
+                raise ScopeDenied("Attempt Run is not an active business Run for this TaskBinding.")
         used = int(
             connection.execute(
                 "SELECT COUNT(*) AS n FROM d2_attempts WHERE task_id = ? AND kind = ?",
@@ -601,9 +618,9 @@ def reserve_attempt(
             raise BudgetExhausted(kind, used, limit)
         connection.execute(
             """INSERT INTO d2_attempts
-               (attempt_id, task_id, kind, call_id, tool_call_id, tool_name, argument_digest)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (attempt_id, task_id, kind, call_id, tool_call_id, tool_name, argument_digest),
+               (attempt_id, task_id, run_id, kind, call_id, tool_call_id, tool_name, argument_digest)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (attempt_id, task_id, run_id, kind, call_id, tool_call_id, tool_name, argument_digest),
         )
         if context_provenance is not None:
             if kind != "MODEL":
@@ -612,10 +629,11 @@ def reserve_attempt(
 
             skill = context_provenance.get("selected_skill")
             memories = context_provenance.get("selected_memories", [])
+            knowledge = context_provenance.get("selected_knowledge", [])
             evidence_ids = context_provenance.get("evidence_ids", [])
             input_refs = context_provenance.get("selected_input_messages", [])
             run_control = context_provenance.get("task_run_control", {})
-            if not isinstance(memories, list) or not isinstance(evidence_ids, list) or not isinstance(input_refs, list):
+            if not isinstance(memories, list) or not isinstance(knowledge, list) or not isinstance(evidence_ids, list) or not isinstance(input_refs, list):
                 raise ValueError("Context Provenance source lists must be arrays.")
             if not isinstance(run_control, dict):
                 raise ValueError("Task Run control provenance must be an object.")
@@ -631,6 +649,7 @@ def reserve_attempt(
                 selected_skill=skill if isinstance(skill, dict) else None,
                 selected_memories=[item for item in memories if isinstance(item, dict)],
                 evidence_ids=[str(item) for item in evidence_ids],
+                selected_knowledge=[item for item in knowledge if isinstance(item, dict)],
                 selected_input_messages=[item for item in input_refs if isinstance(item, dict)],
                 task_run_control=run_control,
             )

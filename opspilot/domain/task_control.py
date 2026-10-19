@@ -1514,6 +1514,10 @@ def finish_task_run(
             and str(run["kind"]) != "CHAT_READONLY"
             and status in {"WAITING_INPUT", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "BLOCKED"}
         ):
+            existing_task = connection.execute(
+                "SELECT status FROM task_bindings WHERE task_id = ?",
+                (run["task_id"],),
+            ).fetchone()
             projected = {
                 "WAITING_INPUT": "WAITING_INPUT",
                 "WAITING_APPROVAL": "WAITING_APPROVAL",
@@ -1521,6 +1525,13 @@ def finish_task_run(
                 "FAILED": "FAILED",
                 "BLOCKED": "BLOCKED",
             }[status]
+            if (
+                status == "SUCCEEDED" and existing_task is not None
+                and str(existing_task["status"]) in {"WAITING_HANDOFF", "INCONCLUSIVE", "NO_ACTION"}
+            ):
+                # S2 Run completion is not business completion. Preserve the
+                # trusted Domain outcome projected by its Gate/Receipt transaction.
+                projected = str(existing_task["status"])
             if blocked_reason == "INVESTIGATION_DEADLINE_EXCEEDED":
                 projected = "INCONCLUSIVE"
             connection.execute(

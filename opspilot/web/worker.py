@@ -174,6 +174,7 @@ async def _process_run_inner(
                 checkpoint_db_path=checkpoint_path,
                 resume=resume,
                 d3_mode=True,
+                s2_mode=True,
                 executor_id=executor_id,
                 run_id=run_id,
             ),

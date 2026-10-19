@@ -10,6 +10,9 @@ from opspilot.config import ROOT
 
 SKILL_DIRECTORY = ROOT / "skills" / "auth-incident-triage"
 SKILL_NAME = "auth-incident-triage"
+SCOPE_SKILL_DIRECTORY = ROOT / "skills" / "auth-scope-triage"
+SCOPE_SKILL_NAME = "auth-scope-triage"
+SCOPE_PROBLEM_TYPE = "auth_403_scope"
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
@@ -21,13 +24,18 @@ def load_applicable_skill(problem_type: str | None) -> dict[str, str] | None:
     """Read the small manifest first; open the Skill body only for a matching issue."""
     if problem_type is None:
         return None
-    manifest_path = SKILL_DIRECTORY / "manifest.json"
+    directory, expected_name, title = (
+        (SCOPE_SKILL_DIRECTORY, SCOPE_SKILL_NAME, "auth scope triage")
+        if problem_type == SCOPE_PROBLEM_TYPE
+        else (SKILL_DIRECTORY, SKILL_NAME, "auth incident")
+    )
+    manifest_path = directory / "manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise SkillIntegrityError("The auth incident Skill manifest is unavailable or invalid.") from error
-    if not isinstance(manifest, dict) or manifest.get("name") != SKILL_NAME:
-        raise SkillIntegrityError("The auth incident Skill manifest name is invalid.")
+        raise SkillIntegrityError(f"The {title} Skill manifest is unavailable or invalid.") from error
+    if not isinstance(manifest, dict) or manifest.get("name") != expected_name:
+        raise SkillIntegrityError(f"The {title} Skill manifest name is invalid.")
     if manifest.get("problem_type") != problem_type:
         return None
     version = manifest.get("version")
@@ -38,8 +46,8 @@ def load_applicable_skill(problem_type: str | None) -> dict[str, str] | None:
     expected = manifest.get("digest")
     if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected):
         raise SkillIntegrityError("The auth incident Skill digest is invalid.")
-    skill_path = (SKILL_DIRECTORY / "SKILL.md").resolve()
-    if skill_path.parent != SKILL_DIRECTORY.resolve():
+    skill_path = (directory / "SKILL.md").resolve()
+    if skill_path.parent != directory.resolve():
         raise SkillIntegrityError("The auth incident Skill path escapes its asset directory.")
     try:
         content_bytes = skill_path.read_bytes()
@@ -53,7 +61,7 @@ def load_applicable_skill(problem_type: str | None) -> dict[str, str] | None:
     except UnicodeDecodeError as error:
         raise SkillIntegrityError("The auth incident Skill body is not UTF-8.") from error
     return {
-        "name": SKILL_NAME,
+        "name": expected_name,
         "version": version,
         "digest": actual,
         "description": str(manifest.get("description", ""))[:240],

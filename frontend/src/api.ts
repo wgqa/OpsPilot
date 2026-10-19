@@ -91,6 +91,11 @@ export interface TaskOutcome {
   task_id: string;
   task_status: string;
   business_outcome: string;
+  currentness?: string;
+  submitted?: boolean;
+  scope_authorized?: boolean;
+  diagnosis_receipt?: Record<string, unknown> | null;
+  draft?: Record<string, unknown> | null;
   plan?: Record<string, unknown>;
   approval?: Record<string, unknown> | null;
   resume_link?: Record<string, unknown> | null;
