@@ -6,7 +6,6 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from opspilot.domain.episodic_memory import create_memory_candidate
-from opspilot.domain.d2 import create_task_binding
 from opspilot.investigator import _prompt_messages
 
 
@@ -54,9 +53,11 @@ def test_m301_red_s2_diagnosis_receipt_can_create_diagnosed_experience(
 
 
 def test_m301_red_s2_investigator_context_can_select_active_case_memory(
-    demo_db: Path, monkeypatch,
+    demo_db: Path, live_api: str, monkeypatch,
 ) -> None:
-    binding = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a")
+    task_id, run_id, _probe, _evidence_ids = _capture_s2_probe(
+        demo_db, live_api, "S2_SCOPE_DENIED", "m301-context-s2",
+    )
     source_task_id = "source-task-a"
     memory = {
         "memory_id": "m301-case-memory-s2",
@@ -71,16 +72,16 @@ def test_m301_red_s2_investigator_context_can_select_active_case_memory(
     }
     import opspilot.investigator as investigator
 
-    def applicable(_path, task_id, problem_type, **_kwargs):
-        assert task_id == binding["task_id"]
+    def applicable(_path, candidate_task_id, problem_type, **_kwargs):
+        assert candidate_task_id == task_id
         assert problem_type == "auth_403_scope"
         return [memory]
 
     monkeypatch.setattr(investigator, "list_applicable_memories", applicable)
     metadata: dict[str, object] = {}
     messages = _prompt_messages(
-        demo_db, str(binding["task_id"]), {"evidence_ids": []},
-        context_metadata=metadata, s2_mode=True,
+        demo_db, task_id, {"evidence_ids": []}, context_metadata=metadata,
+        run_id=run_id, s2_mode=True,
     )
 
     assert "m301-case-memory-s2" in "\n".join(str(item.content) for item in messages)
