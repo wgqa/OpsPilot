@@ -82,6 +82,16 @@ def run_web(source_db: str | Path, source_task_id: str, evidence_dir: str | Path
             "UPDATE integrations SET credential_ref = 'cred-v1', config_version = 7 WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
         )
         connection.commit()
+        source_session = connection.execute(
+            """SELECT s.session_id FROM sessions s JOIN session_task_links l
+                 ON l.session_id = s.session_id AND l.tenant_id = s.tenant_id
+               WHERE l.task_id = ? AND l.tenant_id = 'tenant-a' AND s.owner_id = 'support-a'
+               ORDER BY l.is_primary DESC, l.linked_at LIMIT 1""",
+            (source_task_id,),
+        ).fetchone()
+    if source_session is None:
+        raise RuntimeError("The trusted Domain source Task has no SUPPORT-owned session link.")
+    source_session_id = str(source_session["session_id"])
     scope_before = _scope_snapshot(database)
     passwords = {actor: secrets.token_urlsafe(32) for actor in ("support-a", "approver-a", "support-b", "approver-b")}
     api_port, ui_port = _free_port(), _free_port()
@@ -96,6 +106,7 @@ def run_web(source_db: str | Path, source_task_id: str, evidence_dir: str | Path
         "browser": "Microsoft Edge via Playwright", "model_id": os.environ.get(MODEL_NAME),
         "source_db": str(source_path.resolve()), "isolated_domain_db": str(database),
         "source_task_id": source_task_id,
+        "source_session_id": source_session_id,
         "dependencies": {name: _package_version(name) for name in (
             "langchain", "langchain-openai", "langgraph", "langgraph-checkpoint-sqlite", "mcp", "fastapi", "pydantic",
         )},
@@ -111,6 +122,7 @@ def run_web(source_db: str | Path, source_task_id: str, evidence_dir: str | Path
             "OPSPILOT_E2E_SUPPORT_PASSWORD": passwords["support-a"],
             "OPSPILOT_E2E_APPROVER_PASSWORD": passwords["approver-a"],
             "OPSPILOT_M301_SOURCE_TASK_ID": source_task_id,
+            "OPSPILOT_M301_SOURCE_SESSION_ID": source_session_id,
         })
         browser_script = ROOT / "frontend" / "e2e" / "m3-01-browser.mjs"
         completed = subprocess.run(

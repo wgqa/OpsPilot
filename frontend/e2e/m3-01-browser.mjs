@@ -7,8 +7,9 @@ const supportPassword = process.env.OPSPILOT_E2E_SUPPORT_PASSWORD;
 const approverPassword = process.env.OPSPILOT_E2E_APPROVER_PASSWORD;
 const screenshotDir = process.env.OPSPILOT_EVIDENCE_SCREENSHOTS;
 const sourceTaskId = process.env.OPSPILOT_M301_SOURCE_TASK_ID;
+const sourceSessionId = process.env.OPSPILOT_M301_SOURCE_SESSION_ID;
 
-if (!baseURL || !supportPassword || !approverPassword || !screenshotDir || !sourceTaskId) {
+if (!baseURL || !supportPassword || !approverPassword || !screenshotDir || !sourceTaskId || !sourceSessionId) {
   throw new Error('M3-01 browser evidence configuration is incomplete.');
 }
 
@@ -88,8 +89,10 @@ const result = {
 
 try {
   await login('support-a', supportPassword);
-  const sourceSessionId = await findSessionWithTask(sourceTaskId);
-  if (!sourceSessionId) throw new Error('The real source Task A is not linked to a SUPPORT session.');
+  const sourceSession = await readJson(`/api/sessions/${encodeURIComponent(sourceSessionId)}`);
+  if (!sourceSession.tasks.some((item) => item.task_id === sourceTaskId)) {
+    throw new Error('The real source Task A is not linked to the trusted SUPPORT session from Domain.');
+  }
   await selectSession(sourceSessionId, sourceTaskId);
   const sourceOutcome = await readJson(`/api/tasks/${encodeURIComponent(sourceTaskId)}/outcome`);
   if (sourceOutcome.business_outcome !== 'DELIVERED') {
