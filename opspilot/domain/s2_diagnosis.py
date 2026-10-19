@@ -49,7 +49,7 @@ def _run_evidence(
            JOIN d2_tool_observations o ON o.evidence_id = e.evidence_id AND o.task_id = e.task_id
            JOIN d2_attempts a ON a.attempt_id = o.attempt_id AND a.task_id = o.task_id
            WHERE e.task_id = ? AND a.run_id = ? AND o.status = 'OK'
-           ORDER BY o.created_at, o.observation_id""",
+           ORDER BY o.rowid""",
         (task_id, run_id),
     ).fetchall()
     latest: dict[str, dict[str, object]] = {}
@@ -64,9 +64,13 @@ def _run_evidence(
     return list(latest.values())
 
 
-def run_evidence_ids(path: str | Path, task_id: str, run_id: str) -> list[str]:
+def run_evidence_records(path: str | Path, task_id: str, run_id: str) -> list[dict[str, object]]:
     with connect(path) as connection:
-        return [str(item["evidence_id"]) for item in _run_evidence(connection, task_id, run_id)]
+        return _run_evidence(connection, task_id, run_id)
+
+
+def run_evidence_ids(path: str | Path, task_id: str, run_id: str) -> list[str]:
+    return [str(item["evidence_id"]) for item in run_evidence_records(path, task_id, run_id)]
 
 
 def _current_authz(path: str | Path, task_id: str, request_id: str) -> dict[str, object] | None:
@@ -418,7 +422,6 @@ def record_s2_gate_trace(
     from opspilot.domain.d2 import get_task_binding
 
     binding = get_task_binding(path, task_id)
-    trace_id = f"s2-gate-{uuid.uuid4()}"
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         run = connection.execute(
@@ -427,8 +430,50 @@ def record_s2_gate_trace(
         ).fetchone()
         if run is None or run["task_id"] != task_id or run["tenant_id"] != binding["tenant_id"]:
             raise ValueError("S2 Gate trace Run does not match the trusted TaskBinding.")
+        count = int(connection.execute(
+            "SELECT COUNT(*) AS n FROM s2_gate_traces WHERE task_id = ? AND run_id = ?",
+            (task_id, run_id),
+        ).fetchone()["n"])
+        if count >= 63 and str(gate.get("decision", "")) == "NEED_MORE":
+            gate.update({
+                "decision": "INCONCLUSIVE",
+                "reason_code": "S2_GATE_TRACE_LIMIT_REACHED",
+                "predicate": {},
+            })
+        trace_id = "s2-gate-" + digest_json({
+            "tenant_id": str(binding["tenant_id"]), "task_id": task_id, "run_id": run_id,
+            "decision": str(gate.get("decision", "INCONCLUSIVE")),
+            "reason_code": str(gate.get("reason_code", "UNKNOWN")),
+            "request_id": gate.get("request_id"), "decision_id": gate.get("decision_id"),
+            "evidence_digests": gate.get("evidence_digests", {}),
+            "predicate": gate.get("predicate", {}),
+        })[:40]
+        if connection.execute(
+            "SELECT 1 FROM s2_gate_traces WHERE trace_id = ?", (trace_id,),
+        ).fetchone() is not None:
+            return trace_id
+        if count >= 64:
+            latest = connection.execute(
+                "SELECT trace_id FROM s2_gate_traces WHERE task_id = ? AND run_id = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (task_id, run_id),
+            ).fetchone()
+            if latest is None:
+                raise ValueError("S2 Gate trace count is inconsistent with its Run.")
+            connection.execute(
+                "UPDATE s2_gate_traces SET decision = 'INCONCLUSIVE', "
+                "reason_code = 'S2_GATE_TRACE_LIMIT_REACHED', predicate_json = '{}' "
+                "WHERE trace_id = ?",
+                (str(latest["trace_id"]),),
+            )
+            gate.update({
+                "decision": "INCONCLUSIVE",
+                "reason_code": "S2_GATE_TRACE_LIMIT_REACHED",
+                "predicate": {},
+            })
+            return str(latest["trace_id"])
         connection.execute(
-            """INSERT INTO s2_gate_traces
+            """INSERT OR IGNORE INTO s2_gate_traces
                (trace_id, tenant_id, task_id, run_id, decision, reason_code, request_id,
                 decision_id, evidence_ids_json, evidence_digests_json, predicate_json, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",

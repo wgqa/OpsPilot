@@ -76,6 +76,29 @@ def _trace_snapshot(db_path: Path, task_id: str) -> dict[str, object]:
             "FROM d2_model_traces WHERE task_id = ? ORDER BY rowid",
             (task_id,),
         ),
+        "context_provenance": _db_rows(
+            db_path,
+            "SELECT p.call_id, p.attempt_id, p.model_id, p.prompt_version, p.prompt_digest, "
+            "p.tool_schema_version, p.tool_schema_digest, p.selected_skill_name, "
+            "p.selected_skill_version, p.selected_skill_digest, p.selected_knowledge_json, "
+            "p.evidence_ids_json, p.model_status, p.built_at, p.completed_at, a.run_id "
+            "FROM d5_context_provenance p JOIN d2_attempts a ON a.attempt_id=p.attempt_id "
+            "WHERE p.task_id=? ORDER BY p.rowid",
+            (task_id,),
+        ),
+        "attempts": _db_rows(
+            db_path,
+            "SELECT attempt_id, run_id, kind, tool_name, status, error_class, created_at, completed_at "
+            "FROM d2_attempts WHERE task_id=? ORDER BY rowid",
+            (task_id,),
+        ),
+        "run_inputs": _db_rows(
+            db_path,
+            "SELECT i.run_id, i.message_id, i.input_digest, i.consumed_at, m.sequence, m.input_kind, m.body "
+            "FROM task_run_inputs i JOIN messages m ON m.message_id=i.message_id "
+            "WHERE i.task_id=? ORDER BY m.sequence",
+            (task_id,),
+        ),
         "mcp_observations": _db_rows(
             db_path,
             "SELECT o.observation_id, o.created_at, o.tool_name, o.status, o.error_class, "
@@ -90,6 +113,19 @@ def _trace_snapshot(db_path: Path, task_id: str) -> dict[str, object]:
             "predicate_json, created_at FROM s2_gate_traces WHERE task_id = ? ORDER BY created_at, rowid",
             (task_id,),
         ),
+        "diagnosis_receipts": _db_rows(
+            db_path,
+            "SELECT receipt_id, run_id, request_id, decision_id, evidence_ids_json, "
+            "evidence_digests_json, observed_versions_json, created_at "
+            "FROM s2_diagnosis_receipts WHERE task_id=? ORDER BY created_at, receipt_id",
+            (task_id,),
+        ),
+        "handoff_drafts": _db_rows(
+            db_path,
+            "SELECT draft_id, receipt_id, version, content_json, content_digest, created_at "
+            "FROM s2_handoff_drafts WHERE task_id=? ORDER BY version, draft_id",
+            (task_id,),
+        ),
         "attempt_counts": {
             row["kind"]: row["n"]
             for row in _db_rows(
@@ -98,12 +134,27 @@ def _trace_snapshot(db_path: Path, task_id: str) -> dict[str, object]:
                 (task_id,),
             )
         },
+        "outbox_events": _db_rows(
+            db_path,
+            "SELECT event_id, session_id, task_id, event_kind, source_kind, source_id, "
+            "created_at FROM domain_outbox WHERE task_id=? ORDER BY created_at, rowid",
+            (task_id,),
+        ),
+        "session_events": _db_rows(
+            db_path,
+            "SELECT event_id, session_id, task_id, run_id, event_seq, event_kind, source_kind, source_id, "
+            "happened_at FROM session_events WHERE task_id=? ORDER BY event_seq",
+            (task_id,),
+        ),
     }
 
 
 async def _run(db_path: Path, checkpoint_path: Path, strategy: str = "A") -> dict[str, object]:
     load_local_environment()
+    from opspilot.smokes.m2_02_provider_traces import _install_scope_write_audit, _side_effect_snapshot
+
     reset_fixture(db_path, "S2_SCOPE_DENIED")
+    _install_scope_write_audit(db_path)
     identity = trusted_identity(db_path, "support-a")
     session_id = str(create_session(db_path, identity)["session_id"])
     initial = create_task_with_initial_run(
@@ -167,6 +218,7 @@ async def _run(db_path: Path, checkpoint_path: Path, strategy: str = "A") -> dic
         "initial_graph_result": {
             "stage": first_run_result.get("graph_state", {}).get("stage"),
             "gate": first_run_result.get("graph_state", {}).get("gate_decision"),
+            "diagnosis_draft": first_run_result.get("graph_state", {}).get("diagnosis_draft", {}),
         },
         "correction_message_id": correction.get("message_id"),
         "correction_control_revision": correction.get("expected_control_revision"),
@@ -175,8 +227,10 @@ async def _run(db_path: Path, checkpoint_path: Path, strategy: str = "A") -> dic
         "corrected_graph_result": {
             "stage": second_run_result.get("graph_state", {}).get("stage"),
             "gate": second_run_result.get("graph_state", {}).get("gate_decision"),
+            "diagnosis_draft": second_run_result.get("graph_state", {}).get("diagnosis_draft", {}),
         },
         "business_outcome": outcome,
+        "side_effects": _side_effect_snapshot(db_path, task_id),
         "trace": _trace_snapshot(db_path, task_id),
     }
 

@@ -22,6 +22,8 @@ from opspilot.domain.task_control import (
 )
 from opspilot.investigator import run_investigation
 from opspilot.smokes.m2_02_g4 import _trace_snapshot
+from opspilot.smokes.m2_02_provider_traces import _install_scope_write_audit, _side_effect_snapshot
+from opspilot.smokes.m2_02_provider_traces import _install_scope_write_audit, _side_effect_snapshot
 
 
 def _real_401(db_path: Path) -> dict[str, object]:
@@ -60,6 +62,7 @@ async def _run(db_path: Path, checkpoint_path: Path, strategy: str = "A") -> dic
             "WHERE tenant_id='tenant-a' AND integration_id='integration-a'"
         )
     old_request = _real_401(db_path)
+    _install_scope_write_audit(db_path)
     identity = trusted_identity(db_path, "support-a")
     session_id = str(create_session(db_path, identity)["session_id"])
     initial = create_task_with_initial_run(
@@ -120,6 +123,7 @@ async def _run(db_path: Path, checkpoint_path: Path, strategy: str = "A") -> dic
             table: int(connection.execute(f"SELECT COUNT(*) FROM {table} WHERE task_id=?", (task_id,)).fetchone()[0])
             for table in ("d3_action_intents", "d3_action_ledgers", "s2_diagnosis_receipts", "s2_handoff_drafts")
         }
+    side_effects.update(_side_effect_snapshot(db_path, task_id))
     return {
         "case_id": "G4-H2",
         "strategy": strategy,
@@ -128,12 +132,14 @@ async def _run(db_path: Path, checkpoint_path: Path, strategy: str = "A") -> dic
         "initial_run_id": first_run_id,
         "initial_run_status": _trace_snapshot(db_path, task_id)["runs"][0]["status"],
         "initial_gate": first.get("graph_state", {}).get("gate_decision"),
+        "initial_diagnosis_draft": first.get("graph_state", {}).get("diagnosis_draft", {}),
         "old_real_http_request": old_request,
         "correction_message_id": correction.get("message_id"),
         "correction_control_revision": correction.get("expected_control_revision"),
         "corrected_real_http_request": corrected_request,
         "corrected_run_id": second_run_id,
         "corrected_gate": second.get("graph_state", {}).get("gate_decision"),
+        "corrected_diagnosis_draft": second.get("graph_state", {}).get("diagnosis_draft", {}),
         "business_outcome": get_s2_task_outcome(db_path, task_id),
         "control": {
             "revision": int(control[0]),

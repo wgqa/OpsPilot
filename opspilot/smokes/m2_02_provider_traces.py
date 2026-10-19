@@ -237,6 +237,7 @@ async def _run_case(
             "gate": state.get("gate_decision"),
             "blocked_reason": state.get("blocked_reason"),
             "plan_hash": state.get("plan_hash"),
+            "diagnosis_draft": state.get("diagnosis_draft", {}),
         },
         "s2_outcome": get_s2_task_outcome(db_path, task_id),
         "trace": _trace_snapshot(db_path, task_id),
