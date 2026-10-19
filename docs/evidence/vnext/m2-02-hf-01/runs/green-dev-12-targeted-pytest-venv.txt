@@ -1,0 +1,143 @@
+.F........F..                                                            [100%]
+================================== FAILURES ===================================
+___ test_hf_a_real_task_runs_keep_scope_intent_separate_from_authorization ____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/m2-02-hf-01/pytest-green-12/test_hf_a_real_task_runs_keep_0/domain.sqlite3')
+live_api = 'http://127.0.0.1:58009'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014E71CA15B0>
+
+    def test_hf_a_real_task_runs_keep_scope_intent_separate_from_authorization(
+        demo_db: Path, live_api: str, monkeypatch,
+    ) -> None:
+        """Exercise G6 variants through trusted TaskControl, Graph, MCP, and Domain state."""
+        from opspilot import investigator
+        from opspilot.domain.s2_diagnosis import get_s2_task_outcome
+        from opspilot.domain.task_control import get_task_run
+    
+        monkeypatch.setenv(MODEL_API_KEY, "hf01-no-provider-call")
+        monkeypatch.setenv(MODEL_NAME, "hf01-scope-integration")
+        monkeypatch.setattr(investigator, "ChatOpenAI", lambda **_kwargs: object())
+        cases = [
+            ("original G6-H1", "˳����Ҳ�һ��ͬ����һ���⻧���˺���û��Ȩ�ޡ�", "NO_ACTION"),
+            ("tenant synonym", "���Һ�������⻧�ķ����˺��ܲ��ܷ��ʶ�����", "NO_ACTION"),
+            ("unbound principal", "��ǰ��ͬһ���⻧����Ĳ���һ�� Principal �ķ���Ȩ�ޡ�", "NO_ACTION"),
+            ("unbound integration", "���Ǳ��⻧����� integration-b ���δ�󶨼��ɼ��ɡ�", "NO_ACTION"),
+            (
+                "mixed bound and foreign targets",
+                "���Ȳ鵱ǰ�󶨵Ķ�������ͬʱ˳�����һ���⻧���˺š�",
+                "WAITING_INPUT",
+            ),
+            (
+                "negated foreign target and bound task",
+                "��Ҫ��ѯ����⻧��ֻ���鵱ǰ�󶨵Ķ�������",
+                "HANDOFF_READY",
+            ),
+            (
+                "quoted prior request plus bound task",
+                "����֮ǰ���Ҳ������⻧���˺ţ������Ϊʲô���ܲ飬��������ʵ��ǰ��������",
+                "HANDOFF_READY",
+            ),
+        ]
+    
+        for index, (label, user_text, expected) in enumerate(cases):
+            reset_fixture(demo_db, "S2_SCOPE_DENIED")
+            identity = trusted_identity(demo_db, "support-a")
+            session_id = str(create_session(demo_db, identity)["session_id"])
+            created = create_task_with_initial_run(
+                demo_db, identity, session_id=session_id, service_id="orders-demo",
+                integration_id="integration-a", ticket_id=f"HF01-G6-{index}",
+                initial_message=user_text, idempotency_key=f"hf01-g6-task-{index}",
+            )
+            task_id, run_id = str(created["task_id"]), str(created["run_id"])
+            with connect(demo_db) as connection:
+                before_scope_rows = (
+                    int(connection.execute("SELECT COUNT(*) FROM principal_scope_grants").fetchone()[0]),
+                    int(connection.execute("SELECT COUNT(*) FROM route_scope_policies").fetchone()[0]),
+                )
+    
+            result = asyncio.run(investigator.run_investigation(
+                task_id, identity.actor_id, db_path=demo_db,
+                checkpoint_db_path=demo_db.parent / f"hf01-g6-{index}-checkpoint.sqlite3",
+                run_id=run_id, d3_mode=True, s2_mode=True, executor_id="executor-a",
+                evaluation_strategy="R",
+            ))
+            outcome = get_s2_task_outcome(demo_db, task_id)
+            run = get_task_run(demo_db, identity, run_id)
+            with connect(demo_db) as connection:
+                after_scope_rows = (
+                    int(connection.execute("SELECT COUNT(*) FROM principal_scope_grants").fetchone()[0]),
+                    int(connection.execute("SELECT COUNT(*) FROM route_scope_policies").fetchone()[0]),
+                )
+                attempts = connection.execute(
+                    "SELECT a.kind, a.run_id, o.tool_name, o.result_json, o.status "
+                    "FROM d2_attempts a LEFT JOIN d2_tool_observations o ON o.attempt_id=a.attempt_id "
+                    "WHERE a.task_id=? ORDER BY a.rowid", (task_id,),
+                ).fetchall()
+                receipt_count = int(connection.execute(
+                    "SELECT COUNT(*) FROM s2_diagnosis_receipts WHERE task_id=?", (task_id,),
+                ).fetchone()[0])
+                draft_count = int(connection.execute(
+                    "SELECT COUNT(*) FROM s2_handoff_drafts WHERE task_id=?", (task_id,),
+                ).fetchone()[0])
+                foreign_reads = [
+                    row for row in attempts
+                    if row["tool_name"] == "get_scope_authz_facts"
+                    and row["result_json"]
+                    and ("tenant-b" in str(row["result_json"]) or "integration-b" in str(row["result_json"]))
+                ]
+    
+            assert after_scope_rows == before_scope_rows, label
+            assert not foreign_reads, label
+            assert run["status"] == ("WAITING_INPUT" if expected == "WAITING_INPUT" else "SUCCEEDED"), label
+            assert outcome.get("business_outcome") == expected or (
+                expected == "WAITING_INPUT" and outcome.get("business_outcome") == "NO_S2_DIAGNOSIS"
+            ), label
+            if expected == "NO_ACTION":
+                assert receipt_count == 0 and draft_count == 0, label
+                assert result["graph_state"].get("gate_decision", {}).get("reason_code") == "USER_REQUEST_OUTSIDE_TASK_BINDING"
+                assert not attempts, label
+            elif expected == "WAITING_INPUT":
+                assert result["graph_state"].get("stage") == "waiting_input", label
+                assert receipt_count == 0 and draft_count == 0 and not attempts, label
+>               assert "�����ѯ������Դ" in str(result["graph_state"].get("clarification_prompt", "")), label
+E               AssertionError: mixed bound and foreign targets
+E               assert '�����ѯ������Դ' in ''
+E                +  where '' = str('')
+E                +    where '' = <built-in method get of dict object at 0x0000014E71D45E80>('clarification_prompt', '')
+E                +      where <built-in method get of dict object at 0x0000014E71D45E80> = {'task_binding_id': 'task-aab4053e-b47d-4a4e-8cff-3aeddbd0f4a9', 'stage': 'waiting_input', 'scope_clarification_required': True, 'unbound_resource_lookup_required': False, ...}.get
+
+tests\test_m2_02_hf_01.py:152: AssertionError
+________ test_hf_b_probe_with_conflicting_versions_is_never_diagnosed _________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/m2-02-hf-01/pytest-green-12/test_hf_b_probe_with_conflicti0/domain.sqlite3')
+live_api = 'http://127.0.0.1:55677'
+
+    def test_hf_b_probe_with_conflicting_versions_is_never_diagnosed(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        from opspilot.domain.s2_diagnosis import evaluate_s2_evidence_gate, finish_s2_without_draft
+        from opspilot.domain.task_control import apply_pending_critical_inputs, claim_task_run, finish_task_run
+    
+        reset_fixture(demo_db, "S2_SCOPE_DENIED")
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        created = create_task_with_initial_run(
+            demo_db, identity, session_id=session_id, service_id="orders-demo",
+            integration_id="integration-a", ticket_id="HF01-VERSION-CONFLICT",
+            initial_message="��鵱ǰ�󶨶�������Ȩ��", idempotency_key="hf01-version-conflict",
+        )
+        task_id, run_id = str(created["task_id"]), str(created["run_id"])
+        claim_task_run(demo_db, identity, run_id)
+        apply_pending_critical_inputs(demo_db, identity, run_id)
+        probe = probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)
+        assert probe["facts"]["http_status"] == 403
+        probe["facts"]["versions_stable_during_probe"] = False
+>       probe["observed_versions"]["after"]["scope_policy_version"] += 1
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'scope_policy_version'
+
+tests\test_m2_02_hf_01.py:517: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_hf_01.py::test_hf_a_real_task_runs_keep_scope_intent_separate_from_authorization
+FAILED tests/test_m2_02_hf_01.py::test_hf_b_probe_with_conflicting_versions_is_never_diagnosed
+2 failed, 11 passed in 18.54s

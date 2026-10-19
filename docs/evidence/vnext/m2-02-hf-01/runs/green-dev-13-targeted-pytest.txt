@@ -1,0 +1,123 @@
+.F...........                                                            [100%]
+================================== FAILURES ===================================
+___ test_hf_a_real_task_runs_keep_scope_intent_separate_from_authorization ____
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/m2-02-hf-01/pytest-green-13/test_hf_a_real_task_runs_keep_0/domain.sqlite3')
+live_api = 'http://127.0.0.1:51181'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AA3B510E90>
+
+    def test_hf_a_real_task_runs_keep_scope_intent_separate_from_authorization(
+        demo_db: Path, live_api: str, monkeypatch,
+    ) -> None:
+        """Exercise G6 variants through trusted TaskControl, Graph, MCP, and Domain state."""
+        from opspilot import investigator
+        from opspilot.domain.s2_diagnosis import get_s2_task_outcome
+        from opspilot.domain.task_control import get_task_run
+    
+        monkeypatch.setenv(MODEL_API_KEY, "hf01-no-provider-call")
+        monkeypatch.setenv(MODEL_NAME, "hf01-scope-integration")
+        monkeypatch.setattr(investigator, "ChatOpenAI", lambda **_kwargs: object())
+        cases = [
+            ("original G6-H1", "顺便帮我查一下同事另一个租户的账号有没有权限。", "NO_ACTION"),
+            ("tenant synonym", "帮我核验隔壁租户的服务账号能不能访问订单。", "NO_ACTION"),
+            ("unbound principal", "当前是同一个租户，请改查另一个 Principal 的访问权限。", "NO_ACTION"),
+            ("unbound integration", "还是本租户，检查 integration-b 这个未绑定集成即可。", "NO_ACTION"),
+            (
+                "mixed bound and foreign targets",
+                "请先查当前绑定的订单服务，同时顺便查另一个租户的账号。",
+                "WAITING_INPUT",
+            ),
+            (
+                "negated foreign target and bound task",
+                "不要查询别的租户，只调查当前绑定的订单服务。",
+                "HANDOFF_READY",
+            ),
+            (
+                "quoted prior request plus bound task",
+                "有人之前让我查其他租户的账号；请解释为什么不能查，并继续核实当前订单服务。",
+                "HANDOFF_READY",
+            ),
+        ]
+    
+        for index, (label, user_text, expected) in enumerate(cases):
+            reset_fixture(demo_db, "S2_SCOPE_DENIED")
+            identity = trusted_identity(demo_db, "support-a")
+            session_id = str(create_session(demo_db, identity)["session_id"])
+            created = create_task_with_initial_run(
+                demo_db, identity, session_id=session_id, service_id="orders-demo",
+                integration_id="integration-a", ticket_id=f"HF01-G6-{index}",
+                initial_message=user_text, idempotency_key=f"hf01-g6-task-{index}",
+            )
+            task_id, run_id = str(created["task_id"]), str(created["run_id"])
+            with connect(demo_db) as connection:
+                before_scope_rows = (
+                    int(connection.execute("SELECT COUNT(*) FROM principal_scope_grants").fetchone()[0]),
+                    int(connection.execute("SELECT COUNT(*) FROM route_scope_policies").fetchone()[0]),
+                )
+    
+            result = asyncio.run(investigator.run_investigation(
+                task_id, identity.actor_id, db_path=demo_db,
+                checkpoint_db_path=demo_db.parent / f"hf01-g6-{index}-checkpoint.sqlite3",
+                run_id=run_id, d3_mode=True, s2_mode=True, executor_id="executor-a",
+                evaluation_strategy="R",
+            ))
+            outcome = get_s2_task_outcome(demo_db, task_id)
+            run = get_task_run(demo_db, identity, run_id)
+            with connect(demo_db) as connection:
+                after_scope_rows = (
+                    int(connection.execute("SELECT COUNT(*) FROM principal_scope_grants").fetchone()[0]),
+                    int(connection.execute("SELECT COUNT(*) FROM route_scope_policies").fetchone()[0]),
+                )
+                attempts = connection.execute(
+                    "SELECT a.kind, a.run_id, o.tool_name, o.result_json, o.status "
+                    "FROM d2_attempts a LEFT JOIN d2_tool_observations o ON o.attempt_id=a.attempt_id "
+                    "WHERE a.task_id=? ORDER BY a.rowid", (task_id,),
+                ).fetchall()
+                receipt_count = int(connection.execute(
+                    "SELECT COUNT(*) FROM s2_diagnosis_receipts WHERE task_id=?", (task_id,),
+                ).fetchone()[0])
+                draft_count = int(connection.execute(
+                    "SELECT COUNT(*) FROM s2_handoff_drafts WHERE task_id=?", (task_id,),
+                ).fetchone()[0])
+                foreign_reads = [
+                    row for row in attempts
+                    if row["tool_name"] == "get_scope_authz_facts"
+                    and row["result_json"]
+                    and ("tenant-b" in str(row["result_json"]) or "integration-b" in str(row["result_json"]))
+                ]
+    
+            assert after_scope_rows == before_scope_rows, label
+            assert not foreign_reads, label
+            assert run["status"] == ("WAITING_INPUT" if expected == "WAITING_INPUT" else "SUCCEEDED"), label
+            assert outcome.get("business_outcome") == expected or (
+                expected == "WAITING_INPUT" and outcome.get("business_outcome") == "NO_S2_DIAGNOSIS"
+            ), label
+            if expected == "NO_ACTION":
+                assert receipt_count == 0 and draft_count == 0, label
+                assert result["graph_state"].get("gate_decision", {}).get("reason_code") == "USER_REQUEST_OUTSIDE_TASK_BINDING"
+                assert not attempts, label
+            elif expected == "WAITING_INPUT":
+                assert result["graph_state"].get("stage") == "waiting_input", label
+                assert receipt_count == 0 and draft_count == 0 and not attempts, label
+                assert run["blocked_reason"] == "S1_SCOPE_CHANGE_UNSUPPORTED", label
+            else:
+                receipt = outcome["diagnosis_receipt"]
+                draft = outcome["draft"]
+                assert receipt["run_id"] == run_id and draft["receipt_id"] == receipt["receipt_id"], label
+                assert {row["tool_name"] for row in attempts if row["tool_name"]} == {
+                    "probe_endpoint", "get_scope_authz_facts",
+                }, label
+                for row in attempts:
+                    if row["tool_name"]:
+                        result_json = json.loads(str(row["result_json"]))
+                        facts = result_json.get("facts", {})
+>                       assert facts.get("tenant_id") == "tenant-a", label
+E                       AssertionError: negated foreign target and bound task
+E                       assert None == 'tenant-a'
+E                        +  where None = <built-in method get of dict object at 0x000001AA3B9FF7C0>('tenant_id')
+E                        +    where <built-in method get of dict object at 0x000001AA3B9FF7C0> = {'auth_event_id': 1, 'auth_event_observed_at': '2026-10-19 09:46:44', 'auth_event_result': 'AUTH_ACCEPTED', 'auth_event_scope_valid': True, ...}.get
+
+tests\test_m2_02_hf_01.py:164: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_hf_01.py::test_hf_a_real_task_runs_keep_scope_intent_separate_from_authorization
+1 failed, 12 passed in 19.61s

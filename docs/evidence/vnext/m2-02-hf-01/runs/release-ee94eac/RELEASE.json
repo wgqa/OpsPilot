@@ -1,0 +1,288 @@
+{
+  "schema_version": "opspilot-m2-02-hf01-release-v1",
+  "release_id": "M2-02-HF-01-ee94eacbeadd",
+  "status": "READY",
+  "created_at": "2026-10-19T10:17:32.409525+00:00",
+  "implementation_commit": "ee94eacbeadd03b08a979e29596714afe840936e",
+  "source_sha256": {
+    "knowledge/api-scope/manifest.json": "4309902a09379faa8d8f48c662653c7329c8016e783f21b1cb50148f9793f4a8",
+    "opspilot/domain/s2_diagnosis.py": "b11a1793eec2465d9d4d4851684330f8d053fe3dfb09f2af1e285599cb97004b",
+    "opspilot/investigator.py": "770e99d8ebb0aad4e59af7fcd4769d285763cf14c8090e5ae330e5abd68ce759",
+    "opspilot/smokes/m2_02_g4.py": "df4b8790ccb34f771405082d86f79d22e5efc23069175bf7759a42a77ec33dbc",
+    "opspilot/smokes/m2_02_g4_401.py": "78886743c3be17581965a0ef1d840594b6c3bd260d8ed5fc325a0526306f8a57",
+    "opspilot/smokes/m2_02_g8.py": "cb13b4541e114a809fc5013685a99842d2a1ea2e8ba1bc186f5de537501c6e88",
+    "opspilot/smokes/m2_02_provider_traces.py": "aa736ea015696977284ed62faaf7ab578b2ebf54f0b1c65d48f2628111b6d2c6",
+    "opspilot/smokes/m2_02_rha_matrix.py": "8ef79b7b5c710d78b50a996d10027322525f0dd758fc60568ba807106883fad4",
+    "opspilot/smokes/m2_02_hf_01.py": "b753a65c080641ef972f545e59d19830ea10e2c1d73bb43b6c76c81ce73b8b0f",
+    "opspilot/smokes/m2_02_hf_01_release.py": "2c23a2a02cb182a5b8347063af75dcec368091d224f6c64a7c694a5ecac7af5b",
+    "tests/m2_02_hf_01_worker.py": "5282bbff4c21e354237ad49a2b2e487d267132e384e68085a0ab2110420f5bfb",
+    "tests/test_m2_02_hf_01.py": "2a1874f10b74cbad93a5c40d8527d2317a00531d4919cb09baa2ee99a8b84a63",
+    "tests/test_m2_02_hf_01_release.py": "96c9649eeed621690befc3f427ac5c4c15f47d57162a1d0f443f2b802c9e0ad1",
+    "frontend/e2e/m2-02-hf-01-browser.mjs": "929bd5ac15e05e4a6ac2abab3450cff881a1b5fab87687dc5ac55f150c14642e"
+  },
+  "model_id": "deepseek-flash",
+  "provider_base_url_host": "api.deepseek.com",
+  "prompt_digest": "527a6ad758edf899406ce43434802c8db4234992e20add86de449c45bff2a842",
+  "normalizer_schema_digest": "3930ed953660a297c41990e5d035bd135dfc01e467ac79a03fbade6847e2b89e",
+  "skill": {
+    "name": "auth-scope-triage",
+    "version": "1.0.0",
+    "digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549"
+  },
+  "knowledge_digest": "a90b854d5371a33968687bc27402ff708b18daf7202145cf14f31fc2d39aedf4",
+  "knowledge_documents": [
+    {
+      "document_id": "api-scope-current",
+      "version": "1.0.0",
+      "digest": "962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8",
+      "source": "OpsPilot local API authorization guide",
+      "valid_from": "2026-01-01"
+    }
+  ],
+  "tool_schema_digest": "58927c9663da2e5f701ae6fe28b9ea586a8547f4a2af58fe14af7b3ec0cfc472",
+  "tool_schema_discovery": {
+    "source": "real stdio MCP tools/list against isolated trusted TaskBinding",
+    "tool_names": [
+      "get_auth_policy",
+      "get_integration_config",
+      "get_principal_status",
+      "get_scope_authz_facts",
+      "probe_endpoint"
+    ],
+    "model_schema_digest": "58927c9663da2e5f701ae6fe28b9ea586a8547f4a2af58fe14af7b3ec0cfc472",
+    "model_tool_schemas": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_integration_config",
+          "description": "Read credential reference and configuration version for the bound integration.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "integration_id": {
+                "title": "Integration Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "integration_id"
+            ],
+            "title": "get_integration_configArguments"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_principal_status",
+          "description": "Read status and version of the principal bound to this task.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "principal_id": {
+                "title": "Principal Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "principal_id"
+            ],
+            "title": "get_principal_statusArguments"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_auth_policy",
+          "description": "Read the accepted credential reference and policy version for the bound service.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "service_id": {
+                "title": "Service Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "service_id"
+            ],
+            "title": "get_auth_policyArguments"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_scope_authz_facts",
+          "description": "Read the currentness of one HTTP decision bound to this task's fixed resources.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "request_id": {
+                "title": "Request Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "request_id"
+            ],
+            "title": "get_scope_authz_factsArguments"
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "probe_endpoint",
+          "description": "Call the registered loopback business route using the bound integration.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "service_id": {
+                "title": "Service Id",
+                "type": "string"
+              },
+              "integration_id": {
+                "title": "Integration Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "service_id",
+              "integration_id"
+            ],
+            "title": "probe_endpointArguments"
+          }
+        }
+      }
+    ]
+  },
+  "budget_policy": {
+    "model_calls_per_task": 8,
+    "mcp_call_attempts_per_task": 6
+  },
+  "strategy_conditions": {
+    "holdouts": [
+      "G1_H1",
+      "G1_H2",
+      "G2_H1",
+      "G2_H2",
+      "G3_H1",
+      "G3_H2",
+      "G5_H1",
+      "G5_H2",
+      "G6_H1",
+      "G6_H2",
+      "G7_H1",
+      "G7_H2",
+      "G4_H1",
+      "G4_H2",
+      "G8_H1",
+      "G8_H2"
+    ],
+    "strategies": [
+      "R",
+      "H",
+      "A"
+    ],
+    "fixed_denominator": 48,
+    "per_trial_isolation": [
+      "Domain DB",
+      "LangGraph Checkpoint DB"
+    ],
+    "same_model_for_A_and_H": true,
+    "same_bound_user_inputs_and_domain_gate": true,
+    "no_gold_labels_in_product_context": true
+  },
+  "dependency_versions": {
+    "langchain": "1.4.1",
+    "langchain-openai": "1.7.2",
+    "langgraph": "1.2.16",
+    "langgraph-checkpoint-sqlite": "3.1.2",
+    "mcp": "2.3.0",
+    "pydantic": "2.14.1",
+    "python": "3.14.0",
+    "fastapi": "0.137.1",
+    "uvicorn": "0.49.0",
+    "httpx": "0.28.1",
+    "pytest": "9.1.1",
+    "pyproject_toml_sha256": "351fe34fb378dd4d104e0407a4ae97bc5cc7167c53fef5bd18bb1fa4e34d8e4d",
+    "requirements_lock_sha256": "59658b2a1412f580237fd3a20d88163aea3579e89f6499a768796b6aaca67ae8",
+    "pip_freeze": [
+      "aiosqlite==0.22.1",
+      "annotated-doc==0.0.5",
+      "annotated-types==0.8.0",
+      "anyio==4.15.1",
+      "attrs==26.1.0",
+      "certifi==2026.7.22",
+      "cffi==2.1.1",
+      "charset-normalizer==3.5.2",
+      "click==8.5.0",
+      "colorama==0.4.6",
+      "cryptography==50.0.2",
+      "distro==1.9.0",
+      "fastapi==0.137.1",
+      "h11==0.16.0",
+      "httpcore==1.0.9",
+      "httpcore2==2.13.1",
+      "httpx==0.28.1",
+      "httpx2==2.13.1",
+      "idna==3.20",
+      "iniconfig==2.3.1",
+      "jiter==0.17.0",
+      "jsonpatch==1.35",
+      "jsonpointer==3.2.1",
+      "jsonschema==4.26.0",
+      "jsonschema-specifications==2025.9.1",
+      "langchain==1.4.1",
+      "langchain-core==1.6.12",
+      "langchain-openai==1.7.2",
+      "langchain-protocol==0.0.19",
+      "langgraph==1.2.16",
+      "langgraph-checkpoint==4.3.0",
+      "langgraph-checkpoint-sqlite==3.1.2",
+      "langgraph-prebuilt==1.1.1",
+      "langgraph-sdk==0.4.8",
+      "langsmith==0.14.11",
+      "mcp==2.3.0",
+      "mcp-types==2.3.0",
+      "openai==3.33.0",
+      "opentelemetry-api==1.45.1",
+      "orjson==3.13.0",
+      "ormsgpack==1.13.0",
+      "packaging==26.3",
+      "pluggy==1.7.0",
+      "pycparser==3.11",
+      "pydantic==2.14.1",
+      "pydantic_core==2.50.1",
+      "Pygments==2.21.0",
+      "PyJWT==2.15.1",
+      "pytest==9.1.1",
+      "python-multipart==0.0.32",
+      "pywin32==312",
+      "PyYAML==6.0.3",
+      "referencing==0.37.0",
+      "regex==2026.9.29",
+      "requests==2.34.2",
+      "requests-toolbelt==1.0.0",
+      "rpds-py==2026.9.1",
+      "sniffio==1.3.1",
+      "sqlite-vec==0.1.9",
+      "sse-starlette==3.5.0",
+      "starlette==1.8.0",
+      "tenacity==9.2.1",
+      "tiktoken==0.14.0",
+      "truststore==0.10.5",
+      "typing-inspection==0.4.4",
+      "typing_extensions==4.16.0",
+      "urllib3==2.8.0",
+      "uuid_utils==0.17.1",
+      "uvicorn==0.49.0",
+      "websockets==16.1.1",
+      "xxhash==4.0.1",
+      "zstandard==0.25.0"
+    ]
+  },
+  "historical_result_ref": "docs/evidence/vnext/m2-02/RESULTS.json (immutable 45 PASS / 1 FAIL / 2 PARTIAL)"
+}

@@ -1,0 +1,883 @@
+{
+  "journey_id": "G4",
+  "strategy": "A",
+  "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+  "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+  "initial_message_id": "message-01ba4354-2710-44d0-8b8a-0176aedeea5e",
+  "initial_run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+  "initial_graph_result": {
+    "stage": "complete",
+    "gate": {
+      "decision": "HANDOFF_READY",
+      "reason_code": "CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT",
+      "request_id": "347a3a395214af3c",
+      "decision_id": 1,
+      "checked_fact_ids": [
+        "evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef",
+        "evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6"
+      ],
+      "evidence_digests": {
+        "evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef": "db64a0cca724b4ed19c895ac0fa50a9fb8289de82026aeb59f01b8b4938ce509",
+        "evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6": "bce8bd6287f465fd7c2d3bbcdccd69cc22c53dc9feed6bc7918e12c01d7b6f73"
+      },
+      "observed_versions": {
+        "evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef": {
+          "after": {
+            "config_version": 8,
+            "policy_version": 3,
+            "principal_version": 2
+          },
+          "before": {
+            "config_version": 8,
+            "policy_version": 3,
+            "principal_version": 2
+          }
+        },
+        "evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6": {
+          "credential_policy_version": 3,
+          "grant_version": 1,
+          "scope_policy_version": 1
+        }
+      },
+      "missing_predicates": [],
+      "predicate": {
+        "authenticated": true,
+        "principal_enabled": true,
+        "resource_binding_valid": true,
+        "authz_outcome": "DENY",
+        "reason_code": "SCOPE_INSUFFICIENT",
+        "required_scopes": [
+          "orders.read"
+        ],
+        "granted_scopes": [],
+        "missing_scopes": [
+          "orders.read"
+        ],
+        "credential_policy_version": 3,
+        "scope_policy_version": 1,
+        "grant_version": 1,
+        "request_id": "347a3a395214af3c",
+        "decision_id": 1
+      },
+      "side_effects": []
+    },
+    "diagnosis_draft": {
+      "latest_model_summary": "**调查摘要（基于当前证据）**\n\n用户反映“订单接口调不通”——这是未经核实的症状陈述。\n\n当前已验证事实：\n- 实时探测 `GET /api/orders/demo-order`（service `orders-demo`，integration `integration-a`，principal `principal-a`）返回 **HTTP 403**，Request ID `347a3a395214af3c`；认证结果为 `AUTH_ACCEPTED`（认证通过，非认证失败）。\n- 同一 Request ID 的授权决策为 **DENY / SCOPE_INSUFFICIENT**，currentness 为 CURRENT，resource_binding_valid=true。\n- 所需 scope：`orders.read`；已授予 scope：无；缺失：`orders.read`。\n\n结论：属**授权（scope）不足**，而非认证或服务故障。依据 `api-scope-current` v1.0.0。后续需按人工审批流程提交 scope 申请；本次未执行任何变更。"
+    }
+  },
+  "correction_message_id": "message-64bff78c-5dbd-4584-8e6e-4a51a4f608cb",
+  "correction_control_revision": 1,
+  "correction_run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+  "corrected_real_http_request": {
+    "status": 403,
+    "request_id": "8fd5bdac0f4feaf6",
+    "authn_event_id": 2,
+    "authz_event_id": 2,
+    "route": "/api/orders/demo-order"
+  },
+  "corrected_graph_result": {
+    "stage": "complete",
+    "gate": {
+      "decision": "HANDOFF_READY",
+      "reason_code": "CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT",
+      "request_id": "c5dbd1de2280c30b",
+      "decision_id": 3,
+      "checked_fact_ids": [
+        "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b",
+        "evidence-89e54377-5c51-4665-bbac-70be3503d9f3"
+      ],
+      "evidence_digests": {
+        "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b": "28c66bc192a27ba47363d1246a74092d3c23eb6fdbc6b5846cdf15c09be3f9f9",
+        "evidence-89e54377-5c51-4665-bbac-70be3503d9f3": "c957823d22c83646e3044dd77ae12e5fc77a9151413be43769aa77bdcdc7d9fa"
+      },
+      "observed_versions": {
+        "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b": {
+          "after": {
+            "config_version": 8,
+            "policy_version": 3,
+            "principal_version": 2
+          },
+          "before": {
+            "config_version": 8,
+            "policy_version": 3,
+            "principal_version": 2
+          }
+        },
+        "evidence-89e54377-5c51-4665-bbac-70be3503d9f3": {
+          "credential_policy_version": 3,
+          "grant_version": 1,
+          "scope_policy_version": 1
+        }
+      },
+      "missing_predicates": [],
+      "predicate": {
+        "authenticated": true,
+        "principal_enabled": true,
+        "resource_binding_valid": true,
+        "authz_outcome": "DENY",
+        "reason_code": "SCOPE_INSUFFICIENT",
+        "required_scopes": [
+          "orders.read"
+        ],
+        "granted_scopes": [],
+        "missing_scopes": [
+          "orders.read"
+        ],
+        "credential_policy_version": 3,
+        "scope_policy_version": 1,
+        "grant_version": 1,
+        "request_id": "c5dbd1de2280c30b",
+        "decision_id": 3
+      },
+      "side_effects": []
+    },
+    "diagnosis_draft": {
+      "latest_model_summary": "{\"name\":\"get_principal_status\",\"arguments\":{\"principal_id\":\"principal-a\"}}"
+    }
+  },
+  "business_outcome": {
+    "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+    "task_status": "WAITING_HANDOFF",
+    "business_outcome": "HANDOFF_READY",
+    "currentness": "CURRENT",
+    "reason_code": "CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT",
+    "diagnosis_receipt": {
+      "receipt_id": "s2-receipt-28a1190e-02a3-464a-bbbd-eebb39ff4f4b",
+      "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+      "outcome": "DIAGNOSED",
+      "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+      "request_id": "c5dbd1de2280c30b",
+      "decision_id": 3,
+      "gate_policy_version": "s2-scope-evidence-v1",
+      "predicate": {
+        "authenticated": true,
+        "authz_outcome": "DENY",
+        "credential_policy_version": 3,
+        "decision_id": 3,
+        "grant_version": 1,
+        "granted_scopes": [],
+        "missing_scopes": [
+          "orders.read"
+        ],
+        "principal_enabled": true,
+        "reason_code": "SCOPE_INSUFFICIENT",
+        "request_id": "c5dbd1de2280c30b",
+        "required_scopes": [
+          "orders.read"
+        ],
+        "resource_binding_valid": true,
+        "scope_policy_version": 1
+      },
+      "evidence_ids": [
+        "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b",
+        "evidence-89e54377-5c51-4665-bbac-70be3503d9f3"
+      ],
+      "evidence_digests": {
+        "evidence-89e54377-5c51-4665-bbac-70be3503d9f3": "c957823d22c83646e3044dd77ae12e5fc77a9151413be43769aa77bdcdc7d9fa",
+        "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b": "28c66bc192a27ba47363d1246a74092d3c23eb6fdbc6b5846cdf15c09be3f9f9"
+      },
+      "observed_versions": {
+        "evidence-89e54377-5c51-4665-bbac-70be3503d9f3": {
+          "credential_policy_version": 3,
+          "grant_version": 1,
+          "scope_policy_version": 1
+        },
+        "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b": {
+          "after": {
+            "config_version": 8,
+            "policy_version": 3,
+            "principal_version": 2
+          },
+          "before": {
+            "config_version": 8,
+            "policy_version": 3,
+            "principal_version": 2
+          }
+        }
+      },
+      "created_at": "2026-10-19T10:12:48.034+00:00"
+    },
+    "draft": {
+      "draft_id": "s2-draft-35376fae-aad5-461e-ab0c-da45a613c100",
+      "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+      "outcome": "HANDOFF_READY",
+      "receipt_id": "s2-receipt-28a1190e-02a3-464a-bbbd-eebb39ff4f4b",
+      "version": 2,
+      "content": {
+        "authorization_changed": false,
+        "decision_id": 3,
+        "diagnosis_receipt_id": "s2-receipt-28a1190e-02a3-464a-bbbd-eebb39ff4f4b",
+        "evidence_digests": {
+          "evidence-89e54377-5c51-4665-bbac-70be3503d9f3": "c957823d22c83646e3044dd77ae12e5fc77a9151413be43769aa77bdcdc7d9fa",
+          "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b": "28c66bc192a27ba47363d1246a74092d3c23eb6fdbc6b5846cdf15c09be3f9f9"
+        },
+        "evidence_ids": [
+          "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b",
+          "evidence-89e54377-5c51-4665-bbac-70be3503d9f3"
+        ],
+        "granted_scopes": [],
+        "handoff_receipt_created": false,
+        "integration_id": "integration-a",
+        "knowledge_refs": [
+          {
+            "digest": "962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8",
+            "document_id": "api-scope-current",
+            "source": "OpsPilot local API authorization guide",
+            "valid_from": "2026-01-01",
+            "version": "1.0.0"
+          }
+        ],
+        "missing_scopes": [
+          "orders.read"
+        ],
+        "principal_id": "principal-a",
+        "reason": "The current authenticated request was denied because the bound principal lacks the required route scopes.",
+        "request_id": "c5dbd1de2280c30b",
+        "required_scopes": [
+          "orders.read"
+        ],
+        "route": "/api/orders/demo-order",
+        "schema_version": 1,
+        "service_id": "orders-demo",
+        "state": "FROZEN_DRAFT_NOT_SUBMITTED",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "versions": {
+          "credential_policy_version": 3,
+          "grant_version": 1,
+          "scope_policy_version": 1
+        }
+      },
+      "content_digest": "2874b177dbd394a03375bc0fad23c8c7960a3f3e645582d57441bc9e99bfd360",
+      "created_at": "2026-10-19T10:12:48.052+00:00",
+      "status": "FROZEN"
+    },
+    "handoff_receipt": null,
+    "submitted": false,
+    "scope_authorized": false
+  },
+  "side_effects": {
+    "scope_write_count": 0,
+    "grant_rows": [
+      {
+        "tenant_id": "tenant-a",
+        "principal_id": "principal-a",
+        "granted_scopes_json": "[]",
+        "grant_version": 1
+      },
+      {
+        "tenant_id": "tenant-b",
+        "principal_id": "principal-b",
+        "granted_scopes_json": "[\"orders.read\"]",
+        "grant_version": 1
+      }
+    ],
+    "policy_rows": [
+      {
+        "tenant_id": "tenant-a",
+        "service_id": "orders-demo",
+        "route": "/api/orders/demo-order",
+        "required_scopes_json": "[\"orders.read\"]",
+        "scope_policy_version": 1
+      },
+      {
+        "tenant_id": "tenant-b",
+        "service_id": "orders-demo",
+        "route": "/api/orders/demo-order",
+        "required_scopes_json": "[\"orders.read\"]",
+        "scope_policy_version": 1
+      }
+    ],
+    "receipts": 2,
+    "drafts": 2,
+    "action_intents": 0,
+    "action_ledgers": 0,
+    "s2_handoff_tables": []
+  },
+  "trace": {
+    "runs": [
+      {
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "kind": "INVESTIGATE",
+        "status": "SUCCEEDED",
+        "blocked_reason": null,
+        "expected_control_revision": 0,
+        "applied_critical_message_seq": 0,
+        "created_at": "2026-10-19T10:12:31.225+00:00",
+        "started_at": "2026-10-19T10:12:31.243+00:00",
+        "ended_at": "2026-10-19T10:12:36.680+00:00"
+      },
+      {
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "kind": "INVESTIGATE",
+        "status": "SUCCEEDED",
+        "blocked_reason": null,
+        "expected_control_revision": 2,
+        "applied_critical_message_seq": 2,
+        "created_at": "2026-10-19T10:12:37.314+00:00",
+        "started_at": "2026-10-19T10:12:37.331+00:00",
+        "ended_at": "2026-10-19T10:12:48.086+00:00"
+      }
+    ],
+    "model_calls": [
+      {
+        "call_id": "call-a2b90966-c383-4f8e-b090-dbaae1600289",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "d1f13a7da1cc84d1ad4541920582cdad5f3edc04deb140c398b3edb9eb85a951",
+        "provider_response_id": "0af3e3b5-1de7-4c30-9ef1-5b69f9bfe69a",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":896},\"input_tokens\":2107,\"output_token_details\":{\"reasoning\":91},\"output_tokens\":152,\"total_tokens\":2259}",
+        "tool_calls_json": "[{\"args\":{\"integration_id\":\"integration-a\",\"service_id\":\"orders-demo\"},\"id\":\"call_00_nKdS2THFdWnrFC8Tsrxm7236\",\"name\":\"probe_endpoint\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-551ab093-fc26-4afb-a157-977f44bae18f",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "de20756a99340b7d2362314a9e0ee1746ff7b739c8156832706f59c2bd8f795e",
+        "provider_response_id": "efa0e346-efc7-4c4f-827a-e7e9ccb208cd",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":512},\"input_tokens\":2640,\"output_token_details\":{\"reasoning\":35},\"output_tokens\":88,\"total_tokens\":2728}",
+        "tool_calls_json": "[{\"args\":{\"request_id\":\"347a3a395214af3c\"},\"id\":\"call_00_fnAg3imFf6oc3o7Yvsgx9631\",\"name\":\"get_scope_authz_facts\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-592e8339-edfd-4f48-90c1-891cb33e87f1",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "fdb8f5ed0217e9497fb49e259425006d188f8e652c7a67180b348ce8217dc86f",
+        "provider_response_id": "3a72d8ca-55e9-4564-931c-e76c3d90f531",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":512},\"input_tokens\":2934,\"output_token_details\":{\"reasoning\":193},\"output_tokens\":401,\"total_tokens\":3335}",
+        "tool_calls_json": "[]",
+        "assistant_text": "**调查摘要（基于当前证据）**\n\n用户反映“订单接口调不通”——这是未经核实的症状陈述。\n\n当前已验证事实：\n- 实时探测 `GET /api/orders/demo-order`（service `orders-demo`，integration `integration-a`，principal `principal-a`）返回 **HTTP 403**，Request ID `347a3a395214af3c`；认证结果为 `AUTH_ACCEPTED`（认证通过，非认证失败）。\n- 同一 Request ID 的授权决策为 **DENY / SCOPE_INSUFFICIENT**，currentness 为 CURRENT，resource_binding_valid=true。\n- 所需 scope：`orders.read`；已授予 scope：无；缺失：`orders.read`。\n\n结论：属**授权（scope）不足**，而非认证或服务故障。依据 `api-scope-current` v1.0.0。后续需按人工审批流程提交 scope 申请；本次未执行任何变更。"
+      },
+      {
+        "call_id": "call-15776985-7c55-4a16-a606-ee7c693db11c",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "1336c874d9d9bca729465cbc5d43637865f7d3eb7f4a78d051efb57df3c994bb",
+        "provider_response_id": "75f40c7f-45ca-4d5d-9c08-34f47bebce3b",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":896},\"input_tokens\":2399,\"output_token_details\":{\"reasoning\":147},\"output_tokens\":208,\"total_tokens\":2607}",
+        "tool_calls_json": "[{\"args\":{\"integration_id\":\"integration-a\",\"service_id\":\"orders-demo\"},\"id\":\"call_00_Xfw7cs7f9lX1XlyLV9Fg8970\",\"name\":\"probe_endpoint\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-29c90efb-608d-41bc-9507-39665f53b8a6",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "3458e8af9a1f8ab1f76ad5c5ab61de7302ab2acb5b5d2b5babe8d4f6fba27727",
+        "provider_response_id": "cb3543d1-42cb-40d3-8587-f23e63c80115",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":512},\"input_tokens\":2942,\"output_token_details\":{\"reasoning\":131},\"output_tokens\":186,\"total_tokens\":3128}",
+        "tool_calls_json": "[{\"args\":{\"request_id\":\"c5dbd1de2280c30b\"},\"id\":\"call_00_6QVmXVTabLz1BMTTwyJ25285\",\"name\":\"get_scope_authz_facts\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-772987f8-b55c-49f4-b81b-67ef95183fcb",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "115a2a2a42ac03d8bfaabee0953fcede90a108168bc1e63da0f93f5a9ca3a358",
+        "provider_response_id": "f3a83f44-1dd6-4fcd-a9af-aa81282654b0",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":512},\"input_tokens\":3228,\"output_token_details\":{\"reasoning\":1226},\"output_tokens\":1244,\"total_tokens\":4472}",
+        "tool_calls_json": "[]",
+        "assistant_text": "{\"name\":\"get_principal_status\",\"arguments\":{\"principal_id\":\"principal-a\"}}"
+      }
+    ],
+    "context_provenance": [
+      {
+        "call_id": "call-a2b90966-c383-4f8e-b090-dbaae1600289",
+        "attempt_id": "attempt-6d19cbe1-8877-4721-b38e-b3bf86ae4aad",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "d1f13a7da1cc84d1ad4541920582cdad5f3edc04deb140c398b3edb9eb85a951",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "a99dfe645e7cfb4bee53a790ba90ac39c0669770471d67217ba59bbb2dc6c098",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:12:32.042+00:00",
+        "completed_at": "2026-10-19T10:12:33.371+00:00",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46"
+      },
+      {
+        "call_id": "call-551ab093-fc26-4afb-a157-977f44bae18f",
+        "attempt_id": "attempt-c7fffb5b-5d6f-4778-9120-58fb69aa763f",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "de20756a99340b7d2362314a9e0ee1746ff7b739c8156832706f59c2bd8f795e",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "9273ae07da203fc47550b29d10a053429dd0815490991365f975d8b03200b315",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:12:33.493+00:00",
+        "completed_at": "2026-10-19T10:12:34.385+00:00",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46"
+      },
+      {
+        "call_id": "call-592e8339-edfd-4f48-90c1-891cb33e87f1",
+        "attempt_id": "attempt-4f9197d5-4217-4e65-9748-e4372f63fbea",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "fdb8f5ed0217e9497fb49e259425006d188f8e652c7a67180b348ce8217dc86f",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef\",\"evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:12:34.478+00:00",
+        "completed_at": "2026-10-19T10:12:36.581+00:00",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46"
+      },
+      {
+        "call_id": "call-15776985-7c55-4a16-a606-ee7c693db11c",
+        "attempt_id": "attempt-6daadc79-9359-4a48-9abb-b7aac6365c74",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "1336c874d9d9bca729465cbc5d43637865f7d3eb7f4a78d051efb57df3c994bb",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "a99dfe645e7cfb4bee53a790ba90ac39c0669770471d67217ba59bbb2dc6c098",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:12:38.073+00:00",
+        "completed_at": "2026-10-19T10:12:39.432+00:00",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c"
+      },
+      {
+        "call_id": "call-29c90efb-608d-41bc-9507-39665f53b8a6",
+        "attempt_id": "attempt-fcebf396-7fd0-4482-a912-b20b482b777a",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "3458e8af9a1f8ab1f76ad5c5ab61de7302ab2acb5b5d2b5babe8d4f6fba27727",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "f5e40058e89cb7ff8ca45f0c57c6de10e91f076087fdd964dfa1b4aa7c3ebb11",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:12:39.572+00:00",
+        "completed_at": "2026-10-19T10:12:41.038+00:00",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c"
+      },
+      {
+        "call_id": "call-772987f8-b55c-49f4-b81b-67ef95183fcb",
+        "attempt_id": "attempt-6ba702a8-e05e-4f89-a9db-a3881bc82c7b",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "115a2a2a42ac03d8bfaabee0953fcede90a108168bc1e63da0f93f5a9ca3a358",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b\",\"evidence-89e54377-5c51-4665-bbac-70be3503d9f3\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:12:41.131+00:00",
+        "completed_at": "2026-10-19T10:12:47.992+00:00",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c"
+      }
+    ],
+    "attempts": [
+      {
+        "attempt_id": "attempt-6d19cbe1-8877-4721-b38e-b3bf86ae4aad",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:32",
+        "completed_at": "2026-10-19 10:12:33"
+      },
+      {
+        "attempt_id": "attempt-a321b3bf-6f0a-4ef3-8629-9f4b0bb0e990",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "kind": "MCP",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:33",
+        "completed_at": "2026-10-19 10:12:33"
+      },
+      {
+        "attempt_id": "attempt-c7fffb5b-5d6f-4778-9120-58fb69aa763f",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:33",
+        "completed_at": "2026-10-19 10:12:34"
+      },
+      {
+        "attempt_id": "attempt-2ddf1ccb-54be-4e6f-8e6c-3b1e60584270",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "kind": "MCP",
+        "tool_name": "get_scope_authz_facts",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:34",
+        "completed_at": "2026-10-19 10:12:34"
+      },
+      {
+        "attempt_id": "attempt-4f9197d5-4217-4e65-9748-e4372f63fbea",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:34",
+        "completed_at": "2026-10-19 10:12:36"
+      },
+      {
+        "attempt_id": "attempt-6daadc79-9359-4a48-9abb-b7aac6365c74",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:38",
+        "completed_at": "2026-10-19 10:12:39"
+      },
+      {
+        "attempt_id": "attempt-8fd5be52-41ea-4fc4-a9a7-7bfdfd90ac0c",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "kind": "MCP",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:39",
+        "completed_at": "2026-10-19 10:12:39"
+      },
+      {
+        "attempt_id": "attempt-fcebf396-7fd0-4482-a912-b20b482b777a",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:39",
+        "completed_at": "2026-10-19 10:12:41"
+      },
+      {
+        "attempt_id": "attempt-583a3995-9db1-42d2-bb58-43bcbaadae0f",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "kind": "MCP",
+        "tool_name": "get_scope_authz_facts",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:41",
+        "completed_at": "2026-10-19 10:12:41"
+      },
+      {
+        "attempt_id": "attempt-6ba702a8-e05e-4f89-a9db-a3881bc82c7b",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:41",
+        "completed_at": "2026-10-19 10:12:47"
+      }
+    ],
+    "run_inputs": [
+      {
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "message_id": "message-64bff78c-5dbd-4584-8e6e-4a51a4f608cb",
+        "input_digest": "a43e567592461d3f850dc020a7fcc942aadb9c7cf710a2c428152cd1d29bb462",
+        "consumed_at": "2026-10-19T10:12:37.342+00:00",
+        "sequence": 2,
+        "input_kind": "CORRECT_TASK_INPUT",
+        "body": "正式更正：请按这个当前真实请求重新调查 Request ID 8fd5bdac0f4feaf6。它只是调查线索；不要改变 Task 的服务、集成、主体或路由绑定。"
+      }
+    ],
+    "mcp_observations": [
+      {
+        "observation_id": "observation-f2710b95-434f-41c7-a44e-c1913e0ffedb",
+        "created_at": "2026-10-19 10:12:33",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef",
+        "argument_digest": "e73dee2e592d507d69f53b1397e01d90e84e6bf0e4596673cfc5e06378936957",
+        "result_json": "{\"data_source\":\"http:loopback-demo-business-api\",\"fact_type\":\"endpoint_probe\",\"facts\":{\"auth_event_id\":1,\"auth_event_observed_at\":\"2026-10-19 10:12:33\",\"auth_event_result\":\"AUTH_ACCEPTED\",\"auth_event_scope_valid\":true,\"authn_event_id\":1,\"authz_event_id\":1,\"business_order_id\":null,\"business_order_status\":null,\"credential_ref\":\"cred-v2\",\"http_status\":403,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"request_id\":\"347a3a395214af3c\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\",\"versions_stable_during_probe\":true},\"observed_at\":\"2026-10-19 10:12:33\",\"observed_versions\":{\"after\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2}},\"original_result_ref\":\"http://127.0.0.1:loopback/api/orders/demo-order#347a3a395214af3c\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo:integration-a:/api/orders/demo-order\",\"task_id\":\"task-f9cded26-7056-4905-ad3b-937bec9769e9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46"
+      },
+      {
+        "observation_id": "observation-0b0e0b52-e61b-469e-bebb-98876dd258a4",
+        "created_at": "2026-10-19 10:12:34",
+        "tool_name": "get_scope_authz_facts",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6",
+        "argument_digest": "670d891c2ba39e66f69d10361aafd02c9cde4e446f12e6990fc9a1e4fd80d406",
+        "result_json": "{\"data_source\":\"sqlite:authz_events+principal_scope_grants+route_scope_policies\",\"fact_type\":\"scope_authz_decision\",\"facts\":{\"authn_credential_policy_version\":3,\"authn_event_id\":1,\"authn_integration_id\":\"integration-a\",\"authn_principal_id\":\"principal-a\",\"authn_request_id\":\"347a3a395214af3c\",\"authn_result_code\":\"AUTH_ACCEPTED\",\"authn_route\":\"/api/orders/demo-order\",\"authn_service_id\":\"orders-demo\",\"authn_tenant_id\":\"tenant-a\",\"credential_policy_version\":3,\"current_grant_version\":1,\"current_scope_policy_version\":1,\"currentness\":\"CURRENT\",\"currentness_reasons\":[],\"decision_id\":1,\"grant_version\":1,\"granted_scopes\":[],\"integration_id\":\"integration-a\",\"missing_scopes\":[\"orders.read\"],\"outcome\":\"DENY\",\"principal_id\":\"principal-a\",\"reason_code\":\"SCOPE_INSUFFICIENT\",\"request_id\":\"347a3a395214af3c\",\"required_scopes\":[\"orders.read\"],\"resource_binding_valid\":true,\"route\":\"/api/orders/demo-order\",\"scope_policy_version\":1,\"service_id\":\"orders-demo\",\"tenant_id\":\"tenant-a\"},\"observed_at\":\"2026-10-19 10:12:33\",\"observed_versions\":{\"credential_policy_version\":3,\"grant_version\":1,\"scope_policy_version\":1},\"original_result_ref\":\"domain://authz/request/347a3a395214af3c\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo\",\"task_id\":\"task-f9cded26-7056-4905-ad3b-937bec9769e9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46"
+      },
+      {
+        "observation_id": "observation-312d2fde-d6d1-45f3-b2b7-b867c905a0c7",
+        "created_at": "2026-10-19 10:12:39",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b",
+        "argument_digest": "e73dee2e592d507d69f53b1397e01d90e84e6bf0e4596673cfc5e06378936957",
+        "result_json": "{\"data_source\":\"http:loopback-demo-business-api\",\"fact_type\":\"endpoint_probe\",\"facts\":{\"auth_event_id\":3,\"auth_event_observed_at\":\"2026-10-19 10:12:39\",\"auth_event_result\":\"AUTH_ACCEPTED\",\"auth_event_scope_valid\":true,\"authn_event_id\":3,\"authz_event_id\":3,\"business_order_id\":null,\"business_order_status\":null,\"credential_ref\":\"cred-v2\",\"http_status\":403,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"request_id\":\"c5dbd1de2280c30b\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\",\"versions_stable_during_probe\":true},\"observed_at\":\"2026-10-19 10:12:39\",\"observed_versions\":{\"after\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2}},\"original_result_ref\":\"http://127.0.0.1:loopback/api/orders/demo-order#c5dbd1de2280c30b\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo:integration-a:/api/orders/demo-order\",\"task_id\":\"task-f9cded26-7056-4905-ad3b-937bec9769e9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c"
+      },
+      {
+        "observation_id": "observation-40f8107b-37e9-429f-b052-2363d89224c0",
+        "created_at": "2026-10-19 10:12:41",
+        "tool_name": "get_scope_authz_facts",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-89e54377-5c51-4665-bbac-70be3503d9f3",
+        "argument_digest": "6ddaa18af24b3df212e737ada1723fc3d9ef0109fa3a722cd7c85eb69a2ddf9f",
+        "result_json": "{\"data_source\":\"sqlite:authz_events+principal_scope_grants+route_scope_policies\",\"fact_type\":\"scope_authz_decision\",\"facts\":{\"authn_credential_policy_version\":3,\"authn_event_id\":3,\"authn_integration_id\":\"integration-a\",\"authn_principal_id\":\"principal-a\",\"authn_request_id\":\"c5dbd1de2280c30b\",\"authn_result_code\":\"AUTH_ACCEPTED\",\"authn_route\":\"/api/orders/demo-order\",\"authn_service_id\":\"orders-demo\",\"authn_tenant_id\":\"tenant-a\",\"credential_policy_version\":3,\"current_grant_version\":1,\"current_scope_policy_version\":1,\"currentness\":\"CURRENT\",\"currentness_reasons\":[],\"decision_id\":3,\"grant_version\":1,\"granted_scopes\":[],\"integration_id\":\"integration-a\",\"missing_scopes\":[\"orders.read\"],\"outcome\":\"DENY\",\"principal_id\":\"principal-a\",\"reason_code\":\"SCOPE_INSUFFICIENT\",\"request_id\":\"c5dbd1de2280c30b\",\"required_scopes\":[\"orders.read\"],\"resource_binding_valid\":true,\"route\":\"/api/orders/demo-order\",\"scope_policy_version\":1,\"service_id\":\"orders-demo\",\"tenant_id\":\"tenant-a\"},\"observed_at\":\"2026-10-19 10:12:39\",\"observed_versions\":{\"credential_policy_version\":3,\"grant_version\":1,\"scope_policy_version\":1},\"original_result_ref\":\"domain://authz/request/c5dbd1de2280c30b\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo\",\"task_id\":\"task-f9cded26-7056-4905-ad3b-937bec9769e9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c"
+      }
+    ],
+    "gate_traces": [
+      {
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "decision": "DIAGNOSED",
+        "reason_code": "CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT",
+        "request_id": "347a3a395214af3c",
+        "decision_id": 1,
+        "evidence_ids_json": "[\"evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef\",\"evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6\"]",
+        "predicate_json": "{\"authenticated\":true,\"authz_outcome\":\"DENY\",\"credential_policy_version\":3,\"decision_id\":1,\"grant_version\":1,\"granted_scopes\":[],\"missing_scopes\":[\"orders.read\"],\"principal_enabled\":true,\"reason_code\":\"SCOPE_INSUFFICIENT\",\"request_id\":\"347a3a395214af3c\",\"required_scopes\":[\"orders.read\"],\"resource_binding_valid\":true,\"scope_policy_version\":1}",
+        "created_at": "2026-10-19T10:12:36.604+00:00"
+      },
+      {
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "decision": "DIAGNOSED",
+        "reason_code": "CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT",
+        "request_id": "c5dbd1de2280c30b",
+        "decision_id": 3,
+        "evidence_ids_json": "[\"evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b\",\"evidence-89e54377-5c51-4665-bbac-70be3503d9f3\"]",
+        "predicate_json": "{\"authenticated\":true,\"authz_outcome\":\"DENY\",\"credential_policy_version\":3,\"decision_id\":3,\"grant_version\":1,\"granted_scopes\":[],\"missing_scopes\":[\"orders.read\"],\"principal_enabled\":true,\"reason_code\":\"SCOPE_INSUFFICIENT\",\"request_id\":\"c5dbd1de2280c30b\",\"required_scopes\":[\"orders.read\"],\"resource_binding_valid\":true,\"scope_policy_version\":1}",
+        "created_at": "2026-10-19T10:12:48.014+00:00"
+      }
+    ],
+    "diagnosis_receipts": [
+      {
+        "receipt_id": "s2-receipt-7480de4d-406f-4127-9a5a-c83f99b1434d",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "request_id": "347a3a395214af3c",
+        "decision_id": 1,
+        "evidence_ids_json": "[\"evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef\",\"evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6\"]",
+        "evidence_digests_json": "{\"evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef\":\"db64a0cca724b4ed19c895ac0fa50a9fb8289de82026aeb59f01b8b4938ce509\",\"evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6\":\"bce8bd6287f465fd7c2d3bbcdccd69cc22c53dc9feed6bc7918e12c01d7b6f73\"}",
+        "observed_versions_json": "{\"evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef\":{\"after\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2}},\"evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6\":{\"credential_policy_version\":3,\"grant_version\":1,\"scope_policy_version\":1}}",
+        "created_at": "2026-10-19T10:12:36.626+00:00"
+      },
+      {
+        "receipt_id": "s2-receipt-28a1190e-02a3-464a-bbbd-eebb39ff4f4b",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "request_id": "c5dbd1de2280c30b",
+        "decision_id": 3,
+        "evidence_ids_json": "[\"evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b\",\"evidence-89e54377-5c51-4665-bbac-70be3503d9f3\"]",
+        "evidence_digests_json": "{\"evidence-89e54377-5c51-4665-bbac-70be3503d9f3\":\"c957823d22c83646e3044dd77ae12e5fc77a9151413be43769aa77bdcdc7d9fa\",\"evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b\":\"28c66bc192a27ba47363d1246a74092d3c23eb6fdbc6b5846cdf15c09be3f9f9\"}",
+        "observed_versions_json": "{\"evidence-89e54377-5c51-4665-bbac-70be3503d9f3\":{\"credential_policy_version\":3,\"grant_version\":1,\"scope_policy_version\":1},\"evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b\":{\"after\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2}}}",
+        "created_at": "2026-10-19T10:12:48.034+00:00"
+      }
+    ],
+    "handoff_drafts": [
+      {
+        "draft_id": "s2-draft-0563cd0a-6b55-4725-9e3d-b9882cb66e6f",
+        "receipt_id": "s2-receipt-7480de4d-406f-4127-9a5a-c83f99b1434d",
+        "version": 1,
+        "content_json": "{\"authorization_changed\":false,\"decision_id\":1,\"diagnosis_receipt_id\":\"s2-receipt-7480de4d-406f-4127-9a5a-c83f99b1434d\",\"evidence_digests\":{\"evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef\":\"db64a0cca724b4ed19c895ac0fa50a9fb8289de82026aeb59f01b8b4938ce509\",\"evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6\":\"bce8bd6287f465fd7c2d3bbcdccd69cc22c53dc9feed6bc7918e12c01d7b6f73\"},\"evidence_ids\":[\"evidence-54b7ae1a-94b5-41b8-a67a-2952a65bb9ef\",\"evidence-56189f08-8b38-49b5-8b76-6f49cf2062b6\"],\"granted_scopes\":[],\"handoff_receipt_created\":false,\"integration_id\":\"integration-a\",\"knowledge_refs\":[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}],\"missing_scopes\":[\"orders.read\"],\"principal_id\":\"principal-a\",\"reason\":\"The current authenticated request was denied because the bound principal lacks the required route scopes.\",\"request_id\":\"347a3a395214af3c\",\"required_scopes\":[\"orders.read\"],\"route\":\"/api/orders/demo-order\",\"schema_version\":1,\"service_id\":\"orders-demo\",\"state\":\"FROZEN_DRAFT_NOT_SUBMITTED\",\"task_id\":\"task-f9cded26-7056-4905-ad3b-937bec9769e9\",\"versions\":{\"credential_policy_version\":3,\"grant_version\":1,\"scope_policy_version\":1}}",
+        "content_digest": "43a3257d6dabf5e0e4edcea41fd59866d0158984a7e79fd290e18c5f5f6aff5a",
+        "created_at": "2026-10-19T10:12:36.645+00:00"
+      },
+      {
+        "draft_id": "s2-draft-35376fae-aad5-461e-ab0c-da45a613c100",
+        "receipt_id": "s2-receipt-28a1190e-02a3-464a-bbbd-eebb39ff4f4b",
+        "version": 2,
+        "content_json": "{\"authorization_changed\":false,\"decision_id\":3,\"diagnosis_receipt_id\":\"s2-receipt-28a1190e-02a3-464a-bbbd-eebb39ff4f4b\",\"evidence_digests\":{\"evidence-89e54377-5c51-4665-bbac-70be3503d9f3\":\"c957823d22c83646e3044dd77ae12e5fc77a9151413be43769aa77bdcdc7d9fa\",\"evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b\":\"28c66bc192a27ba47363d1246a74092d3c23eb6fdbc6b5846cdf15c09be3f9f9\"},\"evidence_ids\":[\"evidence-f7d488f8-fbd1-4455-ae89-24c9eab1861b\",\"evidence-89e54377-5c51-4665-bbac-70be3503d9f3\"],\"granted_scopes\":[],\"handoff_receipt_created\":false,\"integration_id\":\"integration-a\",\"knowledge_refs\":[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}],\"missing_scopes\":[\"orders.read\"],\"principal_id\":\"principal-a\",\"reason\":\"The current authenticated request was denied because the bound principal lacks the required route scopes.\",\"request_id\":\"c5dbd1de2280c30b\",\"required_scopes\":[\"orders.read\"],\"route\":\"/api/orders/demo-order\",\"schema_version\":1,\"service_id\":\"orders-demo\",\"state\":\"FROZEN_DRAFT_NOT_SUBMITTED\",\"task_id\":\"task-f9cded26-7056-4905-ad3b-937bec9769e9\",\"versions\":{\"credential_policy_version\":3,\"grant_version\":1,\"scope_policy_version\":1}}",
+        "content_digest": "2874b177dbd394a03375bc0fad23c8c7960a3f3e645582d57441bc9e99bfd360",
+        "created_at": "2026-10-19T10:12:48.052+00:00"
+      }
+    ],
+    "attempt_counts": {
+      "MCP": 4,
+      "MODEL": 6
+    },
+    "outbox_events": [
+      {
+        "event_id": "event-80637e86-998b-488e-b878-2872358342b0",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "event_kind": "TASK_CREATED",
+        "source_kind": "COMMAND",
+        "source_id": "command-43c4eca6-b4ca-438f-918e-2ab23cf144b2",
+        "created_at": "2026-10-19T10:12:31.225+00:00"
+      },
+      {
+        "event_id": "event-bf1c0398-a41a-48ad-81f9-96e984537adb",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "event_kind": "MESSAGE_ACCEPTED",
+        "source_kind": "COMMAND",
+        "source_id": "command-43c4eca6-b4ca-438f-918e-2ab23cf144b2",
+        "created_at": "2026-10-19T10:12:31.225+00:00"
+      },
+      {
+        "event_id": "event-ea5f09e9-380b-4690-bea4-bd2a2cf98951",
+        "session_id": null,
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "event_kind": "S2_DRAFT_FROZEN",
+        "source_kind": "S2_DRAFT",
+        "source_id": "s2-draft-0563cd0a-6b55-4725-9e3d-b9882cb66e6f",
+        "created_at": "2026-10-19T10:12:36.645+00:00"
+      },
+      {
+        "event_id": "event-0ac60696-7c19-4ab3-ae91-76263234de72",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "event_kind": "RUN_STATUS_SUCCEEDED",
+        "source_kind": "RUN",
+        "source_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "created_at": "2026-10-19T10:12:36.681+00:00"
+      },
+      {
+        "event_id": "event-9d84268f-a85f-4963-83ff-0b17d14d77c8",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "event_kind": "MESSAGE_ACCEPTED",
+        "source_kind": "COMMAND",
+        "source_id": "command-bdcff33c-b243-4b72-a988-c671d2929cf5",
+        "created_at": "2026-10-19T10:12:37.315+00:00"
+      },
+      {
+        "event_id": "event-5ec34438-3fb4-4b9f-8c2f-bc58674712d9",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "event_kind": "CRITICAL_INPUTS_APPLIED",
+        "source_kind": "RUN",
+        "source_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "created_at": "2026-10-19T10:12:37.343+00:00"
+      },
+      {
+        "event_id": "event-790ec81d-d4fa-4ab8-948d-d1f54b00299e",
+        "session_id": null,
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "event_kind": "S2_DRAFT_FROZEN",
+        "source_kind": "S2_DRAFT",
+        "source_id": "s2-draft-35376fae-aad5-461e-ab0c-da45a613c100",
+        "created_at": "2026-10-19T10:12:48.052+00:00"
+      },
+      {
+        "event_id": "event-d38514e2-2d5c-413e-9730-02ef96edc73a",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "event_kind": "RUN_STATUS_SUCCEEDED",
+        "source_kind": "RUN",
+        "source_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "created_at": "2026-10-19T10:12:48.086+00:00"
+      }
+    ],
+    "session_events": [
+      {
+        "event_id": "event-80637e86-998b-488e-b878-2872358342b0",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "event_seq": 2,
+        "event_kind": "TASK_CREATED",
+        "source_kind": "COMMAND",
+        "source_id": "command-43c4eca6-b4ca-438f-918e-2ab23cf144b2",
+        "happened_at": "2026-10-19T10:12:31.225+00:00"
+      },
+      {
+        "event_id": "event-bf1c0398-a41a-48ad-81f9-96e984537adb",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "event_seq": 3,
+        "event_kind": "MESSAGE_ACCEPTED",
+        "source_kind": "COMMAND",
+        "source_id": "command-43c4eca6-b4ca-438f-918e-2ab23cf144b2",
+        "happened_at": "2026-10-19T10:12:31.225+00:00"
+      },
+      {
+        "event_id": "event-ea5f09e9-380b-4690-bea4-bd2a2cf98951",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "run_id": null,
+        "event_seq": 4,
+        "event_kind": "S2_DRAFT_FROZEN",
+        "source_kind": "S2_DRAFT",
+        "source_id": "s2-draft-0563cd0a-6b55-4725-9e3d-b9882cb66e6f",
+        "happened_at": "2026-10-19T10:12:36.645+00:00"
+      },
+      {
+        "event_id": "event-0ac60696-7c19-4ab3-ae91-76263234de72",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "run_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "event_seq": 5,
+        "event_kind": "RUN_STATUS_SUCCEEDED",
+        "source_kind": "RUN",
+        "source_id": "run-2da0561a-33f6-4fe8-b9e8-f2fa69ebff46",
+        "happened_at": "2026-10-19T10:12:36.681+00:00"
+      },
+      {
+        "event_id": "event-9d84268f-a85f-4963-83ff-0b17d14d77c8",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "event_seq": 6,
+        "event_kind": "MESSAGE_ACCEPTED",
+        "source_kind": "COMMAND",
+        "source_id": "command-bdcff33c-b243-4b72-a988-c671d2929cf5",
+        "happened_at": "2026-10-19T10:12:37.315+00:00"
+      },
+      {
+        "event_id": "event-5ec34438-3fb4-4b9f-8c2f-bc58674712d9",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "event_seq": 7,
+        "event_kind": "CRITICAL_INPUTS_APPLIED",
+        "source_kind": "RUN",
+        "source_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "happened_at": "2026-10-19T10:12:37.343+00:00"
+      },
+      {
+        "event_id": "event-790ec81d-d4fa-4ab8-948d-d1f54b00299e",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "run_id": null,
+        "event_seq": 8,
+        "event_kind": "S2_DRAFT_FROZEN",
+        "source_kind": "S2_DRAFT",
+        "source_id": "s2-draft-35376fae-aad5-461e-ab0c-da45a613c100",
+        "happened_at": "2026-10-19T10:12:48.052+00:00"
+      },
+      {
+        "event_id": "event-d38514e2-2d5c-413e-9730-02ef96edc73a",
+        "session_id": "session-a2e1a6b1-23a6-4ad8-8d64-b576544f5515",
+        "task_id": "task-f9cded26-7056-4905-ad3b-937bec9769e9",
+        "run_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "event_seq": 9,
+        "event_kind": "RUN_STATUS_SUCCEEDED",
+        "source_kind": "RUN",
+        "source_id": "run-336599a9-7a31-4636-a9b4-ce25a37d8c0c",
+        "happened_at": "2026-10-19T10:12:48.086+00:00"
+      }
+    ]
+  }
+}

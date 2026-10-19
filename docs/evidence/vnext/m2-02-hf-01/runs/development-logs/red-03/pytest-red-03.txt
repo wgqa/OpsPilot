@@ -1,0 +1,34 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______ test_hf_b_fresh_persisted_probe_allows_the_matching_authz_query _______
+
+    def test_hf_b_fresh_persisted_probe_allows_the_matching_authz_query() -> None:
+        from datetime import datetime, timezone
+    
+        from opspilot.investigator import _s2_model_tools_for_evidence
+    
+        schemas = [
+            {"type": "function", "function": {"name": "probe_endpoint", "parameters": {"type": "object"}}},
+            {"type": "function", "function": {"name": "get_scope_authz_facts", "parameters": {
+                "type": "object", "properties": {"request_id": {"type": "string"}},
+            }}},
+        ]
+        # list_evidence() returns persisted Evidence with fetched_at, while the
+        # latest same-Run MCP Observation timestamp is supplied by the Domain
+        # run-evidence query. Both forms must be recognized as current.
+        fresh_probe = {
+            "fact_type": "endpoint_probe",
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "facts": {"http_status": 403, "request_id": "current-request"},
+        }
+        tools = _s2_model_tools_for_evidence(schemas, [fresh_probe])
+>       assert [item["function"]["name"] for item in tools] == ["get_scope_authz_facts"]
+E       AssertionError: assert ['probe_endpoint'] == ['get_scope_authz_facts']
+E         
+E         At index 0 diff: 'probe_endpoint' != 'get_scope_authz_facts'
+E         Use -v to get more diff
+
+tests\test_m2_02_hf_01.py:228: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_hf_01.py::test_hf_b_fresh_persisted_probe_allows_the_matching_authz_query
+1 failed in 1.46s

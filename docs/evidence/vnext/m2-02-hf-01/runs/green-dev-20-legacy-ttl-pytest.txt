@@ -1,0 +1,50 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+______ test_m2_02_model_tool_schema_follows_latest_s2_probe_and_request _______
+
+    def test_m2_02_model_tool_schema_follows_latest_s2_probe_and_request():
+        from opspilot.investigator import S2_AUTHZ_TOOL, _s2_model_tools_for_evidence
+    
+        observed_at = datetime.now(timezone.utc).isoformat()
+    
+        schemas = [
+            {"type": "function", "function": {"name": name, "parameters": {
+                "type": "object", "properties": {"request_id": {"type": "string"}},
+            }}}
+            for name in ("probe_endpoint", "get_scope_authz_facts", "get_integration_config", "get_principal_status")
+        ]
+    
+        assert [item["function"]["name"] for item in _s2_model_tools_for_evidence(schemas, [])] == ["probe_endpoint"]
+    
+        probe = {
+            "fact_type": "endpoint_probe", "fetched_at": observed_at,
+            "facts": {"http_status": 403, "request_id": "current-request"},
+        }
+        authz_tools = _s2_model_tools_for_evidence(schemas, [probe])
+        assert [item["function"]["name"] for item in authz_tools] == [S2_AUTHZ_TOOL]
+        assert authz_tools[0]["function"]["parameters"]["properties"]["request_id"]["enum"] == ["current-request"]
+    
+        old_request_authz = {
+            "fact_type": "scope_authz_decision", "facts": {"request_id": "old-request"},
+        }
+        still_requires_current = _s2_model_tools_for_evidence(schemas, [probe, old_request_authz])
+        assert still_requires_current[0]["function"]["parameters"]["properties"]["request_id"]["enum"] == ["current-request"]
+    
+        current_authz = {
+            "fact_type": "scope_authz_decision", "fetched_at": observed_at,
+            "facts": {"request_id": "current-request"},
+        }
+        assert _s2_model_tools_for_evidence(schemas, [probe, current_authz]) == []
+    
+        authentication_failure = {
+            "fact_type": "endpoint_probe", "fetched_at": observed_at,
+            "facts": {"http_status": 401, "request_id": "authn-request"},
+        }
+        s1_tools = _s2_model_tools_for_evidence(schemas, [probe, authentication_failure])
+>       assert "get_scope_authz_facts" not in {item["function"]["name"] for item in s1_tools}
+E       AssertionError: assert 'get_scope_authz_facts' not in {'get_scope_authz_facts'}
+
+tests\test_m2_02_s2_diagnosis.py:461: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_s2_diagnosis.py::test_m2_02_model_tool_schema_follows_latest_s2_probe_and_request
+1 failed in 1.48s

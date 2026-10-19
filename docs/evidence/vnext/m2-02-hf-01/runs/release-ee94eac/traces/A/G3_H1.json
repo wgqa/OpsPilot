@@ -1,0 +1,486 @@
+{
+  "journey_id": "G3_H1",
+  "strategy": "A",
+  "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+  "session_id": "session-d2a122de-be7c-45bc-8275-ece914a967e6",
+  "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+  "actual_foreign_request": null,
+  "graph_result": {
+    "stage": "d3_plan_created",
+    "gate": {
+      "decision": "READY",
+      "reason_code": "ENABLED_PRINCIPAL_AND_CREDENTIAL_REFERENCE_MISMATCH",
+      "checked_fact_ids": [
+        "evidence-b03cbc23-9058-46fb-ba30-e77f330f91cf",
+        "evidence-4b1ada2c-1f0b-4e9c-a4ac-fb7412d951d5",
+        "evidence-5dc68440-87cf-4274-bcd9-44d86d8ce272",
+        "evidence-533a9f49-d855-483f-ab2c-65cba6e04540"
+      ],
+      "missing_predicates": [],
+      "stale_or_conflicting_ids": [],
+      "plan_candidate": {
+        "action_type": "SWITCH_CREDENTIAL_REF",
+        "integration_id": "integration-a",
+        "new_credential_ref": "cred-v2",
+        "expected_config_version": 9,
+        "expected_principal_version": 2,
+        "expected_auth_policy_version": 3,
+        "required_evidence_ids": [
+          "evidence-b03cbc23-9058-46fb-ba30-e77f330f91cf",
+          "evidence-4b1ada2c-1f0b-4e9c-a4ac-fb7412d951d5",
+          "evidence-5dc68440-87cf-4274-bcd9-44d86d8ce272",
+          "evidence-533a9f49-d855-483f-ab2c-65cba6e04540"
+        ]
+      },
+      "side_effects": []
+    },
+    "blocked_reason": null,
+    "plan_hash": "0c635d1bc59f14d6295a5a4e71dc03fe62bfbe498a443090c6c22440f91df82d",
+    "diagnosis_draft": {
+      "latest_model_summary": "## 调查摘要(基于本次 Run 的实际证据)\n\n**已核验事实（当前 MCP 证据，非用户陈述）**\n- 本次 Run 的实时探测：`GET /api/orders/demo-order` 返回 **HTTP 401**，`request_id=970256a48afa4ec9`，`auth_event_result=AUTH_REJECTED`，`authz_event_id=null` → **认证失败，而非授权拒绝**（业务字段均为 null，未到达业务层）。探测前后版本稳定（config 9 / policy 3 / principal 2）。\n- 集成 `integration-a` 配置的凭据引用为 **`cred-v1`**；而服务 `orders-demo` 当前认证策略（policy_version 3）**只接受 `cred-v2`**。\n- 主体 `principal-a` 状态为 **ENABLED**（version 2），非禁用所致。\n\n**结论**：症状根因是**凭据版本不匹配（凭证过期/轮换未同步）**，导致请求在认证阶段被拒。这**不构成 S2 作用域（scope）诊断**：没有 403、没有 `DENY / SCOPE_INSUFFICIENT` 决策、`authz_event_id` 为空，缺少 required/granted scopes 的可计算差异。按方法与知识（`api-scope-current` 1.0.0）说明，HTTP 状态只是症状，认证拒绝与授权拒绝须区分。\n\n**未执行/不建议**：无需基于用户原始请求 ID 做授权查询；未做任何配置变更。建议由负责凭据轮换的团队走既定人工审批流程，将集成凭据从 `cred-v1` 更新为策略接受的 `cred-v2`——此操作不在本只读任务的范围内。"
+    }
+  },
+  "s2_outcome": {
+    "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+    "task_status": "WAITING_APPROVAL",
+    "business_outcome": "NO_S2_DIAGNOSIS"
+  },
+  "trace": {
+    "runs": [
+      {
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "INVESTIGATE",
+        "status": "WAITING_APPROVAL",
+        "blocked_reason": null,
+        "expected_control_revision": 0,
+        "applied_critical_message_seq": 0,
+        "created_at": "2026-10-19T10:20:35.329+00:00",
+        "started_at": "2026-10-19T10:20:35.346+00:00",
+        "ended_at": "2026-10-19T10:20:48.381+00:00"
+      }
+    ],
+    "model_calls": [
+      {
+        "call_id": "call-d53ec401-75db-4d37-9959-cfebbba18bd0",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "c0c9ad2d3a5e059542c11aebf1367576f960a6e8375e6e5187f891d731e58d4d",
+        "provider_response_id": "bc0c2685-5381-440b-9511-df527cf795e8",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":896},\"input_tokens\":2091,\"output_token_details\":{\"reasoning\":19},\"output_tokens\":80,\"total_tokens\":2171}",
+        "tool_calls_json": "[{\"args\":{\"integration_id\":\"integration-a\",\"service_id\":\"orders-demo\"},\"id\":\"call_00_LHdRyWr8PbeRaGlI3Mgm3107\",\"name\":\"probe_endpoint\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-e95923f7-ae67-478b-9791-db8ba738eb7f",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "0005341eac8bb65c69ffd20edd9b922700b76f180e6e599d8ff31c5c6315fc32",
+        "provider_response_id": "3c6a655d-02a9-4d2b-bc4a-a25172749f8d",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":1024},\"input_tokens\":2818,\"output_token_details\":{\"reasoning\":174},\"output_tokens\":218,\"total_tokens\":3036}",
+        "tool_calls_json": "[{\"args\":{\"service_id\":\"orders-demo\"},\"id\":\"call_00_VJ8XsG98TJGATMYqcMry4579\",\"name\":\"get_auth_policy\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-4c96970c-2adc-4cda-a9bd-6b77385662a7",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "9cbc9a1dfa1d8d0f0cc235ddc6eee0f4c1f2b2b5d8ab9a04e3263b1421f44e76",
+        "provider_response_id": "4ee28911-d0ec-481b-a234-f601161fab7a",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":1408},\"input_tokens\":3190,\"output_token_details\":{\"reasoning\":127},\"output_tokens\":170,\"total_tokens\":3360}",
+        "tool_calls_json": "[{\"args\":{\"integration_id\":\"integration-a\"},\"id\":\"call_00_Ct8APUrJvPkfegpcetCI3972\",\"name\":\"get_integration_config\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-1b938c8b-9b38-4665-9107-614e8fcfff61",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "ab731ea1d6c7171cb68078b3a2cb805c131bf6da051114320b6b9cff47dcc58b",
+        "provider_response_id": "12d260df-06a4-41a6-84cc-49025776bfcf",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":1792},\"input_tokens\":3553,\"output_token_details\":{\"reasoning\":504},\"output_tokens\":546,\"total_tokens\":4099}",
+        "tool_calls_json": "[{\"args\":{\"principal_id\":\"principal-a\"},\"id\":\"call_00_1673685prZAyEsanv72m5333\",\"name\":\"get_principal_status\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-bc7cd8c2-015d-49be-b691-e5fcb8f700a8",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "27743a904438a8464eb32ae1ea5e72cda601fd9bb20acbc7af698509cd428b3f",
+        "provider_response_id": "3ea72607-3447-471c-b534-520f8655e43d",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":2048},\"input_tokens\":3913,\"output_token_details\":{\"reasoning\":282},\"output_tokens\":673,\"total_tokens\":4586}",
+        "tool_calls_json": "[]",
+        "assistant_text": "## 调查摘要(基于本次 Run 的实际证据)\n\n**已核验事实（当前 MCP 证据，非用户陈述）**\n- 本次 Run 的实时探测：`GET /api/orders/demo-order` 返回 **HTTP 401**，`request_id=970256a48afa4ec9`，`auth_event_result=AUTH_REJECTED`，`authz_event_id=null` → **认证失败，而非授权拒绝**（业务字段均为 null，未到达业务层）。探测前后版本稳定（config 9 / policy 3 / principal 2）。\n- 集成 `integration-a` 配置的凭据引用为 **`cred-v1`**；而服务 `orders-demo` 当前认证策略（policy_version 3）**只接受 `cred-v2`**。\n- 主体 `principal-a` 状态为 **ENABLED**（version 2），非禁用所致。\n\n**结论**：症状根因是**凭据版本不匹配（凭证过期/轮换未同步）**，导致请求在认证阶段被拒。这**不构成 S2 作用域（scope）诊断**：没有 403、没有 `DENY / SCOPE_INSUFFICIENT` 决策、`authz_event_id` 为空，缺少 required/granted scopes 的可计算差异。按方法与知识（`api-scope-current` 1.0.0）说明，HTTP 状态只是症状，认证拒绝与授权拒绝须区分。\n\n**未执行/不建议**：无需基于用户原始请求 ID 做授权查询；未做任何配置变更。建议由负责凭据轮换的团队走既定人工审批流程，将集成凭据从 `cred-v1` 更新为策略接受的 `cred-v2`——此操作不在本只读任务的范围内。"
+      }
+    ],
+    "context_provenance": [
+      {
+        "call_id": "call-d53ec401-75db-4d37-9959-cfebbba18bd0",
+        "attempt_id": "attempt-713bcf95-f078-49d5-a116-d407dd85577d",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "c0c9ad2d3a5e059542c11aebf1367576f960a6e8375e6e5187f891d731e58d4d",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "a99dfe645e7cfb4bee53a790ba90ac39c0669770471d67217ba59bbb2dc6c098",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:20:36.145+00:00",
+        "completed_at": "2026-10-19T10:20:36.940+00:00",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      },
+      {
+        "call_id": "call-e95923f7-ae67-478b-9791-db8ba738eb7f",
+        "attempt_id": "attempt-de3b566e-94ae-474f-89a5-1e89cded525a",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "0005341eac8bb65c69ffd20edd9b922700b76f180e6e599d8ff31c5c6315fc32",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "a0223539f8d2b4fce11f2257f99ccf470c902a38635d4b5fd5883f5b23b3ad6a",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-b03cbc23-9058-46fb-ba30-e77f330f91cf\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:20:37.066+00:00",
+        "completed_at": "2026-10-19T10:20:38.645+00:00",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      },
+      {
+        "call_id": "call-4c96970c-2adc-4cda-a9bd-6b77385662a7",
+        "attempt_id": "attempt-e008dc4b-a943-49e7-a76f-a87ef52f98ff",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "9cbc9a1dfa1d8d0f0cc235ddc6eee0f4c1f2b2b5d8ab9a04e3263b1421f44e76",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "a0223539f8d2b4fce11f2257f99ccf470c902a38635d4b5fd5883f5b23b3ad6a",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-b03cbc23-9058-46fb-ba30-e77f330f91cf\",\"evidence-4b1ada2c-1f0b-4e9c-a4ac-fb7412d951d5\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:20:38.742+00:00",
+        "completed_at": "2026-10-19T10:20:40.137+00:00",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      },
+      {
+        "call_id": "call-1b938c8b-9b38-4665-9107-614e8fcfff61",
+        "attempt_id": "attempt-514b1ce0-6d15-4bc1-9b4c-91158e5fad82",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "ab731ea1d6c7171cb68078b3a2cb805c131bf6da051114320b6b9cff47dcc58b",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "a0223539f8d2b4fce11f2257f99ccf470c902a38635d4b5fd5883f5b23b3ad6a",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-b03cbc23-9058-46fb-ba30-e77f330f91cf\",\"evidence-4b1ada2c-1f0b-4e9c-a4ac-fb7412d951d5\",\"evidence-5dc68440-87cf-4274-bcd9-44d86d8ce272\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:20:40.227+00:00",
+        "completed_at": "2026-10-19T10:20:43.899+00:00",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      },
+      {
+        "call_id": "call-bc7cd8c2-015d-49be-b691-e5fcb8f700a8",
+        "attempt_id": "attempt-d5e0e673-3392-4d86-a282-df0089d7ff29",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "27743a904438a8464eb32ae1ea5e72cda601fd9bb20acbc7af698509cd428b3f",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "a0223539f8d2b4fce11f2257f99ccf470c902a38635d4b5fd5883f5b23b3ad6a",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-b03cbc23-9058-46fb-ba30-e77f330f91cf\",\"evidence-4b1ada2c-1f0b-4e9c-a4ac-fb7412d951d5\",\"evidence-5dc68440-87cf-4274-bcd9-44d86d8ce272\",\"evidence-533a9f49-d855-483f-ab2c-65cba6e04540\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:20:43.989+00:00",
+        "completed_at": "2026-10-19T10:20:48.308+00:00",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      }
+    ],
+    "attempts": [
+      {
+        "attempt_id": "attempt-713bcf95-f078-49d5-a116-d407dd85577d",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:36",
+        "completed_at": "2026-10-19 10:20:36"
+      },
+      {
+        "attempt_id": "attempt-0acfa703-8162-486a-ab40-083b9081b430",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MCP",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:36",
+        "completed_at": "2026-10-19 10:20:37"
+      },
+      {
+        "attempt_id": "attempt-de3b566e-94ae-474f-89a5-1e89cded525a",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:37",
+        "completed_at": "2026-10-19 10:20:38"
+      },
+      {
+        "attempt_id": "attempt-5a6bb434-6014-4bd2-a2cf-133b83eea8e4",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MCP",
+        "tool_name": "get_auth_policy",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:38",
+        "completed_at": "2026-10-19 10:20:38"
+      },
+      {
+        "attempt_id": "attempt-e008dc4b-a943-49e7-a76f-a87ef52f98ff",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:38",
+        "completed_at": "2026-10-19 10:20:40"
+      },
+      {
+        "attempt_id": "attempt-2784884d-5008-4c37-a634-6ba670a3913f",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MCP",
+        "tool_name": "get_integration_config",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:40",
+        "completed_at": "2026-10-19 10:20:40"
+      },
+      {
+        "attempt_id": "attempt-514b1ce0-6d15-4bc1-9b4c-91158e5fad82",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:40",
+        "completed_at": "2026-10-19 10:20:43"
+      },
+      {
+        "attempt_id": "attempt-667bf3c5-dc11-48a3-a044-7fb0d40f30fd",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MCP",
+        "tool_name": "get_principal_status",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:43",
+        "completed_at": "2026-10-19 10:20:43"
+      },
+      {
+        "attempt_id": "attempt-d5e0e673-3392-4d86-a282-df0089d7ff29",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:20:43",
+        "completed_at": "2026-10-19 10:20:48"
+      }
+    ],
+    "run_inputs": [],
+    "mcp_observations": [
+      {
+        "observation_id": "observation-d81fc11f-0173-4966-a1c3-aaaa18e1e09b",
+        "created_at": "2026-10-19 10:20:37",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-b03cbc23-9058-46fb-ba30-e77f330f91cf",
+        "argument_digest": "e73dee2e592d507d69f53b1397e01d90e84e6bf0e4596673cfc5e06378936957",
+        "result_json": "{\"data_source\":\"http:loopback-demo-business-api\",\"fact_type\":\"endpoint_probe\",\"facts\":{\"auth_event_id\":1,\"auth_event_observed_at\":\"2026-10-19 10:20:36\",\"auth_event_result\":\"AUTH_REJECTED\",\"auth_event_scope_valid\":true,\"authn_event_id\":1,\"authz_event_id\":null,\"business_order_id\":null,\"business_order_status\":null,\"credential_ref\":\"cred-v1\",\"http_status\":401,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"request_id\":\"970256a48afa4ec9\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\",\"versions_stable_during_probe\":true},\"observed_at\":\"2026-10-19 10:20:36\",\"observed_versions\":{\"after\":{\"config_version\":9,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":9,\"policy_version\":3,\"principal_version\":2}},\"original_result_ref\":\"http://127.0.0.1:loopback/api/orders/demo-order#970256a48afa4ec9\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo:integration-a:/api/orders/demo-order\",\"task_id\":\"task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      },
+      {
+        "observation_id": "observation-d329afd2-0584-477c-94ee-4536b045fc30",
+        "created_at": "2026-10-19 10:20:38",
+        "tool_name": "get_auth_policy",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-4b1ada2c-1f0b-4e9c-a4ac-fb7412d951d5",
+        "argument_digest": "b02b9a9caef5a2f94577feb3db734e8c54c46f3f3a35e5c470e216ae976a5784",
+        "result_json": "{\"data_source\":\"sqlite:auth_policies\",\"fact_type\":\"auth_policy\",\"facts\":{\"accepted_credential_ref\":\"cred-v2\",\"policy_version\":3,\"service_id\":\"orders-demo\"},\"observed_at\":\"2026-10-19T10:20:38.677+00:00\",\"observed_versions\":{\"policy_version\":3},\"original_result_ref\":\"domain://service/orders-demo/auth-policy\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo\",\"task_id\":\"task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      },
+      {
+        "observation_id": "observation-09b2c343-7ae7-46df-8812-acb376c710d1",
+        "created_at": "2026-10-19 10:20:40",
+        "tool_name": "get_integration_config",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-5dc68440-87cf-4274-bcd9-44d86d8ce272",
+        "argument_digest": "15a1fc5e2ad298c41768290e32452e11c980010456fd52e8394f0404b28794da",
+        "result_json": "{\"data_source\":\"sqlite:integrations\",\"fact_type\":\"integration_config\",\"facts\":{\"config_version\":9,\"credential_ref\":\"cred-v1\",\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\"},\"observed_at\":\"2026-10-19T10:20:40.168+00:00\",\"observed_versions\":{\"config_version\":9},\"original_result_ref\":\"domain://integration/integration-a/config\",\"principal_id\":\"principal-a\",\"resource_id\":\"integration-a\",\"task_id\":\"task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      },
+      {
+        "observation_id": "observation-dd2e42eb-e6f7-4b30-baa1-76f73cdeb7de",
+        "created_at": "2026-10-19 10:20:43",
+        "tool_name": "get_principal_status",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-533a9f49-d855-483f-ab2c-65cba6e04540",
+        "argument_digest": "9e2f19c554010111b5170a63fc2a12f716a7ca76ae0e09dd0bf60a7d357d28be",
+        "result_json": "{\"data_source\":\"sqlite:principals\",\"fact_type\":\"principal_status\",\"facts\":{\"principal_id\":\"principal-a\",\"principal_version\":2,\"status\":\"ENABLED\"},\"observed_at\":\"2026-10-19T10:20:43.929+00:00\",\"observed_versions\":{\"principal_version\":2},\"original_result_ref\":\"domain://principal/principal-a/status\",\"principal_id\":\"principal-a\",\"resource_id\":\"principal-a\",\"task_id\":\"task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877"
+      }
+    ],
+    "gate_traces": [
+      {
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "decision": "NOT_APPLICABLE",
+        "reason_code": "AUTHENTICATION_FAILURE_REMAINS_S1",
+        "request_id": null,
+        "decision_id": null,
+        "evidence_ids_json": "[\"evidence-b03cbc23-9058-46fb-ba30-e77f330f91cf\"]",
+        "predicate_json": "{}",
+        "created_at": "2026-10-19T10:20:48.328+00:00"
+      }
+    ],
+    "diagnosis_receipts": [],
+    "handoff_drafts": [],
+    "attempt_counts": {
+      "MCP": 4,
+      "MODEL": 5
+    },
+    "outbox_events": [
+      {
+        "event_id": "event-52191fec-bacc-43c2-9a13-4929a247fff4",
+        "session_id": "session-d2a122de-be7c-45bc-8275-ece914a967e6",
+        "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+        "event_kind": "TASK_CREATED",
+        "source_kind": "COMMAND",
+        "source_id": "command-0bb8d455-cd2a-4da0-9f9f-621e2bddd726",
+        "created_at": "2026-10-19T10:20:35.329+00:00"
+      },
+      {
+        "event_id": "event-46a2880c-5eb5-4419-a082-bac935b05d29",
+        "session_id": "session-d2a122de-be7c-45bc-8275-ece914a967e6",
+        "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+        "event_kind": "MESSAGE_ACCEPTED",
+        "source_kind": "COMMAND",
+        "source_id": "command-0bb8d455-cd2a-4da0-9f9f-621e2bddd726",
+        "created_at": "2026-10-19T10:20:35.329+00:00"
+      },
+      {
+        "event_id": "event-47676b12-372c-49b8-baa2-18dd05776f91",
+        "session_id": null,
+        "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+        "event_kind": "PLAN_ACTIVATED",
+        "source_kind": "PLAN",
+        "source_id": "0c635d1bc59f14d6295a5a4e71dc03fe62bfbe498a443090c6c22440f91df82d",
+        "created_at": "2026-10-19T10:20:48.348+00:00"
+      },
+      {
+        "event_id": "event-693653f5-2b5a-4e7f-a99f-f05048c88c81",
+        "session_id": "session-d2a122de-be7c-45bc-8275-ece914a967e6",
+        "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+        "event_kind": "RUN_STATUS_WAITING_APPROVAL",
+        "source_kind": "RUN",
+        "source_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "created_at": "2026-10-19T10:20:48.382+00:00"
+      }
+    ],
+    "session_events": [
+      {
+        "event_id": "event-52191fec-bacc-43c2-9a13-4929a247fff4",
+        "session_id": "session-d2a122de-be7c-45bc-8275-ece914a967e6",
+        "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "event_seq": 2,
+        "event_kind": "TASK_CREATED",
+        "source_kind": "COMMAND",
+        "source_id": "command-0bb8d455-cd2a-4da0-9f9f-621e2bddd726",
+        "happened_at": "2026-10-19T10:20:35.329+00:00"
+      },
+      {
+        "event_id": "event-46a2880c-5eb5-4419-a082-bac935b05d29",
+        "session_id": "session-d2a122de-be7c-45bc-8275-ece914a967e6",
+        "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "event_seq": 3,
+        "event_kind": "MESSAGE_ACCEPTED",
+        "source_kind": "COMMAND",
+        "source_id": "command-0bb8d455-cd2a-4da0-9f9f-621e2bddd726",
+        "happened_at": "2026-10-19T10:20:35.329+00:00"
+      },
+      {
+        "event_id": "event-47676b12-372c-49b8-baa2-18dd05776f91",
+        "session_id": "session-d2a122de-be7c-45bc-8275-ece914a967e6",
+        "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+        "run_id": null,
+        "event_seq": 4,
+        "event_kind": "PLAN_ACTIVATED",
+        "source_kind": "PLAN",
+        "source_id": "0c635d1bc59f14d6295a5a4e71dc03fe62bfbe498a443090c6c22440f91df82d",
+        "happened_at": "2026-10-19T10:20:48.348+00:00"
+      },
+      {
+        "event_id": "event-693653f5-2b5a-4e7f-a99f-f05048c88c81",
+        "session_id": "session-d2a122de-be7c-45bc-8275-ece914a967e6",
+        "task_id": "task-a2cd1c6a-d35b-4120-9dba-dd1db05ac6c9",
+        "run_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "event_seq": 5,
+        "event_kind": "RUN_STATUS_WAITING_APPROVAL",
+        "source_kind": "RUN",
+        "source_id": "run-5439b61c-020b-482c-b691-adccbbe88877",
+        "happened_at": "2026-10-19T10:20:48.382+00:00"
+      }
+    ]
+  },
+  "side_effects": {
+    "scope_write_count": 0,
+    "grant_rows": [
+      {
+        "tenant_id": "tenant-a",
+        "principal_id": "principal-a",
+        "granted_scopes_json": "[\"orders.read\"]",
+        "grant_version": 1
+      },
+      {
+        "tenant_id": "tenant-b",
+        "principal_id": "principal-b",
+        "granted_scopes_json": "[\"orders.read\"]",
+        "grant_version": 1
+      }
+    ],
+    "policy_rows": [
+      {
+        "tenant_id": "tenant-a",
+        "service_id": "orders-demo",
+        "route": "/api/orders/demo-order",
+        "required_scopes_json": "[\"orders.read\"]",
+        "scope_policy_version": 1
+      },
+      {
+        "tenant_id": "tenant-b",
+        "service_id": "orders-demo",
+        "route": "/api/orders/demo-order",
+        "required_scopes_json": "[\"orders.read\"]",
+        "scope_policy_version": 1
+      }
+    ],
+    "receipts": 0,
+    "drafts": 0,
+    "action_intents": 0,
+    "action_ledgers": 0,
+    "s2_handoff_tables": []
+  }
+}

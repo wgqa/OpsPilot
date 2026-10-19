@@ -1,0 +1,138 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+__ test_hf_a_scope_intent_distinguishes_pure_mixed_negated_and_quoted_cases ___
+
+    def test_hf_a_scope_intent_distinguishes_pure_mixed_negated_and_quoted_cases() -> None:
+>       from opspilot.investigator import classify_unbound_resource_intent
+E       ImportError: cannot import name 'classify_unbound_resource_intent' from 'opspilot.investigator' (D:\ѧϰ\agent����Ŀ\opspilot\investigator.py)
+
+tests\test_m2_02_hf_01.py:25: ImportError
+_ test_hf_a_legacy_guard_does_not_treat_quoted_refusal_as_current_out_of_scope_command _
+
+    def test_hf_a_legacy_guard_does_not_treat_quoted_refusal_as_current_out_of_scope_command() -> None:
+        from opspilot.investigator import _requests_unbound_resource_lookup
+    
+>       assert _requests_unbound_resource_lookup([
+            {"body": "����֮ǰ���Ҳ������⻧���˺ţ���ֻ����Ϊʲô���ܲ顣"},
+        ]) is False
+E       AssertionError: assert True is False
+E        +  where True = <function _requests_unbound_resource_lookup at 0x000002BBA775D590>([{'body': '����֮ǰ���Ҳ������⻧���˺ţ���ֻ����Ϊʲô���ܲ顣'}])
+
+tests\test_m2_02_hf_01.py:47: AssertionError
+______________ test_hf_b_stale_gate_stops_after_no_tool_progress ______________
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\ѧϰ\agent����Ŀ\tests\test_m2_02_hf_01.py", line 109, in test_hf_b_stale_gate_stops_after_no_tool_progress
+  |     asyncio.run(investigator.run_investigation(
+  |     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         task_id, "support-a", db_path=demo_db,
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         checkpoint_db_path=demo_db.parent / "hf01-stale-noop-checkpoint.sqlite3",
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         d3_mode=True, s2_mode=True, executor_id="executor-a", run_id=run_id,
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |     ))
+  |     ^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 204, in run
+  |     return runner.run(main)
+  |            ~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 127, in run
+  |     return self._loop.run_until_complete(task)
+  |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\base_events.py", line 719, in run_until_complete
+  |     return future.result()
+  |            ~~~~~~~~~~~~~^^
+  |   File "D:\ѧϰ\agent����Ŀ\opspilot\investigator.py", line 1802, in run_investigation
+  |     async with Client(server_params) as mcp_client:
+  |                ~~~~~~^^^^^^^^^^^^^^^
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\client.py", line 480, in __aexit__
+  |     await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+  |   File "D:\python\Lib\contextlib.py", line 768, in __aexit__
+  |     raise exc
+  |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+  |     cb_suppress = await cb(*exc_details)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\contextlib.py", line 235, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\stdio.py", line 201, in stdio_client
+  |     async with anyio.create_task_group() as tg:
+  |                ~~~~~~~~~~~~~~~~~~~~~~~^^
+  |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+  |     raise BaseExceptionGroup(
+  |         "unhandled errors in a TaskGroup", self._exceptions
+  |     ) from None
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\stdio.py", line 205, in stdio_client
+    |     yield read_stream, write_stream
+    |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+    |     cb_suppress = await cb(*exc_details)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\client\session.py", line 514, in __aexit__
+    |     result = await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+    |     raise BaseExceptionGroup(
+    |         "unhandled errors in a TaskGroup", self._exceptions
+    |     ) from None
+    | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "D:\ѧϰ\agent����Ŀ\opspilot\investigator.py", line 1975, in run_investigation
+      |     await graph.ainvoke(
+      |     ...<12 lines>...
+      |     )
+      |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\langgraph\pregel\main.py", line 4178, in ainvoke
+      |     async for chunk in self.astream(
+      |     ...<30 lines>...
+      |             chunks.append(chunk)
+      |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\langgraph\pregel\main.py", line 3529, in astream
+      |     async for _ in runner.atick(
+      |     ...<16 lines>...
+      |             yield o
+      |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\langgraph\pregel\_runner.py", line 397, in atick
+      |     await arun_with_retry(
+      |     ...<15 lines>...
+      |     )
+      |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\langgraph\pregel\_retry.py", line 737, in arun_with_retry
+      |     return await task.proc.ainvoke(task.input, config)
+      |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\langgraph\_internal\_runnable.py", line 756, in ainvoke
+      |     input = await asyncio.create_task(
+      |             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |         step.ainvoke(input, config, **kwargs), context=context
+      |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |     )
+      |     ^
+      |   File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\langgraph\_internal\_runnable.py", line 522, in ainvoke
+      |     ret = await self.afunc(*args, **kwargs)
+      |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |   File "D:\ѧϰ\agent����Ŀ\opspilot\investigator.py", line 810, in investigate
+      |     messages = _prompt_messages(
+      |         db_path, task_id, state, context_metadata=context_metadata,
+      |         run_id=run_id, s2_mode=s2_mode,
+      |     )
+      |   File "D:\ѧϰ\agent����Ŀ\opspilot\investigator.py", line 411, in _prompt_messages
+      |     knowledge = load_scope_knowledge(str(binding["service_id"]), include_legacy=asks_about_old_docs)
+      |   File "D:\ѧϰ\agent����Ŀ\opspilot\domain\knowledge_assets.py", line 50, in load_scope_knowledge
+      |     raise KnowledgeIntegrityError("An API Scope Knowledge document digest does not match its manifest.")
+      | opspilot.domain.knowledge_assets.KnowledgeIntegrityError: An API Scope Knowledge document digest does not match its manifest.
+      | During task with name 'investigate' and id 'e3912a81-ba8b-f798-0c87-309d574f800a'
+      +------------------------------------
+____ test_hf_d_candidate_cues_are_versioned_strict_and_consumed_by_policy _____
+
+    def test_hf_d_candidate_cues_are_versioned_strict_and_consumed_by_policy() -> None:
+>       from opspilot.investigator import (
+            NormalizedCandidateCues,
+            _consume_h_normalized_cues,
+            _parse_h_normalized_cues,
+        )
+E       ImportError: cannot import name 'NormalizedCandidateCues' from 'opspilot.investigator' (D:\ѧϰ\agent����Ŀ\opspilot\investigator.py)
+
+tests\test_m2_02_hf_01.py:136: ImportError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_hf_01.py::test_hf_a_scope_intent_distinguishes_pure_mixed_negated_and_quoted_cases
+FAILED tests/test_m2_02_hf_01.py::test_hf_a_legacy_guard_does_not_treat_quoted_refusal_as_current_out_of_scope_command
+FAILED tests/test_m2_02_hf_01.py::test_hf_b_stale_gate_stops_after_no_tool_progress
+FAILED tests/test_m2_02_hf_01.py::test_hf_d_candidate_cues_are_versioned_strict_and_consumed_by_policy
+4 failed in 2.73s

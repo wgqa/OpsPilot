@@ -1,0 +1,318 @@
+{
+  "journey_id": "G7_H1",
+  "strategy": "A",
+  "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+  "session_id": "session-aab86a71-bab0-4528-b03a-d8c035052096",
+  "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+  "actual_foreign_request": null,
+  "graph_result": {
+    "stage": "complete",
+    "gate": {
+      "decision": "INCONCLUSIVE",
+      "reason_code": "HTTP_404_HAS_NO_SCOPE_ROOT_CAUSE",
+      "request_id": "3c48ac5372342169",
+      "decision_id": null,
+      "checked_fact_ids": [
+        "evidence-c76b1e57-b4ab-46d1-b46d-afce800deaf9"
+      ],
+      "evidence_digests": {
+        "evidence-c76b1e57-b4ab-46d1-b46d-afce800deaf9": "adf5ea65808d7f18f144d11ef4ddc2fc81e1e60a9d05c912419a4759b56f76b0"
+      },
+      "observed_versions": {
+        "evidence-c76b1e57-b4ab-46d1-b46d-afce800deaf9": {
+          "after": {
+            "config_version": 8,
+            "policy_version": 3,
+            "principal_version": 2
+          },
+          "before": {
+            "config_version": 8,
+            "policy_version": 3,
+            "principal_version": 2
+          }
+        }
+      },
+      "missing_predicates": [],
+      "predicate": {},
+      "side_effects": []
+    },
+    "blocked_reason": null,
+    "plan_hash": null,
+    "diagnosis_draft": {
+      "latest_model_summary": "**Verdict: INCONCLUSIVE — no S2 scope diagnosis possible.**\n\n**Claim (unverified):** user says the page returns 404 and suspects missing `orders.read`.\n\n**Verified facts (task-scoped Probe, call-637f…):**\n- Route `GET /api/orders/demo-order` on `orders-demo` / `integration-a` / `principal-a` returned **HTTP 404**, request_id `3c48ac5372342169`.\n- Auth was accepted: `AUTH_ACCEPTED`, `auth_event_scope_valid: true`; authn/authz event IDs 1/1.\n- Versions stable during probe (config 8, policy 3, principal 2).\n- `business_order_id` and `business_order_status` are null.\n\n**Interpretation:** Per `api-scope-current` 1.0.0 and auth-scope-triage 1.0.0, a 404 is a symptom and cannot support a scope diagnosis; there is no current `DENY / SCOPE_INSUFFICIENT` decision, and no missing-scope difference can be verified. The 404 plus null order fields is consistent with the demo order not being found, not with a `orders.read` gap. No configuration change was made and no action was taken; if the 404 persists, the next step needs a fresh live probe (or a 403 with a correlated Request ID) before any scope question can be examined."
+    }
+  },
+  "s2_outcome": {
+    "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+    "task_status": "INCONCLUSIVE",
+    "business_outcome": "INCONCLUSIVE",
+    "currentness": "CURRENT",
+    "reason_code": "HTTP_404_HAS_NO_SCOPE_ROOT_CAUSE",
+    "diagnosis_receipt": null,
+    "draft": null,
+    "handoff_receipt": null,
+    "submitted": false,
+    "scope_authorized": false
+  },
+  "trace": {
+    "runs": [
+      {
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "kind": "INVESTIGATE",
+        "status": "SUCCEEDED",
+        "blocked_reason": null,
+        "expected_control_revision": 0,
+        "applied_critical_message_seq": 0,
+        "created_at": "2026-10-19T10:12:15.446+00:00",
+        "started_at": "2026-10-19T10:12:15.460+00:00",
+        "ended_at": "2026-10-19T10:12:20.604+00:00"
+      }
+    ],
+    "model_calls": [
+      {
+        "call_id": "call-637f9687-4996-430d-abcc-8788cf7e3fed",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "f2607af5a0aa2c7b7b61ecb3162aaac17351a3be34e381202747d705a43dc5d4",
+        "provider_response_id": "b1840058-1a90-495f-aca3-ad585e908c49",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":896},\"input_tokens\":2103,\"output_token_details\":{\"reasoning\":19},\"output_tokens\":80,\"total_tokens\":2183}",
+        "tool_calls_json": "[{\"args\":{\"integration_id\":\"integration-a\",\"service_id\":\"orders-demo\"},\"id\":\"call_00_ybBorzec1ho3M5AJ3pW23242\",\"name\":\"probe_endpoint\"}]",
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-f4231db1-22a2-4050-bb7e-28c703f05303",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "01a9561bf9a58d1f6699b336009e3abc8d84f60b70b168b33aac2a6de05807b1",
+        "provider_response_id": "c54088b7-ee66-495b-a4c4-413f07bc5f8a",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":512},\"input_tokens\":2316,\"output_token_details\":{\"reasoning\":304},\"output_tokens\":613,\"total_tokens\":2929}",
+        "tool_calls_json": "[]",
+        "assistant_text": "**Verdict: INCONCLUSIVE — no S2 scope diagnosis possible.**\n\n**Claim (unverified):** user says the page returns 404 and suspects missing `orders.read`.\n\n**Verified facts (task-scoped Probe, call-637f…):**\n- Route `GET /api/orders/demo-order` on `orders-demo` / `integration-a` / `principal-a` returned **HTTP 404**, request_id `3c48ac5372342169`.\n- Auth was accepted: `AUTH_ACCEPTED`, `auth_event_scope_valid: true`; authn/authz event IDs 1/1.\n- Versions stable during probe (config 8, policy 3, principal 2).\n- `business_order_id` and `business_order_status` are null.\n\n**Interpretation:** Per `api-scope-current` 1.0.0 and auth-scope-triage 1.0.0, a 404 is a symptom and cannot support a scope diagnosis; there is no current `DENY / SCOPE_INSUFFICIENT` decision, and no missing-scope difference can be verified. The 404 plus null order fields is consistent with the demo order not being found, not with a `orders.read` gap. No configuration change was made and no action was taken; if the 404 persists, the next step needs a fresh live probe (or a 403 with a correlated Request ID) before any scope question can be examined."
+      }
+    ],
+    "context_provenance": [
+      {
+        "call_id": "call-637f9687-4996-430d-abcc-8788cf7e3fed",
+        "attempt_id": "attempt-699b9bf7-13bd-42c6-a8bc-a8f07596b593",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "f2607af5a0aa2c7b7b61ecb3162aaac17351a3be34e381202747d705a43dc5d4",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "a99dfe645e7cfb4bee53a790ba90ac39c0669770471d67217ba59bbb2dc6c098",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:12:16.215+00:00",
+        "completed_at": "2026-10-19T10:12:17.131+00:00",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc"
+      },
+      {
+        "call_id": "call-f4231db1-22a2-4050-bb7e-28c703f05303",
+        "attempt_id": "attempt-7e6be9be-233f-45d0-834d-fccd576ce0df",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m2-02-context-v3",
+        "prompt_digest": "01a9561bf9a58d1f6699b336009e3abc8d84f60b70b168b33aac2a6de05807b1",
+        "tool_schema_version": "m2-02-read-only-tools-v1",
+        "tool_schema_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "selected_skill_name": "auth-scope-triage",
+        "selected_skill_version": "1.0.0",
+        "selected_skill_digest": "69869d9e0e0555dededfbe6016f7e2ae656b28e9824857d705c7bd00c9c91549",
+        "selected_knowledge_json": "[{\"digest\":\"962eeacb060c9c9891b2c4f56956b6be74dede489fea62db49571913b51fb8c8\",\"document_id\":\"api-scope-current\",\"source\":\"OpsPilot local API authorization guide\",\"valid_from\":\"2026-01-01\",\"version\":\"1.0.0\"}]",
+        "evidence_ids_json": "[\"evidence-c76b1e57-b4ab-46d1-b46d-afce800deaf9\"]",
+        "model_status": "OK",
+        "built_at": "2026-10-19T10:12:17.268+00:00",
+        "completed_at": "2026-10-19T10:12:20.541+00:00",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc"
+      }
+    ],
+    "attempts": [
+      {
+        "attempt_id": "attempt-699b9bf7-13bd-42c6-a8bc-a8f07596b593",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:16",
+        "completed_at": "2026-10-19 10:12:17"
+      },
+      {
+        "attempt_id": "attempt-368e099b-ba55-4ace-ae51-0a1d7b6fe9af",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "kind": "MCP",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:17",
+        "completed_at": "2026-10-19 10:12:17"
+      },
+      {
+        "attempt_id": "attempt-7e6be9be-233f-45d0-834d-fccd576ce0df",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "kind": "MODEL",
+        "tool_name": null,
+        "status": "OK",
+        "error_class": null,
+        "created_at": "2026-10-19 10:12:17",
+        "completed_at": "2026-10-19 10:12:20"
+      }
+    ],
+    "run_inputs": [],
+    "mcp_observations": [
+      {
+        "observation_id": "observation-63c9ac75-690e-4e96-8f65-3c6b7f18a3de",
+        "created_at": "2026-10-19 10:12:17",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-c76b1e57-b4ab-46d1-b46d-afce800deaf9",
+        "argument_digest": "e73dee2e592d507d69f53b1397e01d90e84e6bf0e4596673cfc5e06378936957",
+        "result_json": "{\"data_source\":\"http:loopback-demo-business-api\",\"fact_type\":\"endpoint_probe\",\"facts\":{\"auth_event_id\":1,\"auth_event_observed_at\":\"2026-10-19 10:12:17\",\"auth_event_result\":\"AUTH_ACCEPTED\",\"auth_event_scope_valid\":true,\"authn_event_id\":1,\"authz_event_id\":1,\"business_order_id\":null,\"business_order_status\":null,\"credential_ref\":\"cred-v2\",\"http_status\":404,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"request_id\":\"3c48ac5372342169\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\",\"versions_stable_during_probe\":true},\"observed_at\":\"2026-10-19 10:12:17\",\"observed_versions\":{\"after\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2}},\"original_result_ref\":\"http://127.0.0.1:loopback/api/orders/demo-order#3c48ac5372342169\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo:integration-a:/api/orders/demo-order\",\"task_id\":\"task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9\",\"tenant_id\":\"tenant-a\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc"
+      }
+    ],
+    "gate_traces": [
+      {
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "decision": "INCONCLUSIVE",
+        "reason_code": "HTTP_404_HAS_NO_SCOPE_ROOT_CAUSE",
+        "request_id": "3c48ac5372342169",
+        "decision_id": null,
+        "evidence_ids_json": "[\"evidence-c76b1e57-b4ab-46d1-b46d-afce800deaf9\"]",
+        "predicate_json": "{}",
+        "created_at": "2026-10-19T10:12:20.563+00:00"
+      }
+    ],
+    "diagnosis_receipts": [],
+    "handoff_drafts": [],
+    "attempt_counts": {
+      "MCP": 1,
+      "MODEL": 2
+    },
+    "outbox_events": [
+      {
+        "event_id": "event-b625e59d-4fb1-41c0-9a37-0bb8e8302481",
+        "session_id": "session-aab86a71-bab0-4528-b03a-d8c035052096",
+        "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+        "event_kind": "TASK_CREATED",
+        "source_kind": "COMMAND",
+        "source_id": "command-1f6847c6-e0a4-4712-aae4-050d679caea1",
+        "created_at": "2026-10-19T10:12:15.446+00:00"
+      },
+      {
+        "event_id": "event-781ac1d4-45dd-4f31-835b-de076c5ebe7d",
+        "session_id": "session-aab86a71-bab0-4528-b03a-d8c035052096",
+        "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+        "event_kind": "MESSAGE_ACCEPTED",
+        "source_kind": "COMMAND",
+        "source_id": "command-1f6847c6-e0a4-4712-aae4-050d679caea1",
+        "created_at": "2026-10-19T10:12:15.447+00:00"
+      },
+      {
+        "event_id": "event-36c12b02-6240-42d6-9af6-8cafa0f1460a",
+        "session_id": null,
+        "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+        "event_kind": "S2_SAFE_STOP",
+        "source_kind": "S2_GATE",
+        "source_id": "s2-gate-74f7888fc0e1355c29578d092abecefff10975a7",
+        "created_at": "2026-10-19T10:12:20.577+00:00"
+      },
+      {
+        "event_id": "event-f63ea1ac-93d3-42e8-a2d3-e4f61d85c7cd",
+        "session_id": "session-aab86a71-bab0-4528-b03a-d8c035052096",
+        "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+        "event_kind": "RUN_STATUS_SUCCEEDED",
+        "source_kind": "RUN",
+        "source_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "created_at": "2026-10-19T10:12:20.604+00:00"
+      }
+    ],
+    "session_events": [
+      {
+        "event_id": "event-b625e59d-4fb1-41c0-9a37-0bb8e8302481",
+        "session_id": "session-aab86a71-bab0-4528-b03a-d8c035052096",
+        "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "event_seq": 2,
+        "event_kind": "TASK_CREATED",
+        "source_kind": "COMMAND",
+        "source_id": "command-1f6847c6-e0a4-4712-aae4-050d679caea1",
+        "happened_at": "2026-10-19T10:12:15.446+00:00"
+      },
+      {
+        "event_id": "event-781ac1d4-45dd-4f31-835b-de076c5ebe7d",
+        "session_id": "session-aab86a71-bab0-4528-b03a-d8c035052096",
+        "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "event_seq": 3,
+        "event_kind": "MESSAGE_ACCEPTED",
+        "source_kind": "COMMAND",
+        "source_id": "command-1f6847c6-e0a4-4712-aae4-050d679caea1",
+        "happened_at": "2026-10-19T10:12:15.447+00:00"
+      },
+      {
+        "event_id": "event-36c12b02-6240-42d6-9af6-8cafa0f1460a",
+        "session_id": "session-aab86a71-bab0-4528-b03a-d8c035052096",
+        "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+        "run_id": null,
+        "event_seq": 4,
+        "event_kind": "S2_SAFE_STOP",
+        "source_kind": "S2_GATE",
+        "source_id": "s2-gate-74f7888fc0e1355c29578d092abecefff10975a7",
+        "happened_at": "2026-10-19T10:12:20.577+00:00"
+      },
+      {
+        "event_id": "event-f63ea1ac-93d3-42e8-a2d3-e4f61d85c7cd",
+        "session_id": "session-aab86a71-bab0-4528-b03a-d8c035052096",
+        "task_id": "task-653e570f-2ba4-45e7-9f14-7b4fa21b46b9",
+        "run_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "event_seq": 5,
+        "event_kind": "RUN_STATUS_SUCCEEDED",
+        "source_kind": "RUN",
+        "source_id": "run-a41318f9-2398-45bf-8861-56615699adfc",
+        "happened_at": "2026-10-19T10:12:20.604+00:00"
+      }
+    ]
+  },
+  "side_effects": {
+    "scope_write_count": 0,
+    "grant_rows": [
+      {
+        "tenant_id": "tenant-a",
+        "principal_id": "principal-a",
+        "granted_scopes_json": "[\"orders.read\"]",
+        "grant_version": 1
+      },
+      {
+        "tenant_id": "tenant-b",
+        "principal_id": "principal-b",
+        "granted_scopes_json": "[\"orders.read\"]",
+        "grant_version": 1
+      }
+    ],
+    "policy_rows": [
+      {
+        "tenant_id": "tenant-a",
+        "service_id": "orders-demo",
+        "route": "/api/orders/demo-order",
+        "required_scopes_json": "[\"orders.read\"]",
+        "scope_policy_version": 1
+      },
+      {
+        "tenant_id": "tenant-b",
+        "service_id": "orders-demo",
+        "route": "/api/orders/demo-order",
+        "required_scopes_json": "[\"orders.read\"]",
+        "scope_policy_version": 1
+      }
+    ],
+    "receipts": 0,
+    "drafts": 0,
+    "action_intents": 0,
+    "action_ledgers": 0,
+    "s2_handoff_tables": []
+  }
+}

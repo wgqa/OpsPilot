@@ -1,0 +1,23 @@
+exit_code=1
+stdout:
+
+stderr:
+file:///D:/%E5%AD%A6%E4%B9%A0/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/e2e/m2-02-hf-01-browser.mjs:186
+    throw new Error(`CHAT_READONLY answer did not faithfully explain HANDOFF_READY: ${chat.answer.slice(0, 500)}`);
+          ^
+
+Error: CHAT_READONLY answer did not faithfully explain HANDOFF_READY: ✳
+OpsPilot
+2026/10/19 17:34:30
+核实结果如下（基于当前可用证据）：
+
+- 绑定服务：`orders-demo`
+- 路由：`/api/orders/demo-order`
+- 最近两次端点探针均为 **HTTP 403**：
+  - `evidence-be8c898e-e459-4c02-ac0f-5e87839fa8f9`，时间 2026-10-19 09:33:46
+  - `evidence-aaa862dd-08af-4b82-b346-863f9dd5558f`，时间 2026-10-19 09:33:56
+- 两次探针的认证事件结果都是 `AUTH_ACCEPTED`，但业务订单 ID 和状态为空。诊断回执 `s2-receipt-0046eafa-dd7a-4b40-90c7-3d6c1a283446` 指出：当前认证请求被拒绝，原因是绑定主体缺少 `orders.read` 授权范围，原因码为 `CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT`。
+- 因此，截至这些探针时间，接口**仍未恢复可用**，当前
+    at file:///D:/%E5%AD%A6%E4%B9%A0/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/e2e/m2-02-hf-01-browser.mjs:186:11
+
+Node.js v24.16.0

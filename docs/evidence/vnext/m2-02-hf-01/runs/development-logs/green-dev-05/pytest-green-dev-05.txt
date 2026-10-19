@@ -1,0 +1,40 @@
+F........                                                                [100%]
+================================== FAILURES ===================================
+__ test_hf_a_scope_intent_distinguishes_pure_mixed_negated_and_quoted_cases ___
+
+    def test_hf_a_scope_intent_distinguishes_pure_mixed_negated_and_quoted_cases() -> None:
+        from opspilot.investigator import classify_unbound_resource_intent
+    
+        cases = {
+            "��Խ������": ("˳����Ҳ�һ��ͬ����һ���⻧���˺���û��Ȩ�ޡ�", "OUT_OF_SCOPE"),
+            "��Խ��Ӣ��": ("Please inspect another tenant's service account.", "OUT_OF_SCOPE"),
+            "δ��ͬ�⻧����": ("ͬ�⻧��Ҳ���Ҳ���һ�� Principal �ķ���Ȩ�ޡ�", "OUT_OF_SCOPE"),
+            "δ�󶨼���": ("��� integration-b ���δ�󶨼��ɡ�", "OUT_OF_SCOPE"),
+            "��ȷ��": ("��Ҫ��ѯ����⻧��ֻ���鵱ǰ�󶨵Ķ�������", "NONE"),
+            "ͬ��񶨷���": ("������������⻧�ķ����˺ţ�ֻ�鿴��ǰ�󶨶�����", "NONE"),
+            "Ӣ����д��": ("Don't look up another tenant; check only this task's bound order service.", "NONE"),
+            "�񶨺����Խ�綯��": ("Don't access another tenant, but check a different principal.", "OUT_OF_SCOPE"),
+            "��������": ("�����Ϊʲô���ܲ鿴��һ���⻧���˺š�", "CLARIFY"),
+            "�������ö��ǵ�ǰ��ѯ": (
+                "����֮ǰ���Ҳ������⻧���˺ţ���ֻ����Ϊʲô���ܲ顣", "CLARIFY",
+            ),
+            "���Ŀ��": (
+                "���Ȳ鵱ǰ�󶨵Ķ�������ͬʱ˳�����һ���⻧���˺š�", "CLARIFY",
+            ),
+            "˳����Ŀ��": (
+                "�Ⱥ��鱾���񶩵����ٲ鿴ͬ�⻧��һ���������Ȩ��", "CLARIFY",
+            ),
+        }
+        actual = {name: classify_unbound_resource_intent(text) for name, (text, _) in cases.items()}
+>       assert actual == {name: expected for name, (_, expected) in cases.items()}
+E       AssertionError: assert {'��Խ������': 'CL...F_SCOPE', ...} == {'��Խ������': 'OU...F_SCOPE', ...}
+E         
+E         Omitting 11 identical items, use -vv to show
+E         Differing items:
+E         {'��Խ������': 'CLARIFY'} != {'��Խ������': 'OUT_OF_SCOPE'}
+E         Use -v to get more diff
+
+tests\test_m2_02_hf_01.py:49: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_hf_01.py::test_hf_a_scope_intent_distinguishes_pure_mixed_negated_and_quoted_cases
+1 failed, 8 passed in 5.84s

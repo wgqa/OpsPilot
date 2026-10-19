@@ -1,0 +1,92 @@
+..F.                                                                     [100%]
+================================== FAILURES ===================================
+______________ test_hf_b_stale_gate_stops_after_no_tool_progress ______________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/m2-02-hf-01/green-dev-01/pytest-tmp/test_hf_b_stale_gate_stops_aft0/domain.sqlite3')
+live_api = 'http://127.0.0.1:49401'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002E7F25A8770>
+
+    def test_hf_b_stale_gate_stops_after_no_tool_progress(
+        demo_db: Path, live_api: str, monkeypatch,
+    ) -> None:
+        """A genuine Run and checkpoint must not spend its entire budget repeating a no-op."""
+        from opspilot import investigator
+    
+        class NoToolModel:
+            calls = 0
+    
+            def bind_tools(self, *_args, **_kwargs):
+                return self
+    
+            async def ainvoke(self, _messages):
+                self.calls += 1
+                return AIMessage(content="Request ID ��δ�ɵ�ǰ֤��ȷ�ϣ����ȳ��塣")
+    
+        reset_fixture(demo_db, "S2_SCOPE_DENIED")
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        created = create_task_with_initial_run(
+            demo_db, identity, session_id=session_id, service_id="orders-demo",
+            integration_id="integration-a", ticket_id="HF01-STALE-NOOP",
+            initial_message="���鵱ǰ�󶨶��������Ȩ�����⡣",
+            idempotency_key="hf01-stale-noop",
+        )
+        task_id, run_id = str(created["task_id"]), str(created["run_id"])
+    
+        # Seed an actual loopback Probe observation against this queued Run, then
+        # make its timestamp deterministically stale. No model or MCP result is faked.
+        probe = probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)
+        attempt_id, _ = reserve_attempt(
+            demo_db, task_id, "MCP", 6, call_id="hf01-stale-seed-call",
+            tool_call_id="hf01-stale-seed-tool", tool_name="probe_endpoint",
+            argument_digest="hf01-stale-seed-args",
+        )
+        finish_attempt(demo_db, attempt_id, "OK")
+        observation = record_tool_observation(
+            demo_db, task_id=task_id, call_id="hf01-stale-seed-call", attempt_id=attempt_id,
+            tool_call_id="hf01-stale-seed-tool", tool_name="probe_endpoint",
+            arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+            status="OK", result=probe,
+        )
+        with connect(demo_db) as connection:
+            connection.execute("UPDATE d2_attempts SET run_id = ? WHERE attempt_id = ?", (run_id, attempt_id))
+            connection.execute(
+                "UPDATE d2_tool_observations SET created_at = '2000-01-01T00:00:00+00:00' "
+                "WHERE evidence_id = ?", (observation["evidence_id"],),
+            )
+    
+        model = NoToolModel()
+        monkeypatch.setenv(MODEL_API_KEY, "test-only-no-network")
+        monkeypatch.setenv(MODEL_NAME, "hf01-no-tool-test-model")
+        monkeypatch.setattr(investigator, "ChatOpenAI", lambda **_kwargs: model)
+    
+        asyncio.run(investigator.run_investigation(
+            task_id, "support-a", db_path=demo_db,
+            checkpoint_db_path=demo_db.parent / "hf01-stale-noop-checkpoint.sqlite3",
+            d3_mode=True, s2_mode=True, executor_id="executor-a", run_id=run_id,
+        ))
+    
+        assert model.calls == 1, "a no-tool/no-progress model response must terminate or ask for input"
+        assert attempt_counts(demo_db, task_id)["MODEL"] == 1
+        with connect(demo_db) as connection:
+            gate_count = connection.execute(
+                "SELECT COUNT(*) FROM s2_gate_traces WHERE task_id = ? AND run_id = ?", (task_id, run_id),
+            ).fetchone()[0]
+            receipt_count = connection.execute(
+                "SELECT COUNT(*) FROM s2_diagnosis_receipts WHERE task_id = ?", (task_id,),
+            ).fetchone()[0]
+            draft_count = connection.execute(
+                "SELECT COUNT(*) FROM s2_handoff_drafts WHERE task_id = ?", (task_id,),
+            ).fetchone()[0]
+            writes = connection.execute(
+                "SELECT (SELECT COUNT(*) FROM principal_scope_grants) + "
+                "(SELECT COUNT(*) FROM route_scope_policies)"
+            ).fetchone()[0]
+        assert gate_count <= 3
+>       assert receipt_count == 0 and draft_count == 0 and writes == 0
+E       assert (0 == 0 and 0 == 0 and 4 == 0)
+
+tests\test_m2_02_hf_01.py:132: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_hf_01.py::test_hf_b_stale_gate_stops_after_no_tool_progress
+1 failed, 3 passed in 2.64s
