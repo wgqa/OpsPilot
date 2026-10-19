@@ -1,0 +1,36 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+_______ test_m301_red_s1_memory_is_derived_from_case_not_fixed_template _______
+tests\test_m301_red.py:26: in test_m301_red_s1_memory_is_derived_from_case_not_fixed_template
+    assert candidate.get("schema_version") == "opspilot-case-memory-v1"
+E   AssertionError: assert None == 'opspilot-case-memory-v1'
+E    +  where None = <built-in method get of dict object at 0x000002AD59F56D00>('schema_version')
+E    +    where <built-in method get of dict object at 0x000002AD59F56D00> = {'memory_id': 'episodic-9058b57a-7565-472d-bd07-b3f6551494c1', 'tenant_id': 'tenant-a', 'project_id': 'service:orders-demo', 'type': 'EPISODIC', ...}.get
+_____ test_m301_red_s2_diagnosis_receipt_can_create_diagnosed_experience ______
+tests\test_m301_red.py:48: in test_m301_red_s2_diagnosis_receipt_can_create_diagnosed_experience
+    candidate = create_memory_candidate(demo_db, source_task_id, "support-a")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\domain\episodic_memory.py:265: in create_memory_candidate
+    source = _source_for_task(connection, source_task_id)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\domain\episodic_memory.py:201: in _source_for_task
+    raise MemorySourceRejected(
+E   opspilot.domain.episodic_memory.MemorySourceRejected: Memory requires a committed same-task REPAIR, verified online 200, frozen report, and checkable Evidence.
+_____ test_m301_red_s2_investigator_context_can_select_active_case_memory _____
+tests\test_m301_red.py:84: in test_m301_red_s2_investigator_context_can_select_active_case_memory
+    assert "m301-case-memory-s2" in "\n".join(str(item.content) for item in messages)
+E   assert 'm301-case-memory-s2' in 'You are OpsPilot\'s read-only support investigator. The caller, tenant, task, service, integration, principal, thread...","document_id":"api-scope-legacy","source":"archived onboarding notes","valid_from":"2024-03-01","version":"0.8.0"}]}'
+E    +  where 'You are OpsPilot\'s read-only support investigator. The caller, tenant, task, service, integration, principal, thread...","document_id":"api-scope-legacy","source":"archived onboarding notes","valid_from":"2024-03-01","version":"0.8.0"}]}' = <built-in method join of str object at 0x00007FF89AC198A8>(<generator object test_m301_red_s2_investigator_context_can_select_active_case_memory.<locals>.<genexpr> at 0x000002AD5A327840>)
+E    +    where <built-in method join of str object at 0x00007FF89AC198A8> = '\n'.join
+_________ test_m301_red_web_exposes_candidate_creation_for_task_owner _________
+tests\test_m301_red.py:117: in test_m301_red_web_exposes_candidate_creation_for_task_owner
+    assert response.status_code == 201, response.text
+E   AssertionError: {"detail":"Not Found"}
+E   assert 404 == 201
+E    +  where 404 = <Response [404 Not Found]>.status_code
+=========================== short test summary info ===========================
+FAILED tests/test_m301_red.py::test_m301_red_s1_memory_is_derived_from_case_not_fixed_template
+FAILED tests/test_m301_red.py::test_m301_red_s2_diagnosis_receipt_can_create_diagnosed_experience
+FAILED tests/test_m301_red.py::test_m301_red_s2_investigator_context_can_select_active_case_memory
+FAILED tests/test_m301_red.py::test_m301_red_web_exposes_candidate_creation_for_task_owner
+4 failed in 2.22s
