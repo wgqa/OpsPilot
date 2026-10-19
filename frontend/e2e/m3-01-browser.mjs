@@ -161,6 +161,13 @@ try {
   result.target = {
     task_id: target.task_id, run_id: target.run_id, run_status: targetRun.status,
     gate: targetInspector.current_gate,
+    current_evidence: targetInspector.evidence.map((item) => ({
+      evidence_id: item.evidence_id, fact_type: item.fact_type,
+      versions: item.versions,
+      facts: Object.fromEntries(Object.entries(item.facts ?? {}).filter(([key]) =>
+        ['http_status', 'request_id', 'authn_result_code', 'outcome', 'reason_code',
+          'missing_scopes', 'required_scopes', 'granted_scopes', 'principal_status'].includes(key))),
+    })),
     selected_contexts: selectedContexts,
     model_traces: targetInspector.investigation_model_traces.map((item) => ({
       model_id: item.model_id, status: item.status, prompt_digest: item.prompt_digest,
