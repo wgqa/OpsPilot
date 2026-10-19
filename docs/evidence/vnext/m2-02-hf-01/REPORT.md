@@ -55,7 +55,7 @@ H 使用带版本的严格 Schema 验证模型归一化结果。候选内容保�
 | 验证 | 结果 | 原始证据 |
 |---|---|---|
 | 冻结 HF 定向测试 | 15 passed；之后补充 G8 否定/非证明措辞测试 4 passed | `runs/green-dev-18-targeted-pytest.txt`、`runs/green-dev-25-g8-nonproof-pytest.txt` |
-| 全量 pytest（最终源代码） | **171 passed in 132.17s** | `runs/full-pytest-20624cf.txt` |
+| 全量 pytest（最终源代码） | **171 passed in 132.17s**，覆盖任务卡要求的既有 154 项 M1/M1-HF-01/M2-01 回归及本轮新增测试 | `runs/full-pytest-20624cf.txt` |
 | Vue/TypeScript 生产构建 | PASS，Vite 8.3.4 | `runs/frontend-build-final.txt` |
 | Microsoft Edge Provider/MCP Web 端到端 | PASS；正式纠错、新 Run、Request 关联、Receipt、Draft、只读追问 | `runs/browser-e2e-final-752173a/` |
 | 真实 MCP stdio | PASS；tools/list、工具调用、403 事实、同 Request 授权决策及越界负例 | `runs/mcp-stdio-s2-final.txt` |
