@@ -33,6 +33,7 @@ from opspilot.domain.task_control import (
     apply_pending_critical_inputs,
     claim_task_run,
     create_task_with_initial_run,
+    create_session,
     finish_task_run,
     trusted_identity,
 )
@@ -48,8 +49,11 @@ PASSWORDS = {
 ORIGIN = "http://testserver"
 
 
-def _s2_case(db: Path, live_api: str, prefix: str, *, handoff: bool = False) -> dict[str, object]:
-    reset_fixture(db, "S2_SCOPE_DENIED")
+def _s2_case(
+    db: Path, live_api: str, prefix: str, *, handoff: bool = False, reset: bool = True,
+) -> dict[str, object]:
+    if reset:
+        reset_fixture(db, "S2_SCOPE_DENIED")
     identity = trusted_identity(db, "support-a")
     from opspilot.domain.task_control import create_session
 
@@ -111,6 +115,41 @@ def _s2_case(db: Path, live_api: str, prefix: str, *, handoff: bool = False) -> 
             expected_control_revision=revision, handoff_kind="SCOPE_REVIEW",
         )
     return result
+
+
+def _s1_401_case(db: Path, live_api: str, prefix: str) -> dict[str, object]:
+    """Create one real same-Run 401 Probe without clearing existing source Memories."""
+    with connect(db) as connection:
+        connection.execute(
+            "UPDATE integrations SET credential_ref = 'cred-v1', config_version = config_version + 1 "
+            "WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+        )
+    identity = trusted_identity(db, "support-a")
+    session_id = str(create_session(db, identity)["session_id"])
+    created = create_task_with_initial_run(
+        db, identity, session_id=session_id, service_id="orders-demo",
+        integration_id="integration-a", ticket_id=f"{prefix}-ticket",
+        initial_message="订单接口未认证，请用实际响应核实当前状态。",
+        idempotency_key=f"{prefix}-task",
+    )
+    task_id, run_id = str(created["task_id"]), str(created["run_id"])
+    claim_task_run(db, identity, run_id)
+    apply_pending_critical_inputs(db, identity, run_id)
+    probe = probe_endpoint_fact(db, task_id, "orders-demo", "integration-a", live_api)
+    assert probe["facts"]["http_status"] == 401
+    call_id = f"{prefix}-probe-call"
+    attempt, _ = reserve_attempt(
+        db, task_id, "MCP", 6, call_id=call_id, tool_call_id=f"{prefix}-probe-tool",
+        tool_name="probe_endpoint", argument_digest=f"{prefix}-probe-args", run_id=run_id,
+    )
+    finish_attempt(db, attempt, "OK")
+    record_tool_observation(
+        db, task_id=task_id, call_id=call_id, attempt_id=attempt,
+        tool_call_id=f"{prefix}-probe-tool", tool_name="probe_endpoint",
+        arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+        status="OK", result=probe,
+    )
+    return {"task_id": task_id, "run_id": run_id}
 
 
 def test_s2_diagnosed_and_scope_escalated_cases_have_distinct_real_sources(
@@ -198,14 +237,14 @@ def test_s2_case_memory_is_in_real_investigator_prompt_for_different_task_only(
         demo_db, str(candidate["memory_id"]), "approver-a",
         idempotency_key="m301-prompt-confirm",
     )
-    target = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a")
-    task_b = str(target["task_id"])
+    target = _s2_case(demo_db, live_api, "m301-prompt-target", reset=False)
+    task_b, run_b = str(target["task_id"]), str(target["run_id"])
     assert task_b != task_a
 
     enabled_metadata: dict[str, object] = {}
     enabled_messages = _prompt_messages(
         demo_db, task_b, {"task_binding_id": task_b, "evidence_ids": []},
-        context_metadata=enabled_metadata, s2_mode=True,
+        context_metadata=enabled_metadata, run_id=run_b, s2_mode=True,
     )
     enabled_prompt = "\n".join(str(item.content) for item in enabled_messages)
     assert str(candidate["memory_id"]) in enabled_prompt
@@ -217,11 +256,35 @@ def test_s2_case_memory_is_in_real_investigator_prompt_for_different_task_only(
     disabled_metadata: dict[str, object] = {}
     disabled_messages = _prompt_messages(
         demo_db, task_b, {"task_binding_id": task_b, "evidence_ids": []},
-        context_metadata=disabled_metadata, s2_mode=True, memory_enabled=False,
+        context_metadata=disabled_metadata, run_id=run_b, s2_mode=True, memory_enabled=False,
     )
     disabled_prompt = "\n".join(str(item.content) for item in disabled_messages)
     assert str(candidate["memory_id"]) not in disabled_prompt
     assert disabled_metadata["selected_memories"] == []
+
+
+def test_s2_case_memory_does_not_cross_into_a_current_401_task(
+    demo_db: Path, live_api: str,
+) -> None:
+    from opspilot.investigator import _prompt_messages
+
+    source = _s2_case(demo_db, live_api, "m301-cross-type-source")
+    candidate = create_memory_candidate(
+        demo_db, str(source["task_id"]), "support-a", idempotency_key="m301-cross-type-candidate",
+    )
+    confirm_memory(
+        demo_db, str(candidate["memory_id"]), "approver-a",
+        idempotency_key="m301-cross-type-confirm",
+    )
+    target = _s1_401_case(demo_db, live_api, "m301-cross-type-target")
+    task_b, run_b = str(target["task_id"]), str(target["run_id"])
+    metadata: dict[str, object] = {}
+    prompt = "\n".join(str(item.content) for item in _prompt_messages(
+        demo_db, task_b, {"task_binding_id": task_b, "evidence_ids": []},
+        context_metadata=metadata, run_id=run_b, s2_mode=True,
+    ))
+    assert candidate["memory_id"] not in prompt
+    assert metadata["selected_memories"] == []
 
 
 def test_m301_web_memory_lifecycle_uses_session_roles_and_idempotency(

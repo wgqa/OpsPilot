@@ -514,6 +514,126 @@ def _mcp_child_environment(db_path: Path) -> dict[str, str]:
     return environment
 
 
+def _current_evidence_memory_problem_type(
+    db_path: Path,
+    task_id: str,
+    run_id: str | None,
+    binding: dict[str, object],
+) -> str | None:
+    """Select historical guidance only after this Run proves its problem type.
+
+    Task text is an untrusted clue, so a claimed 401/403 cannot choose which
+    case memory is exposed. Current same-Run MCP evidence selects the type.
+    """
+    if str(binding.get("service_id")) != "orders-demo":
+        return None
+    if run_id is None:
+        # Preserve the legacy D5 prompt path, which has no persisted Run evidence.
+        return PROBLEM_TYPE
+
+    from opspilot.domain.s2_diagnosis import (
+        _current_authz, _same_authz_facts, run_evidence_records,
+    )
+
+    evidence = run_evidence_records(db_path, task_id, run_id)
+    probes = [item for item in evidence if item.get("fact_type") == "endpoint_probe"]
+    if not probes:
+        return None
+    latest_probe = max(
+        probes,
+        key=lambda item: (
+            str(item.get("observation_at") or item.get("fetched_at") or ""),
+            int(item.get("observation_sequence", 0) or 0),
+        ),
+    )
+    probe = latest_probe.get("facts")
+    if not isinstance(probe, dict):
+        return None
+    expected_scope = (
+        str(binding.get("tenant_id")),
+        str(binding.get("service_id")),
+        str(binding.get("integration_id")),
+        str(binding.get("principal_id")),
+        str(binding.get("route") or "/api/orders/demo-order"),
+    )
+    probe_scope = (
+        str(latest_probe.get("tenant_id")),
+        str(probe.get("service_id")),
+        str(probe.get("integration_id")),
+        str(probe.get("principal_id")),
+        str(probe.get("route")),
+    )
+    if (
+        str(latest_probe.get("task_id")) != task_id
+        or probe_scope != expected_scope
+        or probe.get("versions_stable_during_probe") is not True
+        or probe.get("auth_event_scope_valid") is not True
+    ):
+        return None
+
+    if probe.get("http_status") == 401 and probe.get("auth_event_result") == "AUTH_REJECTED":
+        return PROBLEM_TYPE
+    if probe.get("http_status") != 403:
+        return None
+
+    request_id = probe.get("request_id")
+    decision_id = probe.get("authz_event_id")
+    if not isinstance(request_id, str) or not request_id or not isinstance(decision_id, int):
+        return None
+    decisions = [
+        item for item in evidence
+        if item.get("fact_type") == "scope_authz_decision"
+        and isinstance(item.get("facts"), dict)
+        and item["facts"].get("request_id") == request_id
+        and item["facts"].get("decision_id") == decision_id
+    ]
+    if not decisions:
+        return None
+    observed = max(
+        decisions,
+        key=lambda item: (
+            str(item.get("observation_at") or item.get("fetched_at") or ""),
+            int(item.get("observation_sequence", 0) or 0),
+        ),
+    ).get("facts")
+    if not isinstance(observed, dict):
+        return None
+    if (
+        observed.get("authn_result_code") != "AUTH_ACCEPTED"
+        or observed.get("outcome") != "DENY"
+        or observed.get("reason_code") != "SCOPE_INSUFFICIENT"
+        or observed.get("resource_binding_valid") is not True
+        or observed.get("currentness") != "CURRENT"
+        or not isinstance(observed.get("missing_scopes"), list)
+        or not observed.get("missing_scopes")
+        or tuple(str(observed.get(key)) for key in (
+            "tenant_id", "service_id", "integration_id", "principal_id", "route",
+        )) != expected_scope
+    ):
+        return None
+    versions = latest_probe.get("observed_versions")
+    before = versions.get("before") if isinstance(versions, dict) else None
+    if (
+        probe.get("authn_event_id") != observed.get("authn_event_id")
+        or probe.get("authz_event_id") != observed.get("decision_id")
+        or not isinstance(before, dict)
+        or before.get("policy_version") != observed.get("credential_policy_version")
+    ):
+        return None
+
+    # Re-read through the same Domain currentness check used by the S2 Gate so a
+    # stale Evidence row cannot select scope guidance after Policy or Grant changed.
+    current = _current_authz(db_path, task_id, request_id)
+    if (
+        current is None
+        or not _same_authz_facts({"facts": observed}, current)
+        or not isinstance(current.get("facts"), dict)
+        or current["facts"].get("currentness") != "CURRENT"
+    ):
+        return None
+    return S2_PROBLEM_TYPE
+
+
 def _prompt_messages(
     db_path: Path,
     task_id: str,
@@ -559,15 +679,16 @@ def _prompt_messages(
     last_gate = state.get("gate_decision") or {}
     from opspilot.skill_assets import SCOPE_PROBLEM_TYPE
 
-    problem_type = (
+    memory_problem_type = _current_evidence_memory_problem_type(db_path, task_id, run_id, binding)
+    skill_problem_type = (
         SCOPE_PROBLEM_TYPE if s2_mode and binding["service_id"] == "orders-demo"
         else PROBLEM_TYPE if binding["service_id"] == "orders-demo" else None
     )
-    skill = load_applicable_skill(problem_type)
+    skill = load_applicable_skill(skill_problem_type)
     assert_task_skill_compatible(db_path, task_id, skill)
     memories = (
-        list_applicable_memories(db_path, task_id, problem_type)
-        if problem_type and memory_enabled else []
+        list_applicable_memories(db_path, task_id, memory_problem_type)
+        if memory_problem_type and memory_enabled else []
     )
     historical_guidance = [
         {

@@ -11,6 +11,9 @@ from opspilot.domain.d2 import (
     canonical_json,
     create_task_binding,
     digest_json,
+    finish_attempt,
+    probe_endpoint_fact,
+    record_tool_observation,
     reserve_attempt,
 )
 from opspilot.domain.database import connect
@@ -29,6 +32,13 @@ from opspilot.domain.episodic_memory import (
 )
 from opspilot.investigator import PROMPT_VERSION, _prompt_messages
 from opspilot.skill_assets import SkillIntegrityError, load_applicable_skill
+from opspilot.domain.task_control import (
+    apply_pending_critical_inputs,
+    claim_task_run,
+    create_session,
+    create_task_with_initial_run,
+    trusted_identity,
+)
 
 
 def _seed_verified_source(db: Path, task_id: str) -> str:
@@ -264,6 +274,62 @@ def test_context_builder_and_reservation_record_exact_sources(demo_db: Path) -> 
     assert row["error_class"] == "TimeoutError"
     assert row["attempt_id"] == attempt_id
     assert row["model_trace_prompt_digest"] is None
+
+
+def test_s1_memory_waits_for_a_current_same_run_401_before_entering_prompt(
+    demo_db: Path, live_api: str,
+) -> None:
+    source_task = _seed_verified_source(demo_db, "unused")
+    memory = create_memory_candidate(demo_db, source_task, "support-a")
+    confirm_memory(demo_db, str(memory["memory_id"]), "approver-a")
+
+    # The untrusted initial message is not sufficient to select the 401 case.
+    with connect(demo_db) as connection:
+        connection.execute(
+            "UPDATE integrations SET credential_ref = 'cred-v1', config_version = config_version + 1 "
+            "WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+        )
+    identity = trusted_identity(demo_db, "support-a")
+    session_id = str(create_session(demo_db, identity)["session_id"])
+    created = create_task_with_initial_run(
+        demo_db, identity, session_id=session_id, service_id="orders-demo",
+        integration_id="integration-a", ticket_id="m301-s1-target",
+        initial_message="订单接口 401，请核实当前认证状态。", idempotency_key="m301-s1-target",
+    )
+    task_b, run_b = str(created["task_id"]), str(created["run_id"])
+    claim_task_run(demo_db, identity, run_b)
+    apply_pending_critical_inputs(demo_db, identity, run_b)
+    state = {"task_binding_id": task_b, "evidence_ids": []}
+    before_metadata: dict[str, object] = {}
+    before_prompt = "\n".join(str(item.content) for item in _prompt_messages(
+        demo_db, task_b, state, context_metadata=before_metadata, run_id=run_b, s2_mode=True,
+    ))
+    assert before_metadata["selected_memories"] == []
+    assert memory["memory_id"] not in before_prompt
+
+    probe = probe_endpoint_fact(demo_db, task_b, "orders-demo", "integration-a", live_api)
+    assert probe["facts"]["http_status"] == 401
+    call_id = "m301-s1-current-probe"
+    attempt, _ = reserve_attempt(
+        demo_db, task_b, "MCP", 6, call_id=call_id, tool_call_id="m301-s1-current-tool",
+        tool_name="probe_endpoint", argument_digest="m301-s1-current-args", run_id=run_b,
+    )
+    finish_attempt(demo_db, attempt, "OK")
+    observation = record_tool_observation(
+        demo_db, task_id=task_b, call_id=call_id, attempt_id=attempt,
+        tool_call_id="m301-s1-current-tool", tool_name="probe_endpoint",
+        arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+        status="OK", result=probe,
+    )
+    after_metadata: dict[str, object] = {}
+    after_prompt = "\n".join(str(item.content) for item in _prompt_messages(
+        demo_db, task_b, {**state, "evidence_ids": [str(observation["evidence_id"])]},
+        context_metadata=after_metadata, run_id=run_b, s2_mode=True,
+    ))
+    selected = after_metadata["selected_memories"]
+    assert memory["memory_id"] in after_prompt
+    assert isinstance(selected, list) and selected[0]["memory_id"] == memory["memory_id"]
+    assert selected[0]["source_task_id"] == source_task != task_b
 
 
 def test_memory_revocation_between_build_and_reserve_blocks_stale_prompt(demo_db: Path) -> None:
