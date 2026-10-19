@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -421,6 +422,8 @@ def test_m2_02_explicit_unbound_lookup_is_a_no_action_terminal(
 def test_m2_02_model_tool_schema_follows_latest_s2_probe_and_request():
     from opspilot.investigator import S2_AUTHZ_TOOL, _s2_model_tools_for_evidence
 
+    observed_at = datetime.now(timezone.utc).isoformat()
+
     schemas = [
         {"type": "function", "function": {"name": name, "parameters": {
             "type": "object", "properties": {"request_id": {"type": "string"}},
@@ -431,7 +434,7 @@ def test_m2_02_model_tool_schema_follows_latest_s2_probe_and_request():
     assert [item["function"]["name"] for item in _s2_model_tools_for_evidence(schemas, [])] == ["probe_endpoint"]
 
     probe = {
-        "fact_type": "endpoint_probe", "fetched_at": "2026-10-19T10:00:00+00:00",
+        "fact_type": "endpoint_probe", "fetched_at": observed_at,
         "facts": {"http_status": 403, "request_id": "current-request"},
     }
     authz_tools = _s2_model_tools_for_evidence(schemas, [probe])
@@ -445,12 +448,14 @@ def test_m2_02_model_tool_schema_follows_latest_s2_probe_and_request():
     assert still_requires_current[0]["function"]["parameters"]["properties"]["request_id"]["enum"] == ["current-request"]
 
     current_authz = {
-        "fact_type": "scope_authz_decision", "facts": {"request_id": "current-request"},
+        "fact_type": "scope_authz_decision", "fetched_at": observed_at,
+        "facts": {"request_id": "current-request"},
     }
     assert _s2_model_tools_for_evidence(schemas, [probe, current_authz]) == []
 
     authentication_failure = {
-        "fact_type": "endpoint_probe", "fetched_at": "2026-10-19T10:01:00+00:00",
+        "fact_type": "endpoint_probe",
+        "fetched_at": (datetime.now(timezone.utc) + timedelta(seconds=1)).isoformat(),
         "facts": {"http_status": 401, "request_id": "authn-request"},
     }
     s1_tools = _s2_model_tools_for_evidence(schemas, [probe, authentication_failure])
