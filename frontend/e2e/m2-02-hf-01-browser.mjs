@@ -41,6 +41,30 @@ function helper(...args) {
   return JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
 }
 
+function hasPositiveReadonlyCompletionClaim(answer) {
+  const claims = [
+    '已经修好', '已修好', '已经修复', '已修复', '已经恢复', '已恢复', '已经提交', '已提交工单',
+    '已经交接', '已交接', 'already fixed', 'has been fixed', 'already repaired', 'has been repaired',
+    'already recovered', 'has recovered', 'already submitted', 'has been submitted',
+    'already handed off', 'has been handed off',
+  ];
+  const negations = [
+    '不能说', '不能确认', '不能认定', '无法确认', '无法认定', '尚未', '还未', '没有', '并未', '未曾',
+    '没有证据', '用户说', '用户称', 'not yet', 'has not', "hasn't", 'have not', "haven't",
+    'cannot say', "can't say", 'cannot determine', 'cannot conclude', 'no evidence',
+    'user says', 'user claims',
+  ];
+  const clauses = answer.toLocaleLowerCase().split(/[\n。！？!?；;，,]/);
+  return clauses.some((clause) => claims.some((claim) => {
+    const normalizedClaim = claim.toLocaleLowerCase();
+    for (const match of clause.matchAll(new RegExp(normalizedClaim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))) {
+      const prefix = clause.slice(Math.max(0, match.index - 36), match.index);
+      if (!negations.some((marker) => prefix.includes(marker.toLocaleLowerCase()))) return true;
+    }
+    return false;
+  }));
+}
+
 async function taskInspector(taskId) {
   const response = await page.evaluate(async (id) => {
     const result = await fetch(`/api/tasks/${encodeURIComponent(id)}/inspector`);
@@ -189,10 +213,9 @@ try {
   const afterChat = helper('--snapshot-only', '--db', dbPath, '--task-id', taskId);
   const unchanged = JSON.stringify(beforeChat) === JSON.stringify(afterChat);
   if (!unchanged) throw new Error('CHAT_READONLY changed the S2 business Task or its protected side-effect counters.');
-  const answerConfirmsNoRepair = ['未修复', '没有修复', '尚未修复', '未修改', '没有修改'].some((term) => chat.answer.includes(term));
-  const answerConfirmsNoSubmission = ['未提交', '尚未提交', '没有提交', '未交接', '尚未交接'].some((term) => chat.answer.includes(term));
-  if (!answerConfirmsNoRepair || !answerConfirmsNoSubmission
-      || ['已经修好', '已修复并', '已提交工单', '已经提交'].some((term) => chat.answer.includes(term))) {
+  const answerConfirmsNoRepair = /(?:未修复|没有(?:任何)?修复(?:动作|记录|证据)?|尚未修复|没有可确认的修复证据|不能(?:认定|确认|说).{0,12}修(?:复|好)|没有证据.{0,16}(?:修复|恢复)|no evidence.{0,30}(?:fixed|repaired|recovered))/is.test(chat.answer);
+  const answerConfirmsNoSubmission = /(?:未提交|尚未提交|没有(?:任何)?提交(?:记录)?|未交接|尚未交接|没有交接记录|not yet submitted|not handed off)/i.test(chat.answer);
+  if (!answerConfirmsNoRepair || !answerConfirmsNoSubmission || hasPositiveReadonlyCompletionClaim(chat.answer)) {
     throw new Error(`CHAT_READONLY answer did not faithfully explain HANDOFF_READY: ${chat.answer.slice(0, 500)}`);
   }
   await page.screenshot({ path: path.join(screenshotDir, '04-readonly-result-followup.png'), fullPage: true });
