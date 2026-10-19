@@ -1,0 +1,541 @@
+[
+  {
+    "case_id": "G8_H1",
+    "strategy": "A",
+    "task_id": "task-redacted-73b9090ab2",
+    "investigation_run_id": "run-redacted-15614d4e95",
+    "chat_run_id": "run-redacted-9dc7b5c6ed",
+    "task_status_before_chat": "WAITING_HANDOFF",
+    "business_outcome_before_chat": "HANDOFF_READY",
+    "graph_result": {
+      "stage": "complete",
+      "gate": {
+        "decision": "HANDOFF_READY",
+        "reason_code": "CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT",
+        "request_id": "id-redacted-1220c63cdf",
+        "decision_id": 1,
+        "checked_fact_ids": [
+          "evidence-redacted-d8e41d6cf3",
+          "evidence-redacted-0cf788c856"
+        ],
+        "evidence_digests": {
+          "evidence-f33ff9b7-e722-464a-9838-680c4f1a4696": "id-redacted-64591b5d37",
+          "evidence-2b85087e-5a3b-44a2-aaac-1fa14a5f37a8": "id-redacted-b06459f2ee"
+        },
+        "observed_versions": {
+          "evidence-f33ff9b7-e722-464a-9838-680c4f1a4696": {
+            "after": {
+              "config_version": 8,
+              "policy_version": 3,
+              "principal_version": 2
+            },
+            "before": {
+              "config_version": 8,
+              "policy_version": 3,
+              "principal_version": 2
+            }
+          },
+          "evidence-2b85087e-5a3b-44a2-aaac-1fa14a5f37a8": {
+            "credential_policy_version": 3,
+            "grant_version": 1,
+            "scope_policy_version": 1
+          }
+        },
+        "missing_predicates": [],
+        "predicate": {
+          "authenticated": true,
+          "principal_enabled": true,
+          "resource_binding_valid": true,
+          "authz_outcome": "DENY",
+          "reason_code": "SCOPE_INSUFFICIENT",
+          "required_scopes": [
+            "orders.read"
+          ],
+          "granted_scopes": [],
+          "missing_scopes": [
+            "orders.read"
+          ],
+          "credential_policy_version": 3,
+          "scope_policy_version": 1,
+          "grant_version": 1,
+          "request_id": "id-redacted-1220c63cdf",
+          "decision_id": 1
+        },
+        "side_effects": []
+      }
+    },
+    "answer": {
+      "run_status": "SUCCEEDED",
+      "model_id": "deepseek-flash",
+      "provider_response_id": "id-redacted-785a326ddd",
+      "input_tokens": 1199,
+      "output_tokens": 920,
+      "total_tokens": 2119,
+      "answer": "我按当前可信状态核实了一下，结论是：**问题还没修好，申请也还没有提交给管理员。**\n\n## 当前事实（来自授权 MCP 证据）\n\n- **证据 ID**：`evidence-f33ff9b7-e722-464a-9838-680c4f1a4696`（类型 `endpoint_probe`，采集时间 2026-10-19 07:00:48，状态为 CURRENT）\n- **探测结果**：请求 `GET /api/orders/demo-order`（服务 `orders-demo`，集成 `integration-a`，主体 `principal-a`）返回 **HTTP 403**\n- **认证本身是成功的**：`auth_event_result = AUTH_ACCEPTED`，说明不是凭证错误，而是**授权范围不足**\n- 该次探测没有产生任何业务订单数据（`business_order_id`、`business_order_status` 均为 null）\n\n## 诊断结论\n\n- 诊断收据：`s2-receipt-22d69fdd-54d7-45d9-b3b0-20fdc141ed4e`\n- 原因码：`CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT`\n- 缺失范围：`orders.read`（必需范围同为 `orders.read`，当前 `granted_scopes` 为空）\n- 依据知识库：OpsPilot 本地 API 授权指南 `api-scope-current` v1.0.0\n\n也就是说，这条路由因为绑定的主体缺少 `orders.read` 而被拒绝，属于**权限配置问题**，不是接口故障或凭证失效。\n\n## 关于\"修好了吗 / 申请交上去了吗\"\n\n两个都是**没有**：\n\n| 项目 | 状态 |\n|---|---|\n| 申请是否已提交 | 未提交（`submitted: false`） |\n| 交接回执是否创建 | 未创建（`handoff_receipt: null`，`handoff_receipt_created: false`） |\n| 草稿状态 | `FROZEN_DRAFT_NOT_SUBMITTED`（草稿 `s2-draft-36ed5ff3-a270-4e9c-a29d-2cdfe2d0f3d5`） |\n| 任务状态 | `WAITING_HANDOFF` |\n| 授权是否发生变化 | 否（`authorization_changed: false`） |\n| 已执行的动作 | 无（`action_counts` 为空） |\n\n草稿里已经准备好了交接所需内容（任务 `task-9040ec67-bf3c-4be1-9ed9-bb2dcdccd150`，工单 `INC-A-001`），但它目前只是**冻结草稿**，还停在待交接状态，管理员那边并没有收到任何东西。\n\n## 下一步\n\n我不是执行方，不能代为提交或改动权限。要把这份草稿真正交给管理员，需要**你通过可信的审批／动作工作流**去提交这次交接；提交后才会生成交接回执，管理员据此评估是否为 `principal-a` 授予 `orders.read`。在授权实际变更之前，该接口的 403 会持续存在。\n\n如果你希望，我可以继续帮你解读这份草稿里包含的证据摘要和范围要求，供你在审批流程中参考。",
+      "evidence_refs": [
+        {
+          "digest": "id-redacted-64591b5d37",
+          "evidence_id": "evidence-redacted-d8e41d6cf3",
+          "fact_type": "endpoint_probe",
+          "facts": {
+            "auth_event_result": "AUTH_ACCEPTED",
+            "business_order_id": null,
+            "business_order_status": null,
+            "http_status": 403,
+            "integration_id": "integration-a",
+            "principal_id": "principal-a",
+            "route": "/api/orders/demo-order",
+            "service_id": "orders-demo"
+          },
+          "fetched_at": "2026-10-19 07:00:48",
+          "versions": {
+            "after": {
+              "config_version": 8,
+              "policy_version": 3,
+              "principal_version": 2
+            },
+            "before": {
+              "config_version": 8,
+              "policy_version": 3,
+              "principal_version": 2
+            }
+          },
+          "versions_digest": "id-redacted-7ac888090e"
+        }
+      ],
+      "excluded_sources": [],
+      "trusted_state_digest": "id-redacted-1325d498e3"
+    },
+    "task_status_after_chat": "WAITING_HANDOFF",
+    "business_outcome_after_chat": "HANDOFF_READY",
+    "task_control": {
+      "revision": 0,
+      "terminal_state": "ACTIVE"
+    },
+    "trace": {
+      "runs": [
+        {
+          "run_id": "run-redacted-15614d4e95",
+          "kind": "INVESTIGATE",
+          "status": "SUCCEEDED",
+          "blocked_reason": null,
+          "expected_control_revision": 0,
+          "applied_critical_message_seq": 0,
+          "created_at": "2026-10-19T07:00:46.669+00:00",
+          "started_at": "2026-10-19T07:00:46.819+00:00",
+          "ended_at": "2026-10-19T07:00:52.822+00:00"
+        },
+        {
+          "run_id": "run-redacted-9dc7b5c6ed",
+          "kind": "CHAT_READONLY",
+          "status": "SUCCEEDED",
+          "blocked_reason": null,
+          "expected_control_revision": 0,
+          "applied_critical_message_seq": 0,
+          "created_at": "2026-10-19T07:00:53.060+00:00",
+          "started_at": "2026-10-19T07:00:53.090+00:00",
+          "ended_at": "2026-10-19T07:01:03.106+00:00"
+        }
+      ],
+      "model_calls": [
+        {
+          "call_id": "call-61102d7c-ebcc-4fc7-8fb8-3113ccecc014",
+          "model_id": "deepseek-flash",
+          "prompt_digest": "id-redacted-29475f891f",
+          "provider_response_id": "0333c99d-e78b-4691-9c38-7901bd2df5e9",
+          "status": "OK",
+          "usage_json": "{\"input_token_details\":{\"cache_read\":1152},\"input_tokens\":2416,\"output_token_details\":{\"reasoning\":0},\"output_tokens\":72,\"total_tokens\":2488}",
+          "tool_calls_json": "[{\"args\":{\"integration_id\":\"integration-a\",\"service_id\":\"orders-demo\"},\"id\":\"call_00_ET_PqEqKQFsncZc0SQbkVsj7936\",\"name\":\"probe_endpoint\"}]",
+          "assistant_text": "I'll start with a live probe of the bound route."
+        },
+        {
+          "call_id": "call-5af36e90-f6aa-4656-b441-8231593e96e0",
+          "model_id": "deepseek-flash",
+          "prompt_digest": "id-redacted-b19aceab53",
+          "provider_response_id": "48a9ecc4-3b77-481f-80c4-93b4752a65b5",
+          "status": "OK",
+          "usage_json": "{\"input_token_details\":{\"cache_read\":1152},\"input_tokens\":2933,\"output_token_details\":{\"reasoning\":51},\"output_tokens\":103,\"total_tokens\":3036}",
+          "tool_calls_json": "[{\"args\":{\"request_id\":\"id-redacted-1220c63cdf\"},\"id\":\"call_00_0XG2xPSN4giQJNz8HLn00946\",\"name\":\"get_scope_authz_facts\"}]",
+          "assistant_text": ""
+        },
+        {
+          "call_id": "call-485a25d8-71f7-4ebf-b8c6-a4516ea81da3",
+          "model_id": "deepseek-flash",
+          "prompt_digest": "id-redacted-1f2cf87319",
+          "provider_response_id": "5bc28c35-9050-4117-8cec-023b09b3e92b",
+          "status": "OK",
+          "usage_json": "{\"input_token_details\":{\"cache_read\":1152},\"input_tokens\":3562,\"output_token_details\":{\"reasoning\":200},\"output_tokens\":490,\"total_tokens\":4052}",
+          "tool_calls_json": "[]",
+          "assistant_text": "Evidence is sufficient; no further query is needed.\n\n**Verified facts (current task-scoped MCP evidence)**\n- Probe `GET /api/orders/demo-order` (service `orders-demo`, integration `integration-a`, principal `principal-a`) returned **HTTP 403**, Request ID `25662cc11e231e85`, versions stable before/after.\n- Correlated authz decision for that same Request ID: `DENY / SCOPE_INSUFFICIENT`, currentness `CURRENT`, resource binding valid, authentication `AUTH_ACCEPTED` (so this is authorization, not authentication).\n- `required_scopes = [orders.read]`, `granted_scopes = []`, `missing_scopes = [orders.read]`.\n- Versions: credential policy 3, scope policy 1, grant 1.\n\n**Assessment:** The 403 is explained by a missing `orders.read` grant for the bound principal. The user's report (\"订单接口有问题\") is only an unverified cue; the status code above is what was actually observed. Per Knowledge `api-scope-current` v1.0.0, a permission request should cite this Request ID and the policy/grant versions above.\n\nNo configuration was changed and no request was submitted; any permission change requires the existing human approval workflow, and the deterministic Domain Gate — not this summary — decides diagnosis/action eligibility."
+        }
+      ],
+      "mcp_observations": [
+        {
+          "observation_id": "observation-b972767b-a3f7-484f-b57f-278f5f4a07d3",
+          "created_at": "2026-10-19 07:00:48",
+          "tool_name": "probe_endpoint",
+          "status": "OK",
+          "error_class": null,
+          "evidence_id": "evidence-redacted-d8e41d6cf3",
+          "argument_digest": "id-redacted-6be4ac9837",
+          "result_json": "{\"data_source\":\"http:loopback-demo-business-api\",\"fact_type\":\"endpoint_probe\",\"facts\":{\"auth_event_id\":1,\"auth_event_observed_at\":\"2026-10-19 07:00:48\",\"auth_event_result\":\"AUTH_ACCEPTED\",\"auth_event_scope_valid\":true,\"authn_event_id\":1,\"authz_event_id\":1,\"business_order_id\":null,\"business_order_status\":null,\"credential_ref\":\"cred-v2\",\"http_status\":403,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"request_id\":\"id-redacted-1220c63cdf\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\",\"versions_stable_during_probe\":true},\"observed_at\":\"2026-10-19 07:00:48\",\"observed_versions\":{\"after\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2}},\"original_result_ref\":\"http://127.0.0.1:loopback/api/orders/demo-order#id-redacted-1220c63cdf\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo:integration-a:/api/orders/demo-order\",\"task_id\":\"task-redacted-73b9090ab2\",\"tenant_id\":\"tenant-demo\",\"trust_class\":\"untrusted_tool_observation\"}",
+          "run_id": "run-redacted-15614d4e95"
+        },
+        {
+          "observation_id": "observation-7c60a4ee-e8ac-4a8c-9071-937684249256",
+          "created_at": "2026-10-19 07:00:49",
+          "tool_name": "get_scope_authz_facts",
+          "status": "OK",
+          "error_class": null,
+          "evidence_id": "evidence-redacted-0cf788c856",
+          "argument_digest": "id-redacted-814698fd9d",
+          "result_json": "{\"data_source\":\"sqlite:authz_events+principal_scope_grants+route_scope_policies\",\"fact_type\":\"scope_authz_decision\",\"facts\":{\"authn_credential_policy_version\":3,\"authn_event_id\":1,\"authn_integration_id\":\"integration-a\",\"authn_principal_id\":\"principal-a\",\"authn_request_id\":\"id-redacted-1220c63cdf\",\"authn_result_code\":\"AUTH_ACCEPTED\",\"authn_route\":\"/api/orders/demo-order\",\"authn_service_id\":\"orders-demo\",\"authn_tenant_id\":\"tenant-demo\",\"credential_policy_version\":3,\"current_grant_version\":1,\"current_scope_policy_version\":1,\"currentness\":\"CURRENT\",\"currentness_reasons\":[],\"decision_id\":1,\"grant_version\":1,\"granted_scopes\":[],\"integration_id\":\"integration-a\",\"missing_scopes\":[\"orders.read\"],\"outcome\":\"DENY\",\"principal_id\":\"principal-a\",\"reason_code\":\"SCOPE_INSUFFICIENT\",\"request_id\":\"id-redacted-1220c63cdf\",\"required_scopes\":[\"orders.read\"],\"resource_binding_valid\":true,\"route\":\"/api/orders/demo-order\",\"scope_policy_version\":1,\"service_id\":\"orders-demo\",\"tenant_id\":\"tenant-demo\"},\"observed_at\":\"2026-10-19 07:00:48\",\"observed_versions\":{\"credential_policy_version\":3,\"grant_version\":1,\"scope_policy_version\":1},\"original_result_ref\":\"domain://authz/request/id-redacted-1220c63cdf\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo\",\"task_id\":\"task-redacted-73b9090ab2\",\"tenant_id\":\"tenant-demo\",\"trust_class\":\"untrusted_tool_observation\"}",
+          "run_id": "run-redacted-15614d4e95"
+        }
+      ],
+      "gate_traces": [
+        {
+          "run_id": "run-redacted-15614d4e95",
+          "decision": "DIAGNOSED",
+          "reason_code": "CURRENT_AUTHENTICATED_SCOPE_INSUFFICIENT",
+          "request_id": "id-redacted-1220c63cdf",
+          "decision_id": 1,
+          "evidence_ids_json": "[\"evidence-redacted-d8e41d6cf3\",\"evidence-redacted-0cf788c856\"]",
+          "predicate_json": "{\"authenticated\":true,\"authz_outcome\":\"DENY\",\"credential_policy_version\":3,\"decision_id\":1,\"grant_version\":1,\"granted_scopes\":[],\"missing_scopes\":[\"orders.read\"],\"principal_enabled\":true,\"reason_code\":\"SCOPE_INSUFFICIENT\",\"request_id\":\"id-redacted-1220c63cdf\",\"required_scopes\":[\"orders.read\"],\"resource_binding_valid\":true,\"scope_policy_version\":1}",
+          "created_at": "2026-10-19T07:00:52.755+00:00"
+        }
+      ],
+      "attempt_counts": {
+        "MCP": 2,
+        "MODEL": 3
+      }
+    },
+    "side_effects": {
+      "scope_write_count": 0,
+      "grant_rows": [
+        {
+          "tenant_id": "tenant-demo",
+          "principal_id": "principal-a",
+          "granted_scopes_json": "[]",
+          "grant_version": 1
+        },
+        {
+          "tenant_id": "tenant-foreign",
+          "principal_id": "principal-foreign",
+          "granted_scopes_json": "[\"orders.read\"]",
+          "grant_version": 1
+        }
+      ],
+      "policy_rows": [
+        {
+          "tenant_id": "tenant-demo",
+          "service_id": "orders-demo",
+          "route": "/api/orders/demo-order",
+          "required_scopes_json": "[\"orders.read\"]",
+          "scope_policy_version": 1
+        },
+        {
+          "tenant_id": "tenant-foreign",
+          "service_id": "orders-demo",
+          "route": "/api/orders/demo-order",
+          "required_scopes_json": "[\"orders.read\"]",
+          "scope_policy_version": 1
+        }
+      ],
+      "receipts": 1,
+      "drafts": 1,
+      "action_intents": 0,
+      "action_ledgers": 0,
+      "s2_handoff_tables": []
+    },
+    "worker_epoch": 1
+  },
+  {
+    "case_id": "G8_H2",
+    "strategy": "A",
+    "task_id": "task-redacted-1d59656699",
+    "investigation_run_id": "run-redacted-630d20f1ab",
+    "chat_run_id": "run-redacted-c0be80050b",
+    "task_status_before_chat": "INCONCLUSIVE",
+    "business_outcome_before_chat": "INCONCLUSIVE",
+    "graph_result": {
+      "stage": "complete",
+      "gate": {
+        "decision": "INCONCLUSIVE",
+        "reason_code": "HTTP_404_HAS_NO_SCOPE_ROOT_CAUSE",
+        "request_id": "id-redacted-e4180a1fa5",
+        "decision_id": null,
+        "checked_fact_ids": [
+          "evidence-redacted-c2a72227f8"
+        ],
+        "evidence_digests": {
+          "evidence-df1b96d1-32cf-4d9c-ba82-c46a63dffe48": "id-redacted-876290ab02"
+        },
+        "observed_versions": {
+          "evidence-df1b96d1-32cf-4d9c-ba82-c46a63dffe48": {
+            "after": {
+              "config_version": 8,
+              "policy_version": 3,
+              "principal_version": 2
+            },
+            "before": {
+              "config_version": 8,
+              "policy_version": 3,
+              "principal_version": 2
+            }
+          }
+        },
+        "missing_predicates": [],
+        "predicate": {},
+        "side_effects": []
+      }
+    },
+    "answer": {
+      "run_status": "SUCCEEDED",
+      "model_id": "deepseek-flash",
+      "provider_response_id": "id-redacted-74eb9b8c94",
+      "input_tokens": 782,
+      "output_tokens": 1083,
+      "total_tokens": 1865,
+      "answer": "## 结论：目前没有任何“已修复”的证据\n\n任务仍处于 **INCONCLUSIVE（未定论）** 状态，也没有执行过任何修复动作。可信任务状态显示：`plan` 为空、`action_counts` 为空、`submitted: false`、无诊断回执、无草稿、无交接回执。因此不能声称接口已被修复或发生任何变更。\n\n## 当前证据核实到的事实\n\n**1. 端点探测（evidence-df1b96d1-32cf-4d9c-ba82-c46a63dffe48，2026-10-19 07:01:05）**\n- 路由 `/api/orders/demo-order`，服务 `orders-demo`\n- HTTP 状态：**404**\n- 认证事件结果：`AUTH_ACCEPTED`（认证这一层是通过的）\n- `business_order_id` 与 `business_order_status` 均为 **null** —— 即没有取到任何订单对象\n- 探测前后版本一致：config 8 / policy 3 / principal 2\n\n**2. 集成配置（evidence-825c3803-92a7-43bc-9cf9-26aab9ab58c1，2026-10-19T07:01:07Z）**\n- 配置版本 8，凭据引用 `cred-v2`\n\n**3. 认证策略（evidence-3ce53421-e434-46c2-83a8-58b1d9390be3，2026-10-19T07:01:09Z）**\n- 策略版本 3，接受凭据 `cred-v2`\n\n## 这三条证据合起来说明什么\n\n- 凭据链路是**自洽**的：配置里用的是 `cred-v2`，策略接受的也是 `cred-v2`，且探测结果为 `AUTH_ACCEPTED`。所以“认证/凭据不匹配”这一类原因目前**没有被证据支持**。\n- 404 发生在认证通过之后，说明问题更可能在**路由或目标业务对象的存在性/可见范围**层面，而不是凭据层面。\n- 但**不能据此断定根因**。系统给出的原因码是 `HTTP_404_HAS_NO_SCOPE_ROOT_CAUSE`，且 `scope_authorized: false` —— 当前探测的授权范围不足以把 404 归因到具体根因。所以既有证据不支持“确认订单不存在”，也不支持“确认已修好”。\n- 版本号在探测前后完全相同（config 8、policy 3、principal 2），也没有任何变更记录，这与“修好了”不相符。\n\n## 关于“上次说还要查证”\n\n我没有可用的历史会话记忆作为依据（历史记忆指引为空），也不存在任何“已修复”的结论性回执。当前唯一有效的判断来自上面的三条 MCP 证据，而它们指向的是：**现象仍在（404），根因未定位，未做任何变更**。\n\n如果你希望推进，需要由你走可信的审批/操作流程来扩大诊断范围或提交变更——我这边是只读的，只能解释现状，不能代为审批、改配置或执行修复。",
+      "evidence_refs": [
+        {
+          "digest": "id-redacted-876290ab02",
+          "evidence_id": "evidence-redacted-c2a72227f8",
+          "fact_type": "endpoint_probe",
+          "facts": {
+            "auth_event_result": "AUTH_ACCEPTED",
+            "business_order_id": null,
+            "business_order_status": null,
+            "http_status": 404,
+            "integration_id": "integration-a",
+            "principal_id": "principal-a",
+            "route": "/api/orders/demo-order",
+            "service_id": "orders-demo"
+          },
+          "fetched_at": "2026-10-19 07:01:05",
+          "versions": {
+            "after": {
+              "config_version": 8,
+              "policy_version": 3,
+              "principal_version": 2
+            },
+            "before": {
+              "config_version": 8,
+              "policy_version": 3,
+              "principal_version": 2
+            }
+          },
+          "versions_digest": "id-redacted-7ac888090e"
+        },
+        {
+          "digest": "id-redacted-8846b47c3d",
+          "evidence_id": "evidence-redacted-f9de2adf44",
+          "fact_type": "integration_config",
+          "facts": {
+            "config_version": 8,
+            "credential_ref": "cred-v2",
+            "integration_id": "integration-a",
+            "principal_id": "principal-a"
+          },
+          "fetched_at": "2026-10-19T07:01:07.032+00:00",
+          "versions": {
+            "config_version": 8
+          },
+          "versions_digest": "id-redacted-b4f2b28252"
+        },
+        {
+          "digest": "id-redacted-614f4fea10",
+          "evidence_id": "evidence-redacted-b9e206e2f1",
+          "fact_type": "auth_policy",
+          "facts": {
+            "accepted_credential_ref": "cred-v2",
+            "policy_version": 3,
+            "service_id": "orders-demo"
+          },
+          "fetched_at": "2026-10-19T07:01:09.713+00:00",
+          "versions": {
+            "policy_version": 3
+          },
+          "versions_digest": "id-redacted-169f5114fe"
+        }
+      ],
+      "excluded_sources": [],
+      "trusted_state_digest": "id-redacted-c25561b0fe"
+    },
+    "task_status_after_chat": "INCONCLUSIVE",
+    "business_outcome_after_chat": "INCONCLUSIVE",
+    "task_control": {
+      "revision": 0,
+      "terminal_state": "ACTIVE"
+    },
+    "trace": {
+      "runs": [
+        {
+          "run_id": "run-redacted-630d20f1ab",
+          "kind": "INVESTIGATE",
+          "status": "SUCCEEDED",
+          "blocked_reason": null,
+          "expected_control_revision": 0,
+          "applied_critical_message_seq": 0,
+          "created_at": "2026-10-19T07:01:03.236+00:00",
+          "started_at": "2026-10-19T07:01:03.252+00:00",
+          "ended_at": "2026-10-19T07:01:13.134+00:00"
+        },
+        {
+          "run_id": "run-redacted-c0be80050b",
+          "kind": "CHAT_READONLY",
+          "status": "SUCCEEDED",
+          "blocked_reason": null,
+          "expected_control_revision": 0,
+          "applied_critical_message_seq": 0,
+          "created_at": "2026-10-19T07:01:13.409+00:00",
+          "started_at": "2026-10-19T07:01:13.443+00:00",
+          "ended_at": "2026-10-19T07:01:24.052+00:00"
+        }
+      ],
+      "model_calls": [
+        {
+          "call_id": "call-533b7af1-1aef-43d9-a84e-1eb4979dcba1",
+          "model_id": "deepseek-flash",
+          "prompt_digest": "id-redacted-79a8c93e0d",
+          "provider_response_id": "92f7d714-0c20-4c84-a91b-8182a4b3948b",
+          "status": "OK",
+          "usage_json": "{\"input_token_details\":{\"cache_read\":1280},\"input_tokens\":2418,\"output_token_details\":{\"reasoning\":29},\"output_tokens\":90,\"total_tokens\":2508}",
+          "tool_calls_json": "[{\"args\":{\"integration_id\":\"integration-a\",\"service_id\":\"orders-demo\"},\"id\":\"call_00_ZYyo0FNLkhhvVhGsPXeX8092\",\"name\":\"probe_endpoint\"}]",
+          "assistant_text": ""
+        },
+        {
+          "call_id": "call-7441b36b-786e-428d-9b82-5fe25cc036e1",
+          "model_id": "deepseek-flash",
+          "prompt_digest": "id-redacted-b912c76552",
+          "provider_response_id": "84549a9c-879a-44d2-9429-9d6d53b55c74",
+          "status": "OK",
+          "usage_json": "{\"input_token_details\":{\"cache_read\":1152},\"input_tokens\":2929,\"output_token_details\":{\"reasoning\":167},\"output_tokens\":210,\"total_tokens\":3139}",
+          "tool_calls_json": "[{\"args\":{\"integration_id\":\"integration-a\"},\"id\":\"call_00_ER46069GYxGLTzuTgFJN6402\",\"name\":\"get_integration_config\"}]",
+          "assistant_text": ""
+        },
+        {
+          "call_id": "call-9da0a7d7-87f6-42f5-89f2-888980d2e8c2",
+          "model_id": "deepseek-flash",
+          "prompt_digest": "id-redacted-ed7f9b6e8d",
+          "provider_response_id": "ec6e69ef-7a76-4bc2-bede-fdc6e634dae6",
+          "status": "OK",
+          "usage_json": "{\"input_token_details\":{\"cache_read\":1536},\"input_tokens\":3291,\"output_token_details\":{\"reasoning\":409},\"output_tokens\":453,\"total_tokens\":3744}",
+          "tool_calls_json": "[{\"args\":{\"service_id\":\"orders-demo\"},\"id\":\"call_00_yfq6TcQWDSToWKHwu6QF5860\",\"name\":\"get_auth_policy\"}]",
+          "assistant_text": ""
+        },
+        {
+          "call_id": "call-a8401559-7c84-4b84-9dc5-fbbf7358381c",
+          "model_id": "deepseek-flash",
+          "prompt_digest": "id-redacted-d3fa761d10",
+          "provider_response_id": "a099f583-07df-43fd-b10f-1ee2a901949b",
+          "status": "OK",
+          "usage_json": "{\"input_token_details\":{\"cache_read\":1792},\"input_tokens\":3661,\"output_token_details\":{\"reasoning\":207},\"output_tokens\":516,\"total_tokens\":4177}",
+          "tool_calls_json": "[]",
+          "assistant_text": "**Summary — no further queries needed (evidence sufficient, verdict INCONCLUSIVE)**\n\nVerified current facts (task-scoped MCP, run-c1f78da3):\n- Live probe of `GET /api/orders/demo-order` (service `orders-demo`, integration `integration-a`, principal `principal-a`) returned **HTTP 404**, Request ID `bf15ac22284dce23`; authentication succeeded (`AUTH_ACCEPTED`, authn/authz events present), and config/policy/principal versions (8/3/2) were stable before and after.\n- Integration credential ref `cred-v2` matches accepted policy credential (policy v3); no version drift.\n- Business payload empty (`business_order_id`/`status` null).\n\nUser claim: \"order API has a problem.\" That claim is unverified and not Evidence. The only verified symptom is a 404.\n\nPer auth-scope-triage methodology and Knowledge `api-scope-current` v1.0.0, a 404 is a routing/resource-existence symptom, not an authorization denial: no current `DENY / SCOPE_INSUFFICIENT` decision exists, and `get_scope_authz_facts` is only applicable after a 403. No scope diagnosis, no missing-scope set, and no application draft can be supported. Status: **INCONCLUSIVE — route/resource not found; investigate route registration or order ID existence.** No configuration change or action was performed."
+        }
+      ],
+      "mcp_observations": [
+        {
+          "observation_id": "observation-07f3b4b4-38a7-4ad0-bf80-b07e009f1162",
+          "created_at": "2026-10-19 07:01:05",
+          "tool_name": "probe_endpoint",
+          "status": "OK",
+          "error_class": null,
+          "evidence_id": "evidence-redacted-c2a72227f8",
+          "argument_digest": "id-redacted-6be4ac9837",
+          "result_json": "{\"data_source\":\"http:loopback-demo-business-api\",\"fact_type\":\"endpoint_probe\",\"facts\":{\"auth_event_id\":1,\"auth_event_observed_at\":\"2026-10-19 07:01:05\",\"auth_event_result\":\"AUTH_ACCEPTED\",\"auth_event_scope_valid\":true,\"authn_event_id\":1,\"authz_event_id\":1,\"business_order_id\":null,\"business_order_status\":null,\"credential_ref\":\"cred-v2\",\"http_status\":404,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"request_id\":\"id-redacted-e4180a1fa5\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\",\"versions_stable_during_probe\":true},\"observed_at\":\"2026-10-19 07:01:05\",\"observed_versions\":{\"after\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":8,\"policy_version\":3,\"principal_version\":2}},\"original_result_ref\":\"http://127.0.0.1:loopback/api/orders/demo-order#id-redacted-e4180a1fa5\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo:integration-a:/api/orders/demo-order\",\"task_id\":\"task-redacted-1d59656699\",\"tenant_id\":\"tenant-demo\",\"trust_class\":\"untrusted_tool_observation\"}",
+          "run_id": "run-redacted-630d20f1ab"
+        },
+        {
+          "observation_id": "observation-e5da1520-c7cc-4334-9d7b-ce0928174cd6",
+          "created_at": "2026-10-19 07:01:07",
+          "tool_name": "get_integration_config",
+          "status": "OK",
+          "error_class": null,
+          "evidence_id": "evidence-redacted-f9de2adf44",
+          "argument_digest": "id-redacted-616f792404",
+          "result_json": "{\"data_source\":\"sqlite:integrations\",\"fact_type\":\"integration_config\",\"facts\":{\"config_version\":8,\"credential_ref\":\"cred-v2\",\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\"},\"observed_at\":\"2026-10-19T07:01:07.032+00:00\",\"observed_versions\":{\"config_version\":8},\"original_result_ref\":\"domain://integration/integration-a/config\",\"principal_id\":\"principal-a\",\"resource_id\":\"integration-a\",\"task_id\":\"task-redacted-1d59656699\",\"tenant_id\":\"tenant-demo\",\"trust_class\":\"untrusted_tool_observation\"}",
+          "run_id": "run-redacted-630d20f1ab"
+        },
+        {
+          "observation_id": "observation-2648c7ab-3be2-4526-bf88-d237e7d75328",
+          "created_at": "2026-10-19 07:01:09",
+          "tool_name": "get_auth_policy",
+          "status": "OK",
+          "error_class": null,
+          "evidence_id": "evidence-redacted-b9e206e2f1",
+          "argument_digest": "id-redacted-3b27e5989b",
+          "result_json": "{\"data_source\":\"sqlite:auth_policies\",\"fact_type\":\"auth_policy\",\"facts\":{\"accepted_credential_ref\":\"cred-v2\",\"policy_version\":3,\"service_id\":\"orders-demo\"},\"observed_at\":\"2026-10-19T07:01:09.713+00:00\",\"observed_versions\":{\"policy_version\":3},\"original_result_ref\":\"domain://service/orders-demo/auth-policy\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo\",\"task_id\":\"task-redacted-1d59656699\",\"tenant_id\":\"tenant-demo\",\"trust_class\":\"untrusted_tool_observation\"}",
+          "run_id": "run-redacted-630d20f1ab"
+        }
+      ],
+      "gate_traces": [
+        {
+          "run_id": "run-redacted-630d20f1ab",
+          "decision": "INCONCLUSIVE",
+          "reason_code": "HTTP_404_HAS_NO_SCOPE_ROOT_CAUSE",
+          "request_id": "id-redacted-e4180a1fa5",
+          "decision_id": null,
+          "evidence_ids_json": "[\"evidence-redacted-c2a72227f8\"]",
+          "predicate_json": "{}",
+          "created_at": "2026-10-19T07:01:13.084+00:00"
+        },
+        {
+          "run_id": "run-redacted-630d20f1ab",
+          "decision": "INCONCLUSIVE",
+          "reason_code": "HTTP_404_HAS_NO_SCOPE_ROOT_CAUSE",
+          "request_id": "id-redacted-e4180a1fa5",
+          "decision_id": null,
+          "evidence_ids_json": "[\"evidence-redacted-c2a72227f8\"]",
+          "predicate_json": "{}",
+          "created_at": "2026-10-19T07:01:13.097+00:00"
+        }
+      ],
+      "attempt_counts": {
+        "MCP": 3,
+        "MODEL": 4
+      }
+    },
+    "side_effects": {
+      "scope_write_count": 0,
+      "grant_rows": [
+        {
+          "tenant_id": "tenant-demo",
+          "principal_id": "principal-a",
+          "granted_scopes_json": "[\"orders.read\"]",
+          "grant_version": 1
+        },
+        {
+          "tenant_id": "tenant-foreign",
+          "principal_id": "principal-foreign",
+          "granted_scopes_json": "[\"orders.read\"]",
+          "grant_version": 1
+        }
+      ],
+      "policy_rows": [
+        {
+          "tenant_id": "tenant-demo",
+          "service_id": "orders-demo",
+          "route": "/api/orders/demo-order",
+          "required_scopes_json": "[\"orders.read\"]",
+          "scope_policy_version": 1
+        },
+        {
+          "tenant_id": "tenant-foreign",
+          "service_id": "orders-demo",
+          "route": "/api/orders/demo-order",
+          "required_scopes_json": "[\"orders.read\"]",
+          "scope_policy_version": 1
+        }
+      ],
+      "receipts": 0,
+      "drafts": 0,
+      "action_intents": 0,
+      "action_ledgers": 0,
+      "s2_handoff_tables": []
+    },
+    "worker_epoch": 1
+  }
+]

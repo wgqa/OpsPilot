@@ -1,0 +1,93 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+____ test_m2_02_current_s2_facts_create_diagnosis_receipt_and_frozen_draft ____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-m2-02-20261019-fix-02/test_m2_02_current_s2_facts_cr0/domain.sqlite3')
+live_api = 'http://127.0.0.1:56971'
+
+    def test_m2_02_current_s2_facts_create_diagnosis_receipt_and_frozen_draft(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        """A current real 403 plus matching scoped facts must reach only HANDOFF_READY."""
+        reset_fixture(demo_db, "S2_SCOPE_DENIED")
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        created = create_task_with_initial_run(
+            demo_db, identity, session_id=session_id, service_id="orders-demo",
+            integration_id="integration-a", ticket_id="INC-A-001",
+            initial_message="������ѯ�ӿڷ��� 403��������ʵ��Ȩԭ��׼������ݸ塣",
+            idempotency_key="m2-02-s2-red-initial",
+        )
+        task_id, run_id = str(created["task_id"]), str(created["run_id"])
+        claim_task_run(demo_db, identity, run_id)
+        apply_pending_critical_inputs(demo_db, identity, run_id)
+        _install_scope_write_audit(demo_db)
+    
+        probe = probe_endpoint_fact(
+            demo_db, task_id, "orders-demo", "integration-a", live_api,
+        )
+        assert probe["facts"]["http_status"] == 403
+        assert probe["facts"]["request_id"]
+        assert probe["facts"]["versions_stable_during_probe"] is True
+        probe_attempt, _ = reserve_attempt(
+            demo_db, task_id, "MCP", 6, call_id="m2-02-red-probe-call",
+            tool_call_id="m2-02-red-probe-tool", tool_name="probe_endpoint",
+            argument_digest="red-probe-arguments", run_id=run_id,
+        )
+        finish_attempt(demo_db, probe_attempt, "OK")
+        probe_observation = record_tool_observation(
+            demo_db,
+            task_id=task_id,
+            call_id="m2-02-red-probe-call",
+            attempt_id=probe_attempt,
+            tool_call_id="m2-02-red-probe-tool",
+            tool_name="probe_endpoint",
+            arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+            status="OK",
+            result=probe,
+        )
+        request_id = str(probe["facts"]["request_id"])
+        authz = get_scope_authz_facts_fact(demo_db, task_id, request_id)
+        assert authz["facts"]["currentness"] == "CURRENT"
+        assert authz["facts"]["request_id"] == request_id
+        assert authz["facts"]["reason_code"] == "SCOPE_INSUFFICIENT"
+        authz_attempt, _ = reserve_attempt(
+            demo_db, task_id, "MCP", 6, call_id="m2-02-red-authz-call",
+            tool_call_id="m2-02-red-authz-tool", tool_name="get_scope_authz_facts",
+            argument_digest="red-authz-arguments", run_id=run_id,
+        )
+        finish_attempt(demo_db, authz_attempt, "OK")
+        authz_observation = record_tool_observation(
+            demo_db,
+            task_id=task_id,
+            call_id="m2-02-red-authz-call",
+            attempt_id=authz_attempt,
+            tool_call_id="m2-02-red-authz-tool",
+            tool_name="get_scope_authz_facts",
+            arguments={"request_id": request_id},
+            status="OK",
+            result=authz,
+        )
+        evidence_ids = [str(probe_observation["evidence_id"]), str(authz_observation["evidence_id"])]
+    
+        # The following trusted S2 domain contract is intentionally exercised on the
+        # M2-01 baseline. Its absence must be a product RED, not an environment error.
+        from opspilot.domain.s2_diagnosis import (
+            create_diagnosis_receipt,
+            evaluate_s2_evidence_gate,
+            freeze_handoff_draft,
+        )
+    
+        gate = evaluate_s2_evidence_gate(demo_db, task_id, evidence_ids, run_id=run_id)
+>       assert gate["decision"] == "DIAGNOSED", gate
+E       AssertionError: {'decision': 'INCONCLUSIVE', 'reason_code': 'S2_AUTHZ_FACTS_CHANGED_OR_UNAVAILABLE', 'request_id': '1a9f543eb53e176d', 'decision_id': None, ...}
+E       assert 'INCONCLUSIVE' == 'DIAGNOSED'
+E         
+E         - DIAGNOSED
+E         + INCONCLUSIVE
+
+tests\test_m2_02_s2_diagnosis.py:111: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_s2_diagnosis.py::test_m2_02_current_s2_facts_create_diagnosis_receipt_and_frozen_draft
+1 failed in 0.38s
+PYTEST_EXIT_CODE=1

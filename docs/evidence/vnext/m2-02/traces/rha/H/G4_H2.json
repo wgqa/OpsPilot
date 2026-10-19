@@ -1,0 +1,193 @@
+{
+  "case_id": "G4-H2",
+  "strategy": "H",
+  "task_id": "task-redacted-10876d850e",
+  "initial_message_id": "message-2cb687ce-3e89-4478-9390-ba7aadbc9f00",
+  "initial_run_id": "run-redacted-eb9a543d35",
+  "initial_run_status": "SUCCEEDED",
+  "initial_gate": {
+    "decision": "NEED_MORE",
+    "reason_code": "REQUIRED_EVIDENCE_MISSING",
+    "checked_fact_ids": [
+      "evidence-redacted-9c073eec0f"
+    ],
+    "missing_predicates": [
+      "integration_config",
+      "principal_status",
+      "auth_policy"
+    ],
+    "stale_or_conflicting_ids": [],
+    "side_effects": []
+  },
+  "old_real_http_request": {
+    "status": 401,
+    "request_id": "id-redacted-6a4c2049e0",
+    "authn_event_id": 1,
+    "route": "/api/orders/demo-order"
+  },
+  "correction_message_id": "message-bf9953db-9e4e-4009-b5f2-0fabf896cc6c",
+  "correction_control_revision": 1,
+  "corrected_real_http_request": {
+    "status": 401,
+    "request_id": "id-redacted-3da3be17c7",
+    "authn_event_id": 3,
+    "route": "/api/orders/demo-order"
+  },
+  "corrected_run_id": "run-redacted-86210c06bf",
+  "corrected_gate": {
+    "decision": "NEED_MORE",
+    "reason_code": "REQUIRED_EVIDENCE_MISSING",
+    "checked_fact_ids": [
+      "evidence-redacted-9c073eec0f",
+      "evidence-redacted-f63c65ef91"
+    ],
+    "missing_predicates": [
+      "integration_config",
+      "principal_status",
+      "auth_policy"
+    ],
+    "stale_or_conflicting_ids": [],
+    "side_effects": []
+  },
+  "business_outcome": {
+    "task_id": "task-redacted-10876d850e",
+    "task_status": "INCONCLUSIVE",
+    "business_outcome": "INCONCLUSIVE",
+    "currentness": "CURRENT",
+    "reason_code": "RULE_POLICY_NO_ADDITIONAL_CURRENT_FACT",
+    "diagnosis_receipt": null,
+    "draft": null,
+    "handoff_receipt": null,
+    "submitted": false,
+    "scope_authorized": false
+  },
+  "control": {
+    "revision": 2,
+    "pending_critical_message_seq": null,
+    "applied_critical_message_seq": 2
+  },
+  "side_effects": {
+    "d3_action_intents": 0,
+    "d3_action_ledgers": 0,
+    "s2_diagnosis_receipts": 0,
+    "s2_handoff_drafts": 0
+  },
+  "trace": {
+    "runs": [
+      {
+        "run_id": "run-redacted-eb9a543d35",
+        "kind": "INVESTIGATE",
+        "status": "SUCCEEDED",
+        "blocked_reason": null,
+        "expected_control_revision": 0,
+        "applied_critical_message_seq": 0,
+        "created_at": "2026-10-19T07:26:25.034+00:00",
+        "started_at": "2026-10-19T07:26:25.054+00:00",
+        "ended_at": "2026-10-19T07:26:28.545+00:00"
+      },
+      {
+        "run_id": "run-redacted-86210c06bf",
+        "kind": "INVESTIGATE",
+        "status": "SUCCEEDED",
+        "blocked_reason": null,
+        "expected_control_revision": 2,
+        "applied_critical_message_seq": 2,
+        "created_at": "2026-10-19T07:26:29.254+00:00",
+        "started_at": "2026-10-19T07:26:29.271+00:00",
+        "ended_at": "2026-10-19T07:26:33.863+00:00"
+      }
+    ],
+    "model_calls": [
+      {
+        "call_id": "call-355b3bd2-a2fa-4722-a989-3d39033130fe",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "id-redacted-4db7b09089",
+        "provider_response_id": "77f59402-750b-4d36-b662-211afce93647",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":384},\"input_tokens\":977,\"output_token_details\":{\"reasoning\":339},\"output_tokens\":443,\"total_tokens\":1420}",
+        "tool_calls_json": "[]",
+        "assistant_text": "{\"symptom\":\"用户要求先核实一个可能过期的 Request ID；未描述具体的鉴权失败或 HTTP 状态。\",\"candidate_request_ids\":[\"id-redacted-6a4c2049e0\"],\"user_claims\":[\"该 Request ID 可能已过期。\"],\"uncertainty\":[\"该 Request ID 是否真实、当前有效、与某次请求事件相关，尚不确定。\",\"用户输入未提供 HTTP 状态、路由、主体或授权决策信息。\"]}"
+      },
+      {
+        "call_id": "call-17b9831c-2698-46a8-8461-6cb2fc48e05a",
+        "model_id": "deepseek-flash",
+        "prompt_digest": "id-redacted-7e4c2f799d",
+        "provider_response_id": "b77b5ac4-cd8a-43f9-a34d-e775e7673b17",
+        "status": "OK",
+        "usage_json": "{\"input_token_details\":{\"cache_read\":384},\"input_tokens\":1115,\"output_token_details\":{\"reasoning\":472},\"output_tokens\":619,\"total_tokens\":1734}",
+        "tool_calls_json": "[]",
+        "assistant_text": "{\"symptom\":\"Request ID verification needed for an authorization-related issue; the user corrected which request ID is relevant.\",\"candidate_request_ids\":[\"id-redacted-6a4c2049e0\",\"id-redacted-3da3be17c7\"],\"user_claims\":[\"The first request ID may be expired and is not part of this incident.\",\"The second request ID should be checked instead.\",\"The service, integration, principal, and route remain as originally bound.\"],\"uncertainty\":\"The request IDs, correction, and binding details are user-provided and have not been verified against current Domain evidence.\"}"
+      }
+    ],
+    "mcp_observations": [
+      {
+        "observation_id": "observation-59bd77f0-b221-4cfc-9403-b0f7cdc5972a",
+        "created_at": "2026-10-19 07:26:28",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-redacted-9c073eec0f",
+        "argument_digest": "id-redacted-6be4ac9837",
+        "result_json": "{\"data_source\":\"http:loopback-demo-business-api\",\"fact_type\":\"endpoint_probe\",\"facts\":{\"auth_event_id\":2,\"auth_event_observed_at\":\"2026-10-19 07:26:28\",\"auth_event_result\":\"AUTH_REJECTED\",\"auth_event_scope_valid\":true,\"authn_event_id\":2,\"authz_event_id\":null,\"business_order_id\":null,\"business_order_status\":null,\"credential_ref\":\"cred-v1\",\"http_status\":401,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"request_id\":\"id-redacted-bc0a209e82\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\",\"versions_stable_during_probe\":true},\"observed_at\":\"2026-10-19 07:26:28\",\"observed_versions\":{\"after\":{\"config_version\":9,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":9,\"policy_version\":3,\"principal_version\":2}},\"original_result_ref\":\"http://127.0.0.1:loopback/api/orders/demo-order#id-redacted-bc0a209e82\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo:integration-a:/api/orders/demo-order\",\"task_id\":\"task-redacted-10876d850e\",\"tenant_id\":\"tenant-demo\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-redacted-eb9a543d35"
+      },
+      {
+        "observation_id": "observation-57803dbe-bb6a-4616-99a6-3d89b07b3118",
+        "created_at": "2026-10-19 07:26:33",
+        "tool_name": "probe_endpoint",
+        "status": "OK",
+        "error_class": null,
+        "evidence_id": "evidence-redacted-f63c65ef91",
+        "argument_digest": "id-redacted-6be4ac9837",
+        "result_json": "{\"data_source\":\"http:loopback-demo-business-api\",\"fact_type\":\"endpoint_probe\",\"facts\":{\"auth_event_id\":4,\"auth_event_observed_at\":\"2026-10-19 07:26:33\",\"auth_event_result\":\"AUTH_REJECTED\",\"auth_event_scope_valid\":true,\"authn_event_id\":4,\"authz_event_id\":null,\"business_order_id\":null,\"business_order_status\":null,\"credential_ref\":\"cred-v1\",\"http_status\":401,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"request_id\":\"id-redacted-34ca8fb01e\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\",\"versions_stable_during_probe\":true},\"observed_at\":\"2026-10-19 07:26:33\",\"observed_versions\":{\"after\":{\"config_version\":9,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":9,\"policy_version\":3,\"principal_version\":2}},\"original_result_ref\":\"http://127.0.0.1:loopback/api/orders/demo-order#id-redacted-34ca8fb01e\",\"principal_id\":\"principal-a\",\"resource_id\":\"orders-demo:integration-a:/api/orders/demo-order\",\"task_id\":\"task-redacted-10876d850e\",\"tenant_id\":\"tenant-demo\",\"trust_class\":\"untrusted_tool_observation\"}",
+        "run_id": "run-redacted-86210c06bf"
+      }
+    ],
+    "gate_traces": [
+      {
+        "run_id": "run-redacted-eb9a543d35",
+        "decision": "NOT_APPLICABLE",
+        "reason_code": "AUTHENTICATION_FAILURE_REMAINS_S1",
+        "request_id": null,
+        "decision_id": null,
+        "evidence_ids_json": "[\"evidence-redacted-9c073eec0f\"]",
+        "predicate_json": "{}",
+        "created_at": "2026-10-19T07:26:28.494+00:00"
+      },
+      {
+        "run_id": "run-redacted-eb9a543d35",
+        "decision": "INCONCLUSIVE",
+        "reason_code": "RULE_POLICY_NO_ADDITIONAL_CURRENT_FACT",
+        "request_id": null,
+        "decision_id": null,
+        "evidence_ids_json": "[\"evidence-redacted-9c073eec0f\"]",
+        "predicate_json": "{}",
+        "created_at": "2026-10-19T07:26:28.508+00:00"
+      },
+      {
+        "run_id": "run-redacted-86210c06bf",
+        "decision": "NOT_APPLICABLE",
+        "reason_code": "AUTHENTICATION_FAILURE_REMAINS_S1",
+        "request_id": null,
+        "decision_id": null,
+        "evidence_ids_json": "[\"evidence-redacted-f63c65ef91\"]",
+        "predicate_json": "{}",
+        "created_at": "2026-10-19T07:26:33.803+00:00"
+      },
+      {
+        "run_id": "run-redacted-86210c06bf",
+        "decision": "INCONCLUSIVE",
+        "reason_code": "RULE_POLICY_NO_ADDITIONAL_CURRENT_FACT",
+        "request_id": null,
+        "decision_id": null,
+        "evidence_ids_json": "[\"evidence-redacted-9c073eec0f\",\"evidence-redacted-f63c65ef91\"]",
+        "predicate_json": "{}",
+        "created_at": "2026-10-19T07:26:33.820+00:00"
+      }
+    ],
+    "attempt_counts": {
+      "MCP": 2,
+      "MODEL": 2
+    }
+  }
+}

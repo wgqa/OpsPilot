@@ -1,0 +1,30 @@
+.F                                                                       [100%]
+================================== FAILURES ===================================
+_________ test_m2_02_s2_gate_keeps_401_404_and_stale_policy_distinct __________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m2-02-20261019-05/test_m2_02_s2_gate_keeps_401_40/domain.sqlite3')
+live_api = 'http://127.0.0.1:56550'
+
+    def test_m2_02_s2_gate_keeps_401_404_and_stale_policy_distinct(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        from opspilot.domain.s2_diagnosis import evaluate_s2_evidence_gate
+    
+        task_id, run_id, probe, evidence = _capture_s2_probe(
+            demo_db, live_api, "S2_INVALID_CREDENTIAL", "m2-02-401",
+        )
+        assert probe["facts"]["http_status"] == 401
+        authn_gate = evaluate_s2_evidence_gate(demo_db, task_id, evidence, run_id=run_id)
+        assert authn_gate["decision"] == "NOT_APPLICABLE"
+        assert authn_gate["reason_code"] == "AUTHENTICATION_FAILURE_REMAINS_S1"
+    
+        task_id, run_id, probe, evidence = _capture_s2_probe(
+            demo_db, live_api, "S2_RESOURCE_HIDDEN", "m2-02-404",
+        )
+>       assert probe["facts"]["http_status"] == 404
+E       assert 200 == 404
+
+tests\test_m2_02_s2_diagnosis.py:251: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_s2_diagnosis.py::test_m2_02_s2_gate_keeps_401_404_and_stale_policy_distinct
+1 failed, 1 passed in 1.22s

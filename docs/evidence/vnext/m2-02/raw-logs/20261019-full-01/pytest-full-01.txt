@@ -1,0 +1,86 @@
+........................................................................ [ 48%]
+.F................F..................................................F.. [ 96%]
+......                                                                   [100%]
+================================== FAILURES ===================================
+________ test_schema_v3_database_adds_context_input_provenance_columns ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m2-02-full-01/test_schema_v3_database_adds_c0/domain.sqlite3')
+
+    def test_schema_v3_database_adds_context_input_provenance_columns(demo_db: Path) -> None:
+        from opspilot.domain.database import initialize
+    
+        with connect(demo_db) as connection:
+            connection.execute("ALTER TABLE d5_context_provenance DROP COLUMN selected_input_messages_json")
+            connection.execute("ALTER TABLE d5_context_provenance DROP COLUMN task_run_control_json")
+            connection.execute("PRAGMA user_version = 3")
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(d5_context_provenance)")}
+>       assert version == 6
+E       assert 7 == 6
+
+tests\test_m1_dynamic_investigation.py:288: AssertionError
+_____ test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m2-02-full-01/test_schema_migration_is_idemp0/domain.sqlite3')
+live_api = 'http://127.0.0.1:56893'
+
+    def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
+        demo_db: Path, live_api: str
+    ) -> None:
+        from opspilot.domain.database import initialize
+    
+        binding, _, plan = _ready_task(demo_db, live_api, "migration")
+        task_id = str(binding["task_id"])
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_controls WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM session_task_links WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM sessions WHERE session_id = ?", (binding["session_id"],))
+            connection.execute("PRAGMA user_version = 0")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            control = connection.execute("SELECT terminal_state, control_revision FROM task_controls WHERE task_id = ?", (task_id,)).fetchone()
+            session_link = connection.execute("SELECT COUNT(*) FROM session_task_links WHERE task_id = ?", (task_id,)).fetchone()[0]
+            migrated_plan = connection.execute("SELECT plan_hash FROM d3_plans WHERE task_id = ?", (task_id,)).fetchone()[0]
+            plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        assert tuple(control) == ("ACTIVE", 0)
+>       assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 6
+E       AssertionError: assert (1 == 1 and 'ad6a735d62bf...6d98fe960be14' == 'ad6a735d62bf...6d98fe960be14'
+E         
+E         Skipping 53 identical leading characters in diff, use -v to show
+E           98fe960be14 and 1 == 1 and 7 == 6)
+
+tests\test_m1_task_control.py:644: AssertionError
+__ test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero __
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m2-02-full-01/test_m2_01_s2fact09_migration_0/domain.sqlite3')
+live_api = 'http://127.0.0.1:56992'
+
+    def test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero(
+        demo_db: Path, live_api: str
+    ) -> None:
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            connection.execute("DROP INDEX IF EXISTS ux_auth_events_request_id")
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(auth_events)")}
+            if "credential_policy_version" in columns:
+                connection.execute("ALTER TABLE auth_events DROP COLUMN credential_policy_version")
+            if "request_id" in columns:
+                connection.execute("ALTER TABLE auth_events DROP COLUMN request_id")
+            connection.execute("PRAGMA user_version = 5")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+>           assert connection.execute("PRAGMA user_version").fetchone()[0] == 6
+E           assert 7 == 6
+
+tests\test_m2_01_facts.py:367: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_dynamic_investigation.py::test_schema_v3_database_adds_context_input_provenance_columns
+FAILED tests/test_m1_task_control.py::test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash
+FAILED tests/test_m2_01_facts.py::test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero
+3 failed, 147 passed in 114.14s (0:01:54)
