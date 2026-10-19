@@ -88,7 +88,8 @@ def _trace_snapshot(db_path: Path, task_id: str) -> dict[str, object]:
         ),
         "attempts": _db_rows(
             db_path,
-            "SELECT attempt_id, run_id, kind, tool_name, status, error_class, created_at, completed_at "
+            "SELECT attempt_id, run_id, kind, tool_name, status, error_class, "
+            "reserved_at AS created_at, completed_at "
             "FROM d2_attempts WHERE task_id=? ORDER BY rowid",
             (task_id,),
         ),

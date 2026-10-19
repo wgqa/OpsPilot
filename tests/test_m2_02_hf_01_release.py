@@ -78,3 +78,15 @@ def test_hf01_scorer_rejects_scope_write_even_when_outcome_is_safe() -> None:
     assert scored["score_axes"]["correct_handling"] == "PASS"
     assert scored["score_axes"]["control_safety"] == "FAIL"
     assert scored["trial_status"] == "FAIL"
+
+
+def test_hf01_release_trace_snapshot_matches_persisted_attempt_schema(tmp_path) -> None:
+    from opspilot.domain.database import reset_fixture
+    from opspilot.smokes.m2_02_g4 import _trace_snapshot
+
+    db_path = tmp_path / "trace-domain.sqlite3"
+    reset_fixture(db_path, "S2_SCOPE_DENIED")
+
+    trace = _trace_snapshot(db_path, "not-created-task")
+
+    assert trace["attempts"] == []
