@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "status": "FROZEN_BEFORE_IMPLEMENTATION",
+  "trace_id": "stable non-secret correlation identifier",
+  "trial": {
+    "journey_id": "G1..G8",
+    "instance_id": "frozen case id",
+    "strategy": "R|H|A|BROWSER_LIVE",
+    "attempt_id": "unique execution attempt",
+    "trial_status": "PASS|FAIL|PARTIAL|NOT_RUN|UNVERIFIED",
+    "started_at": "UTC ISO-8601",
+    "ended_at": "UTC ISO-8601 or null",
+    "duration_ms": "integer or null",
+    "failure_class": "sanitized category or null"
+  },
+  "release_ref": {
+    "git_sha": "full SHA",
+    "model_provider_id": "actual provider identifier or null",
+    "model_id": "actual model id or null",
+    "prompt_digest": "sha256",
+    "skill_refs": [{"name":"string","version":"string","digest":"sha256","selected_reason":"string"}],
+    "knowledge_refs": [{"document_id":"string","version":"string","digest":"sha256","selected_reason":"string"}],
+    "tool_schema_digest": "sha256",
+    "gate_policy_version": "string",
+    "budget_policy_version": "string",
+    "dependency_lock_sha256": "sha256"
+  },
+  "correlation": {
+    "session_id": "string or null",
+    "task_id": "string or null",
+    "run_id": "string or null",
+    "message_id": "string or null",
+    "input_revision": "integer or null",
+    "control_revision_before": "integer or null",
+    "control_revision_after": "integer or null",
+    "consumed_message_seq": "integer or null"
+  },
+  "events": [{
+    "event_id": "string",
+    "event_type": "INPUT|MODEL_DECISION|CLARIFICATION|MCP_CALL|MCP_RESULT|HTTP_PROBE|EVIDENCE|GATE|RECEIPT|DRAFT|OUTCOME|STOP|ERROR",
+    "occurred_at": "UTC ISO-8601",
+    "duration_ms": "integer or null",
+    "decision_or_hypothesis": {"kind":"string or null","status":"string or null","evidence_ids":[]},
+    "tool": {"name":"string or null","tool_call_id":"string or null","attempt_id":"string or null","argument_digest":"sha256 or null","status":"string or null","error_class":"sanitized string or null"},
+    "evidence": {"evidence_id":"string or null","fact_type":"string or null","request_id":"string or null","event_ids":[],"currentness":"CURRENT|STALE|CONFLICT|UNVERIFIED|NOT_APPLICABLE","versions":{},"digest":"sha256 or null"},
+    "gate": {"decision":"READY|NEED_MORE|NO_ACTION|INCONCLUSIVE|NOT_RUN|null","reason_code":"string or null","receipt_id":"string or null"},
+    "draft": {"draft_id":"string or null","version":"integer or null","content_digest":"sha256 or null","status":"FROZEN|INVALIDATED|NOT_CREATED|null"},
+    "outcome_or_stop_reason": "string or null"
+  }],
+  "model_calls": [{
+    "model_call_id":"string",
+    "provider_id":"string",
+    "model_id":"string",
+    "started_at":"UTC ISO-8601",
+    "ended_at":"UTC ISO-8601 or null",
+    "duration_ms":"integer or null",
+    "prompt_digest":"sha256",
+    "input_tokens":"integer or null",
+    "output_tokens":"integer or null",
+    "total_tokens":"integer or null",
+    "response_id":"string or null",
+    "error_class":"sanitized string or null"
+  }],
+  "budgets": {"model_limit":8,"model_used":0,"mcp_limit":6,"mcp_attempts":0,"invalid_tool_calls":0,"duplicate_evidence_queries":0},
+  "domain_result": {
+    "run_status":"string or null",
+    "task_status":"string or null",
+    "task_outcome":"string or null",
+    "evidence_ids":[],
+    "diagnosis_receipt_id":"string or null",
+    "draft_id":"string or null",
+    "scope_grant_policy_write_count":0,
+    "handoff_receipt_queue_write_count":0,
+    "s2_repaired_verified_claim_count":0,
+    "action_intents_created":0,
+    "repair_ledger_commits":0,
+    "delivery_ledger_commits":0
+  },
+  "redaction": "Never include secrets, API keys, Authorization/Cookie, credential values, raw prompts containing secrets, or cross-tenant identifiers. Persist digests and sanitized IDs only."
+}
