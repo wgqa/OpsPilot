@@ -51,6 +51,31 @@ def _seed_verified_source(db: Path, task_id: str) -> str:
         "expected_post_repair_versions": True,
         "response_body": {"order_id": "demo-order", "status": "CONFIRMED"},
     }
+    probe_versions = {"before": {"config_version": 7}, "after": {"config_version": 7}}
+    probe_facts = {
+        "service_id": "orders-demo", "integration_id": "integration-a", "principal_id": "principal-a",
+        "route": "/api/orders/demo-order", "http_status": 401, "request_id": "initial-401-request",
+        "auth_event_id": 1, "authz_event_id": None, "auth_event_result": "AUTH_REJECTED",
+        "auth_event_scope_valid": True, "versions_stable_during_probe": True,
+    }
+    evidence_digest = digest_json({
+        "tenant_id": "tenant-a", "task_id": task_id, "fact_type": "endpoint_probe",
+        "resource_id": "orders-demo:integration-a:/api/orders/demo-order", "principal_id": "principal-a",
+        "data_source": "http:loopback-demo-business-api", "observed_versions": probe_versions,
+        "facts": probe_facts, "trust_class": "untrusted_tool_observation",
+    })
+    verification_assertions = {**assertions, "request_id": "verify-request", "auth_event_id": 2}
+    verification_versions = {"config_version": 8, "principal_version": 1, "auth_policy_version": 1}
+    verification_digest = digest_json({
+        "tenant_id": "tenant-a", "task_id": task_id, "plan_hash": plan_hash,
+        "repair_action_id": action_id, "service_id": "orders-demo", "integration_id": "integration-a",
+        "principal_id": "principal-a", "business_route": "/api/orders/demo-order",
+        "request_id": "verify-request", "auth_event_id": 2,
+        "observed_versions": verification_versions, "response_status": 200,
+        "response_body": assertions["response_body"], "business_assertions": {
+            key: value for key, value in assertions.items() if key != "response_body"
+        }, "recovery_verified": True,
+    })
     report_body = {
         "schema_version": "opspilot-d3-report-v1",
         "business_outcome": "RECOVERED",
@@ -89,17 +114,20 @@ def _seed_verified_source(db: Path, task_id: str) -> str:
                 probe_observed_versions_json, observed_at, response_status,
                 business_assertions_json, recovery_verified, result_digest)
                VALUES (?, 'tenant-a', ?, ?, ?, 'orders-demo', 'integration-a', 'principal-a',
-                       '/api/orders/demo-order', '{}', ?, 200, ?, 1, ?)""",
-            (verification_id, task_id, plan_hash, action_id, now, canonical_json(assertions), digest_json(assertions)),
+                       '/api/orders/demo-order', ?, ?, 200, ?, 1, ?)""",
+            (verification_id, task_id, plan_hash, action_id, canonical_json(verification_versions), now,
+             canonical_json(verification_assertions), verification_digest),
         )
         connection.execute(
             """INSERT INTO d2_evidence
                (evidence_id, tenant_id, task_id, call_id, tool_call_id, resource_id,
                 principal_id, data_source, fetched_at, observed_versions_json, fact_type,
                 facts_json, original_result_ref, trust_class, digest)
-               VALUES (?, 'tenant-a', ?, ?, ?, 'orders-demo', 'principal-a', 'MCP', ?, '{}',
-                       'endpoint_probe', '{}', 'probe-ref', 'untrusted_tool_observation', ?)""",
-            (evidence_id, task_id, f"call-{task_id}", f"tool-{task_id}", now, digest_json({"evidence_id": evidence_id})),
+               VALUES (?, 'tenant-a', ?, ?, ?, 'orders-demo:integration-a:/api/orders/demo-order',
+                       'principal-a', 'http:loopback-demo-business-api', ?, ?,
+                       'endpoint_probe', ?, 'probe-ref', 'untrusted_tool_observation', ?)""",
+            (evidence_id, task_id, f"call-{task_id}", f"tool-{task_id}", now,
+             canonical_json(probe_versions), canonical_json(probe_facts), evidence_digest),
         )
         connection.execute(
             """INSERT INTO d3_report_artifacts
@@ -223,7 +251,13 @@ def test_context_builder_and_reservation_record_exact_sources(demo_db: Path) -> 
     )
     finish_context_provenance(demo_db, "d5-context-test-call", "MODEL_REQUEST_FAILED", "TimeoutError")
     row = list_context_provenance(demo_db, task_id, "support-a")[0]
-    assert row["selected_memories"] == [{"memory_id": memory["memory_id"], "version": 2}]
+    assert len(row["selected_memories"]) == 1
+    selected_memory = row["selected_memories"][0]
+    assert selected_memory["memory_id"] == memory["memory_id"]
+    assert selected_memory["version"] == 2
+    assert selected_memory["source_task_id"] == task_a
+    assert selected_memory["source_outcome"] == "REPAIRED_VERIFIED"
+    assert selected_memory["digest"] == memory["content_digest"]
     assert row["selected_skill_name"] == "auth-incident-triage"
     assert row["prompt_digest"] == prompt_digest
     assert row["model_status"] == "MODEL_REQUEST_FAILED"

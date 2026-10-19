@@ -42,3 +42,8 @@ class S2HandoffSubmitRequest(StrictModel):
     draft_digest: str = Field(min_length=64, max_length=64)
     expected_control_revision: int = Field(ge=0)
     handoff_kind: Literal["SCOPE_REVIEW"]
+
+
+class MemoryCommandRequest(StrictModel):
+    """Memory lifecycle writes accept no caller-authored source or content fields."""
+    pass

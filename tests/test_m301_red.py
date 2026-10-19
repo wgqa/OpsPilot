@@ -62,6 +62,8 @@ def test_m301_red_s2_investigator_context_can_select_active_case_memory(
         "memory_id": "m301-case-memory-s2",
         "version": 2,
         "digest": "f" * 64,
+        "content_digest": "f" * 64,
+        "schema_version": "opspilot-case-memory-v1",
         "summary": "历史 S2 案例：应只使用本次 Run 的 Probe request_id 查询当前 Authz facts。",
         "source_task_id": source_task_id,
         "source_outcome": "SCOPE_ESCALATED",

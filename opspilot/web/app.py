@@ -35,7 +35,7 @@ from opspilot.web.auth import (
 )
 from opspilot.web.schemas import (
     AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest,
-    PlanApprovalRequest, S2HandoffSubmitRequest,
+    MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
 )
 
 
@@ -65,10 +65,13 @@ _STATUS_BY_CODE = {
     "TASK_SCOPE_DENIED": 404,
     "TASK_RUN_NOT_FOUND": 404,
     "RESOURCE_NOT_FOUND": 404,
+    "MEMORY_SCOPE_DENIED": 403,
+    "MEMORY_SOURCE_REJECTED": 409,
+    "MEMORY_IDEMPOTENCY_CONFLICT": 409,
     "IDEMPOTENCY_CONFLICT": 409,
     "IDEMPOTENCY_KEY_MISMATCH": 422,
     "IDEMPOTENCY_STATE_AMBIGUOUS": 409,
-    "IDEMPOTENCY_KEY_REQUIRED": 422,
+    "IDEMPOTENCY_KEY_REQUIRED": 400,
     "TASK_RUN_BUSY": 409,
     "TASK_RUN_NOT_QUEUED": 409,
     "TASK_RUN_NOT_RESUMABLE": 409,
@@ -585,6 +588,122 @@ def create_app(
                 item["applied_run_id"] = None
             items.append(item)
         return {"items": items}
+
+    @app.get("/api/tasks/{task_id}/memories")
+    async def get_task_memories(
+        task_id: str, context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import (
+            MemoryScopeDenied, get_task_memory_context,
+        )
+
+        require_task_reader(context.identity, task_id)
+        try:
+            return get_task_memory_context(resolved_db, task_id, context.identity.actor_id)
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+
+    @app.post("/api/tasks/{task_id}/memories/candidates", status_code=201)
+    async def create_task_memory_candidate(
+        task_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import (
+            MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected,
+            create_memory_candidate,
+        )
+
+        require_task_reader(context.identity, task_id)
+        try:
+            return create_memory_candidate(
+                resolved_db, task_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("MEMORY_SOURCE_REJECTED") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.get("/api/memories")
+    async def list_memories(
+        state: str | None = Query(default=None),
+        context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied, list_memory_records
+
+        try:
+            return {"items": list_memory_records(
+                resolved_db, context.identity.actor_id, state=state,
+            )}
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+
+    @app.get("/api/memories/{memory_id}")
+    async def get_memory(
+        memory_id: str, context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied, list_memory_records
+
+        try:
+            items = list_memory_records(resolved_db, context.identity.actor_id, memory_id=memory_id)
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        if not items:
+            raise TaskControlError("RESOURCE_NOT_FOUND")
+        return items[0]
+
+    @app.post("/api/memories/{memory_id}/confirm")
+    async def confirm_memory_route(
+        memory_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import (
+            MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected, confirm_memory,
+        )
+
+        try:
+            return confirm_memory(
+                resolved_db, memory_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("MEMORY_SOURCE_REJECTED") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.post("/api/memories/{memory_id}/revoke")
+    async def revoke_memory_route(
+        memory_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import (
+            MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected, revoke_memory,
+        )
+
+        try:
+            return revoke_memory(
+                resolved_db, memory_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("MEMORY_SOURCE_REJECTED") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
 
     @app.post("/api/tasks/{task_id}/abort", status_code=202)
     async def post_abort(

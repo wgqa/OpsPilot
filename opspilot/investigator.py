@@ -55,6 +55,7 @@ from opspilot.domain.d2 import (
 )
 from opspilot.domain.episodic_memory import (
     PROBLEM_TYPE,
+    S2_PROBLEM_TYPE,
     ContextAssetInvalidated,
     assert_task_skill_compatible,
     finish_context_provenance,
@@ -72,7 +73,7 @@ from opspilot.smokes.tool_call import safe_error_details
 from opspilot.skill_assets import load_applicable_skill
 
 
-PROMPT_VERSION = "m2-02-context-v3"
+PROMPT_VERSION = "m3-01-case-memory-v1"
 TOOL_SCHEMA_VERSION = "m2-02-read-only-tools-v1"
 _D4_GRAPH_TEST_FAILPOINT: Callable[[str], None] | None = None
 
@@ -521,6 +522,7 @@ def _prompt_messages(
     context_metadata: dict[str, object] | None = None,
     run_id: str | None = None,
     s2_mode: bool = False,
+    memory_enabled: bool = True,
 ) -> list[SystemMessage | HumanMessage]:
     binding = get_task_binding(db_path, task_id)
     selected_evidence_ids = list(state.get("evidence_ids", []))
@@ -563,16 +565,22 @@ def _prompt_messages(
     )
     skill = load_applicable_skill(problem_type)
     assert_task_skill_compatible(db_path, task_id, skill)
-    memories = list_applicable_memories(db_path, task_id, problem_type) if problem_type and not s2_mode else []
+    memories = (
+        list_applicable_memories(db_path, task_id, problem_type)
+        if problem_type and memory_enabled else []
+    )
     historical_guidance = [
         {
             "memory_id": item["memory_id"],
             "version": item["version"],
+            "schema_version": item.get("schema_version"),
+            "content_digest": item.get("content_digest"),
             "guidance": item["summary"],
             "source_task_id": item["source_task_id"],
-            "source_report_ref": item["source_report_ref"],
-            "source_verification_id": item["source_verification_id"],
-            "source_evidence_ids": item["source_evidence_ids"],
+            "source_outcome": item.get("source_outcome"),
+            "source_refs": item.get("source_refs", []),
+            "experience": item.get("experience", {}),
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
         }
         for item in memories
     ]
@@ -647,7 +655,13 @@ def _prompt_messages(
         context_metadata.update({
             "selected_skill": ({key: skill[key] for key in ("name", "version", "digest")} if skill else None),
             "selected_memories": [
-                {"memory_id": item["memory_id"], "version": item["version"], "summary": item["summary"]}
+                {
+                    "memory_id": item["memory_id"], "version": item["version"],
+                    "summary": item["summary"], "content_digest": item["content_digest"],
+                    "schema_version": item["schema_version"],
+                    "source_task_id": item["source_task_id"],
+                    "source_outcome": item["source_outcome"],
+                }
                 for item in memories
             ],
             "selected_knowledge": [
@@ -847,6 +861,7 @@ def build_investigation_graph(
     run_id: str | None = None,
     s2_mode: bool = False,
     evaluation_strategy: str = "A",
+    memory_enabled: bool = True,
     interrupt_after_for_test: tuple[str, ...] = (),
 ):
     async def intake(state: InvestigatorState) -> dict[str, object]:
@@ -944,6 +959,7 @@ def build_investigation_graph(
         metadata: dict[str, object] = {}
         base_messages = _prompt_messages(
             db_path, task_id, state, context_metadata=metadata, run_id=run_id, s2_mode=s2_mode,
+            memory_enabled=memory_enabled,
         )
         _, separator, serialized_context = base_messages[-1].content.partition("\n")
         context = json.loads(serialized_context) if separator else {}
@@ -980,7 +996,7 @@ def build_investigation_graph(
             "tool_schema_version": "m2-02-hf-normalized-cues-v1",
             "tool_schema_digest": schema_digest,
             "selected_skill": metadata.get("selected_skill"),
-            "selected_memories": [],
+            "selected_memories": metadata.get("selected_memories", []),
             "selected_knowledge": metadata.get("selected_knowledge", []),
             "evidence_ids": metadata.get("evidence_ids", []),
             "selected_input_messages": metadata.get("selected_input_messages", []),
@@ -1143,7 +1159,7 @@ def build_investigation_graph(
             context_metadata: dict[str, object] = {}
             messages = _prompt_messages(
                 db_path, task_id, state, context_metadata=context_metadata,
-                run_id=run_id, s2_mode=s2_mode,
+                run_id=run_id, s2_mode=s2_mode, memory_enabled=memory_enabled,
             )
             prompt_digest = digest_json([{"role": message.type, "content": message.content} for message in messages])
             context_provenance = {
@@ -2019,6 +2035,7 @@ async def run_investigation(
     run_id: str | None = None,
     s2_mode: bool = False,
     evaluation_strategy: str = "A",
+    _memory_enabled_for_test: bool = True,
     _interrupt_after_for_test: tuple[str, ...] = (),
 ) -> dict[str, object]:
     if evaluation_strategy not in {"A", "H", "R"}:
@@ -2201,6 +2218,7 @@ async def run_investigation(
                     run_id=run_id,
                     s2_mode=s2_mode,
                     evaluation_strategy=evaluation_strategy,
+                    memory_enabled=_memory_enabled_for_test,
                     interrupt_after_for_test=_interrupt_after_for_test,
                 )
                 checkpoint_tuple = await checkpointer.aget_tuple(config)

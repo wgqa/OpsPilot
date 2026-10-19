@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -715,8 +716,14 @@ CREATE TABLE IF NOT EXISTS d5_memories (
     applicability_constraints_json TEXT NOT NULL,
     source_task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
     source_evidence_ids_json TEXT NOT NULL,
-    source_report_ref TEXT NOT NULL,
-    source_verification_id TEXT NOT NULL,
+    source_report_ref TEXT,
+    source_verification_id TEXT,
+    source_outcome TEXT NOT NULL DEFAULT 'REPAIRED_VERIFIED'
+        CHECK (source_outcome IN ('REPAIRED_VERIFIED', 'DIAGNOSED', 'SCOPE_ESCALATED')),
+    schema_version TEXT NOT NULL DEFAULT 'd5-legacy-v1',
+    source_refs_json TEXT NOT NULL DEFAULT '[]',
+    experience_json TEXT NOT NULL DEFAULT '{}',
+    content_digest TEXT NOT NULL DEFAULT '',
     state TEXT NOT NULL CHECK (state IN ('CANDIDATE', 'ACTIVE', 'REVOKED')),
     version INTEGER NOT NULL,
     confirmed_by TEXT,
@@ -725,7 +732,14 @@ CREATE TABLE IF NOT EXISTS d5_memories (
     revoked_at TEXT,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    UNIQUE (tenant_id, project_id, problem_type, source_task_id)
+    UNIQUE (tenant_id, project_id, problem_type, source_task_id),
+    CHECK (
+        (source_outcome = 'REPAIRED_VERIFIED'
+            AND source_report_ref IS NOT NULL AND source_verification_id IS NOT NULL)
+        OR
+        (source_outcome IN ('DIAGNOSED', 'SCOPE_ESCALATED')
+            AND source_report_ref IS NULL AND source_verification_id IS NULL)
+    )
 );
 CREATE INDEX IF NOT EXISTS ix_d5_memories_lookup
     ON d5_memories(tenant_id, project_id, problem_type, state, expires_at);
@@ -864,7 +878,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 8:
+        if version > 9:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -972,6 +986,176 @@ def initialize(path: str | Path) -> None:
             version = 7
         if version < 8:
             connection.execute("PRAGMA user_version = 8")
+            version = 8
+        if version < 9:
+            memory_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(d5_memories)").fetchall()
+            }
+            required_v9 = {
+                "source_outcome", "schema_version", "source_refs_json",
+                "experience_json", "content_digest",
+            }
+            if not required_v9.issubset(memory_columns):
+                # Rebuild only the D5 parent and event tables. Renaming the parent
+                # updates the old event FK, so the v8 history can be copied before
+                # the old child and parent are dropped in that order.
+                connection.execute("ALTER TABLE d5_memories RENAME TO d5_memories_v8")
+                connection.execute("ALTER TABLE d5_memory_events RENAME TO d5_memory_events_v8")
+                connection.execute("DROP INDEX IF EXISTS ix_d5_memories_lookup")
+                connection.execute(
+                    """CREATE TABLE d5_memories (
+                        memory_id TEXT PRIMARY KEY,
+                        tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+                        project_id TEXT NOT NULL,
+                        type TEXT NOT NULL CHECK (type = 'EPISODIC'),
+                        problem_type TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        applicability_constraints_json TEXT NOT NULL,
+                        source_task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+                        source_evidence_ids_json TEXT NOT NULL,
+                        source_report_ref TEXT,
+                        source_verification_id TEXT,
+                        source_outcome TEXT NOT NULL
+                            CHECK (source_outcome IN ('REPAIRED_VERIFIED', 'DIAGNOSED', 'SCOPE_ESCALATED')),
+                        schema_version TEXT NOT NULL,
+                        source_refs_json TEXT NOT NULL,
+                        experience_json TEXT NOT NULL,
+                        content_digest TEXT NOT NULL,
+                        state TEXT NOT NULL CHECK (state IN ('CANDIDATE', 'ACTIVE', 'REVOKED')),
+                        version INTEGER NOT NULL,
+                        confirmed_by TEXT,
+                        confirmed_at TEXT,
+                        revoked_by TEXT,
+                        revoked_at TEXT,
+                        expires_at TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        UNIQUE (tenant_id, project_id, problem_type, source_task_id),
+                        CHECK (
+                            (source_outcome = 'REPAIRED_VERIFIED'
+                                AND source_report_ref IS NOT NULL AND source_verification_id IS NOT NULL)
+                            OR
+                            (source_outcome IN ('DIAGNOSED', 'SCOPE_ESCALATED')
+                                AND source_report_ref IS NULL AND source_verification_id IS NULL)
+                        )
+                    )"""
+                )
+                connection.execute(
+                    """CREATE TABLE d5_memory_events (
+                        event_id TEXT PRIMARY KEY,
+                        memory_id TEXT NOT NULL REFERENCES d5_memories(memory_id),
+                        tenant_id TEXT NOT NULL,
+                        project_id TEXT NOT NULL,
+                        event_type TEXT NOT NULL CHECK (event_type IN ('CANDIDATE_CREATED', 'CONFIRMED', 'REVOKED')),
+                        actor_id TEXT NOT NULL,
+                        memory_version INTEGER NOT NULL,
+                        occurred_at TEXT NOT NULL,
+                        details_json TEXT NOT NULL
+                    )"""
+                )
+                old_rows = connection.execute("SELECT * FROM d5_memories_v8").fetchall()
+                for old in old_rows:
+                    try:
+                        evidence_ids = json.loads(str(old["source_evidence_ids_json"]))
+                    except (json.JSONDecodeError, TypeError):
+                        evidence_ids = []
+                    source_refs: list[dict[str, object]] = []
+                    report = connection.execute(
+                        "SELECT content_digest, repair_action_id FROM d3_report_artifacts WHERE report_ref = ?",
+                        (old["source_report_ref"],),
+                    ).fetchone()
+                    ledger = connection.execute(
+                        "SELECT ledger_id, result_digest FROM d3_action_ledgers "
+                        "WHERE task_id = ? AND action_id = ? AND action_kind = 'REPAIR' "
+                        "AND status = 'COMMITTED'",
+                        (old["source_task_id"], report["repair_action_id"] if report is not None else ""),
+                    ).fetchone()
+                    if ledger is not None:
+                        source_refs.append({
+                            "kind": "REPAIR_LEDGER", "id": str(ledger["ledger_id"]),
+                            "digest_or_version": str(ledger["result_digest"]),
+                        })
+                    verification = connection.execute(
+                        "SELECT result_digest FROM d3_verification_receipts WHERE verification_id = ?",
+                        (old["source_verification_id"],),
+                    ).fetchone()
+                    if report is not None:
+                        source_refs.append({
+                            "kind": "FROZEN_REPORT", "id": str(old["source_report_ref"]),
+                            "digest_or_version": str(report["content_digest"]),
+                        })
+                    if verification is not None:
+                        source_refs.append({
+                            "kind": "VERIFICATION_RECEIPT", "id": str(old["source_verification_id"]),
+                            "digest_or_version": str(verification["result_digest"]),
+                        })
+                    for evidence_id in evidence_ids if isinstance(evidence_ids, list) else []:
+                        evidence = connection.execute(
+                            "SELECT digest FROM d2_evidence WHERE evidence_id = ? AND task_id = ?",
+                            (str(evidence_id), str(old["source_task_id"])),
+                        ).fetchone()
+                        if evidence is not None:
+                            source_refs.append({
+                                "kind": "EVIDENCE", "id": str(evidence_id),
+                                "digest_or_version": str(evidence["digest"]),
+                            })
+                    source_refs.sort(key=lambda item: (str(item["kind"]), str(item["id"])))
+                    experience = {
+                        "schema_version": "d5-legacy-v1",
+                        "symptom_pattern": "Legacy D5 method hint; no case-specific extraction was performed.",
+                        "case_specific_facts": [],
+                        "investigation_guidance": str(old["summary"]),
+                        "applicability": str(old["applicability_constraints_json"]),
+                        "limitations": ["Legacy fixed guidance is not case-specific learning."],
+                        "legacy_fixed_guidance": True,
+                    }
+                    payload = {
+                        "schema_version": "d5-legacy-v1",
+                        "problem_type": str(old["problem_type"]),
+                        "source_outcome": "REPAIRED_VERIFIED",
+                        "summary": str(old["summary"]),
+                        "source_refs": source_refs,
+                        "experience": experience,
+                    }
+                    content_digest = hashlib.sha256(json.dumps(
+                        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                    ).encode("utf-8")).hexdigest()
+                    connection.execute(
+                        """INSERT INTO d5_memories
+                           (memory_id, tenant_id, project_id, type, problem_type, summary,
+                            applicability_constraints_json, source_task_id, source_evidence_ids_json,
+                            source_report_ref, source_verification_id, source_outcome, schema_version,
+                            source_refs_json, experience_json, content_digest, state, version,
+                            confirmed_by, confirmed_at, revoked_by, revoked_at, expires_at, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'REPAIRED_VERIFIED', 'd5-legacy-v1',
+                                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            old["memory_id"], old["tenant_id"], old["project_id"], old["type"],
+                            old["problem_type"], old["summary"], old["applicability_constraints_json"],
+                            old["source_task_id"], old["source_evidence_ids_json"],
+                            old["source_report_ref"], old["source_verification_id"],
+                            json.dumps(source_refs, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                            json.dumps(experience, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                            content_digest, old["state"], old["version"], old["confirmed_by"],
+                            old["confirmed_at"], old["revoked_by"], old["revoked_at"],
+                            old["expires_at"], old["created_at"],
+                        ),
+                    )
+                connection.execute(
+                    """INSERT INTO d5_memory_events
+                       (event_id, memory_id, tenant_id, project_id, event_type, actor_id,
+                        memory_version, occurred_at, details_json)
+                       SELECT event_id, memory_id, tenant_id, project_id, event_type, actor_id,
+                              memory_version, occurred_at, details_json
+                       FROM d5_memory_events_v8"""
+                )
+                connection.execute("DROP TABLE d5_memory_events_v8")
+                connection.execute("DROP TABLE d5_memories_v8")
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_d5_memories_lookup "
+                    "ON d5_memories(tenant_id, project_id, problem_type, state, expires_at)"
+                )
+            connection.execute("PRAGMA user_version = 9")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:

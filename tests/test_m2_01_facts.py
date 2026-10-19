@@ -364,8 +364,8 @@ def test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero(
     initialize(demo_db)
     initialize(demo_db)
     with connect(demo_db) as connection:
-        # M2-03 adds the append-only local handoff tables in migration v8.
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
+        # M2-03 adds handoff tables in v8; M3-01 versions D5 case memory in v9.
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
         assert "request_id" in {
             str(row["name"]) for row in connection.execute("PRAGMA table_info(auth_events)")
         }

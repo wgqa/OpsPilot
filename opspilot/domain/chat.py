@@ -272,10 +272,40 @@ def _current_evidence(
     return evidence
 
 
-def _current_memories(connection: sqlite3.Connection, task_id: str | None, state: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _current_memories(
+    connection: sqlite3.Connection,
+    task_id: str | None,
+    state: dict[str, Any] | None,
+    evidence: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     if task_id is None or state is None:
         return []
     from opspilot.domain.episodic_memory import _memory_source_still_valid, project_id_for_service
+
+    probes = [item for item in evidence if item.get("fact_type") == "endpoint_probe"]
+    if not probes:
+        return []
+    latest_probe = max(probes, key=lambda item: str(item.get("fetched_at", "")))
+    probe_facts = latest_probe.get("facts")
+    status = probe_facts.get("http_status") if isinstance(probe_facts, dict) else None
+    if status == 401:
+        problem_type = "auth_401"
+    elif status == 403:
+        request_id = probe_facts.get("request_id") if isinstance(probe_facts, dict) else None
+        decisions = [
+            item for item in evidence
+            if item.get("fact_type") == "scope_authz_decision"
+            and isinstance(item.get("facts"), dict)
+            and item["facts"].get("request_id") == request_id
+            and item["facts"].get("outcome") == "DENY"
+            and item["facts"].get("reason_code") == "SCOPE_INSUFFICIENT"
+            and item["facts"].get("authn_result_code") == "AUTH_ACCEPTED"
+        ]
+        if not decisions:
+            return []
+        problem_type = "auth_403_scope"
+    else:
+        return []
 
     binding = connection.execute(
         "SELECT tenant_id FROM task_bindings WHERE task_id = ?", (task_id,)
@@ -285,8 +315,8 @@ def _current_memories(connection: sqlite3.Connection, task_id: str | None, state
     project_id = project_id_for_service(str(state["service_id"]))
     rows = connection.execute(
         """SELECT * FROM d5_memories WHERE tenant_id = ? AND project_id = ?
-           AND problem_type = 'auth_401' AND state = 'ACTIVE' ORDER BY confirmed_at, memory_id LIMIT 1""",
-        (str(binding["tenant_id"]), project_id),
+           AND problem_type = ? AND state = 'ACTIVE' ORDER BY confirmed_at, memory_id LIMIT 3""",
+        (str(binding["tenant_id"]), project_id, problem_type),
     ).fetchall()
     memories: list[dict[str, Any]] = []
     for row in rows:
@@ -297,7 +327,13 @@ def _current_memories(connection: sqlite3.Connection, task_id: str | None, state
             continue
         memories.append({
             "memory_id": str(row["memory_id"]), "version": int(row["version"]),
-            "digest": _digest(str(row["summary"])), "summary": str(row["summary"])[:480],
+            "digest": str(row["content_digest"]), "content_digest": str(row["content_digest"]),
+            "schema_version": str(row["schema_version"]),
+            "source_task_id": str(row["source_task_id"]),
+            "source_outcome": str(row["source_outcome"]),
+            "source_refs": json.loads(str(row["source_refs_json"])),
+            "experience": json.loads(str(row["experience_json"])),
+            "summary": str(row["summary"])[:480],
             "expires_at": str(row["expires_at"]),
         })
     return memories
@@ -418,7 +454,7 @@ def _prepare_context(
         _current_evidence(connection, task_id, state, excluded_sources=excluded)
         if task_id and state else []
     )
-    memories = _current_memories(connection, task_id, state)
+    memories = _current_memories(connection, task_id, state, evidence)
     evidence_by_id = {str(item["evidence_id"]): item for item in evidence}
     evidence_exclusion_reasons = {
         str(item["source_id"]): str(item["reason"])
@@ -511,7 +547,7 @@ def _prepare_context(
         "Scope is still not authorized, the API is not restored, and the user should not submit it again.\n\n"
         f"TRUSTED TASK STATE (read-only): {_canonical(state) if state is not None else 'No Task is linked.'}\n"
         f"CURRENT AUTHORIZED MCP EVIDENCE: {_canonical(evidence_text) if evidence_text else 'No current authorized MCP Evidence.'}\n"
-        f"HISTORICAL MEMORY GUIDANCE (not evidence): {_canonical([{'memory_id': item['memory_id'], 'summary': item['summary']} for item in memories]) if memories else 'None.'}"
+        f"HISTORICAL MEMORY GUIDANCE (not evidence): {_canonical([{'memory_id': item['memory_id'], 'version': item['version'], 'content_digest': item['content_digest'], 'source_task_id': item['source_task_id'], 'source_outcome': item['source_outcome'], 'summary': item['summary'], 'experience': item['experience'], 'source_authority': 'HISTORICAL_METHOD_HINT_ONLY'} for item in memories]) if memories else 'None.'}"
     )
     messages = [{"role": "system", "content": system}]
     messages.extend({"role": item["role"], "content": item["body"]} for item in selected)
@@ -989,7 +1025,7 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
         investigator_contexts = connection.execute(
             """SELECT call_id, attempt_id, model_id, prompt_version, prompt_digest,
                       model_status, error_class, selected_skill_name, selected_skill_version,
-                      selected_skill_digest, selected_knowledge_json, selected_input_messages_json,
+                      selected_skill_digest, selected_memories_json, selected_knowledge_json, selected_input_messages_json,
                       task_run_control_json, evidence_ids_json, built_at
                FROM d5_context_provenance WHERE task_id = ?
                ORDER BY built_at DESC, call_id DESC LIMIT 20""",
@@ -1065,6 +1101,7 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                 "digest": str(row["selected_skill_digest"]),
             } if row["selected_skill_name"] else None),
             "selected_knowledge": json.loads(str(row["selected_knowledge_json"])),
+            "selected_memories": json.loads(str(row["selected_memories_json"])),
             "model_status": str(row["model_status"]),
             "error_class": str(row["error_class"]) if row["error_class"] else None,
             "selected_input_messages": [

@@ -113,6 +113,26 @@ export interface TaskOutcome {
   ticket_entry_count?: number;
 }
 
+export interface MemoryRecord extends Record<string, unknown> {
+  memory_id: string;
+  problem_type: string;
+  summary: string;
+  source_task_id: string;
+  source_outcome: string;
+  source_refs: Array<Record<string, unknown>>;
+  experience: Record<string, unknown>;
+  state: 'CANDIDATE' | 'ACTIVE' | 'REVOKED';
+  version: number;
+  content_digest: string;
+}
+
+export interface TaskMemoryContext {
+  task_id: string;
+  source_memories: MemoryRecord[];
+  applicable_memories: MemoryRecord[];
+  context_provenance: Array<Record<string, unknown>>;
+}
+
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string) {
     super(code);
@@ -188,6 +208,29 @@ export const api = {
   },
   outcome(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/outcome`); },
   handoff(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/handoff`); },
+  taskMemories(taskId: string) {
+    return request<TaskMemoryContext>(`/api/tasks/${encodeURIComponent(taskId)}/memories`);
+  },
+  createMemoryCandidate(taskId: string, csrf: string, idempotencyKey: string) {
+    return request<MemoryRecord>(`/api/tasks/${encodeURIComponent(taskId)}/memories/candidates`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
+  memories(state?: string) {
+    const query = state ? `?state=${encodeURIComponent(state)}` : '';
+    return request<{ items: MemoryRecord[] }>(`/api/memories${query}`);
+  },
+  memory(memoryId: string) { return request<MemoryRecord>(`/api/memories/${encodeURIComponent(memoryId)}`); },
+  confirmMemory(memoryId: string, csrf: string, idempotencyKey: string) {
+    return request<MemoryRecord>(`/api/memories/${encodeURIComponent(memoryId)}/confirm`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
+  revokeMemory(memoryId: string, csrf: string, idempotencyKey: string) {
+    return request<MemoryRecord>(`/api/memories/${encodeURIComponent(memoryId)}/revoke`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
   submitHandoff(
     taskId: string,
     payload: {

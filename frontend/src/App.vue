@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type SessionItem, type TaskOutcome } from './api';
+import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -15,6 +15,9 @@ const messages = ref<MessageItem[]>([]);
 const taskId = ref('');
 const inspector = ref<Inspector | null>(null);
 const taskOutcome = ref<TaskOutcome | null>(null);
+const taskMemoryContext = ref<TaskMemoryContext | null>(null);
+const memoryCandidates = ref<MemoryRecord[]>([]);
+const selectedMemory = ref<MemoryRecord | null>(null);
 const pendingApprovals = ref<PendingApproval[]>([]);
 const selectedReview = ref<PlanReview | null>(null);
 const approvalResult = ref<ApprovalResult | null>(null);
@@ -51,6 +54,24 @@ const latestSelectedInputs = computed(() => Array.isArray(latestContextProvenanc
   ? latestContextProvenance.value.selected_input_messages as Array<Record<string, unknown>> : []);
 const latestSelectedKnowledge = computed(() => Array.isArray(latestContextProvenance.value?.selected_knowledge)
   ? latestContextProvenance.value.selected_knowledge as Array<Record<string, unknown>> : []);
+const latestSelectedMemories = computed(() => Array.isArray(latestContextProvenance.value?.selected_memories)
+  ? latestContextProvenance.value.selected_memories as Array<Record<string, unknown>> : []);
+const sourceMemoryExists = computed(() => (taskMemoryContext.value?.source_memories ?? []).length > 0);
+const sourceMemoryEligible = computed(() => ['DELIVERED', 'DIAGNOSED', 'SCOPE_ESCALATED'].includes(String(taskOutcome.value?.business_outcome ?? '')));
+
+function memoryOperationKey(operation: string, target: string): string {
+  const storageKey = `opspilot.memory-operation.${user.value?.actor_id ?? 'unknown'}.${operation}.${target}`;
+  let value = sessionStorage.getItem(storageKey);
+  if (!value) {
+    value = crypto.randomUUID();
+    sessionStorage.setItem(storageKey, value);
+  }
+  return value;
+}
+
+function completeMemoryOperation(operation: string, target: string): void {
+  sessionStorage.removeItem(`opspilot.memory-operation.${user.value?.actor_id ?? 'unknown'}.${operation}.${target}`);
+}
 
 function dateLabel(value: unknown): string {
   if (typeof value !== 'string' || !value) return '—';
@@ -125,6 +146,9 @@ async function logout(): Promise<void> {
   messages.value = [];
   inspector.value = null;
   taskOutcome.value = null;
+  taskMemoryContext.value = null;
+  memoryCandidates.value = [];
+  selectedMemory.value = null;
   pendingApprovals.value = [];
   selectedReview.value = null;
   approvalResult.value = null;
@@ -140,6 +164,47 @@ async function loadSessions(): Promise<void> {
 
 async function loadPendingApprovals(): Promise<void> {
   pendingApprovals.value = (await api.pendingApprovals()).items;
+  const [candidates, activeMemories] = await Promise.all([
+    api.memories('CANDIDATE'), api.memories('ACTIVE'),
+  ]);
+  memoryCandidates.value = [...candidates.items, ...activeMemories.items];
+  if (selectedMemory.value) {
+    selectedMemory.value = memoryCandidates.value.find((item) => item.memory_id === selectedMemory.value?.memory_id)
+      ?? selectedMemory.value;
+  }
+}
+
+async function selectMemory(item: MemoryRecord): Promise<void> {
+  try {
+    selectedMemory.value = await api.memory(item.memory_id);
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  }
+}
+
+async function decideMemory(memory: MemoryRecord, action: 'confirm' | 'revoke'): Promise<void> {
+  if (!csrf.value || busy.value) return;
+  const confirmed = window.confirm(action === 'confirm'
+    ? `独立审核并启用这条历史案例经验？\n\n${memory.summary}\n\n它只提供方法提示，不代表目标 Task 的当前事实或授权。`
+    : `撤销这条历史案例经验？后续模型上下文将无法再加载它。`);
+  if (!confirmed) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const key = memoryOperationKey(action, memory.memory_id);
+    selectedMemory.value = action === 'confirm'
+      ? await api.confirmMemory(memory.memory_id, csrf.value, key)
+      : await api.revokeMemory(memory.memory_id, csrf.value, key);
+    completeMemoryOperation(action, memory.memory_id);
+    notice.value = action === 'confirm'
+      ? '人工审核已持久记录；经验仅作为历史方法提示。'
+      : '撤销已持久记录，后续模型调用将排除该经验。';
+    await loadPendingApprovals();
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function selectPendingApproval(item: PendingApproval): Promise<void> {
@@ -202,6 +267,7 @@ async function createSession(): Promise<void> {
 async function selectSession(value: string): Promise<void> {
   sessionId.value = value;
   taskId.value = '';
+  taskMemoryContext.value = null;
   messages.value = [];
   inspector.value = null;
   taskOutcome.value = null;
@@ -249,9 +315,29 @@ async function refreshInspector(): Promise<void> {
   if (!taskId.value) return;
   try {
     inspector.value = await api.inspector(taskId.value);
-    if (user.value?.role === 'SUPPORT') taskOutcome.value = await api.handoff(taskId.value);
+    if (user.value?.role === 'SUPPORT') {
+      taskOutcome.value = await api.handoff(taskId.value);
+      taskMemoryContext.value = await api.taskMemories(taskId.value);
+    }
   } catch (error) {
     if (user.value?.role === 'APPROVER') errorMessage.value = explainError(error);
+  }
+}
+
+async function createMemoryCandidate(): Promise<void> {
+  if (!taskId.value || !csrf.value || busy.value) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const key = memoryOperationKey('candidate', taskId.value);
+    const candidate = await api.createMemoryCandidate(taskId.value, csrf.value, key);
+    completeMemoryOperation('candidate', taskId.value);
+    notice.value = `真实来源候选已建立：${candidate.memory_id} · ${candidate.source_outcome}。等待同租户 APPROVER 独立审核。`;
+    taskMemoryContext.value = await api.taskMemories(taskId.value);
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
   }
 }
 
@@ -643,7 +729,7 @@ onBeforeUnmount(() => {
 
     <section v-else-if="isApprover" class="approval-center">
       <div class="approval-heading">
-        <div><span class="eyebrow">INDEPENDENT APPROVER · {{ user.tenant_id }}</span><h1>Plan 审批队列</h1><p>这里只显示当前租户等待审核的不可变计划。审批身份不能访问 Support 会话或代替其修改任务。</p></div>
+        <div><span class="eyebrow">INDEPENDENT APPROVER · {{ user.tenant_id }}</span><h1>独立审核工作区</h1><p>Plan 与历史案例经验分开审核。案例经验只提供方法提示，不证明当前事实、授权或恢复。</p></div>
         <button class="outline-button" type="button" :disabled="busy" @click="loadPendingApprovals">刷新待办</button>
       </div>
       <div class="approval-grid">
@@ -707,6 +793,33 @@ onBeforeUnmount(() => {
           <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}</div>
         </section>
       </div>
+      <section class="memory-review panel" aria-label="Episodic Memory 审核" data-testid="memory-approval-center">
+        <div class="approval-review-heading"><div><span class="eyebrow">EPISODIC MEMORY · SAME-TENANT REVIEW</span><h2>案例经验审核与撤销</h2></div><button class="outline-button" type="button" :disabled="busy" @click="loadPendingApprovals">刷新</button></div>
+        <p class="memory-warning">仅审核来自真实 Domain 收据的历史案例。Memory 不能替代当前 MCP Evidence、确定性 Gate、权限决策或业务审批。</p>
+        <div class="memory-review-grid">
+          <div class="memory-candidate-list">
+            <div v-if="memoryCandidates.length === 0" class="muted-card">当前租户没有待审核的案例候选。</div>
+            <button v-for="item in memoryCandidates" :key="item.memory_id" class="memory-candidate-item" :class="{ selected: selectedMemory?.memory_id === item.memory_id }" type="button" :data-testid="`memory-candidate-${item.memory_id}`" @click="selectMemory(item)">
+              <strong>{{ item.problem_type }} · {{ item.source_outcome }}</strong><small>来源 Task {{ item.source_task_id }}</small><small>{{ item.summary }}</small>
+            </button>
+          </div>
+          <div v-if="selectedMemory" class="memory-detail" data-testid="memory-review-detail">
+            <div class="plan-row"><span>状态 / 版本</span><b>{{ selectedMemory.state }} · v{{ selectedMemory.version }}</b></div>
+            <div class="plan-row"><span>案例摘要</span><b>{{ selectedMemory.summary }}</b></div>
+            <div class="plan-row"><span>来源 Task / Outcome</span><b>{{ selectedMemory.source_task_id }} · {{ selectedMemory.source_outcome }}</b></div>
+            <div class="memory-json"><strong>历史案例事实</strong><code>{{ JSON.stringify(selectedMemory.experience.case_specific_facts ?? {}) }}</code></div>
+            <div class="memory-json"><strong>调查方法提示</strong><code>{{ JSON.stringify(selectedMemory.experience.investigation_guidance ?? []) }}</code></div>
+            <div class="memory-json"><strong>来源引用</strong><code>{{ JSON.stringify(selectedMemory.source_refs) }}</code></div>
+            <div class="memory-json"><strong>适用限制</strong><code>{{ JSON.stringify(selectedMemory.experience.limitations ?? []) }}</code></div>
+            <small class="memory-digest">Content SHA-256 {{ selectedMemory.content_digest }}</small>
+            <div class="approval-buttons">
+              <button v-if="selectedMemory.state === 'CANDIDATE'" class="primary-button" type="button" data-testid="confirm-memory" :disabled="busy || !csrf" @click="decideMemory(selectedMemory, 'confirm')">独立审核并启用</button>
+              <button v-else-if="selectedMemory.state === 'ACTIVE'" class="outline-button" type="button" data-testid="revoke-memory" :disabled="busy || !csrf" @click="decideMemory(selectedMemory, 'revoke')">撤销此经验</button>
+            </div>
+          </div>
+          <div v-else class="approval-empty"><h3>选择一条案例</h3><p>只展示 Domain 事实投影，不加载源任务的完整对话。</p></div>
+        </div>
+      </section>
     </section>
 
     <section v-else class="workspace-grid">
@@ -841,6 +954,37 @@ onBeforeUnmount(() => {
             <div v-if="taskOutcome.delivery" class="outcome-row">DELIVER <code>{{ String(taskOutcome.delivery.delivery_id) }}</code><span>工单条目 {{ String(taskOutcome.delivery.ticket_entry_id) }}</span></div>
             <div v-if="taskOutcome.local_report" class="outcome-row">拒绝报告 <code>{{ String(taskOutcome.local_report.report_ref) }}</code><span>{{ String(taskOutcome.local_report.outcome) }}</span></div>
           </div>
+          <div v-if="taskMemoryContext" class="inspector-section memory-section" data-testid="task-memory-context">
+            <div class="section-heading"><h3>跨 Task 案例经验</h3><span class="read-only-label">仅历史方法提示</span></div>
+            <div class="memory-warning">案例不属于当前 Evidence，不改变 Gate、授权、Plan 或业务状态。目标 Task 只会读取不同 source_task_id 的已审核经验。</div>
+            <div v-for="item in taskMemoryContext.source_memories" :key="item.memory_id" class="memory-case-card" data-testid="source-memory-case">
+              <div class="plan-row"><span>来源案例</span><b>{{ item.problem_type }} · {{ item.source_outcome }} · {{ item.state }}</b></div>
+              <div class="plan-row"><span>摘要</span><b>{{ item.summary }}</b></div>
+              <div class="memory-json"><strong>案例事实</strong><code>{{ JSON.stringify(item.experience.case_specific_facts ?? {}) }}</code></div>
+              <div class="memory-json"><strong>方法提示</strong><code>{{ JSON.stringify(item.experience.investigation_guidance ?? []) }}</code></div>
+              <div class="memory-json"><strong>来源 / 限制</strong><code>{{ JSON.stringify({ refs: item.source_refs, limitations: item.experience.limitations }) }}</code></div>
+              <small class="memory-digest">Task {{ item.source_task_id }} · SHA-256 {{ item.content_digest }}</small>
+            </div>
+            <div v-if="canCreateTask && sourceMemoryEligible && !sourceMemoryExists" class="memory-create-row">
+              <p>当前可信业务结果可形成案例候选。内容只从受验证 Domain 收据投影，不收录完整对话。</p>
+              <button class="outline-button" type="button" data-testid="create-memory-candidate" :disabled="busy || !csrf" @click="createMemoryCandidate">生成真实案例候选</button>
+            </div>
+            <div v-if="taskMemoryContext.applicable_memories.length" class="memory-applied-list">
+              <strong>可用于当前调查的已审核案例</strong>
+              <div v-for="item in taskMemoryContext.applicable_memories" :key="item.memory_id" class="trace-row" data-testid="applicable-memory">
+                <span class="trace-icon">↗</span><span><strong>{{ item.problem_type }} · {{ item.source_outcome }}</strong><small>来源 Task {{ item.source_task_id }} · v{{ item.version }} · {{ item.content_digest }}</small></span>
+              </div>
+            </div>
+            <div v-if="latestSelectedMemories.length" class="memory-applied-list" data-testid="selected-memory-provenance">
+              <strong>最近一次真实模型调用的 Context Provenance</strong>
+              <div v-for="item in latestSelectedMemories" :key="String(item.memory_id)" class="memory-case-card">
+                <div class="plan-row"><span>实际选用</span><b>{{ String(item.memory_id) }} · v{{ String(item.version) }}</b></div>
+                <div class="plan-row"><span>来源 Task / Outcome</span><b>{{ String(item.source_task_id) }} · {{ String(item.source_outcome) }}</b></div>
+                <small class="memory-digest">SHA-256 {{ String(item.digest) }}</small>
+              </div>
+            </div>
+            <div v-else class="muted-card">最近模型调用没有选用 Memory；当前工具、Evidence Gate 与业务资格仍来自实时来源。</div>
+          </div>
           <div class="inspector-section input-provenance-section">
             <div class="section-heading"><h3>用户线索 Provenance</h3><span class="read-only-label">未验证</span></div>
             <div v-if="latestSelectedInputs.length === 0" class="muted-card">尚无模型调用上下文；已提交消息仍保存在会话与 Task Run 中。</div>
@@ -875,7 +1019,7 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>新建 S1 调查并输入真实故障描述后，这里会显示来源引用、可信 Evidence 和确定性 Gate。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = true">新建调查任务</button></div>
-        <footer class="inspector-footer"><span>OpsPilot vNext · M2-03</span><span>LOOPBACK ONLY</span></footer>
+        <footer class="inspector-footer"><span>OpsPilot vNext · M3-01</span><span>LOOPBACK ONLY</span></footer>
       </aside>
     </section>
   </main>
