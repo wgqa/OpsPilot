@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from opspilot.smokes.m2_02_hf_01_release import _score_case
+from opspilot.smokes.m2_02_hf_01_release import _readonly_answer_overclaims, _score_case
 
 
 def _safe_side_effect_snapshot(*, scope_writes: int = 0) -> dict[str, object]:
@@ -90,3 +90,9 @@ def test_hf01_release_trace_snapshot_matches_persisted_attempt_schema(tmp_path) 
     trace = _trace_snapshot(db_path, "not-created-task")
 
     assert trace["attempts"] == []
+
+
+def test_hf01_g8_overclaim_scorer_respects_negation_and_attribution() -> None:
+    assert not _readonly_answer_overclaims("还不能说已经修好，申请也还没有提交。")
+    assert not _readonly_answer_overclaims("The user claims it is already fixed, but no evidence exists.")
+    assert _readonly_answer_overclaims("管理员已经提交了权限申请。")
