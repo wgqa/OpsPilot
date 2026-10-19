@@ -214,6 +214,7 @@ export const api = {
   },
   outcome(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/outcome`); },
   handoff(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/handoff`); },
+  taskOutcome(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/outcome`); },
   taskMemories(taskId: string) {
     return request<TaskMemoryContext>(`/api/tasks/${encodeURIComponent(taskId)}/memories`);
   },

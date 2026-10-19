@@ -320,7 +320,11 @@ async function refreshInspector(): Promise<void> {
   try {
     inspector.value = await api.inspector(taskId.value);
     if (user.value?.role === 'SUPPORT') {
-      taskOutcome.value = await api.handoff(taskId.value);
+      const [handoffOutcome, taskOutcomeResult] = await Promise.all([
+        api.handoff(taskId.value), api.taskOutcome(taskId.value),
+      ]);
+      taskOutcome.value = ['NO_PLAN', 'NO_S2_DIAGNOSIS'].includes(String(handoffOutcome.business_outcome))
+        ? taskOutcomeResult : handoffOutcome;
       taskMemoryContext.value = await api.taskMemories(taskId.value);
     }
   } catch (error) {
