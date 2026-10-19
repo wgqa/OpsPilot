@@ -297,7 +297,11 @@ async function refreshSession(): Promise<void> {
     } else if (latestChat && ['FAILED', 'BLOCKED'].includes(latestChat.status)) {
       errorMessage.value = `上次只读回答结束：${readableStatus(latestChat.status)}${latestChat.waiting_reason ? `（${latestChat.waiting_reason}）` : ''}`;
     }
-    const linkedTask = [...response.items].reverse().find((item) => item.task_id)?.task_id;
+    let linkedTask = [...response.items].reverse().find((item) => item.task_id)?.task_id;
+    if (!linkedTask) {
+      const linkedTasks = await api.session(sessionId.value);
+      linkedTask = [...linkedTasks.tasks].reverse().find((item) => item.task_id)?.task_id;
+    }
     if (linkedTask) {
       taskId.value = linkedTask;
       await refreshInspector();

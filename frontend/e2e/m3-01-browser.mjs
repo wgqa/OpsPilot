@@ -46,9 +46,9 @@ async function findSessionWithTask(taskId) {
   return page.evaluate(async (wantedTaskId) => {
     const sessions = await fetch('/api/sessions').then((response) => response.json());
     for (const session of sessions.items) {
-      const messages = await fetch(`/api/sessions/${encodeURIComponent(session.session_id)}/messages`)
+      const detail = await fetch(`/api/sessions/${encodeURIComponent(session.session_id)}`)
         .then((response) => response.json());
-      if (messages.items.some((item) => item.task_id === wantedTaskId)) return session.session_id;
+      if (detail.tasks.some((item) => item.task_id === wantedTaskId)) return session.session_id;
     }
     return null;
   }, taskId);

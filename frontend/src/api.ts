@@ -5,6 +5,11 @@ export interface SessionItem {
   task_count: number;
 }
 
+export interface SessionDetail {
+  session_id: string;
+  tasks: Array<{ task_id: string; linked_at: string; is_primary: number }>;
+}
+
 export interface MessageItem {
   message_id: string;
   task_id: string | null;
@@ -169,6 +174,7 @@ export const api = {
     return request<{ status: string }>('/api/auth/logout', { method: 'POST', headers: writeHeaders(csrf) });
   },
   sessions() { return request<{ items: SessionItem[] }>('/api/sessions'); },
+  session(sessionId: string) { return request<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}`); },
   createSession(csrf: string) {
     return request<SessionItem>('/api/sessions', { method: 'POST', headers: writeHeaders(csrf) });
   },
