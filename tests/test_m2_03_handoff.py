@@ -279,4 +279,3 @@ def test_m203_09_real_web_route_requires_owner_and_exposes_submit_operation(
         )
         assert response.status_code == 202, response.text
         assert response.json()["business_outcome"] == "SCOPE_ESCALATED"
-
