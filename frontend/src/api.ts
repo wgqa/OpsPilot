@@ -91,9 +91,14 @@ export interface TaskOutcome {
   task_id: string;
   task_status: string;
   business_outcome: string;
+  control_revision?: number;
   currentness?: string;
   submitted?: boolean;
   scope_authorized?: boolean;
+  recovered?: boolean;
+  handoff_status?: string;
+  queue_entry?: Record<string, unknown> | null;
+  handoff_receipt?: Record<string, unknown> | null;
   diagnosis_receipt?: Record<string, unknown> | null;
   draft?: Record<string, unknown> | null;
   plan?: Record<string, unknown>;
@@ -182,6 +187,27 @@ export const api = {
     );
   },
   outcome(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/outcome`); },
+  handoff(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/handoff`); },
+  submitHandoff(
+    taskId: string,
+    payload: {
+      operation_id: string;
+      draft_id: string;
+      draft_digest: string;
+      expected_control_revision: number;
+      handoff_kind: 'SCOPE_REVIEW';
+    },
+    csrf: string,
+  ) {
+    return request<Record<string, unknown>>(
+      `/api/tasks/${encodeURIComponent(taskId)}/handoff/submit`,
+      {
+        method: 'POST',
+        headers: { ...writeHeaders(csrf), 'Idempotency-Key': payload.operation_id },
+        body: JSON.stringify(payload),
+      },
+    );
+  },
   eventHistory(sessionId: string, after: number) {
     return request<{ items: Array<Record<string, unknown>>; after: number }>(`/api/sessions/${encodeURIComponent(sessionId)}/events/history?after=${after}`);
   },

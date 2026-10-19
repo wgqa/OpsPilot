@@ -34,3 +34,11 @@ class AbortTaskRequest(StrictModel):
 
 class PlanApprovalRequest(StrictModel):
     decision: Literal["APPROVED", "REJECTED"]
+
+
+class S2HandoffSubmitRequest(StrictModel):
+    operation_id: str = Field(min_length=1, max_length=200)
+    draft_id: str = Field(min_length=1, max_length=200)
+    draft_digest: str = Field(min_length=64, max_length=64)
+    expected_control_revision: int = Field(ge=0)
+    handoff_kind: Literal["SCOPE_REVIEW"]

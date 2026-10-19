@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -340,15 +341,25 @@ def get_auth_policy_fact(
 
 
 def get_scope_authz_facts_fact(
-    path: str | Path, task_id: str, request_id: str
+    path: str | Path, task_id: str, request_id: str, *,
+    connection: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    """Read a decision only when its complete resource tuple matches TaskBinding."""
+    """Read a decision only when its complete resource tuple matches TaskBinding.
+
+    Callers doing a final transactional check may pass their existing Domain
+    connection so current policy/grant versions are read in the same snapshot.
+    """
     if not request_id or len(request_id) > 64 or any(ch.isspace() for ch in request_id):
         raise ScopeDenied("Request is outside the immutable TaskBinding scope.")
-    binding = _bound_task(path, task_id)
-    with connect(path) as connection:
-        decision = connection.execute(
-            """SELECT z.*, n.request_id AS authn_request_id, n.result_code AS authn_result_code,
+    if connection is None:
+        with connect(path) as opened:
+            return get_scope_authz_facts_fact(path, task_id, request_id, connection=opened)
+    binding_row = connection.execute("SELECT * FROM task_bindings WHERE task_id = ?", (task_id,)).fetchone()
+    if binding_row is None:
+        raise ScopeDenied("Request is outside the immutable TaskBinding scope.")
+    binding = _dict_row(binding_row)
+    decision = connection.execute(
+        """SELECT z.*, n.request_id AS authn_request_id, n.result_code AS authn_result_code,
                       n.credential_policy_version AS authn_credential_policy_version,
                       n.tenant_id AS authn_tenant_id, n.principal_id AS authn_principal_id,
                       n.service_id AS authn_service_id, n.integration_id AS authn_integration_id,
@@ -372,8 +383,8 @@ def get_scope_authz_facts_fact(
                LEFT JOIN route_scope_policies AS p
                  ON p.tenant_id = z.tenant_id AND p.service_id = z.service_id AND p.route = z.route
                WHERE z.request_id = ?""",
-            (request_id,),
-        ).fetchone()
+        (request_id,),
+    ).fetchone()
     if decision is None or any(
         decision[key] != binding[value]
         for key, value in (

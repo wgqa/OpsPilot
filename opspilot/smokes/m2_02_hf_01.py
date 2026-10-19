@@ -64,7 +64,7 @@ def _snapshot(db_path: Path, task_id: str) -> dict[str, object]:
             "principal_scope_grants", "route_scope_policies", "d3_approvals", "d3_action_permissions",
             "d3_action_intents", "d3_action_ledgers", "d3_verification_receipts", "d3_report_artifacts",
             "d3_delivery_records", "s2_gate_traces", "s2_diagnosis_receipts", "s2_handoff_drafts",
-            "s2_handoff_receipts", "s2_handoff_queue",
+            "s2_handoff_receipts", "s2_handoff_queue_entries",
         ):
             if table in tables:
                 columns = {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -116,7 +116,7 @@ def _fixture_scope_counts(db_path: Path) -> dict[str, int]:
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()}
         for table in (
-            "principal_scope_grants", "route_scope_policies", "s2_handoff_receipts", "s2_handoff_queue",
+            "principal_scope_grants", "route_scope_policies",
         ):
             if table in tables:
                 result[table] = int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])

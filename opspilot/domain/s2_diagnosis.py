@@ -73,9 +73,12 @@ def run_evidence_ids(path: str | Path, task_id: str, run_id: str) -> list[str]:
     return [str(item["evidence_id"]) for item in run_evidence_records(path, task_id, run_id)]
 
 
-def _current_authz(path: str | Path, task_id: str, request_id: str) -> dict[str, object] | None:
+def _current_authz(
+    path: str | Path, task_id: str, request_id: str,
+    connection: sqlite3.Connection | None = None,
+) -> dict[str, object] | None:
     try:
-        return get_scope_authz_facts_fact(path, task_id, request_id)
+        return get_scope_authz_facts_fact(path, task_id, request_id, connection=connection)
     except (LookupError, ValueError, ScopeDenied):
         return None
 
@@ -133,8 +136,17 @@ def _need_more_or_budget_exhausted(
     request_id: str | None = None,
     decision_id: int | None = None,
     exhausted_reason: str = "S2_EVIDENCE_BUDGET_EXHAUSTED",
+    connection: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
-    counts = attempt_counts(path, task_id)
+    if connection is None:
+        counts = attempt_counts(path, task_id)
+    else:
+        rows = connection.execute(
+            "SELECT kind, COUNT(*) AS n FROM d2_attempts WHERE task_id = ? GROUP BY kind",
+            (task_id,),
+        ).fetchall()
+        counts = {"MODEL": 0, "MCP": 0}
+        counts.update({str(row["kind"]): int(row["n"]) for row in rows})
     if counts["MCP"] >= MAX_MCP_ATTEMPTS or counts["MODEL"] >= MAX_MODEL_CALLS:
         return _gate(
             "INCONCLUSIVE", exhausted_reason, evidence=evidence,
@@ -152,22 +164,30 @@ def evaluate_s2_evidence_gate(
     evidence_ids: list[str] | None = None,
     *,
     run_id: str,
+    connection: sqlite3.Connection | None = None,
 ) -> dict[str, object]:
     """Evaluate only current, same-Run evidence against the trusted S2 predicate."""
-    from opspilot.domain.d2 import get_task_binding
-
-    binding = get_task_binding(path, task_id)
-    with connect(path) as connection:
-        run = connection.execute(
-            "SELECT tenant_id, task_id, kind, status FROM task_runs WHERE run_id = ?",
-            (run_id,),
-        ).fetchone()
-        if (
-            run is None or str(run["tenant_id"]) != str(binding["tenant_id"])
-            or str(run["task_id"]) != task_id or str(run["kind"]) == "CHAT_READONLY"
-        ):
-            return _gate("INCONCLUSIVE", "RUN_TASK_BINDING_INVALID", evidence=[], missing=["trusted_run"])
-        all_evidence = _run_evidence(connection, task_id, run_id)
+    if connection is None:
+        with connect(path) as opened:
+            return evaluate_s2_evidence_gate(
+                path, task_id, evidence_ids, run_id=run_id, connection=opened,
+            )
+    binding_row = connection.execute(
+        "SELECT * FROM task_bindings WHERE task_id = ?", (task_id,),
+    ).fetchone()
+    if binding_row is None:
+        return _gate("INCONCLUSIVE", "TASK_BINDING_MISSING", evidence=[], missing=["trusted_task"])
+    binding = {key: binding_row[key] for key in binding_row.keys()}
+    run = connection.execute(
+        "SELECT tenant_id, task_id, kind, status FROM task_runs WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    if (
+        run is None or str(run["tenant_id"]) != str(binding["tenant_id"])
+        or str(run["task_id"]) != task_id or str(run["kind"]) == "CHAT_READONLY"
+    ):
+        return _gate("INCONCLUSIVE", "RUN_TASK_BINDING_INVALID", evidence=[], missing=["trusted_run"])
+    all_evidence = _run_evidence(connection, task_id, run_id)
 
     # The Domain selects every persisted observation from this Run. The caller's
     # candidate list cannot omit contradictory facts or promote prior-Run rows.
@@ -240,7 +260,7 @@ def evaluate_s2_evidence_gate(
         if age > EVIDENCE_MAX_AGE_SECONDS:
             return _need_more_or_budget_exhausted(
                 path, task_id, evidence=evidence, reason="S2_EVIDENCE_STALE_REQUERY_ALLOWED",
-                missing=["current_s2_evidence"],
+                missing=["current_s2_evidence"], connection=connection,
             )
 
     if len(probes) > 1:
@@ -305,18 +325,18 @@ def evaluate_s2_evidence_gate(
                 path, task_id, evidence=evidence, reason="S2_CURRENT_AUTHZ_DECISION_REQUIRED",
                 missing=["matching_scope_authz_decision"], request_id=request_id,
                 exhausted_reason="S2_AUTHZ_EVIDENCE_MISSING_BUDGET_EXHAUSTED",
+                connection=connection,
             )
         matching_authz = matching[-1]
     elif authz_items:
         matching_authz = authz_items[-1]
         facts = matching_authz.get("facts", {})
         request_id = str(facts.get("request_id") or "") if isinstance(facts, dict) else ""
-        with connect(path) as connection:
-            correction = connection.execute(
-                """SELECT m.body FROM task_run_inputs i JOIN messages m ON m.message_id = i.message_id
-                   WHERE i.run_id = ? AND m.input_kind = 'CORRECT_TASK_INPUT'""",
-                (run_id,),
-            ).fetchall()
+        correction = connection.execute(
+            """SELECT m.body FROM task_run_inputs i JOIN messages m ON m.message_id = i.message_id
+               WHERE i.run_id = ? AND m.input_kind = 'CORRECT_TASK_INPUT'""",
+            (run_id,),
+        ).fetchall()
         if not request_id or not any(request_id in str(row["body"]) for row in correction):
             return _gate("INCONCLUSIVE", "REQUEST_ID_NOT_BOUND_TO_CURRENT_PROBE_OR_FORMAL_CORRECTION",
                          evidence=evidence, request_id=request_id or None)
@@ -325,11 +345,12 @@ def evaluate_s2_evidence_gate(
         return _need_more_or_budget_exhausted(
             path, task_id, evidence=evidence, reason="S2_CURRENT_AUTHZ_DECISION_REQUIRED",
             missing=["matching_scope_authz_decision"], request_id=request_id,
+            connection=connection,
         )
     authz_facts = matching_authz.get("facts", {})
     if not isinstance(authz_facts, dict):
         return _gate("INCONCLUSIVE", "S2_AUTHZ_FACTS_INVALID", evidence=evidence, request_id=request_id)
-    current = _current_authz(path, task_id, request_id)
+    current = _current_authz(path, task_id, request_id, connection)
     if current is None or not _same_authz_facts(matching_authz, current):
         return _gate("INCONCLUSIVE", "S2_AUTHZ_FACTS_CHANGED_OR_UNAVAILABLE", evidence=evidence,
                      request_id=request_id)
@@ -340,6 +361,7 @@ def evaluate_s2_evidence_gate(
             path, task_id, evidence=evidence, reason="S2_POLICY_OR_GRANT_VERSION_STALE",
             missing=["current_policy_grant_evidence"], request_id=request_id,
             decision_id=int(authz_facts["decision_id"]), exhausted_reason="S2_STALE_BUDGET_EXHAUSTED",
+            connection=connection,
         )
     if currentness != "CURRENT" or authz_facts.get("currentness") != "CURRENT":
         return _gate("INCONCLUSIVE", "S2_AUTHZ_CORRELATION_CONFLICT", evidence=evidence,
@@ -358,11 +380,10 @@ def evaluate_s2_evidence_gate(
         return _gate("NO_ACTION", "S2_AUTHENTICATION_OR_RESOURCE_BINDING_NOT_VALID", evidence=evidence,
                      request_id=request_id, decision_id=int(authz_facts["decision_id"]))
 
-    with connect(path) as connection:
-        principal = connection.execute(
-            "SELECT status FROM principals WHERE tenant_id = ? AND principal_id = ?",
-            (binding["tenant_id"], binding["principal_id"]),
-        ).fetchone()
+    principal = connection.execute(
+        "SELECT status FROM principals WHERE tenant_id = ? AND principal_id = ?",
+        (binding["tenant_id"], binding["principal_id"]),
+    ).fetchone()
     if principal is None or str(principal["status"]) != "ENABLED":
         return _gate("NO_ACTION", "PRINCIPAL_NOT_CURRENTLY_ENABLED", evidence=evidence,
                      request_id=request_id, decision_id=int(authz_facts["decision_id"]))
@@ -694,8 +715,12 @@ def _draft_dict(row: sqlite3.Row) -> dict[str, object]:
 
 def get_s2_task_outcome(path: str | Path, task_id: str) -> dict[str, object]:
     from opspilot.domain.d2 import get_task_binding
+    from opspilot.domain.s2_handoff import get_s2_handoff_outcome
 
     binding = get_task_binding(path, task_id)
+    accepted = get_s2_handoff_outcome(path, task_id)
+    if accepted is not None:
+        return accepted
     with connect(path) as connection:
         receipt_row = connection.execute(
             """SELECT * FROM s2_diagnosis_receipts WHERE tenant_id = ? AND task_id = ?

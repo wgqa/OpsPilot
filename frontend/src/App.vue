@@ -62,7 +62,7 @@ function statusTone(value: unknown): string {
   const status = String(value ?? '').toUpperCase();
   if (['SUCCEEDED', 'COMPLETED', 'ENABLED', 'ACTIVE', 'APPROVED', 'READY', 'DELIVERED'].includes(status)) return 'good';
   if (['FAILED', 'BLOCKED', 'ABORTED', 'REJECTED', 'DISABLED', 'INCONCLUSIVE'].includes(status)) return 'bad';
-  if (['WAITING_APPROVAL', 'WAITING_INPUT', 'QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE', 'RECOVERED_NOT_DELIVERED', 'APPROVAL_ACCEPTED'].includes(status)) return 'warm';
+  if (['WAITING_APPROVAL', 'WAITING_INPUT', 'QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE', 'RECOVERED_NOT_DELIVERED', 'APPROVAL_ACCEPTED', 'SCOPE_ESCALATED', 'PENDING_REVIEW', 'OVERDUE'].includes(status)) return 'warm';
   return 'neutral';
 }
 
@@ -74,6 +74,7 @@ function readableStatus(value: unknown): string {
     FAILED: '失败', BLOCKED: '已阻止', INCONCLUSIVE: '结论不足', ENABLED: '已启用',
     DISABLED: '已停用', ACTIVE: '生效中', APPROVED: '已批准', REJECTED: '已拒绝',
     CHAT_READONLY: '只读聊天', INVESTIGATE: '调查', APPROVAL_RESUME: '审批恢复',
+    SCOPE_ESCALATED: '已交本地队列', PENDING_REVIEW: '等待人工处理', OVERDUE: '超过处理目标',
   };
   return names[status] ?? status;
 }
@@ -248,7 +249,7 @@ async function refreshInspector(): Promise<void> {
   if (!taskId.value) return;
   try {
     inspector.value = await api.inspector(taskId.value);
-    if (user.value?.role === 'SUPPORT') taskOutcome.value = await api.outcome(taskId.value);
+    if (user.value?.role === 'SUPPORT') taskOutcome.value = await api.handoff(taskId.value);
   } catch (error) {
     if (user.value?.role === 'APPROVER') errorMessage.value = explainError(error);
   }
@@ -313,6 +314,115 @@ async function submitCriticalCorrection(): Promise<void> {
     await watchRun(accepted.run_id);
   } catch (error) {
     errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function stableHandoffOperationId(task: string, draftId: string, digest: string, revision: number): string {
+  const storageKey = `opspilot.m2-03.handoff.${task}.${draftId}`;
+  const stored = window.localStorage.getItem(storageKey);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored) as Record<string, unknown>;
+      if (
+        parsed.draft_digest === digest
+        && parsed.expected_control_revision === revision
+        && typeof parsed.operation_id === 'string'
+        && parsed.operation_id.length > 0
+      ) return parsed.operation_id;
+    } catch {
+      // Replace malformed local metadata; it contains no credential or session token.
+    }
+  }
+  const operationId = crypto.randomUUID();
+  window.localStorage.setItem(storageKey, JSON.stringify({
+    operation_id: operationId,
+    draft_digest: digest,
+    expected_control_revision: revision,
+  }));
+  return operationId;
+}
+
+async function submitHandoff(): Promise<void> {
+  const selectedTask = taskId.value;
+  if (!selectedTask || !csrf.value || busy.value || user.value?.role !== 'SUPPORT') return;
+  busy.value = true;
+  errorMessage.value = '';
+  notice.value = '';
+  try {
+    const displayed = await api.handoff(selectedTask);
+    taskOutcome.value = displayed;
+    if (displayed.business_outcome === 'SCOPE_ESCALATED' && displayed.handoff_receipt) {
+      notice.value = `已由本地受控队列接收，回执 ${String(displayed.handoff_receipt.receipt_id)}；无需再次提交。`;
+      return;
+    }
+    const displayedDraft = displayed.draft as Record<string, unknown> | null | undefined;
+    if (
+      displayed.business_outcome !== 'HANDOFF_READY'
+      || displayed.currentness !== 'CURRENT'
+      || !displayedDraft
+      || displayed.submitted
+    ) {
+      errorMessage.value = '当前没有可提交的有效冻结草稿；请先刷新调查结果。';
+      return;
+    }
+    const draftId = String(displayedDraft.draft_id ?? '');
+    const digest = String(displayedDraft.content_digest ?? '');
+    const revision = Number(displayed.control_revision);
+    if (!draftId || !/^[0-9a-f]{64}$/.test(digest) || !Number.isInteger(revision) || revision < 0) {
+      errorMessage.value = '冻结草稿或控制版本信息不完整，已停止提交。';
+      return;
+    }
+    const confirmed = window.confirm(
+      `确认将冻结草稿 ${draftId}（摘要 ${digest.slice(0, 16)}）提交到本地受控审查队列？\n\n`
+      + '这只代表本地队列接收，不代表人工批准、Scope 授权或业务恢复。',
+    );
+    if (!confirmed) return;
+
+    // Refresh after confirmation, then bind the write to the exact reviewed Draft/revision.
+    const current = await api.handoff(selectedTask);
+    taskOutcome.value = current;
+    if (current.business_outcome === 'SCOPE_ESCALATED' && current.handoff_receipt) {
+      notice.value = `本地队列已接收，回执 ${String(current.handoff_receipt.receipt_id)}；无需再次提交。`;
+      return;
+    }
+    const currentDraft = current.draft as Record<string, unknown> | null | undefined;
+    if (
+      current.business_outcome !== 'HANDOFF_READY'
+      || current.currentness !== 'CURRENT'
+      || !currentDraft
+      || String(currentDraft.draft_id ?? '') !== draftId
+      || String(currentDraft.content_digest ?? '') !== digest
+      || Number(current.control_revision) !== revision
+    ) {
+      errorMessage.value = '确认期间草稿或控制版本已变化；请重新核对后再提交。';
+      return;
+    }
+    const operationId = stableHandoffOperationId(selectedTask, draftId, digest, revision);
+    await api.submitHandoff(selectedTask, {
+      operation_id: operationId,
+      draft_id: draftId,
+      draft_digest: digest,
+      expected_control_revision: revision,
+      handoff_kind: 'SCOPE_REVIEW',
+    }, csrf.value);
+    taskOutcome.value = await api.handoff(selectedTask);
+    notice.value = `本地受控队列已接收，回执 ${String(taskOutcome.value.handoff_receipt?.receipt_id ?? '')}。尚未批准、未授予 Scope，业务未恢复。`;
+    await refreshInspector();
+  } catch (error) {
+    errorMessage.value = explainError(error);
+    // Reconcile a response that may have been lost after the Domain transaction committed.
+    try {
+      const reconciled = await api.handoff(selectedTask);
+      taskOutcome.value = reconciled;
+      if (reconciled.business_outcome === 'SCOPE_ESCALATED' && reconciled.handoff_receipt) {
+        errorMessage.value = '';
+        notice.value = `提交结果已从 Domain 回查：本地队列已接收，回执 ${String(reconciled.handoff_receipt.receipt_id)}。`;
+      }
+    } catch {
+      // Keep the stable operation ID in localStorage so the next retry can reconcile it.
+    }
   } finally {
     busy.value = false;
   }
@@ -714,11 +824,16 @@ onBeforeUnmount(() => {
             <div v-else-if="taskOutcome.business_outcome === 'RECOVERED_NOT_DELIVERED'" class="outcome-message warm-outcome">业务已在线验证恢复，但工单尚未完成交付。</div>
             <div v-else-if="taskOutcome.business_outcome === 'REJECTED'" class="outcome-message warm-outcome">审批者已拒绝；拒绝报告来自原调查图，没有执行业务写入。</div>
             <div v-else-if="taskOutcome.business_outcome === 'HANDOFF_READY'" class="outcome-message warm-outcome">可信证据已完成诊断，权限申请草稿已冻结；尚未提交、未入队、权限未生效，S2 业务也未恢复。</div>
+            <div v-else-if="taskOutcome.business_outcome === 'SCOPE_ESCALATED'" class="outcome-message warm-outcome" data-testid="handoff-accepted">本地受控队列已接收这份申请，当前等待人工处理。尚未批准、未授予 Scope，订单 API 仍未恢复。</div>
             <div v-else-if="taskOutcome.business_outcome === 'DIAGNOSED'" class="outcome-message warm-outcome">已形成可信诊断回执；申请草稿仍待冻结，尚未提交或改变任何授权。</div>
             <div v-else-if="taskOutcome.business_outcome === 'INCONCLUSIVE'" class="outcome-message warm-outcome">当前权限事实已变化或不足，旧诊断不能作为当前结论。</div>
             <div v-if="taskOutcome.diagnosis_receipt" class="outcome-row"><span>诊断回执</span><code>{{ String((taskOutcome.diagnosis_receipt as Record<string, unknown>).receipt_id) }}</code><span>Request {{ String((taskOutcome.diagnosis_receipt as Record<string, unknown>).request_id) }}</span></div>
-            <div v-if="taskOutcome.draft" class="outcome-row"><span>冻结申请草稿</span><code>{{ String((taskOutcome.draft as Record<string, unknown>).draft_id) }}</code><span>摘要 {{ String((taskOutcome.draft as Record<string, unknown>).content_digest).slice(0, 16) }} · 未提交</span></div>
+            <div v-if="taskOutcome.draft" class="outcome-row"><span>冻结申请草稿</span><code>{{ String((taskOutcome.draft as Record<string, unknown>).draft_id) }}</code><span>摘要 {{ String((taskOutcome.draft as Record<string, unknown>).content_digest).slice(0, 16) }} · {{ taskOutcome.submitted ? '已交本地队列' : '未提交' }}</span></div>
             <div v-if="taskOutcome.draft" class="outcome-message warm-outcome">草稿中的缺失 Scope 仅供后续人工评估，不是授权结果：{{ JSON.stringify(((taskOutcome.draft as Record<string, unknown>).content as Record<string, unknown>).missing_scopes ?? []) }}</div>
+            <button v-if="canCreateTask && taskId && taskOutcome.business_outcome === 'HANDOFF_READY' && taskOutcome.currentness === 'CURRENT' && !taskOutcome.submitted" class="primary-button" type="button" data-testid="submit-s2-handoff" :disabled="busy || !csrf" @click="submitHandoff">确认提交到本地受控队列</button>
+            <div v-if="taskOutcome.handoff_receipt" class="outcome-row" data-testid="handoff-receipt"><span>HandoffReceipt</span><code>{{ String(taskOutcome.handoff_receipt.receipt_id) }}</code><span>Queue Entry {{ String(taskOutcome.handoff_receipt.queue_entry_id) }} · {{ readableStatus(taskOutcome.handoff_status ?? 'PENDING_REVIEW') }}</span></div>
+            <div v-if="taskOutcome.queue_entry" class="outcome-row"><span>接收时间</span><span>{{ dateLabel(taskOutcome.queue_entry.received_at) }} · 截止 {{ dateLabel(taskOutcome.queue_entry.review_due_at) }}</span></div>
+            <div v-if="taskOutcome.submitted" class="outcome-message warm-outcome">聊天只读追问不会再次入队。接收不等于批准、授权或业务恢复。</div>
             <div v-if="taskOutcome.approval" class="outcome-row">审批 <code>{{ String(taskOutcome.approval.approval_id) }}</code><span>{{ String(taskOutcome.approval.approver_id) }} · {{ String(taskOutcome.approval.decision) }}</span></div>
             <div v-if="taskOutcome.repair" class="outcome-row">REPAIR <code>{{ String(taskOutcome.repair.ledger_id) }}</code><span>配置 v{{ String(taskOutcome.repair.before_version) }} → v{{ String(taskOutcome.repair.after_version) }}</span></div>
             <div v-if="taskOutcome.verification" class="outcome-row">在线验证 <code>{{ String(taskOutcome.verification.verification_id) }}</code><span>HTTP {{ String(taskOutcome.verification.response_status) }} · {{ taskOutcome.verification.recovery_verified ? '业务字段通过' : '未恢复' }}</span></div>
@@ -760,7 +875,7 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>新建 S1 调查并输入真实故障描述后，这里会显示来源引用、可信 Evidence 和确定性 Gate。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = true">新建调查任务</button></div>
-        <footer class="inspector-footer"><span>OpsPilot vNext · M2-02</span><span>LOOPBACK ONLY</span></footer>
+        <footer class="inspector-footer"><span>OpsPilot vNext · M2-03</span><span>LOOPBACK ONLY</span></footer>
       </aside>
     </section>
   </main>

@@ -33,7 +33,10 @@ from opspilot.web.auth import (
     revoke_session,
     verify_csrf,
 )
-from opspilot.web.schemas import AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest, PlanApprovalRequest
+from opspilot.web.schemas import (
+    AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest,
+    PlanApprovalRequest, S2HandoffSubmitRequest,
+)
 
 
 _M1_05_TEST_FAILPOINT: Callable[[str], None] | None = None
@@ -63,6 +66,7 @@ _STATUS_BY_CODE = {
     "TASK_RUN_NOT_FOUND": 404,
     "RESOURCE_NOT_FOUND": 404,
     "IDEMPOTENCY_CONFLICT": 409,
+    "IDEMPOTENCY_KEY_MISMATCH": 422,
     "IDEMPOTENCY_STATE_AMBIGUOUS": 409,
     "IDEMPOTENCY_KEY_REQUIRED": 422,
     "TASK_RUN_BUSY": 409,
@@ -72,6 +76,9 @@ _STATUS_BY_CODE = {
     "TASK_ABORTED": 409,
     "TASK_ALREADY_TERMINAL": 409,
     "TASK_CONTROL_STALE": 409,
+    "DRAFT_STALE": 409,
+    "QUEUE_ALREADY_ACCEPTED": 409,
+    "HANDOFF_INTEGRITY_ERROR": 409,
     "TASK_APPROVER_REQUIRED": 403,
     "APPROVAL_SCOPE_DENIED": 403,
     "APPROVAL_ALREADY_RECORDED": 409,
@@ -469,6 +476,39 @@ def create_app(
             return get_task_outcome(resolved_db, task_id, context.identity.actor_id)
         except D3ScopeDenied as error:
             raise TaskControlError("TASK_SCOPE_DENIED") from error
+
+    @app.get("/api/tasks/{task_id}/handoff")
+    async def get_task_handoff_route(
+        task_id: str, context: AuthContext = Depends(current_user)
+    ) -> dict[str, Any]:
+        require_task_reader(context.identity, task_id)
+        from opspilot.domain.s2_handoff import get_s2_handoff
+
+        return get_s2_handoff(resolved_db, context.identity, task_id)
+
+    @app.post("/api/tasks/{task_id}/handoff/submit")
+    async def post_task_handoff_route(
+        task_id: str,
+        body: S2HandoffSubmitRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> Response:
+        key = require_idempotency_key(idempotency_key)
+        if key != body.operation_id:
+            raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
+        from opspilot.domain.s2_handoff import submit_s2_handoff
+
+        result = submit_s2_handoff(
+            resolved_db,
+            context.identity,
+            task_id=task_id,
+            operation_id=body.operation_id,
+            draft_id=body.draft_id,
+            draft_digest=body.draft_digest,
+            expected_control_revision=body.expected_control_revision,
+            handoff_kind=body.handoff_kind,
+        )
+        return JSONResponse(result, status_code=200 if result.get("replayed") else 202)
 
     @app.get("/api/runs/{run_id}")
     async def get_run(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:

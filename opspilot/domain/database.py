@@ -444,6 +444,60 @@ CREATE TABLE IF NOT EXISTS s2_handoff_drafts (
     UNIQUE (tenant_id, task_id, version)
 );
 CREATE INDEX IF NOT EXISTS ix_s2_draft_task ON s2_handoff_drafts(task_id, version);
+CREATE TABLE IF NOT EXISTS s2_handoff_queue_entries (
+    entry_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    handoff_kind TEXT NOT NULL CHECK (handoff_kind = 'SCOPE_REVIEW'),
+    receiver_queue_id TEXT NOT NULL,
+    receiver_identity_ref TEXT NOT NULL,
+    draft_id TEXT NOT NULL REFERENCES s2_handoff_drafts(draft_id),
+    draft_version INTEGER NOT NULL CHECK (draft_version > 0),
+    draft_digest TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    review_due_at TEXT NOT NULL,
+    queue_status TEXT NOT NULL CHECK (queue_status IN ('PENDING_REVIEW', 'REVIEWED')),
+    UNIQUE (tenant_id, task_id, handoff_kind),
+    UNIQUE (entry_id, tenant_id, task_id),
+    FOREIGN KEY (task_id, tenant_id) REFERENCES task_bindings(task_id, tenant_id)
+);
+CREATE INDEX IF NOT EXISTS ix_s2_handoff_queue_status ON s2_handoff_queue_entries(queue_status, review_due_at);
+CREATE TABLE IF NOT EXISTS s2_handoff_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    handoff_kind TEXT NOT NULL CHECK (handoff_kind = 'SCOPE_REVIEW'),
+    entry_id TEXT NOT NULL UNIQUE,
+    draft_id TEXT NOT NULL,
+    draft_version INTEGER NOT NULL CHECK (draft_version > 0),
+    draft_digest TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    canonical_request_digest TEXT NOT NULL,
+    accepted_by_receiver_ref TEXT NOT NULL,
+    accepted_by_actor_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
+    accepted_at TEXT NOT NULL,
+    receipt_digest TEXT NOT NULL,
+    control_revision INTEGER NOT NULL CHECK (control_revision >= 0),
+    request_id TEXT NOT NULL,
+    decision_id INTEGER NOT NULL,
+    credential_policy_version INTEGER NOT NULL,
+    scope_policy_version INTEGER NOT NULL,
+    grant_version INTEGER NOT NULL,
+    UNIQUE (tenant_id, task_id, handoff_kind),
+    FOREIGN KEY (entry_id, tenant_id, task_id)
+        REFERENCES s2_handoff_queue_entries(entry_id, tenant_id, task_id)
+);
+CREATE INDEX IF NOT EXISTS ix_s2_handoff_receipt_task ON s2_handoff_receipts(tenant_id, task_id, accepted_at);
+CREATE TRIGGER IF NOT EXISTS trg_s2_handoff_receipt_no_update
+BEFORE UPDATE ON s2_handoff_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'S2 HandoffReceipt is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_s2_handoff_receipt_no_delete
+BEFORE DELETE ON s2_handoff_receipts
+BEGIN
+    SELECT RAISE(ABORT, 'S2 HandoffReceipt is immutable');
+END;
 CREATE TABLE IF NOT EXISTS d2_tool_faults (
     task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
     tool_name TEXT NOT NULL,
@@ -810,7 +864,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 7:
+        if version > 8:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -915,6 +969,9 @@ def initialize(path: str | Path) -> None:
                     "ALTER TABLE d5_context_provenance ADD COLUMN selected_knowledge_json TEXT NOT NULL DEFAULT '[]'"
                 )
             connection.execute("PRAGMA user_version = 7")
+            version = 7
+        if version < 8:
+            connection.execute("PRAGMA user_version = 8")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -923,6 +980,8 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     status_a = "DISABLED" if scenario == "S1_DISABLED" else "ENABLED"
     s2_scenario = scenario.startswith("S2_")
     with connect(path) as connection:
+        connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_update")
+        connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_delete")
         for table in (
             "chat_run_answers",
             "chat_message_sources",
@@ -938,6 +997,8 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             "domain_outbox",
             "approval_resume_links",
             "d3_plan_control_bindings",
+            "s2_handoff_receipts",
+            "s2_handoff_queue_entries",
             "s2_handoff_drafts",
             "s2_diagnosis_receipts",
             "s2_gate_traces",
@@ -1055,6 +1116,7 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
                 "INSERT INTO orders VALUES (?, ?, ?)",
                 (tenant_id, "demo-order", "CONFIRMED"),
             )
+    initialize(path)
 
 
 def get_service_info(path: str | Path, tenant_id: str, service_id: str) -> dict[str, object]:
