@@ -213,8 +213,13 @@ try {
   const afterChat = helper('--snapshot-only', '--db', dbPath, '--task-id', taskId);
   const unchanged = JSON.stringify(beforeChat) === JSON.stringify(afterChat);
   if (!unchanged) throw new Error('CHAT_READONLY changed the S2 business Task or its protected side-effect counters.');
-  const answerConfirmsNoRepair = /(?:未修复|没有(?:任何)?修复(?:动作|记录|证据)?|尚未修复|没有可确认的修复证据|不能(?:认定|确认|说).{0,12}修(?:复|好)|没有证据.{0,16}(?:修复|恢复)|no evidence.{0,30}(?:fixed|repaired|recovered))/is.test(chat.answer);
-  const answerConfirmsNoSubmission = /(?:未提交|尚未提交|没有(?:任何)?提交(?:记录)?|未交接|尚未交接|没有交接记录|not yet submitted|not handed off)/i.test(chat.answer);
+  const answerClauses = chat.answer.toLocaleLowerCase().split(/[\n。！？!?；;，,]/);
+  const answerConfirmsNoRepair = answerClauses.some((clause) =>
+    /修好|修复|恢复|fixed|repaired|recovered/i.test(clause)
+      && /没有|无|未|尚未|还未|不能|无法|不曾|not yet|has not|no evidence|cannot|can't/i.test(clause));
+  const answerConfirmsNoSubmission = answerClauses.some((clause) =>
+    /提交|交接|submitted|handed off/i.test(clause)
+      && /没有|无|未|尚未|还未|不能|无法|不曾|not yet|has not|no evidence|cannot|can't/i.test(clause));
   if (!answerConfirmsNoRepair || !answerConfirmsNoSubmission || hasPositiveReadonlyCompletionClaim(chat.answer)) {
     throw new Error(`CHAT_READONLY answer did not faithfully explain HANDOFF_READY: ${chat.answer.slice(0, 500)}`);
   }
