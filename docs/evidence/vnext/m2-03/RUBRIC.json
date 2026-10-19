@@ -1,0 +1,70 @@
+{
+  "schema_version": "m2-03-rubric-v1",
+  "stage": "M2-03",
+  "status": "FROZEN_NOT_EXECUTED",
+  "dimensions": [
+    {
+      "id": "actual_user_outcome",
+      "weight": 20,
+      "score_0": "No persistent queue receipt; draft/chat text is misrepresented as delivery.",
+      "score_1": "Queue and receipt exist but no real browser confirmation or reliable readback.",
+      "score_2": "Real UI action commits one queue entry and receipt; readback shows pending review and no authorization or recovery.",
+      "evidence": ["browser_recording_or_trace", "receipt_id", "queue_query", "post_commit_get"]
+    },
+    {
+      "id": "authorization_and_scope_safety",
+      "weight": 20,
+      "score_0": "Model or untrusted request can submit, authorize Scope, or cross task/tenant boundaries.",
+      "score_1": "Main path is guarded but one negative role/scope case is untested or ambiguous.",
+      "score_2": "Trusted SUPPORT owner confirmation is enforced; all frozen negative cases reject; Scope/Policy/Grant writes equal zero.",
+      "hard_gate": true
+    },
+    {
+      "id": "atomicity_and_idempotency",
+      "weight": 20,
+      "score_0": "Partial commits or duplicates are possible.",
+      "score_1": "Sequential duplicate is handled but crash/process/key-conflict proof is incomplete.",
+      "score_2": "Pre-commit failures roll back all rows; lost response and process races preserve one business identity and same receipt.",
+      "hard_gate": true
+    },
+    {
+      "id": "currentness_and_race_safety",
+      "weight": 15,
+      "score_0": "Old evidence/draft can be accepted or correction/abort can be lost.",
+      "score_1": "Version checks exist but not in final Domain transaction or concurrency order is unproven.",
+      "score_2": "Same-connection transaction rechecks current S2 gate, draft, versions and TaskControl; write races serialize.",
+      "hard_gate": true
+    },
+    {
+      "id": "user_truthfulness_and_recovery",
+      "weight": 10,
+      "score_0": "UI claims approval, authorization, or repair without a trusted fact.",
+      "score_1": "UI labels are correct online but refresh/lost response recovery is unclear.",
+      "score_2": "Refresh, retry and follow-up consistently explain received/pending vs approved/authorized/recovered.",
+      "hard_gate": true
+    },
+    {
+      "id": "regression_and_reproducibility",
+      "weight": 15,
+      "score_0": "Required prior suites or fresh evidence absent/failing.",
+      "score_1": "Some required regressions pass but full pytest, MCP, frontend or S1 evidence is incomplete.",
+      "score_2": "Fresh full pytest, historical M1/M2 regressions, real MCP stdio, build and S1 401-to-200 pass with commands/logs.",
+      "hard_gate": true
+    }
+  ],
+  "scoring": {
+    "dimension_scale": [0, 1, 2],
+    "weighted_percent_formula": "sum(weight * score / 2)",
+    "pass_threshold_percent": 95,
+    "all_hard_gates_must_score": 2,
+    "all_m203_cases_must_be_pass_for_release_candidate": true,
+    "no_dynamic_agent_vs_rule_engine_claim": true
+  },
+  "status_rules": {
+    "PASS": "Fresh primary evidence satisfies all criteria.",
+    "FAIL": "A tested criterion violates its frozen expected outcome or any hard safety gate fails.",
+    "PARTIAL": "Evidence exists but is incomplete or an explicitly non-blocking part did not run.",
+    "NOT_RUN": "No fresh execution evidence exists; docs or prior-stage logs do not count."
+  },
+  "gold_must_not_be_sent_to_model": true
+}

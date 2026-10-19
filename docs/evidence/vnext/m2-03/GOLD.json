@@ -1,0 +1,58 @@
+{
+  "schema_version": "m2-03-gold-v1",
+  "stage": "M2-03",
+  "baseline_commit": "0cdc3160a2c2a6c74a89bce0a1360f2939c1ed8b",
+  "status": "FROZEN_NOT_EXECUTED",
+  "frozen_at": "2026-10-19",
+  "freeze_commit_must_precede_red_and_implementation": true,
+  "product_semantics": {
+    "HANDOFF_READY": "A current, frozen request draft exists; it has not been submitted or received.",
+    "SCOPE_ESCALATED": "A trusted local review queue committed one entry and one immutable HandoffReceipt.",
+    "PENDING_REVIEW": "A local queue entry is awaiting human review; no actual reviewer action is implied.",
+    "OVERDUE": "The local entry has crossed the 72-hour review target; it is not re-delivered or auto-approved.",
+    "scope_authorized": false,
+    "recovered": false,
+    "repaired_verified": false
+  },
+  "invariants": {
+    "unique_business_key": ["tenant_id", "task_id", "handoff_kind"],
+    "single_transaction_tables": ["s2_handoff_queue_entries", "s2_handoff_receipts", "commands", "task_bindings", "domain_outbox"],
+    "explicit_actor_confirmation_required": true,
+    "task_owner_role_required": "SUPPORT",
+    "scope_policy_grant_write_budget": 0,
+    "receiver_client_controlled": false,
+    "queue_entry_count_after_accept": 1,
+    "receipt_count_after_accept": 1,
+    "accept_outbox_count_after_accept": 1,
+    "receipt_immutable": true,
+    "task_status_after_accept": "COMPLETED",
+    "business_outcome_after_accept": "SCOPE_ESCALATED",
+    "handoff_initial_status": "PENDING_REVIEW",
+    "review_due_hours": 72,
+    "outcome_receipt_precedes_currentness_projection": true
+  },
+  "failure_points": [
+    {"id": "after_command_before_queue", "expected": "ROLLBACK_ALL"},
+    {"id": "after_queue_before_receipt", "expected": "ROLLBACK_ALL"},
+    {"id": "after_receipt_before_outbox", "expected": "ROLLBACK_ALL"},
+    {"id": "after_commit_before_http_response", "expected": "COMMIT_ALL_THEN_REPLAY_SAME_RECEIPT"}
+  ],
+  "cases": [
+    {"id":"M203-01","expected":"FROZEN_BEFORE_IMPLEMENTATION_AND_HISTORY_UNCHANGED"},
+    {"id":"M203-02","expected":"HANDOFF_READY_ZERO_QUEUE_RECEIPT_SUBMIT_OUTBOX"},
+    {"id":"M203-03","expected":"SUPPORT_OWNER_EXPLICIT_COMMIT_ONE_ENTRY_ONE_IMMUTABLE_RECEIPT_ONE_OUTBOX_ZERO_SCOPE_WRITES"},
+    {"id":"M203-04","expected":"SAME_KEY_SAME_PAYLOAD_REPLAYS_SAME_RECEIPT_WITHOUT_NEW_ROWS"},
+    {"id":"M203-05","expected":"SAME_KEY_DIFFERENT_PAYLOAD_REJECTS_WITHOUT_NEW_ROWS"},
+    {"id":"M203-06","expected":"TAB_AND_PROCESS_RACE_HAS_AT_MOST_ONE_BUSINESS_ACCEPTANCE"},
+    {"id":"M203-07","expected":"STALE_DRAFT_EVIDENCE_OR_AUTHZ_VERSIONS_REJECT"},
+    {"id":"M203-08","expected":"CORRECTION_ABORT_AND_HANDOFF_SERIALIZE_WITH_NO_LOST_RECEIPT"},
+    {"id":"M203-09","expected":"NON_OWNER_APPROVER_CROSS_TENANT_AND_SPOOFING_REJECT_WITH_ZERO_SIDE_EFFECT"},
+    {"id":"M203-10","expected":"CSRF_ORIGIN_AUTH_AND_STABLE_CLIENT_OPERATION_ID_ENFORCED"},
+    {"id":"M203-11","expected":"PRE_COMMIT_FAILPOINTS_ROLL_BACK_AND_POST_COMMIT_RESPONSE_LOSS_RECONCILES"},
+    {"id":"M203-12","expected":"REAL_BROWSER_PROVIDER_MCP_HTTP_SSE_DOMAIN_JOURNEY_WITH_USER_CONFIRMATION_AND_RESULT_FOLLOWUP"},
+    {"id":"M203-13","expected":"VIRTUAL_72H_OVERDUE_IS_READ_ONLY_AND_DOES_NOT_OCCUPY_WORKER_OR_REDELIVER"},
+    {"id":"M203-14","expected":"FRESH_FULL_REGRESSION_MCP_BUILD_AND_S1_SMOKE_WITH_ZERO_S2_SCOPE_WRITES"}
+  ],
+  "case_result_statuses": ["PASS", "FAIL", "PARTIAL", "NOT_RUN"],
+  "gold_is_runtime_input": false
+}
