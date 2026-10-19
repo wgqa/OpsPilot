@@ -1,0 +1,176 @@
+{
+  "contract": "M2-03-FROZEN-v1.0",
+  "status": "PASS_FOR_MAIN_AGENT_REVIEW",
+  "main_agent_acceptance": "PENDING",
+  "base_sha": "0cdc3160a2c2a6c74a89bce0a1360f2939c1ed8b",
+  "freeze_standard_commit_sha": "35af8d763176705adc844859cd65dc96b087a54c",
+  "red_baseline_commit_sha": "d0e9627f6961c62af432b9abf40cd5fcc22fae4c",
+  "implementation_commit_sha": "c4335c186dd93b505d15f15c5ffa322ae245cd4a",
+  "m203": [
+    {
+      "id": "M203-01",
+      "status": "PASS",
+      "evidence": "FROZEN_SHA256SUMS.txt; runs/freeze-check-01/CHECKS.json and commit-order.txt; freeze commit predates RED and implementation."
+    },
+    {
+      "id": "M203-02",
+      "status": "PASS",
+      "evidence": "Pre-submit HANDOFF_READY and zero queue/receipt; browser-07 before-submit snapshot."
+    },
+    {
+      "id": "M203-03",
+      "status": "PASS",
+      "evidence": "Real SUPPORT-owner confirmation; Queue/Receipt/Outbox each 1; authorization unchanged."
+    },
+    {
+      "id": "M203-04",
+      "status": "PASS",
+      "evidence": "Lost-response replay test and browser-07 same Receipt recovery."
+    },
+    {
+      "id": "M203-05",
+      "status": "PASS",
+      "evidence": "Same operation ID with changed canonical body is rejected without side effects."
+    },
+    {
+      "id": "M203-06",
+      "status": "PASS",
+      "evidence": "Cross-process race, different operation IDs, and real two-tab request."
+    },
+    {
+      "id": "M203-07",
+      "status": "PASS",
+      "evidence": "Policy, Grant, Principal and expired Probe currentness invalidation tests."
+    },
+    {
+      "id": "M203-08",
+      "status": "PASS",
+      "evidence": "Critical correction and Abort first-commit race tests."
+    },
+    {
+      "id": "M203-09",
+      "status": "PASS",
+      "evidence": "Web tests reject non-owner, APPROVER, cross-tenant, spoofed identity and extra fields."
+    },
+    {
+      "id": "M203-10",
+      "status": "PASS",
+      "evidence": "Origin/CSRF/auth tests; operation ID persists across browser reload; chat remains read-only."
+    },
+    {
+      "id": "M203-11",
+      "status": "PASS",
+      "evidence": "Three pre-commit failpoints roll back; post-commit response loss replays Receipt."
+    },
+    {
+      "id": "M203-12",
+      "status": "PASS",
+      "evidence": "Real Edge + DeepSeek + MCP + 403/Authz + correction + new Run/Request + Draft + submit + Receipt + follow-up."
+    },
+    {
+      "id": "M203-13",
+      "status": "PASS",
+      "evidence": "Virtual 72-hour overdue state is read-only; Receipt digest is stable."
+    },
+    {
+      "id": "M203-14",
+      "status": "PASS",
+      "evidence": "Fresh pytest 186/186; M2-01 facts, MCP stdio, S1, frontend lint and build pass."
+    }
+  ],
+  "validation": {
+    "pytest": {
+      "status": "PASS",
+      "passed": 186,
+      "failed": 0,
+      "command": ".venv\\Scripts\\python.exe -X utf8 -m pytest -q --tb=short --basetemp=.runtime/m2-03-full-02",
+      "log": "runs/full-02/pytest.log"
+    },
+    "frontend_build": {
+      "status": "PASS",
+      "command": "npm --prefix frontend run build",
+      "vite": "8.3.4",
+      "log": "runs/frontend-build-03/build.log"
+    },
+    "frontend_lint": {
+      "status": "PASS",
+      "command": "npm --prefix frontend run lint",
+      "log": "runs/frontend-lint-07/lint.log"
+    },
+    "mcp_stdio": {
+      "status": "PASS",
+      "command": ".venv\\Scripts\\python.exe -X utf8 -m opspilot.smokes.m2_s2_mcp",
+      "log": "runs/mcp-stdio-01/trace.log"
+    },
+    "m2_01_http_mcp": {
+      "status": "PASS",
+      "http_statuses": [
+        401,
+        403,
+        200
+      ],
+      "runtime_scope_writes": 0,
+      "trace": "runs/m2-01-facts-01/TRACE.json"
+    },
+    "s1_401_to_200": {
+      "status": "PASS",
+      "command": ".venv\\Scripts\\python.exe -X utf8 -m opspilot.smokes.s1",
+      "log": "runs/s1-smoke-01/trace.log"
+    },
+    "browser": {
+      "status": "PASS",
+      "run_stamp": "20261019T121513Z",
+      "implementation_sha": "c4335c186dd93b505d15f15c5ffa322ae245cd4a",
+      "model": "deepseek-flash",
+      "task_id": "task-edf6da86-2351-460a-a15b-4f5476b6e98a",
+      "session_id": "session-90ed4970-c677-4067-b62b-c2a94fb1d561",
+      "run": "runs/browser-07/RESULTS.json"
+    },
+    "frozen_checksum_verification": {
+      "status": "PASS",
+      "files": 7,
+      "checksum_file": "FROZEN_SHA256SUMS.txt",
+      "evidence": "runs/freeze-check-01/CHECKS.json"
+    },
+    "focused_handoff_s2": {
+      "status": "PASS",
+      "passed": 29,
+      "failed": 0,
+      "command": ".venv\\Scripts\\python.exe -m pytest tests/test_m2_03_handoff.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py -q --tb=short --basetemp=.runtime/m2-03-impl-06",
+      "log": "runs/green/impl-06/pytest.log"
+    }
+  },
+  "business_assertions": {
+    "business_outcome": "SCOPE_ESCALATED",
+    "queue_entry_count": 1,
+    "handoff_receipt_count": 1,
+    "handoff_outbox_count": 1,
+    "first_submit_http": 202,
+    "idempotent_replay_http": 200,
+    "operation_id_stable_across_tabs": true,
+    "operation_id_persisted_across_reload": true,
+    "receipt_reconciled_after_reload": true,
+    "scope_authorized": false,
+    "business_recovered": false,
+    "request_id_chain": [
+      "fb493d84a78ba39f",
+      "c8ef68dd858fe571",
+      "e35db77ac675378c"
+    ],
+    "queue_entry_id": "s2-queue-2accff7c-c83e-4091-a9a9-54e9ce1d4983",
+    "receipt_id": "s2-handoff-1ea789e5-c7ab-4a87-8dea-fe6ffc7ce36f"
+  },
+  "provider_usage": {
+    "model": "deepseek-flash",
+    "investigator_total_tokens": 17531,
+    "chat_total_tokens": 3467,
+    "detail": "Provider-reported totals; call-level traces are preserved."
+  },
+  "known_limitations": [
+    "Queue and Receipt are local SQLite demo records; no human receiver workbench or remote ITSM is integrated.",
+    "SCOPE_ESCALATED means local queue acceptance only; no approval, Scope grant, API recovery, or S2 business completion is claimed.",
+    "Atomicity/idempotency is guaranteed inside the local Domain SQLite boundary; this is not distributed exactly-once delivery.",
+    "S1 real recovery remains separate from S2 scope-denied handoff and uses the S1 fixture business API."
+  ],
+  "failure_history": "FAILURES.md preserves RED, first/full test, lint, and browser failures. All raw run logs remain under runs/."
+}

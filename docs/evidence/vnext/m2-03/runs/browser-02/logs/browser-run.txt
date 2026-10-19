@@ -1,0 +1,28 @@
+exit_code=1
+stdout:
+
+stderr:
+file:///D:/%E5%AD%A6%E4%B9%A0/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/e2e/m2-03-browser.mjs:258
+    throw new Error(`Post-handoff answer made an unsupported authorization or recovery claim: ${answer.slice(0, 500)}`);
+          ^
+
+Error: Post-handoff answer made an unsupported authorization or recovery claim: ✳
+OpsPilot
+2026/10/19 20:05:01
+已核实，当前情况如下：
+
+1. **权限错误是 HTTP 403，不是登录失败**  
+   当前授权 MCP 证据 `evidence-f33c52ba-a9f4-43e5-8901-a9d4a7377461` 和 `evidence-054b7f7d-28dc-4ab9-8b01-7f31b30bc660` 都显示：  
+   - 路由：`/api/orders/demo-order`
+   - 认证结果：`AUTH_ACCEPTED`
+   - HTTP 状态：`403`
+   - `business_order_id` / `business_order_status`：均为空  
+   
+   这说明请求已通过认证，但因绑定主体 `principal-a` 缺少 `orders.read` 权限被拒绝。`granted_scopes` 当前为空。
+
+2. **申请进度：已进入本地范围审查队列，等待人工审查**  
+   - 业务结果：`SCOPE_ESCALATED`
+   - 队列：`local-scope-re
+    at file:///D:/%E5%AD%A6%E4%B9%A0/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/e2e/m2-03-browser.mjs:258:11
+
+Node.js v24.16.0

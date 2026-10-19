@@ -1,0 +1,30 @@
+exit_code=1
+stdout:
+
+stderr:
+file:///D:/%E5%AD%A6%E4%B9%A0/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/e2e/m2-03-browser.mjs:271
+    throw new Error(`Post-handoff answer did not explain receipt and non-recovery accurately: ${answer.slice(0, 500)}`);
+          ^
+
+Error: Post-handoff answer did not explain receipt and non-recovery accurately: ✳
+OpsPilot
+2026/10/19 20:07:10
+核实结果如下：
+
+**1. API 当前真实情况**
+- 绑定服务：`orders-demo`
+- 路由：`/api/orders/demo-order`
+- 主体：`principal-a`
+- 两条当前探测证据 `evidence-d442217e-8424-4d19-8027-0b47cf788eef`（2026-10-19 12:06:16）和 `evidence-8d6aa0d8-cb0e-42c5-8020-997c338f6a5a`（2026-10-19 12:06:27）都显示：
+  - `AUTH_ACCEPTED`
+  - **HTTP 403**
+  - 未返回业务订单号或订单状态
+- 可信状态显示缺少 `orders.read`，`scope_authorized` 为 `false`。因此不是订单查询结果问题，而是当前授权范围不足；服务端拒绝了该路由访问。
+
+**2. 这份申请到哪一步了**
+- 业务结果：`SCOPE_ESCALATED`
+- 本地受控审查队列已接收：
+  - 队列条目：`s2-q
+    at file:///D:/%E5%AD%A6%E4%B9%A0/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/e2e/m2-03-browser.mjs:271:11
+
+Node.js v24.16.0

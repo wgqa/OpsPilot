@@ -1,0 +1,24 @@
+...........FF................                                            [100%]
+================================== FAILURES ===================================
+_ test_m203_08_abort_wins_before_submit_and_post_handoff_abort_cannot_erase_receipt _
+tests\test_m2_03_handoff.py:398: in test_m203_08_abort_wins_before_submit_and_post_handoff_abort_cannot_erase_receipt
+    ready_after = _make_ready_draft(demo_db, live_api, "m203-08-handoff-first")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_m2_03_handoff.py:130: in _make_ready_draft
+    _install_scope_write_audit(db)
+tests\test_m2_03_handoff.py:65: in _install_scope_write_audit
+    connection.execute("CREATE TABLE m203_scope_write_audit (table_name TEXT, operation TEXT)")
+E   sqlite3.OperationalError: table m203_scope_write_audit already exists
+_ test_m203_11_precommit_failure_points_roll_back_and_postcommit_loss_replays _
+tests\test_m2_03_handoff.py:415: in test_m203_11_precommit_failure_points_roll_back_and_postcommit_loss_replays
+    ready = _make_ready_draft(demo_db, live_api, f"m203-11-{point}")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_m2_03_handoff.py:130: in _make_ready_draft
+    _install_scope_write_audit(db)
+tests\test_m2_03_handoff.py:65: in _install_scope_write_audit
+    connection.execute("CREATE TABLE m203_scope_write_audit (table_name TEXT, operation TEXT)")
+E   sqlite3.OperationalError: table m203_scope_write_audit already exists
+=========================== short test summary info ===========================
+FAILED tests/test_m2_03_handoff.py::test_m203_08_abort_wins_before_submit_and_post_handoff_abort_cannot_erase_receipt
+FAILED tests/test_m2_03_handoff.py::test_m203_11_precommit_failure_points_roll_back_and_postcommit_loss_replays
+2 failed, 27 passed in 17.80s

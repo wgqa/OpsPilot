@@ -1,0 +1,21 @@
+exit_code=1
+stdout:
+
+stderr:
+file:///D:/%E5%AD%A6%E4%B9%A0/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/e2e/m2-03-browser.mjs:295
+    throw new Error(`Post-handoff answer made an unsupported authorization or recovery claim: ${answer.slice(0, 500)}`);
+          ^
+
+Error: Post-handoff answer made an unsupported authorization or recovery claim: ✳
+OpsPilot
+2026/10/19 20:11:10
+结论：**当前证据显示是 HTTP 403，不是认证失败；业务尚未恢复。申请已进入本地受控审查队列，等待人工审查。**
+
+- **状态码与调用结果**
+  - 两条当前授权 MCP 证据均显示：`http_status: 403`，`auth_event_result: AUTH_ACCEPTED`。
+  - 路由：`/api/orders/demo-order`；服务：`orders-demo`；集成：`integration-a`；主体：`principal-a`。
+  - 证据 ID：`evidence-61998196-5945-4187-b42e-49118ccd5e23`、`evidence-54a48e80-f325-4983-a66f-fffbe5c9d1ab`，时间分别为 `2026-10-19 12:10:11`、`2026-10-19 12:10:22`。
+  - 两次探测均未返回业务订单 ID 或订单状态；相关版本在探测前后未变化：config `8`、policy `3`、principal `2`
+    at file:///D:/%E5%AD%A6%E4%B9%A0/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/e2e/m2-03-browser.mjs:295:11
+
+Node.js v24.16.0
