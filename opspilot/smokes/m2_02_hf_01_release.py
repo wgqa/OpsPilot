@@ -227,10 +227,11 @@ def _readonly_answer_overclaims(answer: str) -> bool:
         "already handed off", "has been handed off",
     )
     non_assertions = (
-        "不能说", "无法说", "尚未", "还未", "没有", "并未", "未曾", "不曾",
+        "不能说", "无法说", "不能认定", "不能确认", "无法认定", "无法确认",
+        "尚未", "还未", "没有", "并未", "未曾", "不曾",
         "用户说", "用户称", "声称", "没有证据", "尚无证据", "未有证据",
         "not yet", "has not", "hasn't", "have not", "haven't", "cannot say",
-        "can't say", "no evidence", "user says", "user claims", "reported that",
+        "can't say", "cannot determine", "cannot conclude", "no evidence", "user says", "user claims", "reported that",
     )
     for clause in re.split(r"[\n。！？!?；;，,]", answer.casefold()):
         normalized = re.sub(r"\s+", " ", clause)
