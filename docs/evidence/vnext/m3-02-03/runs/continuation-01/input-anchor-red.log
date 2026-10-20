@@ -1,0 +1,50 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_long_chat_keeps_original_task_and_latest_formal_correction_as_untrusted_input _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/pytest-m302-input-anchor-red/test_long_chat_keeps_original_0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000281E37B5BA0>
+
+    def test_long_chat_keeps_original_task_and_latest_formal_correction_as_untrusted_input(demo_db: Path, monkeypatch) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        owner = "m302-task-input-worker"
+        register_worker_owner(demo_db, owner, 72016)
+        created = create_task_with_initial_run(
+            demo_db, identity, session_id=session_id, service_id="orders-demo",
+            integration_id="integration-a", ticket_id="M302-PINNED-INPUT",
+            initial_message="Read demo-order status, never create an order or change credentials.",
+            idempotency_key="m302-pinned-create",
+        )
+        task_id = str(created["task_id"])
+        correction = admit_task_message(
+            demo_db, identity, session_id=session_id, task_id=task_id,
+            input_kind="CORRECT_TASK_INPUT",
+            body="The earlier 401 is only a historical claim; no current request or HTTP evidence exists.",
+            idempotency_key="m302-pinned-correction",
+        )
+        for index in range(21):
+            _turn(demo_db, session_id, owner, f"Incidental follow-up {index}.",
+                  key=f"m302-pinned-follow-up-{index}", answer="No new current evidence.")
+        accepted = admit_task_message(
+            demo_db, identity, session_id=session_id, task_id=task_id, input_kind="CHAT_READONLY",
+            body="Recall the goal, restrictions and latest formal correction.", idempotency_key="m302-pinned-question",
+        )
+        run_id = str(accepted["run_id"])
+        claim_task_run(demo_db, identity, run_id)
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "RECENT_WINDOW")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+        with connect(demo_db) as connection:
+            before = dict(connection.execute("SELECT * FROM task_controls WHERE task_id = ?", (task_id,)).fetchone())
+    
+        context = prepare_chat_attempt(demo_db, run_id, owner, "test-model")
+    
+        selected = set(context["selected_message_ids"])
+>       assert str(created["message_id"]) in selected
+E       AssertionError: assert 'message-f3b01544-d739-46d5-bf0f-74da21e97312' in {'message-2840ad3c-1acb-4059-8fa7-5dd977305466', 'message-45d86650-ff53-4f91-a928-babd8177591d', 'message-4f91f287-48e...589-1b9a168f4d39', 'message-55628617-4c4b-40a1-b1b2-333399949b13', 'message-5ada5a2c-d835-4884-9d87-342c9617c5c2', ...}
+E        +  where 'message-f3b01544-d739-46d5-bf0f-74da21e97312' = str('message-f3b01544-d739-46d5-bf0f-74da21e97312')
+
+tests\test_m302_context.py:269: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_long_chat_keeps_original_task_and_latest_formal_correction_as_untrusted_input
+1 failed in 2.96s

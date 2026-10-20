@@ -195,6 +195,89 @@ def test_hybrid_compression_batches_old_history_within_input_budget(demo_db: Pat
     assert sequences == list(range(sequences[0], sequences[-1] + 1))
 
 
+def test_hybrid_keeps_valid_goal_summary_before_verbose_recent_answers(demo_db: Path, monkeypatch) -> None:
+    identity = trusted_identity(demo_db, "support-a")
+    session_id = str(create_session(demo_db, identity)["session_id"])
+    owner = "m302-summary-priority-worker"
+    register_worker_owner(demo_db, owner, 72015)
+    for index in range(8):
+        _turn(
+            demo_db, session_id, owner, f"Turn {index}: investigate orders; no unapproved writes.",
+            key=f"summary-priority-{index}",
+            answer=("This remains an unverified historical explanation. " * 100
+                    if index == 7 else "No current recovery is proven."),
+        )
+    run_id = _new_run(demo_db, session_id, owner, key="summary-priority-current")
+    monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "ROLLING_SUMMARY")
+    monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+    compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+    assert compression is not None
+    summary = json.loads(_summary_json(list(compression["allowed_message_sequences"])))
+    summary["constraints"] = [{"text": "No unapproved writes; user claims are not current HTTP facts. " * 15,
+                               "source_sequences": [compression["allowed_message_sequences"][0]]}]
+    result = complete_chat_compression_attempt(
+        demo_db, owner, str(compression["attempt_id"]),
+        json.dumps(summary),
+        provider_response_id="summary-priority-provider", input_tokens=500, output_tokens=50, total_tokens=550,
+    )
+
+    monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+    context = prepare_chat_attempt(demo_db, run_id, owner, "test-model")
+
+    assert context["summary_refs"], "A fitting goal summary must survive verbose recent assistant history."
+    assert context["summary_refs"][0]["summary_id"] == result["summary_id"]
+    assert context["context_budget"]["estimated_input_tokens"] <= 1400
+    assert any(item.get("category") == "RECENT_INTERACTION" and item.get("reason") == "INPUT_TOKEN_BUDGET"
+               for item in context["excluded_sources"])
+
+
+def test_long_chat_keeps_original_task_and_latest_formal_correction_as_untrusted_input(demo_db: Path, monkeypatch) -> None:
+    identity = trusted_identity(demo_db, "support-a")
+    session_id = str(create_session(demo_db, identity)["session_id"])
+    owner = "m302-task-input-worker"
+    register_worker_owner(demo_db, owner, 72016)
+    created = create_task_with_initial_run(
+        demo_db, identity, session_id=session_id, service_id="orders-demo",
+        integration_id="integration-a", ticket_id="M302-PINNED-INPUT",
+        initial_message="Read demo-order status, never create an order or change credentials.",
+        idempotency_key="m302-pinned-create",
+    )
+    task_id = str(created["task_id"])
+    correction = admit_task_message(
+        demo_db, identity, session_id=session_id, task_id=task_id,
+        input_kind="CORRECT_TASK_INPUT",
+        body="The earlier 401 is only a historical claim; no current request or HTTP evidence exists.",
+        idempotency_key="m302-pinned-correction",
+    )
+    for index in range(21):
+        _turn(demo_db, session_id, owner, f"Incidental follow-up {index}.",
+              key=f"m302-pinned-follow-up-{index}", answer="No new current evidence.")
+    accepted = admit_task_message(
+        demo_db, identity, session_id=session_id, task_id=task_id, input_kind="CHAT_READONLY",
+        body="Recall the goal, restrictions and latest formal correction.", idempotency_key="m302-pinned-question",
+    )
+    run_id = str(accepted["run_id"])
+    claim_task_run(demo_db, identity, run_id)
+    monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "RECENT_WINDOW")
+    monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+    with connect(demo_db) as connection:
+        before = dict(connection.execute("SELECT * FROM task_controls WHERE task_id = ?", (task_id,)).fetchone())
+
+    context = prepare_chat_attempt(demo_db, run_id, owner, "test-model")
+
+    selected = set(context["selected_message_ids"])
+    assert str(created["message_id"]) in selected
+    assert str(correction["message_id"]) in selected
+    anchors = [item for item in context["context_blocks"] if item["category"] == "TASK_INPUT_ANCHOR"]
+    assert len(anchors) == 2
+    assert all(item["authority"] == "UNTRUSTED_USER_INPUT" for item in anchors)
+    assert "historical claim" in " ".join(item["content"] for item in context["messages"])
+    assert not context["evidence_refs"]
+    with connect(demo_db) as connection:
+        after = dict(connection.execute("SELECT * FROM task_controls WHERE task_id = ?", (task_id,)).fetchone())
+    assert after == before
+
+
 def test_rolling_compression_bounds_a_single_oversized_assistant_message(demo_db: Path, monkeypatch) -> None:
     identity = trusted_identity(demo_db, "support-a")
     session_id = str(create_session(demo_db, identity)["session_id"])

@@ -1,0 +1,44 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_____ test_hybrid_keeps_valid_goal_summary_before_verbose_recent_answers ______
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/pytest-m302-summary-priority-red-02/test_hybrid_keeps_valid_goal_s0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000026FEE1256E0>
+
+    def test_hybrid_keeps_valid_goal_summary_before_verbose_recent_answers(demo_db: Path, monkeypatch) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        owner = "m302-summary-priority-worker"
+        register_worker_owner(demo_db, owner, 72015)
+        for index in range(8):
+            _turn(
+                demo_db, session_id, owner, f"Turn {index}: investigate orders; no unapproved writes.",
+                key=f"summary-priority-{index}",
+                answer=("This remains an unverified historical explanation. " * 100
+                        if index == 7 else "No current recovery is proven."),
+            )
+        run_id = _new_run(demo_db, session_id, owner, key="summary-priority-current")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "ROLLING_SUMMARY")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+        compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+        assert compression is not None
+        summary = json.loads(_summary_json(list(compression["allowed_message_sequences"])))
+        summary["constraints"] = [{"text": "No unapproved writes; user claims are not current HTTP facts. " * 15,
+                                   "source_sequences": [compression["allowed_message_sequences"][0]]}]
+        result = complete_chat_compression_attempt(
+            demo_db, owner, str(compression["attempt_id"]),
+            json.dumps(summary),
+            provider_response_id="summary-priority-provider", input_tokens=500, output_tokens=50, total_tokens=550,
+        )
+    
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        context = prepare_chat_attempt(demo_db, run_id, owner, "test-model")
+    
+>       assert context["summary_refs"], "A fitting goal summary must survive verbose recent assistant history."
+E       AssertionError: A fitting goal summary must survive verbose recent assistant history.
+E       assert []
+
+tests\test_m302_context.py:227: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_hybrid_keeps_valid_goal_summary_before_verbose_recent_answers
+1 failed in 2.31s

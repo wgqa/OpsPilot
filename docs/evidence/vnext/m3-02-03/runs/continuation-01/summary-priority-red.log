@@ -1,0 +1,30 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_____ test_hybrid_keeps_valid_goal_summary_before_verbose_recent_answers ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-m302-summary-priority-red/test_hybrid_keeps_valid_goal_s0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001614D289480>
+
+    def test_hybrid_keeps_valid_goal_summary_before_verbose_recent_answers(demo_db: Path, monkeypatch) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        owner = "m302-summary-priority-worker"
+        register_worker_owner(demo_db, owner, 72015)
+        for index in range(8):
+            _turn(
+                demo_db, session_id, owner, f"Turn {index}: investigate orders; no unapproved writes.",
+                key=f"summary-priority-{index}",
+                answer=("This remains an unverified historical explanation. " * 100
+                        if index == 7 else "No current recovery is proven."),
+            )
+        run_id = _new_run(demo_db, session_id, owner, key="summary-priority-current")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+        compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+>       assert compression is not None
+E       assert None is not None
+
+tests\test_m302_context.py:214: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_hybrid_keeps_valid_goal_summary_before_verbose_recent_answers
+1 failed in 2.32s
