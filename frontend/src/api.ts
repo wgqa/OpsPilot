@@ -170,7 +170,9 @@ export class ApiError extends Error {
 
 export function explainError(error: unknown): string {
   if (!(error instanceof ApiError)) return '连接服务失败，请确认本地 OpsPilot 服务仍在运行。';
-  if (error.status === 401) return '登录状态已过期，请重新登录。';
+  if (error.status === 401) return error.code === 'INVALID_CREDENTIALS'
+    ? '所选身份的本地口令不匹配，或服务尚未配置该身份的口令。'
+    : '登录状态已过期，请重新登录。';
   if (error.status === 403) return error.code === 'ORIGIN_REJECTED' ? '请求来源未获准，浏览器写入已被拒绝。' : '此操作需要额外权限或有效的 CSRF 校验。';
   if (error.status === 404) return '记录不存在，或当前身份无权查看。';
   if (error.status === 409) return '当前状态不允许此操作；刷新状态后重试。';
