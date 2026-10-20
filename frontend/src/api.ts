@@ -136,7 +136,30 @@ export interface TaskMemoryContext {
   task_id: string;
   source_memories: MemoryRecord[];
   applicable_memories: MemoryRecord[];
+  excluded_memories?: Array<Record<string, unknown>>;
   context_provenance: Array<Record<string, unknown>>;
+}
+
+export interface SemanticMemoryRecord extends Record<string, unknown> {
+  memory_id: string;
+  project_id: string;
+  memory_kind: 'ALIAS' | 'INTERFACE_CONVENTION' | 'WORK_CONSTRAINT';
+  memory_key: string;
+  content: string;
+  content_digest: string;
+  source_task_id: string;
+  source_refs: Array<Record<string, unknown>>;
+  state: 'CANDIDATE' | 'ACTIVE' | 'REVISED' | 'REVOKED' | 'EXPIRED';
+  version: number;
+  expires_at: string;
+}
+
+export interface SemanticMemoryContext {
+  task_id: string;
+  project_id: string;
+  source_candidates: SemanticMemoryRecord[];
+  active_project_memories: SemanticMemoryRecord[];
+  excluded: Array<Record<string, unknown>>;
 }
 
 export class ApiError extends Error {
@@ -236,6 +259,44 @@ export const api = {
   },
   revokeMemory(memoryId: string, csrf: string, idempotencyKey: string) {
     return request<MemoryRecord>(`/api/memories/${encodeURIComponent(memoryId)}/revoke`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
+  taskSemanticMemories(taskId: string) {
+    return request<SemanticMemoryContext>(`/api/tasks/${encodeURIComponent(taskId)}/semantic-memories`);
+  },
+  semanticReviewQueue(state?: string) {
+    const query = state ? `?state=${encodeURIComponent(state)}` : '';
+    return request<{ items: SemanticMemoryRecord[] }>(`/api/semantic-memories/review-queue${query}`);
+  },
+  createSemanticCandidate(
+    taskId: string,
+    payload: {
+      memory_kind: SemanticMemoryRecord['memory_kind'];
+      memory_key: string;
+      content: string;
+      source_message_id: string;
+      ttl_days?: number;
+      supersedes_memory_id?: string;
+      expected_version?: number;
+    },
+    csrf: string,
+    idempotencyKey: string,
+  ) {
+    return request<SemanticMemoryRecord>(
+      `/api/tasks/${encodeURIComponent(taskId)}/semantic-memories/candidates`, {
+        method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+  confirmSemanticMemory(memoryId: string, csrf: string, idempotencyKey: string) {
+    return request<SemanticMemoryRecord>(`/api/semantic-memories/${encodeURIComponent(memoryId)}/confirm`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
+  revokeSemanticMemory(memoryId: string, csrf: string, idempotencyKey: string) {
+    return request<SemanticMemoryRecord>(`/api/semantic-memories/${encodeURIComponent(memoryId)}/revoke`, {
       method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
     });
   },

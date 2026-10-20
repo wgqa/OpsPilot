@@ -47,3 +47,13 @@ class S2HandoffSubmitRequest(StrictModel):
 class MemoryCommandRequest(StrictModel):
     """Memory lifecycle writes accept no caller-authored source or content fields."""
     pass
+
+
+class SemanticMemoryCandidateRequest(StrictModel):
+    memory_kind: Literal["ALIAS", "INTERFACE_CONVENTION", "WORK_CONSTRAINT"]
+    memory_key: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=1, max_length=800)
+    source_message_id: str = Field(min_length=1, max_length=120)
+    ttl_days: int = Field(default=90, ge=1, le=365)
+    supersedes_memory_id: str | None = Field(default=None, max_length=120)
+    expected_version: int | None = Field(default=None, ge=1)

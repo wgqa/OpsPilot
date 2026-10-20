@@ -285,7 +285,7 @@ def test_schema_v3_database_adds_context_input_provenance_columns(demo_db: Path)
     with connect(demo_db) as connection:
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(d5_context_provenance)")}
-    # M3-02 adds bounded context-summary storage in v10.
-    assert version == 10
+    # M3-03 adds the semantic-memory lifecycle in v11.
+    assert version == 11
     assert "selected_knowledge_json" in columns
     assert {"selected_input_messages_json", "task_run_control_json"}.issubset(columns)

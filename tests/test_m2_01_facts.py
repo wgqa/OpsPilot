@@ -364,8 +364,8 @@ def test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero(
     initialize(demo_db)
     initialize(demo_db)
     with connect(demo_db) as connection:
-        # M3-02 adds bounded context-summary storage in v10.
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10
+        # M3-03 adds the semantic-memory lifecycle in v11.
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 11
         assert "request_id" in {
             str(row["name"]) for row in connection.execute("PRAGMA table_info(auth_events)")
         }

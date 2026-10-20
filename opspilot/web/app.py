@@ -36,6 +36,7 @@ from opspilot.web.auth import (
 from opspilot.web.schemas import (
     AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest,
     MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
+    SemanticMemoryCandidateRequest,
 )
 
 
@@ -702,6 +703,130 @@ def create_app(
             raise TaskControlError("MEMORY_SCOPE_DENIED") from error
         except MemorySourceRejected as error:
             raise TaskControlError("MEMORY_SOURCE_REJECTED") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.get("/api/tasks/{task_id}/semantic-memories")
+    async def get_task_semantic_memories(
+        task_id: str, context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.semantic_memory import MemoryScopeDenied, semantic_memory_context
+
+        require_task_reader(context.identity, task_id)
+        try:
+            return semantic_memory_context(resolved_db, task_id, context.identity.actor_id)
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+
+    @app.post("/api/tasks/{task_id}/semantic-memories/candidates", status_code=201)
+    async def create_semantic_memory_candidate_route(
+        task_id: str,
+        body: SemanticMemoryCandidateRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import SemanticMemoryConflict, create_semantic_candidate
+
+        require_task_reader(context.identity, task_id)
+        try:
+            return create_semantic_candidate(
+                resolved_db, task_id, context.identity.actor_id,
+                memory_kind=body.memory_kind, memory_key=body.memory_key, content=body.content,
+                source_message_id=body.source_message_id, ttl_days=body.ttl_days,
+                supersedes_memory_id=body.supersedes_memory_id, expected_version=body.expected_version,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("SEMANTIC_MEMORY_SOURCE_REJECTED") from error
+        except SemanticMemoryConflict as error:
+            raise TaskControlError("SEMANTIC_MEMORY_CONFLICT") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.get("/api/semantic-memories")
+    async def list_semantic_memory_route(
+        task_id: str = Query(..., min_length=1, max_length=120),
+        state: str | None = Query(default=None),
+        context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import list_semantic_memories
+
+        require_task_reader(context.identity, task_id)
+        try:
+            return {"items": list_semantic_memories(
+                resolved_db, task_id, context.identity.actor_id, state=state,
+            )}
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("SEMANTIC_MEMORY_SOURCE_REJECTED") from error
+
+    @app.get("/api/semantic-memories/review-queue")
+    async def semantic_memory_review_queue_route(
+        state: str | None = Query(default=None),
+        context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import list_semantic_review_queue
+
+        try:
+            return {"items": list_semantic_review_queue(
+                resolved_db, context.identity.actor_id, state=state,
+            )}
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("SEMANTIC_MEMORY_SOURCE_REJECTED") from error
+
+    @app.post("/api/semantic-memories/{memory_id}/confirm")
+    async def confirm_semantic_memory_route(
+        memory_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import SemanticMemoryConflict, confirm_semantic_memory
+
+        try:
+            return confirm_semantic_memory(
+                resolved_db, memory_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("SEMANTIC_MEMORY_SOURCE_REJECTED") from error
+        except SemanticMemoryConflict as error:
+            raise TaskControlError("SEMANTIC_MEMORY_CONFLICT") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.post("/api/semantic-memories/{memory_id}/revoke")
+    async def revoke_semantic_memory_route(
+        memory_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import revoke_semantic_memory
+
+        try:
+            return revoke_semantic_memory(
+                resolved_db, memory_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("SEMANTIC_MEMORY_SOURCE_REJECTED") from error
         except MemoryIdempotencyConflict as error:
             raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
 

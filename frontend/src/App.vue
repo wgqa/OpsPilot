@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -16,8 +16,14 @@ const taskId = ref('');
 const inspector = ref<Inspector | null>(null);
 const taskOutcome = ref<TaskOutcome | null>(null);
 const taskMemoryContext = ref<TaskMemoryContext | null>(null);
+const taskSemanticContext = ref<SemanticMemoryContext | null>(null);
 const memoryCandidates = ref<MemoryRecord[]>([]);
 const selectedMemory = ref<MemoryRecord | null>(null);
+const semanticMemoryCandidates = ref<SemanticMemoryRecord[]>([]);
+const selectedSemanticMemory = ref<SemanticMemoryRecord | null>(null);
+const semanticDraftKind = ref<SemanticMemoryRecord['memory_kind']>('ALIAS');
+const semanticDraftKey = ref('');
+const semanticDraftContent = ref('');
 const pendingApprovals = ref<PendingApproval[]>([]);
 const selectedReview = ref<PlanReview | null>(null);
 const approvalResult = ref<ApprovalResult | null>(null);
@@ -59,8 +65,16 @@ const latestSelectedKnowledge = computed(() => Array.isArray(latestContextProven
   ? latestContextProvenance.value.selected_knowledge as Array<Record<string, unknown>> : []);
 const latestSelectedMemories = computed(() => Array.isArray(latestContextProvenance.value?.selected_memories)
   ? latestContextProvenance.value.selected_memories as Array<Record<string, unknown>> : []);
+const latestExcludedMemorySources = computed(() => Array.isArray(latestContextProvenance.value?.excluded_sources)
+  ? latestContextProvenance.value.excluded_sources as Array<Record<string, unknown>> : []);
+const latestSelectedSemanticMemories = computed(() => latestSelectedMemories.value.filter(
+  (item) => item.memory_type === 'SEMANTIC',
+));
 const sourceMemoryExists = computed(() => (taskMemoryContext.value?.source_memories ?? []).length > 0);
 const sourceMemoryEligible = computed(() => ['DELIVERED', 'DIAGNOSED', 'SCOPE_ESCALATED'].includes(String(taskOutcome.value?.business_outcome ?? '')));
+const semanticSourceMessageId = computed(() => [...messages.value].reverse().find((item) =>
+  item.task_id === taskId.value && item.role === 'USER' && ['CHAT_READONLY', 'CORRECT_TASK_INPUT'].includes(String(item.input_kind)),
+)?.message_id ?? '');
 
 function memoryOperationKey(operation: string, target: string): string {
   const storageKey = `opspilot.memory-operation.${user.value?.actor_id ?? 'unknown'}.${operation}.${target}`;
@@ -150,8 +164,11 @@ async function logout(): Promise<void> {
   inspector.value = null;
   taskOutcome.value = null;
   taskMemoryContext.value = null;
+  taskSemanticContext.value = null;
   memoryCandidates.value = [];
   selectedMemory.value = null;
+  semanticMemoryCandidates.value = [];
+  selectedSemanticMemory.value = null;
   pendingApprovals.value = [];
   selectedReview.value = null;
   approvalResult.value = null;
@@ -171,9 +188,17 @@ async function loadPendingApprovals(): Promise<void> {
     api.memories('CANDIDATE'), api.memories('ACTIVE'),
   ]);
   memoryCandidates.value = [...candidates.items, ...activeMemories.items];
+  const [semanticCandidates, semanticActive] = await Promise.all([
+    api.semanticReviewQueue('CANDIDATE'), api.semanticReviewQueue('ACTIVE'),
+  ]);
+  semanticMemoryCandidates.value = [...semanticCandidates.items, ...semanticActive.items];
   if (selectedMemory.value) {
     selectedMemory.value = memoryCandidates.value.find((item) => item.memory_id === selectedMemory.value?.memory_id)
       ?? selectedMemory.value;
+  }
+  if (selectedSemanticMemory.value) {
+    selectedSemanticMemory.value = semanticMemoryCandidates.value.find((item) => item.memory_id === selectedSemanticMemory.value?.memory_id)
+      ?? selectedSemanticMemory.value;
   }
 }
 
@@ -183,6 +208,10 @@ async function selectMemory(item: MemoryRecord): Promise<void> {
   } catch (error) {
     errorMessage.value = explainError(error);
   }
+}
+
+function selectSemanticMemory(item: SemanticMemoryRecord): void {
+  selectedSemanticMemory.value = item;
 }
 
 async function decideMemory(memory: MemoryRecord, action: 'confirm' | 'revoke'): Promise<void> {
@@ -202,6 +231,31 @@ async function decideMemory(memory: MemoryRecord, action: 'confirm' | 'revoke'):
     notice.value = action === 'confirm'
       ? '人工审核已持久记录；经验仅作为历史方法提示。'
       : '撤销已持久记录，后续模型调用将排除该经验。';
+    await loadPendingApprovals();
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function decideSemanticMemory(memory: SemanticMemoryRecord, action: 'confirm' | 'revoke'): Promise<void> {
+  if (!csrf.value || busy.value) return;
+  const confirmed = window.confirm(action === 'confirm'
+    ? `独立审核并启用这条项目 Semantic Memory？\n\n${memory.memory_key}: ${memory.content}\n\n它只作为非权威项目上下文；当前 Domain/MCP Evidence 和正式 Knowledge 优先。`
+    : `撤销这条项目 Semantic Memory？后续模型上下文及依赖它的历史摘要将无法再使用。`);
+  if (!confirmed) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const key = memoryOperationKey(action, `semantic:${memory.memory_id}`);
+    selectedSemanticMemory.value = action === 'confirm'
+      ? await api.confirmSemanticMemory(memory.memory_id, csrf.value, key)
+      : await api.revokeSemanticMemory(memory.memory_id, csrf.value, key);
+    completeMemoryOperation(action, `semantic:${memory.memory_id}`);
+    notice.value = action === 'confirm'
+      ? '项目候选已由受信 APPROVER 确认并版本化；它仍不能替代当前事实或授权。'
+      : '项目记忆已撤销；新模型调用会排除它并使依赖链失效。';
     await loadPendingApprovals();
   } catch (error) {
     errorMessage.value = explainError(error);
@@ -271,6 +325,7 @@ async function selectSession(value: string): Promise<void> {
   sessionId.value = value;
   taskId.value = '';
   taskMemoryContext.value = null;
+  taskSemanticContext.value = null;
   messages.value = [];
   inspector.value = null;
   taskOutcome.value = null;
@@ -329,6 +384,7 @@ async function refreshInspector(): Promise<void> {
       taskOutcome.value = ['NO_PLAN', 'NO_S2_DIAGNOSIS'].includes(String(handoffOutcome.business_outcome))
         ? taskOutcomeResult : handoffOutcome;
       taskMemoryContext.value = await api.taskMemories(taskId.value);
+      taskSemanticContext.value = await api.taskSemanticMemories(taskId.value);
     }
   } catch (error) {
     if (user.value?.role === 'APPROVER') errorMessage.value = explainError(error);
@@ -345,6 +401,31 @@ async function createMemoryCandidate(): Promise<void> {
     completeMemoryOperation('candidate', taskId.value);
     notice.value = `真实来源候选已建立：${candidate.memory_id} · ${candidate.source_outcome}。等待同租户 APPROVER 独立审核。`;
     taskMemoryContext.value = await api.taskMemories(taskId.value);
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function createSemanticCandidate(): Promise<void> {
+  if (!taskId.value || !csrf.value || busy.value || !semanticSourceMessageId.value) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const key = memoryOperationKey('semantic-candidate', `${taskId.value}:${semanticDraftKey.value.trim()}`);
+    const candidate = await api.createSemanticCandidate(taskId.value, {
+      memory_kind: semanticDraftKind.value,
+      memory_key: semanticDraftKey.value,
+      content: semanticDraftContent.value,
+      source_message_id: semanticSourceMessageId.value,
+      ttl_days: 90,
+    }, csrf.value, key);
+    completeMemoryOperation('semantic-candidate', `${taskId.value}:${semanticDraftKey.value.trim()}`);
+    semanticDraftKey.value = '';
+    semanticDraftContent.value = '';
+    notice.value = `Semantic Candidate ${candidate.memory_id} 已隔离保存，等待该项目授权的 APPROVER 审核；候选尚未进入模型上下文。`;
+    taskSemanticContext.value = await api.taskSemanticMemories(taskId.value);
   } catch (error) {
     errorMessage.value = explainError(error);
   } finally {
@@ -831,6 +912,31 @@ onBeforeUnmount(() => {
           <div v-else class="approval-empty"><h3>选择一条案例</h3><p>只展示 Domain 事实投影，不加载源任务的完整对话。</p></div>
         </div>
       </section>
+      <section class="memory-review panel" aria-label="Semantic Memory 审核" data-testid="semantic-memory-approval-center">
+        <div class="approval-review-heading"><div><span class="eyebrow">SEMANTIC MEMORY · PROJECT SCOPE</span><h2>项目约定审核与版本管理</h2></div><button class="outline-button" type="button" :disabled="busy" @click="loadPendingApprovals">刷新</button></div>
+        <p class="memory-warning">候选来自同一 Task 中已持久化的用户消息，只有项目授权的 APPROVER 可以确认。生效内容是非权威上下文，当前 Domain 与正式 Knowledge 始终优先。</p>
+        <div class="memory-review-grid">
+          <div class="memory-candidate-list">
+            <div v-if="semanticMemoryCandidates.length === 0" class="muted-card">当前项目没有待审核或生效中的 Semantic Memory。</div>
+            <button v-for="item in semanticMemoryCandidates" :key="item.memory_id" class="memory-candidate-item" :class="{ selected: selectedSemanticMemory?.memory_id === item.memory_id }" type="button" :data-testid="`semantic-memory-${item.memory_id}`" @click="selectSemanticMemory(item)">
+              <strong>{{ item.memory_kind }} · {{ item.memory_key }} · {{ item.state }} v{{ item.version }}</strong><small>来源 Task {{ item.source_task_id }} · 到期 {{ dateLabel(item.expires_at) }}</small><small>{{ item.content }}</small>
+            </button>
+          </div>
+          <div v-if="selectedSemanticMemory" class="memory-detail" data-testid="semantic-memory-review-detail">
+            <div class="plan-row"><span>状态 / 版本</span><b>{{ selectedSemanticMemory.state }} · v{{ selectedSemanticMemory.version }}</b></div>
+            <div class="plan-row"><span>项目 / 类型 / Key</span><b>{{ selectedSemanticMemory.project_id }} · {{ selectedSemanticMemory.memory_kind }} · {{ selectedSemanticMemory.memory_key }}</b></div>
+            <div class="plan-row"><span>内容</span><b>{{ selectedSemanticMemory.content }}</b></div>
+            <div class="plan-row"><span>来源 Task / 到期</span><b>{{ selectedSemanticMemory.source_task_id }} · {{ dateLabel(selectedSemanticMemory.expires_at) }}</b></div>
+            <div class="memory-json"><strong>来源引用</strong><code>{{ JSON.stringify(selectedSemanticMemory.source_refs) }}</code></div>
+            <small class="memory-digest">Content SHA-256 {{ selectedSemanticMemory.content_digest }}</small>
+            <div class="approval-buttons">
+              <button v-if="selectedSemanticMemory.state === 'CANDIDATE'" class="primary-button" type="button" data-testid="confirm-semantic-memory" :disabled="busy || !csrf" @click="decideSemanticMemory(selectedSemanticMemory, 'confirm')">审核并启用此版本</button>
+              <button v-else-if="selectedSemanticMemory.state === 'ACTIVE'" class="outline-button" type="button" data-testid="revoke-semantic-memory" :disabled="busy || !csrf" @click="decideSemanticMemory(selectedSemanticMemory, 'revoke')">撤销此版本</button>
+            </div>
+          </div>
+          <div v-else class="approval-empty"><h3>选择一条项目约定</h3><p>版本修订必须从支持端提交显式 supersedes 与预期版本；冲突不会静默覆盖。</p></div>
+        </div>
+      </section>
     </section>
 
     <section v-else class="workspace-grid">
@@ -1000,18 +1106,51 @@ onBeforeUnmount(() => {
             <div v-if="taskMemoryContext.applicable_memories.length" class="memory-applied-list">
               <strong>可用于当前调查的已审核案例</strong>
               <div v-for="item in taskMemoryContext.applicable_memories" :key="item.memory_id" class="trace-row" data-testid="applicable-memory">
-                <span class="trace-icon">↗</span><span><strong>{{ item.problem_type }} · {{ item.source_outcome }}</strong><small>来源 Task {{ item.source_task_id }} · v{{ item.version }} · {{ item.content_digest }}</small></span>
+                <span class="trace-icon">↗</span><span><strong>{{ item.problem_type }} · {{ item.source_outcome }}</strong><small>来源 Task {{ item.source_task_id }} · v{{ item.version }} · {{ item.content_digest }}</small><small>适用理由：{{ item.applicability_reason ?? '来自相同服务的问题类型与当前有效来源' }}</small></span>
               </div>
             </div>
+            <div v-if="taskMemoryContext.excluded_memories?.length" class="evidence-footer" data-testid="excluded-episodic-memories">未选用的历史案例：{{ JSON.stringify(taskMemoryContext.excluded_memories) }}</div>
             <div v-if="latestSelectedMemories.length" class="memory-applied-list" data-testid="selected-memory-provenance">
               <strong>最近一次真实模型调用的 Context Provenance</strong>
               <div v-for="item in latestSelectedMemories" :key="String(item.memory_id)" class="memory-case-card">
                 <div class="plan-row"><span>实际选用</span><b>{{ String(item.memory_id) }} · v{{ String(item.version) }}</b></div>
                 <div class="plan-row"><span>来源 Task / Outcome</span><b>{{ String(item.source_task_id) }} · {{ String(item.source_outcome) }}</b></div>
-                <small class="memory-digest">SHA-256 {{ String(item.digest) }}</small>
+                <small>适用理由：{{ String(item.applicability_reason ?? '已通过当前作用域与来源校验') }}</small>
+                <small class="memory-digest">SHA-256 {{ String(item.content_digest ?? item.digest ?? '') }}</small>
               </div>
             </div>
             <div v-else class="muted-card">最近模型调用没有选用 Memory；当前工具、Evidence Gate 与业务资格仍来自实时来源。</div>
+            <div v-if="latestExcludedMemorySources.length" class="evidence-footer" data-testid="excluded-memory-provenance">本轮未选入模型上下文的记忆：{{ JSON.stringify(latestExcludedMemorySources) }}</div>
+          </div>
+          <div v-if="taskSemanticContext" class="inspector-section memory-section" data-testid="semantic-memory-context">
+            <div class="section-heading"><h3>项目 Semantic Memory</h3><span class="read-only-label">历史约定提示</span></div>
+            <div class="memory-warning">只加载其他 Task 来源、经项目授权 APPROVER 确认且来源仍有效的内容。它不能证明当前事实或授权；续会摘要与历史回答在版本变化或撤销后失效。</div>
+            <div v-if="taskSemanticContext.active_project_memories.length === 0" class="muted-card">当前 Task 没有可用的跨 Task 项目约定。</div>
+            <div v-for="item in taskSemanticContext.active_project_memories" :key="item.memory_id" class="memory-case-card" data-testid="active-semantic-memory">
+              <div class="plan-row"><span>项目约定</span><b>{{ item.memory_kind }} · {{ item.memory_key }} · v{{ item.version }}</b></div>
+              <div class="plan-row"><span>内容</span><b>{{ item.content }}</b></div>
+              <small class="memory-digest">来源 Task {{ item.source_task_id }} · {{ item.content_digest }} · 到期 {{ dateLabel(item.expires_at) }}</small>
+            </div>
+            <div v-if="latestSelectedSemanticMemories.length" class="memory-applied-list" data-testid="selected-semantic-memory-provenance">
+              <strong>最近模型调用选用的 Semantic Memory</strong>
+              <div v-for="item in latestSelectedSemanticMemories" :key="String(item.memory_id)" class="trace-row"><span class="trace-icon">↗</span><span><strong>{{ String(item.memory_id) }} · v{{ String(item.version) }}</strong><small>来源 Task {{ String(item.source_task_id) }} · SHA-256 {{ String(item.digest) }}</small></span></div>
+            </div>
+            <div v-if="taskSemanticContext.source_candidates.length" class="memory-applied-list" data-testid="semantic-memory-source-candidates">
+              <strong>本 Task 的候选与历史版本</strong>
+              <div v-for="item in taskSemanticContext.source_candidates" :key="item.memory_id" class="trace-row"><span class="trace-icon">◌</span><span><strong>{{ item.memory_kind }} · {{ item.memory_key }} · {{ item.state }} v{{ item.version }}</strong><small>{{ item.content }} · {{ item.memory_id }}</small></span></div>
+            </div>
+            <div v-if="taskSemanticContext.excluded.length" class="evidence-footer" data-testid="semantic-memory-exclusions">排除项目记忆：{{ JSON.stringify(taskSemanticContext.excluded) }}</div>
+            <form v-if="canCreateTask && semanticSourceMessageId" class="memory-create-row semantic-proposal-form" data-testid="semantic-memory-proposal" @submit.prevent="createSemanticCandidate">
+              <strong>从当前 Task 的用户消息提议项目约定</strong>
+              <p>该操作只创建不可用作模型上下文的候选；必须由有权 APPROVER 单独确认后才会启用。</p>
+              <label>类型
+                <select v-model="semanticDraftKind" :disabled="busy || !csrf"><option value="ALIAS">实体别名</option><option value="INTERFACE_CONVENTION">接口约定</option><option value="WORK_CONSTRAINT">非敏感工作约束</option></select>
+              </label>
+              <label>项目 Key<input v-model="semanticDraftKey" maxlength="120" placeholder="例如 orders.route-name" :disabled="busy || !csrf" /></label>
+              <label>约定内容<textarea v-model="semanticDraftContent" maxlength="800" rows="2" placeholder="仅写相对稳定、非敏感且可从来源消息核对的约定。" :disabled="busy || !csrf" /></label>
+              <small>来源 Message {{ semanticSourceMessageId }} · 提案不会修改当前 Task、Gate 或权限。</small>
+              <button class="outline-button" type="submit" :disabled="busy || !csrf || !semanticDraftKey.trim() || !semanticDraftContent.trim()">保存待审候选</button>
+            </form>
           </div>
           <div class="inspector-section input-provenance-section">
             <div class="section-heading"><h3>用户线索 Provenance</h3><span class="read-only-label">未验证</span></div>

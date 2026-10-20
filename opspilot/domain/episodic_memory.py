@@ -19,6 +19,8 @@ MEMORY_SUMMARY = (
     "只用当前任务的 MCP Evidence 交给确定性门禁判断；历史经验不代表当前事实、根因或授权。"
 )
 MAX_MEMORY_RESULTS = 1
+MAX_MEMORY_LIMIT = 3
+MAX_MEMORY_SCAN = 100
 MEMORY_SCHEMA_VERSION = "opspilot-case-memory-v1"
 MEMORY_AUTHORITY = "HISTORICAL_METHOD_HINT_ONLY"
 
@@ -1000,25 +1002,94 @@ def revoke_memory(
     return result
 
 
-def _memory_is_applicable(
-    row: sqlite3.Row, *, problem_type: str, service_id: str, now: datetime,
-) -> bool:
-    if row["state"] != "ACTIVE" or row["problem_type"] != problem_type:
-        return False
+def _memory_exclusion_reason(
+    connection: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    task_id: str,
+    problem_type: str,
+    service_id: str,
+    now: datetime,
+) -> str | None:
+    if str(row["source_task_id"]) == task_id:
+        return "SAME_TASK_SOURCE"
+    if str(row["state"]) != "ACTIVE":
+        return f"MEMORY_{row['state']}"
+    if str(row["problem_type"]) != problem_type:
+        return "PROBLEM_TYPE_MISMATCH"
     if _parse_time(str(row["expires_at"])) <= now:
-        return False
+        return "MEMORY_EXPIRED"
     try:
         constraints = json.loads(str(row["applicability_constraints_json"]))
-    except json.JSONDecodeError:
-        return False
-    return (
-        constraints.get("problem_type") == problem_type
-        and constraints.get("service_id") == service_id
-        and constraints.get("source_outcome") == str(row["source_outcome"])
-        and str(row["schema_version"]) in {MEMORY_SCHEMA_VERSION, "d5-legacy-v1"}
-        and len(str(row["summary"])) <= 480
-        and str(row["content_digest"]) == _memory_content_digest(row)
-    )
+    except (json.JSONDecodeError, TypeError):
+        return "APPLICABILITY_CONSTRAINTS_INVALID"
+    if constraints.get("problem_type") != problem_type:
+        return "PROBLEM_TYPE_CONSTRAINT_MISMATCH"
+    if constraints.get("service_id") != service_id:
+        return "SERVICE_CONSTRAINT_MISMATCH"
+    if constraints.get("source_outcome") != str(row["source_outcome"]):
+        return "SOURCE_OUTCOME_CONSTRAINT_MISMATCH"
+    if str(row["schema_version"]) not in {MEMORY_SCHEMA_VERSION, "d5-legacy-v1"}:
+        return "MEMORY_SCHEMA_UNSUPPORTED"
+    if len(str(row["summary"])) > 480:
+        return "SUMMARY_EXCEEDS_LIMIT"
+    if str(row["content_digest"]) != _memory_content_digest(row):
+        return "CONTENT_DIGEST_MISMATCH"
+    if not _memory_source_still_valid(connection, row):
+        return "SOURCE_RECEIPT_INVALID"
+    return None
+
+
+def select_applicable_memories(
+    path: str | Path,
+    task_id: str,
+    problem_type: str,
+    *,
+    limit: int = MAX_MEMORY_RESULTS,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Return bounded historical guidance and same-project exclusion reasons."""
+    if not 1 <= limit <= MAX_MEMORY_LIMIT:
+        raise ValueError("D5 memory retrieval is limited to at most three records.")
+    with connect(path) as connection:
+        binding = _trusted_binding(connection, task_id)
+        project_id = project_id_for_service(str(binding["service_id"]))
+        rows = connection.execute(
+            """SELECT * FROM d5_memories WHERE tenant_id = ? AND project_id = ?
+               ORDER BY confirmed_at, memory_id LIMIT ?""",
+            (binding["tenant_id"], project_id, MAX_MEMORY_SCAN + 1),
+        ).fetchall()
+        now = _now()
+        selected: list[dict[str, object]] = []
+        excluded: list[dict[str, object]] = []
+        for row in rows[:MAX_MEMORY_SCAN]:
+            reason = _memory_exclusion_reason(
+                connection, row, task_id=task_id, problem_type=problem_type,
+                service_id=str(binding["service_id"]), now=now,
+            )
+            if reason is None and len(selected) >= limit:
+                reason = "MAX_SELECTION_LIMIT"
+            if reason is not None:
+                excluded.append({
+                    "source_type": "EPISODIC_MEMORY",
+                    "source_id": str(row["memory_id"]),
+                    "version": int(row["version"]),
+                    "reason": reason,
+                })
+                continue
+            item = _row_dict(row)
+            item["summary"] = str(item["summary"])[:480]
+            item["applicability_reason"] = (
+                "EXACT_PROBLEM_TYPE_AND_SERVICE; ACTIVE; NOT_EXPIRED; SOURCE_CURRENT"
+            )
+            selected.append(item)
+        if len(rows) > MAX_MEMORY_SCAN:
+            excluded.append({
+                "source_type": "EPISODIC_MEMORY",
+                "source_id": None,
+                "reason": "RETRIEVAL_SCAN_LIMIT",
+                "scanned_limit": MAX_MEMORY_SCAN,
+            })
+    return selected, excluded
 
 
 def list_applicable_memories(
@@ -1028,33 +1099,8 @@ def list_applicable_memories(
     *,
     limit: int = MAX_MEMORY_RESULTS,
 ) -> list[dict[str, object]]:
-    if not 1 <= limit <= 3:
-        raise ValueError("D5 memory retrieval is limited to at most three records.")
-    with connect(path) as connection:
-        binding = _trusted_binding(connection, task_id)
-        project_id = project_id_for_service(str(binding["service_id"]))
-        rows = connection.execute(
-            """SELECT * FROM d5_memories WHERE tenant_id = ? AND project_id = ?
-               AND problem_type = ? AND state = 'ACTIVE' ORDER BY confirmed_at, memory_id""",
-            (binding["tenant_id"], project_id, problem_type),
-        ).fetchall()
-        now = _now()
-        results = []
-        for row in rows:
-            if str(row["source_task_id"]) == task_id:
-                continue
-            if not _memory_is_applicable(
-                row, problem_type=problem_type, service_id=str(binding["service_id"]), now=now,
-            ):
-                continue
-            if not _memory_source_still_valid(connection, row):
-                continue
-            item = _row_dict(row)
-            item["summary"] = str(item["summary"])[:480]
-            results.append(item)
-            if len(results) >= limit:
-                break
-    return results
+    selected, _ = select_applicable_memories(path, task_id, problem_type, limit=limit)
+    return selected
 
 
 def list_memory_records(
@@ -1098,13 +1144,17 @@ def get_task_memory_context(
             (binding["tenant_id"], task_id),
         ).fetchall()
     applicable = []
+    excluded_memories = []
     for problem_type in (PROBLEM_TYPE, S2_PROBLEM_TYPE):
-        applicable.extend(list_applicable_memories(path, task_id, problem_type))
+        selected, excluded = select_applicable_memories(path, task_id, problem_type)
+        applicable.extend(selected)
+        excluded_memories.extend(excluded)
     provenance = list_context_provenance(path, task_id, actor_id)
     return {
         "task_id": task_id,
         "source_memories": [_row_dict(row) for row in source_rows],
         "applicable_memories": applicable,
+        "excluded_memories": excluded_memories,
         "context_provenance": provenance,
     }
 
@@ -1140,6 +1190,41 @@ def insert_context_provenance_in_transaction(
             version = int(selected.get("version", 0))
         except (TypeError, ValueError):
             raise ContextAssetInvalidated("Selected memory version is invalid.")
+        memory_type = str(selected.get("memory_type", "EPISODIC"))
+        if memory_type == "SEMANTIC":
+            from opspilot.domain.semantic_memory import _source_is_current
+
+            semantic = connection.execute(
+                "SELECT * FROM semantic_memories WHERE memory_id = ?", (memory_id,),
+            ).fetchone()
+            if (
+                semantic is None or str(semantic["state"]) != "ACTIVE"
+                or int(semantic["version"]) != version
+                or str(semantic["tenant_id"]) != str(binding["tenant_id"])
+                or str(semantic["project_id"]) != project_id
+                or str(semantic["source_task_id"]) == task_id
+                or _parse_time(str(semantic["expires_at"])) <= _now()
+                or not _source_is_current(connection, semantic)
+                or str(selected.get("summary", "")) != str(semantic["content"])
+                or str(selected.get("content_digest", "")) != str(semantic["content_digest"])
+                or str(selected.get("source_task_id", "")) != str(semantic["source_task_id"])
+                or str(selected.get("source_outcome", "")) != "PROJECT_CONTEXT"
+                or str(selected.get("memory_key", "")) != str(semantic["memory_key"])
+                or str(selected.get("memory_kind", "")) != str(semantic["memory_kind"])
+            ):
+                raise ContextAssetInvalidated("Selected Semantic Memory is no longer current in this TaskBinding scope.")
+            memory_refs.append({
+                "memory_id": memory_id, "version": version,
+                "digest": str(semantic["content_digest"]),
+                "source_task_id": str(semantic["source_task_id"]),
+                "source_outcome": "PROJECT_CONTEXT", "memory_type": "SEMANTIC",
+                "memory_key": str(semantic["memory_key"]), "memory_kind": str(semantic["memory_kind"]),
+                "source_refs": json.loads(str(semantic["source_refs_json"])),
+                "source_authority": "CONFIRMED_SEMANTIC_PROJECT_CONTEXT_NOT_FACT",
+            })
+            continue
+        if memory_type not in {"EPISODIC", ""}:
+            raise ContextAssetInvalidated("Selected Memory type is unsupported.")
         row = connection.execute("SELECT * FROM d5_memories WHERE memory_id = ?", (memory_id,)).fetchone()
         if (
             row is None
@@ -1239,6 +1324,31 @@ def assert_selected_memories_current(
         project_id = project_id_for_service(str(binding["service_id"]))
         for selected in selected_memories:
             memory_id = str(selected.get("memory_id", ""))
+            if str(selected.get("memory_type", "EPISODIC")) == "SEMANTIC":
+                from opspilot.domain.semantic_memory import _source_is_current
+
+                semantic = connection.execute(
+                    "SELECT * FROM semantic_memories WHERE memory_id = ?", (memory_id,),
+                ).fetchone()
+                if (
+                    semantic is None
+                    or str(semantic["state"]) != "ACTIVE"
+                    or int(semantic["version"]) != int(selected.get("version", 0))
+                    or str(semantic["content_digest"]) != str(selected.get("content_digest", ""))
+                    or str(semantic["content"]) != str(selected.get("summary", ""))
+                    or str(semantic["memory_key"]) != str(selected.get("memory_key", ""))
+                    or str(semantic["memory_kind"]) != str(selected.get("memory_kind", ""))
+                    or str(semantic["source_task_id"]) != str(selected.get("source_task_id", ""))
+                    or str(semantic["tenant_id"]) != str(binding["tenant_id"])
+                    or str(semantic["project_id"]) != project_id
+                    or str(semantic["source_task_id"]) == task_id
+                    or _parse_time(str(semantic["expires_at"])) <= _now()
+                    or not _source_is_current(connection, semantic)
+                ):
+                    raise ContextAssetInvalidated(
+                        "Selected Semantic Memory changed after attempt reservation and before Provider I/O."
+                    )
+                continue
             row = connection.execute(
                 "SELECT * FROM d5_memories WHERE memory_id = ?", (memory_id,),
             ).fetchone()
@@ -1337,11 +1447,34 @@ def list_context_provenance(
         item["prompt_digest_matches_trace"] = item.get("model_trace_prompt_digest") in (None, item["prompt_digest"])
         current_memory_states: list[dict[str, str]] = []
         with connect(path) as connection:
+            tenant_id = str(_trusted_binding(connection, task_id)["tenant_id"])
             for selected in item["selected_memories"]:
                 memory_id = str(selected.get("memory_id", ""))
+                if str(selected.get("memory_type", "EPISODIC")) == "SEMANTIC":
+                    from opspilot.domain.semantic_memory import _source_is_current
+
+                    current = connection.execute(
+                        "SELECT * FROM semantic_memories WHERE memory_id = ? AND tenant_id = ?",
+                        (memory_id, tenant_id),
+                    ).fetchone()
+                    reason = "CURRENT"
+                    if current is None:
+                        reason = "SEMANTIC_MEMORY_NOT_FOUND_OR_CROSS_TENANT"
+                    elif current["state"] != "ACTIVE":
+                        reason = f"SEMANTIC_MEMORY_{current['state']}"
+                    elif int(current["version"]) != int(selected.get("version", 0)):
+                        reason = "SEMANTIC_MEMORY_VERSION_CHANGED"
+                    elif str(current["content_digest"]) != str(selected.get("digest", "")):
+                        reason = "SEMANTIC_MEMORY_CONTENT_CHANGED"
+                    elif _parse_time(str(current["expires_at"])) <= _now():
+                        reason = "SEMANTIC_MEMORY_EXPIRED"
+                    elif not _source_is_current(connection, current):
+                        reason = "SEMANTIC_MEMORY_SOURCE_INVALID"
+                    current_memory_states.append({"memory_id": memory_id, "currentness": reason})
+                    continue
                 current = connection.execute(
                     "SELECT * FROM d5_memories WHERE memory_id = ? AND tenant_id = ?",
-                    (memory_id, item["tenant_id"] if "tenant_id" in item else _trusted_binding(connection, task_id)["tenant_id"]),
+                    (memory_id, tenant_id),
                 ).fetchone()
                 reason = "CURRENT"
                 if current is None:

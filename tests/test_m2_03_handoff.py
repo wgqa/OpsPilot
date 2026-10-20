@@ -53,8 +53,8 @@ def test_m203_migration_from_v7_is_additive_and_idempotent(demo_db: Path) -> Non
     initialize(demo_db)
     initialize(demo_db)
     with connect(demo_db) as connection:
-        # M3-02 adds bounded context-summary storage in v10.
-        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 10
+        # M3-03 adds the semantic-memory lifecycle in v11.
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 11
         tables = {str(row["name"]) for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'",
         ).fetchall()}

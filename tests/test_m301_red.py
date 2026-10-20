@@ -75,9 +75,9 @@ def test_m301_red_s2_investigator_context_can_select_active_case_memory(
     def applicable(_path, candidate_task_id, problem_type, **_kwargs):
         assert candidate_task_id == task_id
         assert problem_type == "auth_403_scope"
-        return [memory]
+        return [memory], []
 
-    monkeypatch.setattr(investigator, "list_applicable_memories", applicable)
+    monkeypatch.setattr(investigator, "select_applicable_memories", applicable)
     metadata: dict[str, object] = {}
     messages = _prompt_messages(
         demo_db, task_id, {"evidence_ids": []}, context_metadata=metadata,

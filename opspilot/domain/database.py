@@ -754,6 +754,69 @@ CREATE TABLE IF NOT EXISTS d5_memory_events (
     occurred_at TEXT NOT NULL,
     details_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS semantic_memories (
+    memory_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    project_id TEXT NOT NULL,
+    memory_kind TEXT NOT NULL CHECK (memory_kind IN ('ALIAS', 'INTERFACE_CONVENTION', 'WORK_CONSTRAINT')),
+    memory_key TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    source_task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
+    source_refs_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('CANDIDATE', 'ACTIVE', 'REVISED', 'REVOKED', 'EXPIRED')),
+    version INTEGER NOT NULL CHECK (version > 0),
+    supersedes_memory_id TEXT REFERENCES semantic_memories(memory_id),
+    supersedes_version INTEGER,
+    created_by TEXT NOT NULL,
+    confirmed_by TEXT,
+    confirmed_at TEXT,
+    revoked_by TEXT,
+    revoked_at TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK ((supersedes_memory_id IS NULL AND supersedes_version IS NULL)
+        OR (supersedes_memory_id IS NOT NULL AND supersedes_version IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_semantic_memory_active_key
+    ON semantic_memories(tenant_id, project_id, memory_kind, memory_key)
+    WHERE state = 'ACTIVE';
+CREATE INDEX IF NOT EXISTS ix_semantic_memory_scope
+    ON semantic_memories(tenant_id, project_id, state, expires_at);
+CREATE TABLE IF NOT EXISTS semantic_memory_events (
+    event_id TEXT PRIMARY KEY,
+    memory_id TEXT NOT NULL REFERENCES semantic_memories(memory_id),
+    tenant_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('CANDIDATE_CREATED', 'CONFIRMED', 'REVISED', 'REVOKED', 'EXPIRED')),
+    actor_id TEXT NOT NULL,
+    memory_version INTEGER NOT NULL,
+    occurred_at TEXT NOT NULL,
+    details_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_semantic_memory_events_scope
+    ON semantic_memory_events(memory_id, memory_version, occurred_at);
+CREATE TABLE IF NOT EXISTS semantic_memory_commands (
+    command_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    command_kind TEXT NOT NULL,
+    target_ref TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (tenant_id, actor_id, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS semantic_memory_project_approvers (
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    project_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
+    active INTEGER NOT NULL CHECK (active IN (0, 1)),
+    granted_by TEXT NOT NULL,
+    granted_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, project_id, actor_id)
+);
 CREATE TABLE IF NOT EXISTS d5_context_provenance (
     call_id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES task_bindings(task_id),
@@ -945,7 +1008,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 10:
+        if version > 11:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1238,6 +1301,18 @@ def initialize(path: str | Path) -> None:
                 if name not in provenance_columns:
                     connection.execute(f"ALTER TABLE d5_context_provenance ADD COLUMN {name} {definition}")
             connection.execute("PRAGMA user_version = 10")
+            version = 10
+        if version < 11:
+            connection.execute(
+                """INSERT OR IGNORE INTO semantic_memory_project_approvers
+                   (tenant_id, project_id, actor_id, active, granted_by, granted_at)
+                   SELECT DISTINCT o.tenant_id, 'service:' || b.service_id, o.actor_id, 1,
+                          'migration:v11_same_tenant_approver', CURRENT_TIMESTAMP
+                   FROM trusted_operators AS o JOIN task_bindings AS b
+                     ON b.tenant_id = o.tenant_id
+                   WHERE o.role = 'APPROVER'"""
+            )
+            connection.execute("PRAGMA user_version = 11")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -1281,6 +1356,10 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             "d5_context_provenance",
             "d5_memory_events",
             "d5_memories",
+            "semantic_memory_commands",
+            "semantic_memory_events",
+            "semantic_memories",
+            "semantic_memory_project_approvers",
             "d3_local_reports",
             "d3_delivery_records",
             "d3_ticket_resolution_entries",
@@ -1363,6 +1442,12 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             connection.execute(
                 "INSERT INTO services VALUES (?, ?, ?, ?)",
                 (tenant_id, "orders-demo", f"integration-{suffix}", "/api/orders/demo-order"),
+            )
+            connection.execute(
+                """INSERT INTO semantic_memory_project_approvers
+                   (tenant_id, project_id, actor_id, active, granted_by, granted_at)
+                   VALUES (?, 'service:orders-demo', ?, 1, 'fixture:trusted-demo-roles', CURRENT_TIMESTAMP)""",
+                (tenant_id, f"approver-{suffix}"),
             )
             connection.execute(
                 "INSERT INTO auth_policies VALUES (?, ?, ?, ?)",

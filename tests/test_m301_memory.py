@@ -26,6 +26,7 @@ from opspilot.domain.episodic_memory import (
     create_memory_candidate,
     list_applicable_memories,
     revoke_memory,
+    select_applicable_memories,
 )
 from opspilot.domain.s2_diagnosis import create_diagnosis_receipt, freeze_handoff_draft
 from opspilot.domain.s2_handoff import submit_s2_handoff
@@ -252,6 +253,10 @@ def test_s2_case_memory_is_in_real_investigator_prompt_for_different_task_only(
     assert isinstance(selected, list) and selected[0]["source_task_id"] == task_a
     assert selected[0]["source_outcome"] == "DIAGNOSED"
     assert selected[0]["content_digest"] == candidate["content_digest"]
+    assert selected[0]["applicability_reason"] == (
+        "EXACT_PROBLEM_TYPE_AND_SERVICE; ACTIVE; NOT_EXPIRED; SOURCE_CURRENT"
+    )
+    assert selected[0]["memory_type"] == "EPISODIC"
 
     disabled_metadata: dict[str, object] = {}
     disabled_messages = _prompt_messages(
@@ -285,6 +290,39 @@ def test_s2_case_memory_does_not_cross_into_a_current_401_task(
     ))
     assert candidate["memory_id"] not in prompt
     assert metadata["selected_memories"] == []
+    assert any(
+        item["source_id"] == candidate["memory_id"] and item["reason"] == "PROBLEM_TYPE_MISMATCH"
+        for item in metadata["excluded_sources"]
+    )
+
+
+def test_m301_memory_retrieval_records_applicability_and_selection_limits(
+    demo_db: Path, live_api: str,
+) -> None:
+    first_source = _s2_case(demo_db, live_api, "m301-retrieval-first")
+    first = create_memory_candidate(
+        demo_db, str(first_source["task_id"]), "support-a", idempotency_key="m301-retrieval-candidate-1",
+    )
+    confirm_memory(demo_db, str(first["memory_id"]), "approver-a", idempotency_key="m301-retrieval-confirm-1")
+
+    second_source = _s2_case(demo_db, live_api, "m301-retrieval-second", reset=False)
+    second = create_memory_candidate(
+        demo_db, str(second_source["task_id"]), "support-a", idempotency_key="m301-retrieval-candidate-2",
+    )
+    confirm_memory(demo_db, str(second["memory_id"]), "approver-a", idempotency_key="m301-retrieval-confirm-2")
+
+    target = _s2_case(demo_db, live_api, "m301-retrieval-target", reset=False)
+    task_b = str(target["task_id"])
+    selected, excluded = select_applicable_memories(demo_db, task_b, "auth_403_scope", limit=2)
+    assert {item["memory_id"] for item in selected} == {first["memory_id"], second["memory_id"]}
+    assert all(item["applicability_reason"].startswith("EXACT_PROBLEM_TYPE_AND_SERVICE") for item in selected)
+    assert excluded == []
+
+    one_selected, one_excluded = select_applicable_memories(demo_db, task_b, "auth_403_scope", limit=1)
+    assert len(one_selected) == 1
+    assert any(item["reason"] == "MAX_SELECTION_LIMIT" for item in one_excluded)
+    _, wrong_condition = select_applicable_memories(demo_db, task_b, "auth_401", limit=2)
+    assert {item["reason"] for item in wrong_condition} == {"PROBLEM_TYPE_MISMATCH"}
 
 
 def test_m301_web_memory_lifecycle_uses_session_roles_and_idempotency(
@@ -435,7 +473,7 @@ def test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun(demo_db: P
     initialize(demo_db)
     initialize(demo_db)
     with connect(demo_db) as connection:
-        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 10
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 11
         context_columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(d5_context_provenance)").fetchall()
@@ -445,7 +483,10 @@ def test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun(demo_db: P
             str(row["name"])
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
         }
-        assert {"context_compression_attempts", "context_summaries", "context_summary_dependencies"}.issubset(context_tables)
+        assert {
+            "context_compression_attempts", "context_summaries", "context_summary_dependencies",
+            "semantic_memories", "semantic_memory_events", "semantic_memory_project_approvers",
+        }.issubset(context_tables)
         rows = connection.execute("SELECT * FROM d5_memories WHERE memory_id='legacy-memory'").fetchall()
         events = connection.execute("SELECT * FROM d5_memory_events WHERE memory_id='legacy-memory'").fetchall()
         foreign_keys = connection.execute("PRAGMA foreign_key_list(d5_memory_events)").fetchall()
