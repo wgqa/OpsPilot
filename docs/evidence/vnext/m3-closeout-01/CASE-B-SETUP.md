@@ -1,0 +1,9 @@
+# Task B 测试准备补充（执行前记录）
+
+原SCOPE首选保留A修复后的200状态做B复查。只读预检发现当前实现`_current_evidence_memory_problem_type`严格要求本Run可信MCP认证失败401或可信403 Scope Decision才能选择相应Episodic，200正确返回None；Chat同样如此。不得为了演示放宽该选择规则，也不能凭用户自述选Memory。
+
+本补充依据任务卡§2.4和§2.7：复用现有fixture、把测试准备与Agent动作分开审计。在同一全新隔离库使用已有`prepare_d5_auth_401_for_test`显式准备一次合成第二故障，且仅在A已受控修复并完成交付、Memory已独立确认后执行。现有函数只允许从已恢复cred-v2状态创建新的cred-v1配置版本，v8→v9，不回退版本、不删原Task/Receipt、不重置数据库；没有复制旧Evidence或伪造HTTP响应。实际401仍必须由新Task绑定的真实业务HTTP请求产生。
+
+这一动作是公开记录的测试条件初始化，不是Agent修复或获得的授权。配置变化、函数来源、时间、前后快照及账本不变性记录到`fixture-second-incident.json`。原Task A的REPAIR仍是唯一获批业务REPAIR，B只能调查到新计划待审批，不执行第二次REPAIR/DELIVER。Scope/Policy/Principal不变。
+
+原M3 Gold、冻结矩阵及验收十条件不变；不调整Memory机制或生产代码。此补充仅替代不能触发合法Memory选择的B=200执行条件，并在第二故障测试开始前独立提交。不把预检说成实际B模型失败，不把准备动作记成Agent业务成果。
