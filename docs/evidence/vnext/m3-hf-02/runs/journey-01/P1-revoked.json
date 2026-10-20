@@ -1,0 +1,108 @@
+{
+  "memory_id": "episodic-bf9f8893-5c13-4879-9a35-7ba0bda732c0",
+  "tenant_id": "tenant-a",
+  "project_id": "service:orders-demo",
+  "type": "EPISODIC",
+  "problem_type": "auth_401",
+  "summary": "历史恢复案例：绑定业务路由 /api/orders/demo-order 曾返回 HTTP 401；经受控配置更新 v11→v12 后，同身份业务验证返回 HTTP 200。",
+  "source_task_id": "task-b1f6c544-8733-42ad-b88e-d69d58a151b9",
+  "source_report_ref": "report-ddf5d9d6-b3a1-4a48-97f5-a7a06f228ff8",
+  "source_verification_id": "verification-3167e051-ecfa-47c8-9d6f-4ac2786d0790",
+  "source_outcome": "REPAIRED_VERIFIED",
+  "schema_version": "opspilot-case-memory-v1",
+  "content_digest": "cc5ec7bc52e9d6e2591ffa82aec14770dfbc30309fe44102cf5bb2541299588d",
+  "state": "REVOKED",
+  "version": 3,
+  "confirmed_by": "approver-a",
+  "confirmed_at": "2026-10-20T18:05:35.635+00:00",
+  "revoked_by": "approver-a",
+  "revoked_at": "2026-10-20T18:12:18.530+00:00",
+  "expires_at": "2026-11-19T18:05:35.604+00:00",
+  "created_at": "2026-10-20T18:05:35.604+00:00",
+  "source_evidence_ids": [
+    "evidence-951b322c-ffe2-4dbe-a21d-dbd82e36e9b6",
+    "evidence-84e65cd8-ca4f-48c6-80b4-e6f6b50564fd",
+    "evidence-51b92a4b-993a-4e72-944e-0573a855b17f",
+    "evidence-d6c2368c-dfd7-4266-91d8-743c690cc9e5"
+  ],
+  "applicability_constraints": {
+    "problem_type": "auth_401",
+    "required_current_checks": [
+      "integration_config",
+      "principal_status",
+      "auth_policy",
+      "endpoint_probe"
+    ],
+    "service_id": "orders-demo",
+    "source_outcome": "REPAIRED_VERIFIED"
+  },
+  "source_refs": [
+    {
+      "digest_or_version": "6d238bc40f10bef1bb24847e29ea64b1b8a8cea7271c92dea5034ee583fc3956",
+      "id": "evidence-51b92a4b-993a-4e72-944e-0573a855b17f",
+      "kind": "EVIDENCE"
+    },
+    {
+      "digest_or_version": "4e7aa474a3b743a76d202916b7730f40b166016b154134025cc5b805a5d6465f",
+      "id": "evidence-84e65cd8-ca4f-48c6-80b4-e6f6b50564fd",
+      "kind": "EVIDENCE"
+    },
+    {
+      "digest_or_version": "6324b611f4eb94bcc2805e85251d30887a49703ad865e60174b56eef4c770028",
+      "id": "evidence-951b322c-ffe2-4dbe-a21d-dbd82e36e9b6",
+      "kind": "EVIDENCE"
+    },
+    {
+      "digest_or_version": "36660f3818e77c47dbbd5849c4d5be12f78dac7c7d2365e58dfe55af68dc99a5",
+      "id": "evidence-d6c2368c-dfd7-4266-91d8-743c690cc9e5",
+      "kind": "EVIDENCE"
+    },
+    {
+      "digest_or_version": "272d01783282f5db388e4c8f72ed00807e97d998d1b1cfaad7f5ec04d3e6a366",
+      "id": "report-ddf5d9d6-b3a1-4a48-97f5-a7a06f228ff8",
+      "kind": "FROZEN_REPORT"
+    },
+    {
+      "digest_or_version": "38d36d92882c8c16521b8b830811e062b1e35385ca7e53df77a0b603f098d43c",
+      "id": "ledger-37adc7db-8411-4462-b380-7d7c7b79d922",
+      "kind": "REPAIR_LEDGER"
+    },
+    {
+      "digest_or_version": "5478cab88a4b42c78cffc23481e1915883026c8cd36df2b4d4309d787ed1c56c",
+      "id": "verification-3167e051-ecfa-47c8-9d6f-4ac2786d0790",
+      "kind": "VERIFICATION_RECEIPT"
+    }
+  ],
+  "experience": {
+    "applicability": {
+      "problem_type": "auth_401",
+      "service_id": "orders-demo"
+    },
+    "case_specific_facts": {
+      "business_order_id": "demo-order",
+      "business_order_status": "CONFIRMED",
+      "config_version_after": 12,
+      "config_version_before": 11,
+      "http_status_before": 401,
+      "route": "/api/orders/demo-order",
+      "verified_http_status": 200
+    },
+    "investigation_guidance": [
+      "For a new task, read current bound integration configuration, principal status, and authentication policy.",
+      "Use the current task's bound business probe to distinguish authentication failure from other outcomes.",
+      "Only current task Evidence and the deterministic Gate can establish a cause or action eligibility."
+    ],
+    "limitations": [
+      "Historical facts do not describe the target task's current state.",
+      "This memory does not authorize a repair or prove that the target task is recovered."
+    ],
+    "required_current_checks": [
+      "integration_config",
+      "principal_status",
+      "auth_policy",
+      "endpoint_probe"
+    ],
+    "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+    "symptom_pattern": "Historical bound business request returned HTTP 401 before a verified configuration repair."
+  }
+}
