@@ -32,3 +32,10 @@ Failures are append-only and retained as originally observed. Historical M3-01 e
 - Exit: 1; the Investigator path accepted the first Provider call with the still-ACTIVE Memory, then the deterministic Provider revoked it and returned a no-tool response. The bounded investigation graph continued through its existing retry budget with fresh prompts that excluded the revoked Memory.
 - Failure: the new test incorrectly expected no follow-up Provider call after revocation. Captured follow-up payloads contained no revoked Memory; the production behavior respected revocation. This was a test expectation error, not a product safety failure.
 - Follow-up: revised only the assertion to allow bounded follow-up requests while requiring each actual payload after the revocation event to exclude the Memory. No runtime budget or policy changed.
+
+## HF-A WEB-01: source snapshot lacked trusted SUPPORT session link
+
+- Run: `runs/web-final-01/`
+- Exit: 1 before the browser journey started.
+- Observed: the chosen source database copy contained the completed S1 Task and receipt but did not contain the `session_task_links` row tying Task A to its trusted SUPPORT-owned Web session. The smoke correctly refused to create a candidate from an unlinked source Task.
+- Follow-up: selected the existing source database snapshot with the actual SUPPORT-owned session link (`runs/web-final-02/`), reran on a fresh isolated database, and completed all eight browser screenshots and lifecycle assertions. The original failure logs remain unchanged.

@@ -1,0 +1,468 @@
+{
+  "acceptance_gates": {
+    "HF01-01": {
+      "evidence": [
+        "runs/freeze-check-01/",
+        "BASELINE.md"
+      ],
+      "status": "PASS"
+    },
+    "HF01-02": {
+      "evidence": [
+        "FROZEN_SHA256SUMS.txt",
+        "115/115 SHA-256 match"
+      ],
+      "status": "PASS"
+    },
+    "HF01-03": {
+      "evidence": [
+        "runs/web-final-02/RESULTS.json",
+        "runs/web-final-02/screenshots/",
+        "8 fresh screenshots"
+      ],
+      "status": "PASS"
+    },
+    "HF01-04": {
+      "evidence": [
+        "web Provider/MCP/API traces",
+        "source and target SQLite snapshots",
+        "MCP tools/list smoke"
+      ],
+      "status": "PASS"
+    },
+    "HF01-05": {
+      "evidence": [
+        "Task A real repair/verification/report/delivery",
+        "Task B no REPAIR/DELIVER",
+        "Scope Grant unchanged"
+      ],
+      "status": "PASS"
+    },
+    "HF01-06": {
+      "evidence": [
+        "Web post-revoke Chat ContextManifest",
+        "C02 and C04/C06 checks"
+      ],
+      "status": "PASS"
+    },
+    "HF01-07": {
+      "evidence": [
+        "C01/C02/C03 synchronized tests",
+        "C02 RED preserved",
+        "C03 actual Investigator event trace"
+      ],
+      "status": "PASS"
+    },
+    "HF01-08": {
+      "evidence": [
+        "runs/restart-recovery-01/RESULTS.json",
+        "C06 history lineage test"
+      ],
+      "status": "PASS"
+    },
+    "HF01-09": {
+      "evidence": [
+        "C05 expired/version/source invalidation cases; 3/3"
+      ],
+      "status": "PASS"
+    },
+    "HF01-10": {
+      "evidence": [
+        "full pytest 204/204",
+        "M3/S1/S2 47/47",
+        "frontend build/lint exit 0",
+        "real MCP/HTTP smoke"
+      ],
+      "status": "PASS"
+    },
+    "HF01-11": {
+      "evidence": [
+        "FAILURES.md",
+        "all run commands/stdout/stderr/exit codes",
+        "source-manifest.json files"
+      ],
+      "status": "PASS"
+    },
+    "HF01-12": {
+      "evidence": [
+        "no B Task ActionLedger writes",
+        "no scope grant changes",
+        "no cross-tenant MCP read"
+      ],
+      "status": "PASS"
+    }
+  },
+  "baseline": {
+    "required_sha": "22823acc519789c14e2cefe8e0f4c16a05fb4b72",
+    "starting_branch": "main",
+    "starting_head": "22823acc519789c14e2cefe8e0f4c16a05fb4b72",
+    "starting_origin_main": "22823acc519789c14e2cefe8e0f4c16a05fb4b72",
+    "user_local_changes_preserved": true
+  },
+  "commits": {
+    "c03_trace_and_final_test_commit": "e9f7dd4630bda91b3691bd2973a47028a3480382",
+    "frozen_acceptance": "811508cf844b2d10590f44a42883d29c54e61572",
+    "minimal_production_fix": "f6025880133c7132bd703fcbaa83b99191b7c21e",
+    "original_red": "887bf58787d09aea38cb6fbb9762000202aee9a7",
+    "production_code_unchanged_after_fix": true,
+    "strengthened_c03_test": "cab76ff4996d94260072c9c260b72521ee947080"
+  },
+  "environment": {
+    "model_endpoint_host": "https://api.deepseek.com",
+    "model_id": "deepseek-flash",
+    "node": "v24.16.0",
+    "npm": "11.13.0",
+    "packages": {
+      "fastapi": "0.137.1",
+      "langchain": "1.4.1",
+      "langchain-openai": "1.7.2",
+      "langgraph": "1.2.16",
+      "langgraph-checkpoint-sqlite": "3.1.2",
+      "mcp": "2.3.0",
+      "pydantic": "2.14.1"
+    },
+    "pytest": "9.1.1",
+    "python": "3.14.0",
+    "secrets_written_to_evidence": false
+  },
+  "evidence_status": "READY_FOR_MAIN_AGENT_REVIEW",
+  "executor_signed_m301_pass": false,
+  "failures_retained": [
+    "runs/revoke-race-01/",
+    "runs/revoke-race-02/",
+    "runs/focused-03/",
+    "runs/web-final-01/",
+    "runs/c03-investigator-01/"
+  ],
+  "final_stage_decision": "NOT_SIGNED; awaiting independent Main Agent review",
+  "frozen_artifact_integrity": {
+    "files_checked": 115,
+    "original_m3_01_evidence_modified": false,
+    "sha256_mismatches": 0,
+    "verification_result": "runs/freeze-check-final-01/stdout.txt",
+    "verification_run": "runs/freeze-check-final-01/"
+  },
+  "hf_c01_to_c06": {
+    "C01": {
+      "status": "PASS",
+      "test": "test_memory_revocation_between_build_and_reserve_blocks_stale_prompt"
+    },
+    "C02": {
+      "original_red": "runs/revoke-race-02/RESULTS.json",
+      "status": "PASS",
+      "tests": [
+        "test_hf01_c02_revocation_after_attempt_reservation_blocks_provider_outbound",
+        "test_hf01_c02_chat_revocation_after_attempt_reservation_blocks_provider_outbound"
+      ]
+    },
+    "C03": {
+      "status": "PASS",
+      "test": "test_hf01_c03_provider_started_before_revocation_is_recorded_in_order",
+      "trace": {
+        "event": "hf01_c03_provider_revocation_order",
+        "events": [
+          "provider_request_started_with_active_memory",
+          "memory_revocation_committed",
+          "provider_request_started_after_revocation_without_memory",
+          "provider_request_started_after_revocation_without_memory",
+          "provider_request_started_after_revocation_without_memory",
+          "provider_request_started_after_revocation_without_memory",
+          "provider_request_started_after_revocation_without_memory",
+          "provider_request_started_after_revocation_without_memory",
+          "provider_request_started_after_revocation_without_memory"
+        ],
+        "memory_id": "episodic-b1ae499a-d1be-4116-af00-1111e6a7aa60",
+        "memory_present_by_provider_call": [
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "model_trace_call_ids": [
+          "call-3c704975-ee02-42e0-9b2e-3e27bd41f0bf",
+          "call-4523073a-baf1-41e7-af2d-32709ba512d5",
+          "call-63d5307f-cd9e-4d95-943e-659b0ed0d82a",
+          "call-6ed28b85-13da-46f7-a55b-3eeaefca9080",
+          "call-8cdec303-1ce7-4489-9e25-58aab3231a88",
+          "call-97a7d872-ee9a-41ec-8282-c89ba964dd35",
+          "call-9c571940-4666-40a8-9864-4d590d1034dd",
+          "call-d6aba00b-812b-4b3e-9af7-2c947b41a0a8"
+        ],
+        "provider_calls": 8,
+        "provider_payload_digests": [
+          "cb1b56657f59ed4aa8a99f7ee167081fd0926efc95875fe4fce9af45841582e6",
+          "985c2c4476703072af8e51f86df5990a34b26465f60a92a1e0b262e070c7b4a3",
+          "985c2c4476703072af8e51f86df5990a34b26465f60a92a1e0b262e070c7b4a3",
+          "985c2c4476703072af8e51f86df5990a34b26465f60a92a1e0b262e070c7b4a3",
+          "985c2c4476703072af8e51f86df5990a34b26465f60a92a1e0b262e070c7b4a3",
+          "985c2c4476703072af8e51f86df5990a34b26465f60a92a1e0b262e070c7b4a3",
+          "985c2c4476703072af8e51f86df5990a34b26465f60a92a1e0b262e070c7b4a3",
+          "985c2c4476703072af8e51f86df5990a34b26465f60a92a1e0b262e070c7b4a3"
+        ],
+        "run_id": "run-ff856ba1-926b-4a18-b892-9bd7a6dc2513",
+        "selected_memory_provenance_call_ids": [
+          "call-4523073a-baf1-41e7-af2d-32709ba512d5"
+        ],
+        "task_id": "task-66a06e6f-a6b8-4928-9ced-026a23d79136"
+      }
+    },
+    "C04": {
+      "checks": {
+        "mcp_read_observation_after_resume": true,
+        "memory_revoked_by_approver": true,
+        "memory_selected_before_revoke_checkpoint": true,
+        "new_worker_process_id": true,
+        "pre_revoke_provenance_retained_as_audit": true,
+        "real_http_401_persisted_before_worker_checkpoint": true,
+        "revoked_memory_absent_from_all_post_resume_contexts": true,
+        "same_run_resumed_by_new_worker": true,
+        "source_memory_was_active_before_revoke": true,
+        "source_task_differs_from_target": true
+      },
+      "http_status": 401,
+      "provider": "deterministic test provider; no external Provider request",
+      "status": "PASS",
+      "worker_pid_after": 31376,
+      "worker_pid_before": 12956
+    },
+    "C05": {
+      "cases": [
+        "expired",
+        "version_changed",
+        "source_invalid"
+      ],
+      "cases_passed": 3,
+      "status": "PASS"
+    },
+    "C06": {
+      "historical_message_retained": true,
+      "provider": "deterministic test Provider",
+      "status": "PASS",
+      "test": "test_hf01_c06_active_memory_chat_answer_is_excluded_from_actual_followup_provider_context"
+    }
+  },
+  "historical_m3_01_eval_immutable": {
+    "P03_P04": "ON/OFF both HANDOFF_READY; still conflicts with allowed outcome",
+    "arms": 16,
+    "outcome_matches_gold": "12/16",
+    "pairs": 8,
+    "provider_cost": "NOT_REPORTED",
+    "rerun_this_phase": false,
+    "utility": "UTILITY_NOT_PROVEN"
+  },
+  "independent_main_agent_verdict_required": true,
+  "known_limits": [
+    "local SQLite Demo; not production IAM or distributed deployment",
+    "non-blocking UI console noise: unauthenticated pre-login 401 and empty-task-selection 404",
+    "memory utility remains unproven; original P03/P04 mismatch remains"
+  ],
+  "mcp_stdio_smoke": {
+    "calls": [
+      {
+        "evidence_id": null,
+        "http_status": null,
+        "status": "OK",
+        "tool_name": "get_integration_config"
+      },
+      {
+        "evidence_id": null,
+        "http_status": null,
+        "status": "OK",
+        "tool_name": "get_principal_status"
+      },
+      {
+        "evidence_id": null,
+        "http_status": null,
+        "status": "OK",
+        "tool_name": "get_auth_policy"
+      },
+      {
+        "evidence_id": null,
+        "http_status": 401,
+        "status": "OK",
+        "tool_name": "probe_endpoint"
+      }
+    ],
+    "cross_tenant_negative": {
+      "content": [
+        "Error executing tool get_integration_config: RESOURCE_OUTSIDE_TASK_SCOPE"
+      ],
+      "event": "d2_mcp_cross_tenant_negative",
+      "is_error": true
+    },
+    "exit_code": 0,
+    "status": "PASS",
+    "tool_list_count": 4,
+    "tool_names": [
+      "get_integration_config",
+      "get_principal_status",
+      "get_auth_policy",
+      "probe_endpoint"
+    ]
+  },
+  "real_web_journey": {
+    "api_event_count": 294,
+    "api_status_counts": {
+      "200": 281,
+      "201": 2,
+      "202": 2,
+      "401": 5,
+      "404": 4
+    },
+    "approver_confirmation": {
+      "confirmed_by": "approver-a",
+      "state": "ACTIVE",
+      "version": 2
+    },
+    "browser": "Microsoft Edge via Playwright",
+    "chat_chunk_count": 318,
+    "committed_chat_answer": {
+      "body_digest": "ca8806d1799bb0532ecf2350514c58136c8e3c6033822a43de80c68ce93a72b7",
+      "manifest_id": "chat-manifest-f275cb06-91eb-476d-a2be-cddc753f1946",
+      "message_id": "message-a2f0554d-4545-4a00-8dae-59b4f11f178a"
+    },
+    "console_error_count": 10,
+    "domain_outbox_count": 325,
+    "event_stream_endpoint_count": 9,
+    "fresh_screenshot_count": 8,
+    "investigator_model_calls": 5,
+    "investigator_usage": {
+      "input_tokens": 19575,
+      "output_tokens": 1195,
+      "total_tokens": 20770
+    },
+    "mcp_observations": [
+      {
+        "evidence_id": "evidence-5c622830-925d-47fe-819e-3411867f867d",
+        "status": "OK",
+        "tool_name": "get_auth_policy"
+      },
+      {
+        "evidence_id": "evidence-e37ec15c-51e7-4276-86f6-26b341f09ef5",
+        "status": "OK",
+        "tool_name": "get_integration_config"
+      },
+      {
+        "evidence_id": "evidence-4469727e-f723-4c83-bb90-962595a1cf2c",
+        "status": "OK",
+        "tool_name": "get_principal_status"
+      },
+      {
+        "evidence_id": "evidence-71ab998f-7a9e-48ab-84d4-35b319fd9ccd",
+        "status": "OK",
+        "tool_name": "probe_endpoint"
+      }
+    ],
+    "memory_selected_context_count": 4,
+    "post_revocation_chat_memory_refs": [],
+    "post_revocation_chat_run_id": "run-4fd4f108-f243-49d6-ac6d-597f28fc49bb",
+    "post_revocation_chat_status": "SUCCEEDED",
+    "post_revocation_chat_usage": {
+      "input_tokens": 898,
+      "output_tokens": 1320,
+      "total_tokens": 2218
+    },
+    "provider_model_id": "deepseek-flash",
+    "revocation": {
+      "revoked_by": "approver-a",
+      "state": "REVOKED",
+      "version": 3
+    },
+    "scope_grants_unchanged": true,
+    "selected_memory_source_task_ids": [
+      "task-798b6841-82db-4976-8f41-860d0a33df0c"
+    ],
+    "session_event_count": 326,
+    "source_delivery_committed": true,
+    "source_frozen_report": {
+      "content_digest": "5554c9964d6cb5b7f59f450de84cd60f22ef1386f3084642929082db4d3dcad8",
+      "report_ref": "report-8a38cdb1-fab3-4443-9cf5-b153865aa069",
+      "report_version": 1
+    },
+    "source_repair_committed": true,
+    "source_repair_versions": {
+      "after": 8,
+      "before": 7
+    },
+    "source_s1_outcome": "DELIVERED",
+    "source_task_id": "task-798b6841-82db-4976-8f41-860d0a33df0c",
+    "source_task_status": "COMPLETED",
+    "source_verification": {
+      "business_assertions": {
+        "auth_event_id": 2,
+        "auth_event_id_present": true,
+        "expected_post_repair_versions": true,
+        "order_id_matches": true,
+        "order_status_matches": true,
+        "request_id": "a9a9e1da33c52938",
+        "request_id_present": true,
+        "response_body": {
+          "authn_event_id": 2,
+          "authz_event_id": 1,
+          "event_id": 2,
+          "order_id": "demo-order",
+          "request_id": "a9a9e1da33c52938",
+          "status": "CONFIRMED"
+        },
+        "same_business_route": true,
+        "same_integration": true,
+        "same_principal": true,
+        "same_service": true,
+        "same_tenant": true
+      },
+      "route": "/api/orders/demo-order",
+      "status": 200,
+      "verified": true
+    },
+    "status": "PASS",
+    "target_delivery_ledger_count": 0,
+    "target_gate": {
+      "checked_fact_ids": [
+        "evidence-71ab998f-7a9e-48ab-84d4-35b319fd9ccd"
+      ],
+      "decision": "NOT_APPLICABLE",
+      "missing_predicates": null,
+      "reason_code": "AUTHENTICATION_FAILURE_REMAINS_S1",
+      "stale_or_conflicting_ids": null
+    },
+    "target_http_statuses": [
+      401
+    ],
+    "target_repair_ledger_count": 0,
+    "target_run_id": "run-be38c2f9-5584-4319-bd1b-f1efd86c7d83",
+    "target_run_status": "WAITING_APPROVAL",
+    "target_task_id": "task-f5ba2a2f-bdca-4b57-90d4-74f7ef9f8ddc"
+  },
+  "schema_version": "m3-01-hf-01-results-v1",
+  "scope": "M3-01-HF-01 only; no M3-02 implementation",
+  "test_results": {
+    "focused_m3_s1_s2": {
+      "failed": 0,
+      "passed": 47,
+      "run": "runs/m3-s1-s2-focused-final-01/",
+      "status": "PASS",
+      "summary": "47 passed in 16.67s"
+    },
+    "frontend_build": {
+      "exit_code": 0,
+      "run": "runs/frontend-build-01/",
+      "status": "PASS"
+    },
+    "frontend_lint": {
+      "exit_code": 0,
+      "run": "runs/frontend-lint-01/",
+      "status": "PASS"
+    },
+    "full_pytest": {
+      "failed": 0,
+      "passed": 204,
+      "run": "runs/full-pytest-final-02/",
+      "status": "PASS",
+      "summary": "204 passed in 153.58s (0:02:33)"
+    }
+  }
+}
