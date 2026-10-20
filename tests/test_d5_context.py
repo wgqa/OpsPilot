@@ -39,6 +39,7 @@ from opspilot.domain.task_control import (
     create_session,
     create_task_with_initial_run,
     finish_task_run,
+    register_worker_owner,
     trusted_identity,
 )
 
@@ -149,6 +150,51 @@ def _seed_verified_source(db: Path, task_id: str) -> str:
             (report_ref, task_id, plan_hash, action_id, verification_id, hashlib.sha256(report_content.encode("utf-8")).hexdigest(), report_content, now),
         )
     return task_id
+
+
+def _seed_hf01_chat_target(db: Path, live_api: str, prefix: str) -> dict[str, object]:
+    source_task = _seed_verified_source(db, f"{prefix}-source")
+    candidate = create_memory_candidate(db, source_task, "support-a")
+    active = confirm_memory(db, str(candidate["memory_id"]), "approver-a")
+    identity = trusted_identity(db, "support-a")
+    session = create_session(db, identity)
+    created = create_task_with_initial_run(
+        db, identity, session_id=str(session["session_id"]),
+        service_id="orders-demo", integration_id="integration-a",
+        ticket_id=f"{prefix}-target", initial_message="Verify the current orders API result.",
+        idempotency_key=f"{prefix}-create-task",
+    )
+    task_id, business_run_id = str(created["task_id"]), str(created["run_id"])
+    with connect(db) as connection:
+        connection.execute(
+            "UPDATE integrations SET credential_ref = 'cred-v1', config_version = 7 "
+            "WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+        )
+    claim_task_run(db, identity, business_run_id)
+    apply_pending_critical_inputs(db, identity, business_run_id)
+    probe = probe_endpoint_fact(db, task_id, "orders-demo", "integration-a", live_api)
+    assert probe["facts"]["http_status"] == 401
+    call_id = f"{prefix}-current-401"
+    tool_call_id = f"{prefix}-current-401-tool"
+    probe_attempt, _ = reserve_attempt(
+        db, task_id, "MCP", 6, call_id=call_id,
+        tool_call_id=tool_call_id, tool_name="probe_endpoint",
+        argument_digest=f"{prefix}-current-401-args", run_id=business_run_id,
+    )
+    finish_attempt(db, probe_attempt, "OK")
+    record_tool_observation(
+        db, task_id=task_id, call_id=call_id, attempt_id=probe_attempt,
+        tool_call_id=tool_call_id, tool_name="probe_endpoint",
+        arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+        status="OK", result=probe,
+    )
+    worker_id = f"{prefix}-chat-worker"
+    register_worker_owner(db, worker_id, 5101)
+    return {
+        "task_id": task_id, "business_run_id": business_run_id,
+        "session_id": str(session["session_id"]), "identity": identity,
+        "memory": active, "memory_id": str(active["memory_id"]), "worker_id": worker_id,
+    }
 
 
 def test_memory_candidate_requires_real_domain_links_and_manual_lifecycle(demo_db: Path) -> None:
@@ -456,6 +502,316 @@ def test_hf01_c02_revocation_after_attempt_reservation_blocks_provider_outbound(
     assert revocation["value"] is not None and revocation["value"]["state"] == "REVOKED"
     assert captured, "the investigation should rebuild a safe context and reach the Provider"
     assert all(str(memory["memory_id"]) not in prompt for prompt in captured)
+    provenance = list_context_provenance(demo_db, task_id, "support-a")
+    memory_attempts = [
+        row for row in provenance
+        if any(item.get("memory_id") == memory["memory_id"] for item in row["selected_memories"])
+    ]
+    assert len(memory_attempts) == 1
+    invalidated_call_id = str(memory_attempts[0]["call_id"])
+    assert memory_attempts[0]["model_status"] == "CONTEXT_ASSET_INVALIDATED"
+    with connect(demo_db) as connection:
+        attempts = [dict(row) for row in connection.execute(
+            "SELECT attempt_id, call_id, status FROM d2_attempts WHERE task_id = ? AND kind = 'MODEL'",
+            (task_id,),
+        ).fetchall()]
+        model_calls = [str(row[0]) for row in connection.execute(
+            "SELECT call_id FROM d2_model_traces WHERE task_id = ?", (task_id,),
+        ).fetchall()]
+    assert len(attempts) >= 2
+    assert len({str(item["call_id"]) for item in attempts}) == len(attempts)
+    assert next(item for item in attempts if item["call_id"] == invalidated_call_id)["status"] == "CONTEXT_ASSET_INVALIDATED"
+    assert invalidated_call_id not in model_calls
+    assert len(model_calls) == len(captured)
+    assert all(call_id in {str(item["call_id"]) for item in attempts} for call_id in model_calls)
+
+
+def test_hf01_c02_chat_revocation_after_attempt_reservation_blocks_provider_outbound(
+    demo_db: Path, live_api: str, monkeypatch,
+) -> None:
+    import asyncio
+
+    import langchain_openai
+
+    import opspilot.domain.chat as chat_domain
+    from opspilot.domain.chat import get_chat_manifest
+    from opspilot.web.worker import _process_chat_run
+    target = _seed_hf01_chat_target(demo_db, live_api, "hf01-c02-chat")
+    identity = target["identity"]
+    task_id, worker_id = str(target["task_id"]), str(target["worker_id"])
+    accepted = admit_task_message(
+        demo_db, identity, session_id=str(target["session_id"]), task_id=task_id,
+        input_kind="CHAT_READONLY", body="Explain the current bound investigation.",
+        idempotency_key="hf01-c02-chat-message",
+    )
+    original_prepare = chat_domain.prepare_chat_attempt
+    revoked_ids: list[str] = []
+
+    def prepare_then_revoke(*args, **kwargs):
+        prepared = original_prepare(*args, **kwargs)
+        assert any(item.get("memory_id") == target["memory_id"] for item in prepared["memory_refs"])
+        revoked = revoke_memory(
+            demo_db, str(target["memory_id"]), "approver-a",
+            idempotency_key="hf01-c02-chat-revoke-after-reserve",
+        )
+        assert revoked["state"] == "REVOKED"
+        revoked_ids.append(str(revoked["memory_id"]))
+        return prepared
+
+    provider_calls: list[str] = []
+
+    class CapturingChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def astream(self, messages):
+            provider_calls.append("\n".join(str(item.content) for item in messages))
+            raise AssertionError("Provider I/O must not start with a revoked Memory in context.")
+            yield  # pragma: no cover - keeps this an async generator
+
+    monkeypatch.setattr(chat_domain, "prepare_chat_attempt", prepare_then_revoke)
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", CapturingChat)
+    monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "deterministic-hf01-chat-race-key")
+    monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deterministic-hf01-chat-race-model")
+    with connect(demo_db) as connection:
+        run = dict(connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (accepted["run_id"],)).fetchone())
+    asyncio.run(_process_chat_run(demo_db, worker_id, run))
+
+    assert revoked_ids == [str(target["memory_id"])]
+    assert provider_calls == []
+    manifest = get_chat_manifest(demo_db, identity, str(accepted["run_id"]))
+    assert manifest["attempts"][0]["error_class"] == "ContextAssetInvalidated"
+    assert manifest["attempts"][0]["status"] == "FAILED"
+    assert manifest["attempts"][0]["token_usage"] == {
+        "input_tokens": None, "output_tokens": None, "total_tokens": None,
+    }
+
+
+def test_hf01_c03_provider_started_before_revocation_is_recorded_in_order(demo_db: Path) -> None:
+    import asyncio
+
+    from opspilot.domain.episodic_memory import list_context_provenance
+
+    source_task = _seed_verified_source(demo_db, "hf01-c03-source")
+    memory = create_memory_candidate(demo_db, source_task, "support-a")
+    active = confirm_memory(demo_db, str(memory["memory_id"]), "approver-a")
+    target = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a")
+    task_id = str(target["task_id"])
+    metadata: dict[str, object] = {}
+    messages = _prompt_messages(
+        demo_db, task_id, {"task_binding_id": task_id, "evidence_ids": []},
+        context_metadata=metadata,
+    )
+    prompt_digest = digest_json([{"role": item.type, "content": item.content} for item in messages])
+    call_id = "hf01-c03-provider-start-order"
+    reserve_attempt(
+        demo_db, task_id, "MODEL", 8, call_id=call_id,
+        argument_digest=prompt_digest,
+        context_provenance={
+            "model_id": "test-model", "prompt_version": PROMPT_VERSION,
+            "prompt_digest": prompt_digest, "tool_schema_version": "test-schema-v1",
+            "tool_schema_digest": digest_json([]), **metadata,
+        },
+    )
+    events: list[str] = []
+    provider_payloads: list[str] = []
+
+    class CapturingProvider:
+        async def ainvoke(self, provider_messages):
+            provider_payloads.append("\n".join(str(item.content) for item in provider_messages))
+            events.append("provider_request_started")
+            revoked = revoke_memory(
+                demo_db, str(memory["memory_id"]), "approver-a",
+                idempotency_key="hf01-c03-revoke-after-provider-start",
+            )
+            assert revoked["state"] == "REVOKED"
+            events.append("memory_revocation_committed")
+
+    asyncio.run(CapturingProvider().ainvoke(messages))
+    assert events == ["provider_request_started", "memory_revocation_committed"]
+    assert str(memory["memory_id"]) in provider_payloads[0]
+    provenance = list_context_provenance(demo_db, task_id, "support-a")
+    selected = [
+        item for row in provenance for item in row["selected_memories"]
+        if item["memory_id"] == memory["memory_id"]
+    ]
+    assert len(selected) == 1 and selected[0]["version"] == active["version"]
+
+
+@pytest.mark.parametrize("invalidation", ["expired", "version_changed", "source_invalid"])
+def test_hf01_c05_stale_memory_context_is_rejected_and_fresh_prompt_excludes_it(
+    demo_db: Path, invalidation: str,
+) -> None:
+    from opspilot.domain.episodic_memory import assert_selected_memories_current
+
+    source_task = _seed_verified_source(demo_db, f"hf01-c05-{invalidation}")
+    candidate = create_memory_candidate(demo_db, source_task, "support-a")
+    confirm_memory(demo_db, str(candidate["memory_id"]), "approver-a")
+    target = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a")
+    task_id = str(target["task_id"])
+    metadata: dict[str, object] = {}
+    messages = _prompt_messages(
+        demo_db, task_id, {"task_binding_id": task_id, "evidence_ids": []},
+        context_metadata=metadata,
+    )
+    memory_id = str(candidate["memory_id"])
+    assert memory_id in "\n".join(str(item.content) for item in messages)
+    prompt_digest = digest_json([{"role": item.type, "content": item.content} for item in messages])
+    attempt_id, _ = reserve_attempt(
+        demo_db, task_id, "MODEL", 8, call_id=f"hf01-c05-{invalidation}",
+        argument_digest=prompt_digest,
+        context_provenance={
+            "model_id": "test-model", "prompt_version": PROMPT_VERSION,
+            "prompt_digest": prompt_digest, "tool_schema_version": "test-schema-v1",
+            "tool_schema_digest": digest_json([]), **metadata,
+        },
+    )
+    with connect(demo_db) as connection:
+        if invalidation == "expired":
+            expired = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+            connection.execute("UPDATE d5_memories SET expires_at = ? WHERE memory_id = ?", (expired, memory_id))
+        elif invalidation == "version_changed":
+            connection.execute(
+                "UPDATE d5_memories SET state = 'REVOKED', version = version + 1 WHERE memory_id = ?",
+                (memory_id,),
+            )
+        else:
+            connection.execute(
+                "UPDATE d3_report_artifacts SET immutable_content_json = immutable_content_json || ' ' WHERE task_id = ?",
+                (source_task,),
+            )
+
+    with pytest.raises(ContextAssetInvalidated):
+        assert_selected_memories_current(
+            demo_db, task_id,
+            [item for item in metadata.get("selected_memories", []) if isinstance(item, dict)],
+        )
+    finish_attempt(demo_db, attempt_id, "CONTEXT_ASSET_INVALIDATED", error_class="ContextAssetInvalidated")
+    finish_context_provenance(demo_db, f"hf01-c05-{invalidation}", "CONTEXT_ASSET_INVALIDATED")
+
+    fresh_metadata: dict[str, object] = {}
+    fresh_messages = _prompt_messages(
+        demo_db, task_id, {"task_binding_id": task_id, "evidence_ids": []},
+        context_metadata=fresh_metadata,
+    )
+    assert memory_id not in "\n".join(str(item.content) for item in fresh_messages)
+    assert fresh_metadata["selected_memories"] == []
+
+
+def test_hf01_c06_active_memory_chat_answer_is_excluded_from_actual_followup_provider_context(
+    demo_db: Path, live_api: str, monkeypatch,
+) -> None:
+    import asyncio
+
+    import langchain_openai
+    from langchain_core.messages import AIMessageChunk
+
+    from opspilot.domain.chat import get_chat_manifest
+    from opspilot.web.worker import _process_chat_run
+
+    source_task = _seed_verified_source(demo_db, "hf01-c06-source")
+    candidate = create_memory_candidate(demo_db, source_task, "support-a")
+    active = confirm_memory(demo_db, str(candidate["memory_id"]), "approver-a")
+    memory_id = str(active["memory_id"])
+
+    identity = trusted_identity(demo_db, "support-a")
+    session = create_session(demo_db, identity)
+    created = create_task_with_initial_run(
+        demo_db, identity, session_id=str(session["session_id"]),
+        service_id="orders-demo", integration_id="integration-a",
+        ticket_id="HF01-C06-TARGET", initial_message="Verify the current orders API result.",
+        idempotency_key="hf01-c06-create-task",
+    )
+    task_id, business_run_id = str(created["task_id"]), str(created["run_id"])
+    with connect(demo_db) as connection:
+        connection.execute(
+            "UPDATE integrations SET credential_ref = 'cred-v1', config_version = 7 "
+            "WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+        )
+    claim_task_run(demo_db, identity, business_run_id)
+    apply_pending_critical_inputs(demo_db, identity, business_run_id)
+    probe = probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)
+    assert probe["facts"]["http_status"] == 401
+    probe_attempt, _ = reserve_attempt(
+        demo_db, task_id, "MCP", 6, call_id="hf01-c06-current-401",
+        tool_call_id="hf01-c06-current-401-tool", tool_name="probe_endpoint",
+        argument_digest="hf01-c06-current-401-args", run_id=business_run_id,
+    )
+    finish_attempt(demo_db, probe_attempt, "OK")
+    record_tool_observation(
+        demo_db, task_id=task_id, call_id="hf01-c06-current-401", attempt_id=probe_attempt,
+        tool_call_id="hf01-c06-current-401-tool", tool_name="probe_endpoint",
+        arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+        status="OK", result=probe,
+    )
+
+    owner = "hf01-c06-chat-worker"
+    register_worker_owner(demo_db, owner, 5101)
+    first_user = admit_task_message(
+        demo_db, identity, session_id=str(session["session_id"]), task_id=task_id,
+        input_kind="CHAT_READONLY", body="Explain what the current investigation can use.",
+        idempotency_key="hf01-c06-chat-1",
+    )
+    memory_derived_answer = f"A prior case method from memory {memory_id} suggested checking policy first."
+    provider_contexts: list[str] = []
+
+    class CapturingChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def astream(self, messages):
+            provider_contexts.append("\n".join(f"{item.type}:{item.content}" for item in messages))
+            yield AIMessageChunk(
+                content=memory_derived_answer,
+                response_metadata={"id": "hf01-c06-provider-1"},
+                usage_metadata={"input_tokens": 10, "output_tokens": 9, "total_tokens": 19},
+            )
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", CapturingChat)
+    monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "deterministic-hf01-chat-key")
+    monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deterministic-hf01-chat-model")
+    with connect(demo_db) as connection:
+        first_run = dict(connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (first_user["run_id"],)).fetchone())
+    asyncio.run(_process_chat_run(demo_db, owner, first_run))
+    assert memory_id in provider_contexts[0]
+
+    with connect(demo_db) as connection:
+        answer = connection.execute(
+            "SELECT a.message_id FROM chat_run_answers a WHERE a.run_id = ?", (first_user["run_id"],),
+        ).fetchone()
+        assert answer is not None
+        answer_id = str(answer["message_id"])
+        sources = [dict(row) for row in connection.execute(
+            "SELECT * FROM chat_message_sources WHERE message_id = ? AND source_kind = 'MEMORY'",
+            (answer_id,),
+        ).fetchall()]
+    assert len(sources) == 1
+    assert sources[0]["source_ref"] == memory_id
+    assert sources[0]["source_version"] == str(active["version"])
+    assert sources[0]["source_digest"] == active["content_digest"]
+
+    revoked = revoke_memory(demo_db, memory_id, "approver-a", idempotency_key="hf01-c06-revoke")
+    assert revoked["state"] == "REVOKED" and revoked["version"] == int(active["version"]) + 1
+    second_user = admit_task_message(
+        demo_db, identity, session_id=str(session["session_id"]), task_id=task_id,
+        input_kind="CHAT_READONLY", body="Explain the currently available evidence only.",
+        idempotency_key="hf01-c06-chat-2",
+    )
+    with connect(demo_db) as connection:
+        second_run = dict(connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (second_user["run_id"],)).fetchone())
+    asyncio.run(_process_chat_run(demo_db, owner, second_run))
+
+    assert len(provider_contexts) == 2
+    assert memory_derived_answer not in provider_contexts[1]
+    assert memory_id not in provider_contexts[1]
+    manifest = get_chat_manifest(demo_db, identity, str(second_user["run_id"]))
+    assert any(
+        item.get("message_id") == answer_id
+        and item.get("reason") == "MEMORY_REVOKED_EXPIRED_OR_CHANGED"
+        for item in manifest["attempts"][0]["manifest"]["excluded_sources"]
+    )
+    with connect(demo_db) as connection:
+        assert connection.execute("SELECT 1 FROM messages WHERE message_id = ?", (answer_id,)).fetchone() is not None
 
 
 def test_skill_is_loaded_lazily_and_digest_tampering_fails(monkeypatch, tmp_path: Path) -> None:

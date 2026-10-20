@@ -358,6 +358,14 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
         persisted_metadata: tuple[str | None, int | None, int | None, int | None] = (None, None, None, None)
         chunk_seq = 0
         metadata_shape_logged = False
+        if run.get("task_id") is not None:
+            from opspilot.domain.episodic_memory import assert_selected_memories_current
+
+            assert_selected_memories_current(
+                db_path,
+                str(run["task_id"]),
+                [item for item in prepared.get("memory_refs", []) if isinstance(item, dict)],
+            )
         async for part in model.astream(messages):
             metadata = getattr(part, "response_metadata", {}) or {}
             if not metadata_shape_logged and os.environ.get("OPSPILOT_TRACE_PROVIDER_METADATA") == "1":

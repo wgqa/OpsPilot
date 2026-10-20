@@ -18,3 +18,10 @@ Failures are append-only and retained as originally observed. Historical M3-01 e
 - Synchronization: wrapper called the real `reserve_attempt`, then revoked the selected Memory in Domain before `ChatOpenAI.ainvoke` was entered. No timing sleep was used.
 - Observed: revocation committed (`state=REVOKED`), but the captured actual Provider messages still contained the revoked Memory ID. The prompt was therefore sent after revocation with stale context.
 - Classification: confirmed HF-C02 safety violation. This is a real post-reservation/pre-Provider race. Minimal implementation repair is authorized by the task card; no frozen Gold or strategy changes are needed.
+
+## HF-C02 GREEN-01: test accounting assertion corrected
+
+- Run: `runs/focused-03/`
+- Exit: 1; 29 passed and 1 failed.
+- Failure was in a new test assertion that assumed the full Investigator graph would issue exactly two model attempts. The actual run used the normal bounded investigation path: one reserved context invalidated before Provider I/O, followed by seven distinct post-revocation model requests while continuing the real evidence workflow (eight total model reservations, within the existing limit). The security assertions had already confirmed every captured Provider payload excluded the revoked Memory, the invalidated call had no model trace, and each request had a distinct call ID.
+- Follow-up: changed only the test accounting assertion to verify the frozen invariant (invalidated call is not a Provider trace; each actual Provider capture maps to a unique reserved attempt) without assuming a fixed graph call count. No budget, tool, or strategy behavior changed. Rerun is `runs/revoke-race-05/` and the full targeted rerun follows.

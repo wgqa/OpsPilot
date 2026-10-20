@@ -1274,9 +1274,9 @@ def build_investigation_graph(
             available_tool_specs = _s2_model_tool_specs_for_run(
                 db_path, task_id, run_id, model_tool_specs,
             )
-        call_id = f"call-{uuid.uuid4()}"
         tool_schema_digest = digest_json(available_tool_specs)
         for refresh in range(2):
+            call_id = f"call-{uuid.uuid4()}"
             context_metadata: dict[str, object] = {}
             messages = _prompt_messages(
                 db_path, task_id, state, context_metadata=context_metadata,
@@ -1291,6 +1291,7 @@ def build_investigation_graph(
                 "tool_schema_digest": tool_schema_digest,
                 **context_metadata,
             }
+            attempt_id: str | None = None
             try:
                 attempt_id, _ = reserve_attempt(
                     db_path,
@@ -1307,8 +1308,29 @@ def build_investigation_graph(
                     ),
                     run_id=run_id,
                 )
+                from opspilot.domain.episodic_memory import assert_selected_memories_current
+
+                assert_selected_memories_current(
+                    db_path,
+                    task_id,
+                    [
+                        item for item in context_metadata.get("selected_memories", [])
+                        if isinstance(item, dict)
+                    ],
+                )
                 break
             except ContextAssetInvalidated:
+                # Reservation is durable and consumes the model-attempt budget, but a
+                # Memory revoked in the reserve-to-Provider window must never reach I/O.
+                # Close that provenance row and rebuild once from current Domain state.
+                if attempt_id is not None:
+                    finish_attempt(
+                        db_path, attempt_id, "CONTEXT_ASSET_INVALIDATED",
+                        error_class="ContextAssetInvalidated",
+                    )
+                    finish_context_provenance(
+                        db_path, call_id, "CONTEXT_ASSET_INVALIDATED", "ContextAssetInvalidated",
+                    )
                 if refresh:
                     raise
             except BudgetExhausted:

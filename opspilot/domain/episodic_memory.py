@@ -1219,6 +1219,42 @@ def finish_context_provenance(
         )
 
 
+def assert_selected_memories_current(
+    path: str | Path,
+    task_id: str,
+    selected_memories: list[dict[str, object]],
+) -> None:
+    """Revalidate selected Memory immediately before Investigator Provider I/O."""
+    if not selected_memories:
+        return
+    with connect(path) as connection:
+        binding = _trusted_binding(connection, task_id)
+        project_id = project_id_for_service(str(binding["service_id"]))
+        for selected in selected_memories:
+            memory_id = str(selected.get("memory_id", ""))
+            row = connection.execute(
+                "SELECT * FROM d5_memories WHERE memory_id = ?", (memory_id,),
+            ).fetchone()
+            if (
+                row is None
+                or str(row["state"]) != "ACTIVE"
+                or int(row["version"]) != int(selected.get("version", 0))
+                or str(row["content_digest"]) != str(selected.get("content_digest", ""))
+                or str(row["summary"]) != str(selected.get("summary", ""))
+                or str(row["schema_version"]) != str(selected.get("schema_version", ""))
+                or str(row["source_task_id"]) != str(selected.get("source_task_id", ""))
+                or str(row["source_outcome"]) != str(selected.get("source_outcome", ""))
+                or str(row["tenant_id"]) != str(binding["tenant_id"])
+                or str(row["project_id"]) != project_id
+                or str(row["source_task_id"]) == task_id
+                or _parse_time(str(row["expires_at"])) <= _now()
+                or not _memory_source_still_valid(connection, row)
+            ):
+                raise ContextAssetInvalidated(
+                    "Selected Memory changed after attempt reservation and before Provider I/O."
+                )
+
+
 def assert_task_skill_compatible(
     path: str | Path, task_id: str, selected_skill: dict[str, str] | None
 ) -> None:
