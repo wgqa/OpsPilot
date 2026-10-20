@@ -1,0 +1,70 @@
+{
+  "schema_version": "opspilot-m302-m303-results-v1",
+  "release_ref": "m3-02-03-final-candidate",
+  "initial_baseline": "5ade2b5deedbb3704b09e9d6fbbfbffa3ab8deb8",
+  "freeze_commit": "3cb826d",
+  "red_commit": "48be70422f03b567b09a6bd45efc42d7a98ad598",
+  "m302_implementation_commit": "f9f9d8a7c724a477578ff9eed2a48f4972078ee0",
+  "m303_implementation_commit": "a0ac67836c5dc641d316628689621c986e91b57a",
+  "overall_status": "PARTIAL",
+  "completion_blocker": "REAL_WEB_TASK_B_PROVIDER_MCP_REVOCATION_AND_RECOVERY_NOT_RUN",
+  "historical_m301": {
+    "pairs": 8,
+    "arms": 16,
+    "gold_matches": 12,
+    "utility": "UTILITY_NOT_PROVEN",
+    "badcases": ["P03", "P04"],
+    "modified": false
+  },
+  "test_runs": [
+    {"name": "M3-02 core pytest", "passed": 215, "deselected": 1, "exit_code": 0, "log": "runs/verification-01/full-pytest-m302-core.log"},
+    {"name": "M3-03 semantic and episodic focused", "passed": 13, "failed": 0, "exit_code": 0, "log": "runs/m303-final/pytest-episodic.log"},
+    {"name": "M3-03 full pytest attempt 1", "passed": 222, "failed": 1, "exit_code": 1, "log": "runs/m303-final/pytest-full-episodic.log", "failure": "legacy M3-01 mock patched the removed investigator.list_applicable_memories symbol"},
+    {"name": "M3-03 Investigator compatibility regression", "passed": 1, "failed": 0, "exit_code": 0, "log": "runs/m303-final/pytest-m301-red-compat.log"},
+    {"name": "M3-03 full pytest final", "passed": 223, "failed": 0, "exit_code": 0, "duration_seconds": 165.36, "log": "runs/m303-final/pytest-full-final.log"},
+    {"name": "frontend typecheck and build", "passed": true, "exit_code": 0, "log": "runs/m303-final/frontend-build-episodic.log"}
+  ],
+  "acceptance": [
+    {"id": "CTX-01", "status": "AUTOMATED_PASS", "evidence": "full pytest and real budget/compression traces"},
+    {"id": "CTX-02", "status": "PARTIAL", "evidence": "26 Web turns; 21 succeeded and 5 failed"},
+    {"id": "CTX-03", "status": "AUTOMATED_PASS", "evidence": "summary invalidation tests in frozen run"},
+    {"id": "CTX-04", "status": "AUTOMATED_PASS", "evidence": "summary projection and preservation regression"},
+    {"id": "CTX-05", "status": "AUTOMATED_PASS", "evidence": "dependency/revocation regression"},
+    {"id": "CTX-06", "status": "AUTOMATED_PASS", "evidence": "asset/source currentness regression"},
+    {"id": "CTX-07", "status": "UNVERIFIED", "evidence": "no durable real browser PID-to-resumed-Run trace"},
+    {"id": "CTX-08", "status": "AUTOMATED_AND_PROVIDER_TRACE_PASS", "evidence": "Manifest and DeepSeek strategy trace"},
+    {"id": "CTX-09", "status": "AUTOMATED_PASS", "evidence": "tenant/project/task scoping tests"},
+    {"id": "CTX-10", "status": "AUTOMATED_PASS", "evidence": "bounded failure and budget tests"},
+    {"id": "MEM-01", "status": "PASS_FOR_SEMANTIC_CANDIDATE_APPROVAL", "evidence": "Web candidate and approver-a confirmed event"},
+    {"id": "MEM-02", "status": "AUTOMATED_PASS_WITH_TRACE", "evidence": "episodic applicability and selection-limit test"},
+    {"id": "MEM-03", "status": "AUTOMATED_PASS", "evidence": "current evidence and problem-type boundary regression"},
+    {"id": "MEM-04", "status": "AUTOMATED_PASS_AND_WEB_CONFIRM", "evidence": "candidate, confirm, revision, revoke, expiry tests; live confirm event"},
+    {"id": "MEM-05", "status": "AUTOMATED_PASS", "evidence": "cross-task context and revocation dependency tests"},
+    {"id": "MEM-06", "status": "AUTOMATED_PASS", "evidence": "scope, actor, source, version and migration tests"},
+    {"id": "E2E-01", "status": "PARTIAL", "evidence": "Web long conversation had 5 failed runs; recovery PID trace unavailable"},
+    {"id": "E2E-02", "status": "PASS", "evidence": "real S1 HTTP, S2 MCP stdio, model/MCP trace and full pytest"},
+    {"id": "E2E-03", "status": "UNVERIFIED", "evidence": "Task A and APPROVER confirmation done; Task B/revoke/recovery still pending"}
+  ],
+  "real_strategy_comparison": [
+    {"strategy": "RECENT_WINDOW", "status": "SUCCEEDED", "provider_input_tokens": 1123, "provider_output_tokens": 1676, "provider_total_tokens": 2799, "latency_ms": 21088},
+    {"strategy": "ROLLING_SUMMARY", "status": "FAILED", "blocked_reason": "CHAT_ATTEMPTS_EXHAUSTED", "provider_total_tokens": 6020},
+    {"strategy": "HYBRID", "status": "FAILED", "blocked_reason": "CHAT_ATTEMPTS_EXHAUSTED", "provider_total_tokens": 4640}
+  ],
+  "semantic_web": {
+    "task_a": "task-9444df29-9e21-4b7f-9b26-df6ff17cf123",
+    "memory_id": "semantic-8669bb64-f2b1-41a9-ae9c-10c3ef5a7626",
+    "state": "ACTIVE",
+    "version": 1,
+    "created_by": "support-a",
+    "confirmed_by": "approver-a",
+    "task_b": null,
+    "revocation_test": "NOT_RUN"
+  },
+  "evidence": {
+    "trace": "runs/m303-final/TRACE-task-a.json",
+    "full_test_log": "runs/m303-final/pytest-full-final.log",
+    "initial_full_test_failure_log": "runs/m303-final/pytest-full-episodic.log",
+    "failures": "FAILURES.md",
+    "browser_screenshot_file": "NOT_SAVED"
+  }
+}

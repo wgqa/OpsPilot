@@ -1,0 +1,43 @@
+........................................................................ [ 32%]
+........................................................................ [ 64%]
+.....................................................F.................. [ 96%]
+.......                                                                  [100%]
+================================== FAILURES ===================================
+_____ test_m301_red_s2_investigator_context_can_select_active_case_memory _____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m303-final-complete/test_m301_red_s2_investigator_0/domain.sqlite3')
+live_api = 'http://127.0.0.1:63971'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000141DF7ADF60>
+
+    def test_m301_red_s2_investigator_context_can_select_active_case_memory(
+        demo_db: Path, live_api: str, monkeypatch,
+    ) -> None:
+        task_id, run_id, _probe, _evidence_ids = _capture_s2_probe(
+            demo_db, live_api, "S2_SCOPE_DENIED", "m301-context-s2",
+        )
+        source_task_id = "source-task-a"
+        memory = {
+            "memory_id": "m301-case-memory-s2",
+            "version": 2,
+            "digest": "f" * 64,
+            "content_digest": "f" * 64,
+            "schema_version": "opspilot-case-memory-v1",
+            "summary": "��ʷ S2 ������Ӧֻʹ�ñ��� Run �� Probe request_id ��ѯ��ǰ Authz facts��",
+            "source_task_id": source_task_id,
+            "source_outcome": "SCOPE_ESCALATED",
+            "source_refs": [{"kind": "HANDOFF_RECEIPT", "id": "source-receipt"}],
+        }
+        import opspilot.investigator as investigator
+    
+        def applicable(_path, candidate_task_id, problem_type, **_kwargs):
+            assert candidate_task_id == task_id
+            assert problem_type == "auth_403_scope"
+            return [memory]
+    
+>       monkeypatch.setattr(investigator, "list_applicable_memories", applicable)
+E       AttributeError: <module 'opspilot.investigator' from 'D:\\ѧϰ\\agent����Ŀ\\opspilot\\investigator.py'> has no attribute 'list_applicable_memories'
+
+tests\test_m301_red.py:80: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/test_m301_red.py::test_m301_red_s2_investigator_context_can_select_active_case_memory
+1 failed, 222 passed in 173.79s (0:02:53)
