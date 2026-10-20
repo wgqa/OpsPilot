@@ -14,7 +14,7 @@
 | 本次继续起点 | `c57cd28827335dddb8ab21afa093131b1a6faaec` |
 | 补充 RED | `9d264d1780d585d4b763f8e54af919ac0d29f1a0` |
 | 最小修复 | `e2c48e78e5d41f2cc0c74632665fa3600502005e` |
-| 最终证据提交 | 交付消息给出；本提交的父提交即上述修复 |
+| 最终证据提交 | 交付消息给出 |
 
 直接使用 main，不创建分支或 PR。用户未提交的 `AGENTS.md`、`PROJECT_NORTH_STAR.md`、`开发目录/` 和历史临时目录均未暂存。依赖基线没有变更。原冻结 Gold、原始失败日志和 M3-01 的 12/16 结果未改写。
 
@@ -99,3 +99,5 @@ pytest 覆盖原 M1、M1-HF-01、M2 与 M3-01 安全回归。前端构建之后�
 `export_continuation_trace.py` 通过只读 SQLite 连接导出白名单事实、来源和账本；不导出 credentials、Cookie 或 Web 认证会话。原始库及临时测试服务脚本留在项目 `.runtime/`，不提交数据库或本地密钥。运行命令和副本来源见 `RUNBOOK.md`。所有本次子服务已停止，原8000/5173服务仍运行。
 
 机器矩阵见 `RESULTS.json`，原始索引见 `TRACE.json`，错误与尝试见 `FAILURES.md`，源码学习材料见 `docs/learning/M3-02/`、`M3-03/`。本轮停止于修复与证据交付，不进入 M4、S3、新业务工具、通用 Memory 平台或多 Agent。是否验收通过由主 Agent 独立决定。
+
+补充可读截图：`runs/long-recovery-01/screenshots/04-readable-final-answer.png`。截图在测试副本停止后滚动到已持久的最终回答，底部SSE断开提示是停止测试服务后的预期状态；用户原8000/5173服务不受影响。
