@@ -20,5 +20,7 @@
 | 原始本地 Web Task B：`task-8f2720b8-72b4-4e67-9fad-bae863de3c1d` / `run-8e65e032-5e99-4c24-96ea-867df3912a18` | 3 次 Worker 重试后 `WORKER_RETRY_EXHAUSTED`；0 Provider / 0 MCP attempt | 原 Domain 数据仍保留；generic Worker error 没有提供根因。结构化失败记录见 `runs/m303-final/FAILURE-original-web-task-b.json`，原因未推断。 |
 | 第二次原数据库 Web Task B：`task-dfe71a7a-caea-4c8c-a0b4-d2dcd3d8d124` / `run-9e9834db-ca90-431c-8e6a-c5ca0948eb56` | 同样 3 次 Worker 重试后 `WORKER_RETRY_EXHAUSTED`；0 Provider / 0 MCP attempt | 作为失败保留在同一结构化记录中；没有将其改写为成功。 |
 | `runs/m303-final/debug-run-clone.log` | 隔离克隆上的直接 Worker 调试调用返回 `WAITING_APPROVAL`，5 Provider / 4 MCP | 仅用于排查当前代码路径，不算 Web 验收；后续真实浏览器 Task B 使用独立 Run 并单独记录在 `TRACE-task-b.json`。 |
+| 临时隔离 API 的 APPROVER 登录 | `POST /api/auth/login` 返回 401；本地克隆进程未配置 `OPSPILOT_WEB_APPROVER_PASSWORD` | 从本轮进程输出观察到 3 次 401；没有读取或保存口令。切回原 API 服务后，`approver-a` 登录和 Web 撤销成功。此项为测试环境配置失败，不是产品回归。 |
+| 撤销后 support-a 登录 | 页面仍停在登录表单，显示通用 401 文案“登录状态已过期，请重新登录” | 前端将过期会话与凭证拒绝映射到同一文案；未能判断确切原因。未重复提交、读取口令或更改认证配置，后续模型调用与恢复测试待有效 support-a 会话。 |
 
-本轮仍有产品层失败：26 轮真实 Web 会话中 5 个 Run 失败；真实 DeepSeek 对照中的 Rolling Summary / Hybrid 均未完成最终回答。Task B 跨任务使用现已有真实浏览器、Provider、MCP 和 Provenance 证据；Web 撤销后的新模型请求及跨进程恢复仍未执行，因此整体继续保持 `PARTIAL`。
+本轮仍有产品层失败：26 轮真实 Web 会话中 5 个 Run 失败；真实 DeepSeek 对照中的 Rolling Summary / Hybrid 均未完成最终回答。Task B 跨任务使用和 Web 撤销均已核实；撤销后的新模型请求及跨进程恢复仍未执行，因此整体继续保持 `PARTIAL`。
