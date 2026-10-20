@@ -33,10 +33,12 @@ from opspilot.domain.episodic_memory import (
 from opspilot.investigator import PROMPT_VERSION, _prompt_messages
 from opspilot.skill_assets import SkillIntegrityError, load_applicable_skill
 from opspilot.domain.task_control import (
+    admit_task_message,
     apply_pending_critical_inputs,
     claim_task_run,
     create_session,
     create_task_with_initial_run,
+    finish_task_run,
     trusted_identity,
 )
 
@@ -354,6 +356,106 @@ def test_memory_revocation_between_build_and_reserve_blocks_stale_prompt(demo_db
     assert list_context_provenance(demo_db, str(target["task_id"]), "support-a") == []
     with connect(demo_db) as connection:
         assert connection.execute("SELECT COUNT(*) AS n FROM d2_attempts WHERE task_id = ?", (target["task_id"],)).fetchone()["n"] == 0
+
+
+def test_hf01_c02_revocation_after_attempt_reservation_blocks_provider_outbound(
+    demo_db: Path, live_api: str, monkeypatch, tmp_path: Path,
+) -> None:
+    """A revoked Memory must not cross the provider boundary after reservation."""
+    import asyncio
+
+    from langchain_core.messages import AIMessage
+
+    import opspilot.investigator as investigator
+
+    source_task = _seed_verified_source(demo_db, "unused")
+    memory = create_memory_candidate(demo_db, source_task, "support-a")
+    active = confirm_memory(demo_db, str(memory["memory_id"]), "approver-a")
+    assert active["state"] == "ACTIVE"
+
+    identity = trusted_identity(demo_db, "support-a")
+    session = create_session(demo_db, identity)
+    initial = create_task_with_initial_run(
+        demo_db, identity, session_id=str(session["session_id"]),
+        service_id="orders-demo", integration_id="integration-a",
+        ticket_id="HF01-C02-TARGET", initial_message="Orders API is failing; investigate the bound request.",
+        idempotency_key="hf01-c02-create-task",
+    )
+    task_id = str(initial["task_id"])
+    with connect(demo_db) as connection:
+        connection.execute(
+            "UPDATE integrations SET credential_ref = 'cred-v1', config_version = 7 "
+            "WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+        )
+    accepted = admit_task_message(
+        demo_db, identity, session_id=str(session["session_id"]), task_id=task_id,
+        input_kind="CORRECT_TASK_INPUT", body="Use the current request for the bound orders route.",
+        idempotency_key="hf01-c02-correction",
+    )
+    run_id = str(accepted["run_id"])
+    claim_task_run(demo_db, identity, run_id)
+    apply_pending_critical_inputs(demo_db, identity, run_id)
+
+    probe = probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)
+    assert probe["facts"]["http_status"] == 401
+    probe_call = "hf01-c02-live-probe"
+    probe_attempt, _ = reserve_attempt(
+        demo_db, task_id, "MCP", 6, call_id=probe_call,
+        tool_call_id="hf01-c02-live-probe-tool", tool_name="probe_endpoint",
+        argument_digest="hf01-c02-live-probe-args", run_id=run_id,
+    )
+    finish_attempt(demo_db, probe_attempt, "OK")
+    record_tool_observation(
+        demo_db, task_id=task_id, call_id=probe_call, attempt_id=probe_attempt,
+        tool_call_id="hf01-c02-live-probe-tool", tool_name="probe_endpoint",
+        arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+        status="OK", result=probe,
+    )
+    finish_task_run(
+        demo_db, identity, run_id, "INTERRUPTED_RECOVERABLE",
+        blocked_reason="HF01_C02_PRE_PROVIDER_BARRIER",
+    )
+
+    original_reserve = investigator.reserve_attempt
+    revocation = {"value": None}
+    captured: list[str] = []
+
+    def reserve_then_revoke(*args, **kwargs):
+        result = original_reserve(*args, **kwargs)
+        provenance = kwargs.get("context_provenance")
+        selected = provenance.get("selected_memories", []) if isinstance(provenance, dict) else []
+        if selected and revocation["value"] is None:
+            revocation["value"] = revoke_memory(
+                demo_db, str(memory["memory_id"]), "approver-a",
+                idempotency_key="hf01-c02-revoke-after-reserve",
+            )
+        return result
+
+    class CapturingChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def bind_tools(self, *args, **kwargs):
+            return self
+
+        async def ainvoke(self, messages):
+            captured.append("\n".join(str(item.content) for item in messages))
+            return AIMessage(content="No additional read is needed.")
+
+    monkeypatch.setattr(investigator, "reserve_attempt", reserve_then_revoke)
+    monkeypatch.setattr(investigator, "ChatOpenAI", CapturingChat)
+    monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "deterministic-hf01-test-key")
+    monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deterministic-hf01-test-model")
+
+    asyncio.run(investigator.run_investigation(
+        task_id, "support-a", db_path=demo_db,
+        checkpoint_db_path=tmp_path / "hf01-c02-checkpoint.sqlite3",
+        resume=True, run_id=run_id,
+    ))
+
+    assert revocation["value"] is not None and revocation["value"]["state"] == "REVOKED"
+    assert captured, "the investigation should rebuild a safe context and reach the Provider"
+    assert all(str(memory["memory_id"]) not in prompt for prompt in captured)
 
 
 def test_skill_is_loaded_lazily_and_digest_tampering_fails(monkeypatch, tmp_path: Path) -> None:
