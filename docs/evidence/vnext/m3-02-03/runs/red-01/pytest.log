@@ -1,0 +1,83 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 3 items
+
+tests/test_m302_m303_red.py::test_ctx08_chat_manifest_has_token_budget_and_strategy FAILED [ 33%]
+tests/test_m302_m303_red.py::test_ctx05_summary_dependency_dag_tables_exist_after_v9_migration FAILED [ 66%]
+tests/test_m302_m303_red.py::test_mem04_semantic_memory_has_versioned_audit_storage FAILED [100%]
+
+================================== FAILURES ===================================
+___________ test_ctx08_chat_manifest_has_token_budget_and_strategy ____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-m302m303-red-01/test_ctx08_chat_manifest_has_t0/domain.sqlite3')
+
+    def test_ctx08_chat_manifest_has_token_budget_and_strategy(demo_db: Path) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        admitted = admit_task_message(
+            demo_db, identity, session_id=session_id, task_id=None,
+            input_kind="CHAT_READONLY", body="Orders are failing; do not assume recovery.",
+            idempotency_key="m302-red-context-budget",
+        )
+        run_id = str(admitted["run_id"])
+        register_worker_owner(demo_db, "m302-red-worker", 64001)
+        claim_task_run(demo_db, identity, run_id)
+        prepare_chat_attempt(demo_db, run_id, "m302-red-worker", "test-model")
+    
+        manifest = get_chat_manifest(demo_db, identity, run_id)["attempts"][0]["manifest"]
+    
+>       assert manifest["context_budget"]["strategy"] == "HYBRID"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'context_budget'
+
+tests\test_m302_m303_red.py:31: KeyError
+______ test_ctx05_summary_dependency_dag_tables_exist_after_v9_migration ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-m302m303-red-01/test_ctx05_summary_dependency_0/domain.sqlite3')
+
+    def test_ctx05_summary_dependency_dag_tables_exist_after_v9_migration(demo_db: Path) -> None:
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            summary_tables = {
+                str(row["name"])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+    
+>       assert schema_version >= 10
+E       assert 9 >= 10
+
+tests\test_m302_m303_red.py:47: AssertionError
+___________ test_mem04_semantic_memory_has_versioned_audit_storage ____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.runtime/pytest-m302m303-red-01/test_mem04_semantic_memory_has0/domain.sqlite3')
+
+    def test_mem04_semantic_memory_has_versioned_audit_storage(demo_db: Path) -> None:
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            tables = {
+                str(row["name"])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            version_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(semantic_memories)").fetchall()
+            } if "semantic_memories" in tables else set()
+    
+>       assert "semantic_memories" in tables
+E       AssertionError: assert 'semantic_memories' in {'executor_services', 'd3_action_permissions', 'd3_action_intents', 'auth_policies', 'tickets', 'task_run_inputs', 'task_execution_budgets', 'd2_tool_faults', 'messages', 'session_events', 's2_diagnosis_receipts', 'd3_plans', 'd3_plan_authorizations', 'd3_delivery_records', 'chat_attempts', 'task_bindings', 'chat_answer_chunks', 'auth_events', 'd2_attempts', 'd5_memories', 'task_controls', 'chat_context_manifests', 'chat_run_answers', 'd3_plan_control_bindings', 'trusted_operators', 'd2_evidence', 's2_handoff_queue_entries', 's2_handoff_receipts', 'principal_scope_grants', 's2_gate_traces', 'session_task_links', 'd2_reports', 'task_runs', 'd3_plan_authorization_history', 'credentials', 'd2_pending_tool_calls', 'domain_outbox', 'd3_action_ledgers', 'sessions', 'd3_report_artifacts', 'd3_approvals', 'd3_local_reports', 'd5_context_provenance', 'commands', 'web_worker_state', 'd2_model_traces', 'd3_ticket_resolution_entries', 'approval_resume_links', 'orders', 's2_handoff_drafts', 'tenants', 'chat_message_sources', 'route_scope_policies', 'worker_retry_state', 'integrations', 'd3_verification_receipts', 'services', 'd5_memory_events', 'web_auth_sessions', 'authz_events', 'thread_owners', 'sqlite_sequence', 'principals', 'd2_tool_observations'}
+
+tests\test_m302_m303_red.py:66: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_m303_red.py::test_ctx08_chat_manifest_has_token_budget_and_strategy - KeyError: 'context_budget'
+FAILED tests/test_m302_m303_red.py::test_ctx05_summary_dependency_dag_tables_exist_after_v9_migration - assert 9 >= 10
+FAILED tests/test_m302_m303_red.py::test_mem04_semantic_memory_has_versioned_audit_storage - AssertionError: assert 'semantic_memories' in {'executor_services', 'd3_action_permissions', 'd3_action_intents', 'auth_policies', 'tickets', 'task_run_inputs', 'task_execution_budgets', 'd2_tool_faults', 'messages', 'session_events', 's2_diagnosis_receipts', 'd3_plans', 'd3_plan_authorizations', 'd3_delivery_records', 'chat_attempts', 'task_bindings', 'chat_answer_chunks', 'auth_events', 'd2_attempts', 'd5_memories', 'task_controls', 'chat_context_manifests', 'chat_run_answers', 'd3_plan_control_bindings', 'trusted_operators', 'd2_evidence', 's2_handoff_queue_entries', 's2_handoff_receipts', 'principal_scope_grants', 's2_gate_traces', 'session_task_links', 'd2_reports', 'task_runs', 'd3_plan_authorization_history', 'credentials', 'd2_pending_tool_calls', 'domain_outbox', 'd3_action_ledgers', 'sessions', 'd3_report_artifacts', 'd3_approvals', 'd3_local_reports', 'd5_context_provenance', 'commands', 'web_worker_state', 'd2_model_traces', 'd3_ticket_resolution_entries', 'approval_resume_links', 'orders', 's2_handoff_drafts', 'tenants', 'chat_message_sources', 'route_scope_policies', 'worker_retry_state', 'integrations', 'd3_verification_receipts', 'services', 'd5_memory_events', 'web_auth_sessions', 'authz_events', 'thread_owners', 'sqlite_sequence', 'principals', 'd2_tool_observations'}
+============================== 3 failed in 0.29s ==============================
