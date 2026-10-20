@@ -1,0 +1,53 @@
+{
+  "schema_version": "opspilot-m302-m303-acceptance-v1",
+  "baseline": "5ade2b5deedbb3704b09e9d6fbbfbffa3ab8deb8",
+  "domain_schema_baseline": 9,
+  "freeze_before_implementation": true,
+  "historical_m301_result_immutable": {
+    "pairs": 8,
+    "arms": 16,
+    "gold_matches": 12,
+    "utility": "UTILITY_NOT_PROVEN",
+    "known_badcases": ["P03", "P04"]
+  },
+  "hard_stop_policy": {
+    "any_security_boundary_failure": "BLOCKED",
+    "unrun_real_provider_mcp_browser_or_recovery": "UNVERIFIED",
+    "m302_core_gate_failure": "STOP_BEFORE_M303",
+    "implementation_agent_may_self_sign_pass": false
+  },
+  "cases": [
+    {"id":"CTX-01","required":"computed token budget overflow triggers a real compression or explicit safe failure; no manual compressed flag","class":"P0"},
+    {"id":"CTX-02","required":"20+ turns retain original goal, key constraints and latest formal correction in usable context","class":"P0"},
+    {"id":"CTX-03","required":"correction invalidates/rebuilds incompatible old summary and keeps temporal/version order","class":"P0"},
+    {"id":"CTX-04","required":"summary preserves negation, pronoun reference, rejected hypothesis with source, version change and unresolved work without promoting claims to facts","class":"P0"},
+    {"id":"CTX-05","required":"revoked/expired Memory is excluded through AssistantMessage to Summary dependency chain without keyword deletion","class":"P0"},
+    {"id":"CTX-06","required":"expired or incompatible Evidence, Knowledge, Skill and Task-state versions invalidate dependent summaries","class":"P0"},
+    {"id":"CTX-07","required":"new process and resumed Run/checkpoint cannot resurrect invalid summaries or reset budgets","class":"P0"},
+    {"id":"CTX-08","required":"Manifest selection/exclusion and local estimate match the actual Provider payload; Provider usage is recorded separately","class":"P0"},
+    {"id":"CTX-09","required":"Tenant, Project, Session and Task scope prevent message, summary and source enumeration","class":"P0"},
+    {"id":"CTX-10","required":"oversized trusted blocks, summary/provider failure and exhausted retry budget stop safely and are auditable","class":"P0"},
+    {"id":"MEM-01","required":"Episodic candidate requires valid Domain source and independent authorized confirmation before Active","class":"P0"},
+    {"id":"MEM-02","required":"retrieval records applicability reason, selected/rejected candidates, conflict and token-budget decisions; at most 3 candidates","class":"P1"},
+    {"id":"MEM-03","required":"current trusted Evidence overrides contradictory Episodic/Semantic guidance","class":"P0"},
+    {"id":"MEM-04","required":"Semantic lifecycle supports candidate, authorized confirm, versioned revision, revoke and expiry with audit history","class":"P0"},
+    {"id":"MEM-05","required":"revocation/expiry propagates to direct and transitive summaries, old Assistant answers and resumed calls","class":"P0"},
+    {"id":"MEM-06","required":"cross tenant/project, wrong actor, stale asset/source and concurrent lifecycle changes cannot load or activate memory","class":"P0"},
+    {"id":"E2E-01","required":"real browser completes 20+ turn Web conversation; token budget causes compression; correction, refresh, restart/resume and Inspector agree","class":"P0"},
+    {"id":"E2E-02","required":"fresh existing S1 401-to-200 and S2 403/Authz flows, real Provider/MCP smoke and full regression preserve zero unauthorized writes","class":"P0"},
+    {"id":"E2E-03","required":"real Web Task A case to approver confirmation to distinct Task B Provider/MCP use to revocation to new request and recovery with no stale use","class":"P0"}
+  ],
+  "strategy_comparison": {
+    "frozen_strategies": ["RECENT_WINDOW", "ROLLING_SUMMARY", "HYBRID"],
+    "primary": "HYBRID",
+    "same_source_material": true,
+    "required_metrics": ["estimated_input_tokens", "provider_input_tokens", "provider_output_tokens", "latency_ms", "selected_sources", "excluded_sources", "outcome", "errors"],
+    "must_not_claim": ["statistical_significance_without_test", "memory_utility_without_supporting_results"]
+  },
+  "memory_synthetic_scenarios": [
+    {"id":"MS-01","required":"similar valid case can be retrieved as method hint"},
+    {"id":"MS-02","required":"surface similarity with changed critical condition is rejected or clearly limited"},
+    {"id":"MS-03","required":"current Evidence conflict wins over historical Memory"},
+    {"id":"MS-04","required":"revoked/expired source is absent after restart and summary rebuild"}
+  ]
+}
