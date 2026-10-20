@@ -25,3 +25,10 @@ Failures are append-only and retained as originally observed. Historical M3-01 e
 - Exit: 1; 29 passed and 1 failed.
 - Failure was in a new test assertion that assumed the full Investigator graph would issue exactly two model attempts. The actual run used the normal bounded investigation path: one reserved context invalidated before Provider I/O, followed by seven distinct post-revocation model requests while continuing the real evidence workflow (eight total model reservations, within the existing limit). The security assertions had already confirmed every captured Provider payload excluded the revoked Memory, the invalidated call had no model trace, and each request had a distinct call ID.
 - Follow-up: changed only the test accounting assertion to verify the frozen invariant (invalidated call is not a Provider trace; each actual Provider capture maps to a unique reserved attempt) without assuming a fixed graph call count. No budget, tool, or strategy behavior changed. Rerun is `runs/revoke-race-05/` and the full targeted rerun follows.
+
+## HF-C03 GREEN-01: overstrict call-count expectation
+
+- Run: `runs/c03-investigator-01/`
+- Exit: 1; the Investigator path accepted the first Provider call with the still-ACTIVE Memory, then the deterministic Provider revoked it and returned a no-tool response. The bounded investigation graph continued through its existing retry budget with fresh prompts that excluded the revoked Memory.
+- Failure: the new test incorrectly expected no follow-up Provider call after revocation. Captured follow-up payloads contained no revoked Memory; the production behavior respected revocation. This was a test expectation error, not a product safety failure.
+- Follow-up: revised only the assertion to allow bounded follow-up requests while requiring each actual payload after the revocation event to exclude the Memory. No runtime budget or policy changed.

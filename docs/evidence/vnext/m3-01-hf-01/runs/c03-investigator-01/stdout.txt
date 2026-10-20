@@ -1,0 +1,84 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\学习\agent新项目\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\学习\agent新项目
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_d5_context.py::test_hf01_c03_provider_started_before_revocation_is_recorded_in_order FAILED [100%]
+
+================================== FAILURES ===================================
+____ test_hf01_c03_provider_started_before_revocation_is_recorded_in_order ____
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/hf01-c03-investigator-01/test_hf01_c03_provider_started0/domain.sqlite3')
+live_api = 'http://127.0.0.1:54836'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021461031810>
+tmp_path = WindowsPath('D:/学习/agent新项目/.runtime/hf01-c03-investigator-01/test_hf01_c03_provider_started0')
+
+    def test_hf01_c03_provider_started_before_revocation_is_recorded_in_order(
+        demo_db: Path, live_api: str, monkeypatch, tmp_path: Path,
+    ) -> None:
+        import asyncio
+    
+        from langchain_core.messages import AIMessage
+    
+        import opspilot.investigator as investigator
+        from opspilot.domain.episodic_memory import list_context_provenance
+    
+        target = _seed_hf01_chat_target(demo_db, live_api, "hf01-c03")
+        task_id = str(target["task_id"])
+        run_id = str(target["business_run_id"])
+        memory_id = str(target["memory_id"])
+        finish_task_run(
+            demo_db, target["identity"], run_id, "INTERRUPTED_RECOVERABLE",
+            blocked_reason="HF01_C03_PROVIDER_START_BARRIER",
+        )
+        events: list[str] = []
+        provider_payloads: list[str] = []
+    
+        class CapturingProvider:
+            def __init__(self, *args, **kwargs):
+                pass
+    
+            def bind_tools(self, *args, **kwargs):
+                return self
+    
+            async def ainvoke(self, provider_messages):
+                provider_payloads.append("\n".join(str(item.content) for item in provider_messages))
+                events.append("provider_request_started")
+                if len(provider_payloads) == 1:
+                    assert memory_id in provider_payloads[0]
+                    revoked = revoke_memory(
+                        demo_db, memory_id, "approver-a",
+                        idempotency_key="hf01-c03-revoke-after-provider-start",
+                    )
+                    assert revoked["state"] == "REVOKED"
+                    events.append("memory_revocation_committed")
+                else:
+                    events.append("provider_request_started_after_revocation")
+                return AIMessage(
+                    content="The observed 401 is current; no repair has been performed.",
+                    response_metadata={"id": f"hf01-c03-provider-{len(provider_payloads)}"},
+                    usage_metadata={"input_tokens": 10, "output_tokens": 8, "total_tokens": 18},
+                )
+    
+        monkeypatch.setattr(investigator, "ChatOpenAI", CapturingProvider)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "deterministic-hf01-c03-key")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deterministic-hf01-c03-model")
+        asyncio.run(investigator.run_investigation(
+            task_id, "support-a", db_path=demo_db,
+            checkpoint_db_path=tmp_path / "hf01-c03-checkpoint.sqlite3",
+            resume=True, run_id=run_id,
+        ))
+    
+        assert events[:2] == ["provider_request_started", "memory_revocation_committed"]
+        assert memory_id in provider_payloads[0]
+        assert all(memory_id not in payload for payload in provider_payloads[1:])
+>       assert "provider_request_started_after_revocation" not in events
+E       AssertionError: assert 'provider_request_started_after_revocation' not in ['provider_request_started', 'memory_revocation_committed', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation']
+
+tests\test_d5_context.py:649: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_d5_context.py::test_hf01_c03_provider_started_before_revocation_is_recorded_in_order - AssertionError: assert 'provider_request_started_after_revocation' not in ['provider_request_started', 'memory_revocation_committed', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation', 'provider_request_started', 'provider_request_started_after_revocation']
+============================== 1 failed in 3.24s ==============================

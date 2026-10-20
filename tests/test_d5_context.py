@@ -587,55 +587,82 @@ def test_hf01_c02_chat_revocation_after_attempt_reservation_blocks_provider_outb
     }
 
 
-def test_hf01_c03_provider_started_before_revocation_is_recorded_in_order(demo_db: Path) -> None:
+def test_hf01_c03_provider_started_before_revocation_is_recorded_in_order(
+    demo_db: Path, live_api: str, monkeypatch, tmp_path: Path,
+) -> None:
     import asyncio
 
+    from langchain_core.messages import AIMessage
+
+    import opspilot.investigator as investigator
     from opspilot.domain.episodic_memory import list_context_provenance
 
-    source_task = _seed_verified_source(demo_db, "hf01-c03-source")
-    memory = create_memory_candidate(demo_db, source_task, "support-a")
-    active = confirm_memory(demo_db, str(memory["memory_id"]), "approver-a")
-    target = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a")
+    target = _seed_hf01_chat_target(demo_db, live_api, "hf01-c03")
     task_id = str(target["task_id"])
-    metadata: dict[str, object] = {}
-    messages = _prompt_messages(
-        demo_db, task_id, {"task_binding_id": task_id, "evidence_ids": []},
-        context_metadata=metadata,
-    )
-    prompt_digest = digest_json([{"role": item.type, "content": item.content} for item in messages])
-    call_id = "hf01-c03-provider-start-order"
-    reserve_attempt(
-        demo_db, task_id, "MODEL", 8, call_id=call_id,
-        argument_digest=prompt_digest,
-        context_provenance={
-            "model_id": "test-model", "prompt_version": PROMPT_VERSION,
-            "prompt_digest": prompt_digest, "tool_schema_version": "test-schema-v1",
-            "tool_schema_digest": digest_json([]), **metadata,
-        },
+    run_id = str(target["business_run_id"])
+    memory_id = str(target["memory_id"])
+    finish_task_run(
+        demo_db, target["identity"], run_id, "INTERRUPTED_RECOVERABLE",
+        blocked_reason="HF01_C03_PROVIDER_START_BARRIER",
     )
     events: list[str] = []
     provider_payloads: list[str] = []
 
     class CapturingProvider:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def bind_tools(self, *args, **kwargs):
+            return self
+
         async def ainvoke(self, provider_messages):
             provider_payloads.append("\n".join(str(item.content) for item in provider_messages))
-            events.append("provider_request_started")
-            revoked = revoke_memory(
-                demo_db, str(memory["memory_id"]), "approver-a",
-                idempotency_key="hf01-c03-revoke-after-provider-start",
+            if len(provider_payloads) == 1:
+                events.append("provider_request_started_with_active_memory")
+                assert memory_id in provider_payloads[0]
+                revoked = revoke_memory(
+                    demo_db, memory_id, "approver-a",
+                    idempotency_key="hf01-c03-revoke-after-provider-start",
+                )
+                assert revoked["state"] == "REVOKED"
+                events.append("memory_revocation_committed")
+            else:
+                events.append("provider_request_started_after_revocation_without_memory")
+                assert memory_id not in provider_payloads[-1]
+            return AIMessage(
+                content="The observed 401 is current; no repair has been performed.",
+                response_metadata={"id": f"hf01-c03-provider-{len(provider_payloads)}"},
+                usage_metadata={"input_tokens": 10, "output_tokens": 8, "total_tokens": 18},
             )
-            assert revoked["state"] == "REVOKED"
-            events.append("memory_revocation_committed")
 
-    asyncio.run(CapturingProvider().ainvoke(messages))
-    assert events == ["provider_request_started", "memory_revocation_committed"]
-    assert str(memory["memory_id"]) in provider_payloads[0]
+    monkeypatch.setattr(investigator, "ChatOpenAI", CapturingProvider)
+    monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "deterministic-hf01-c03-key")
+    monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deterministic-hf01-c03-model")
+    asyncio.run(investigator.run_investigation(
+        task_id, "support-a", db_path=demo_db,
+        checkpoint_db_path=tmp_path / "hf01-c03-checkpoint.sqlite3",
+        resume=True, run_id=run_id,
+    ))
+
+    assert events[:2] == ["provider_request_started_with_active_memory", "memory_revocation_committed"]
+    assert memory_id in provider_payloads[0]
+    assert all(memory_id not in payload for payload in provider_payloads[1:])
+    assert events[2:] and all(
+        event == "provider_request_started_after_revocation_without_memory" for event in events[2:]
+    )
     provenance = list_context_provenance(demo_db, task_id, "support-a")
     selected = [
         item for row in provenance for item in row["selected_memories"]
-        if item["memory_id"] == memory["memory_id"]
+        if item["memory_id"] == memory_id
     ]
-    assert len(selected) == 1 and selected[0]["version"] == active["version"]
+    assert len(selected) == 1 and selected[0]["version"] == target["memory"]["version"]
+    with connect(demo_db) as connection:
+        model_calls = {
+            str(row[0]) for row in connection.execute(
+                "SELECT call_id FROM d2_model_traces WHERE task_id = ?", (task_id,),
+            ).fetchall()
+        }
+    assert model_calls == {str(row["call_id"]) for row in provenance if row["model_status"] == "OK"}
 
 
 @pytest.mark.parametrize("invalidation", ["expired", "version_changed", "source_invalid"])
