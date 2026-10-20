@@ -17,5 +17,8 @@
 | `runs/m303-final/pytest-full-episodic.log` | 222 passed / 1 failed；`test_m301_red_s2_investigator_context_can_select_active_case_memory` 仍替换 `investigator.list_applicable_memories`，而实现已改用 `select_applicable_memories` | 保留原始失败日志；将测试替身切换到新选择 API，并兼容缺省 applicability metadata。 |
 | `runs/m303-final/pytest-m301-red-compat.log` 初次尝试 | 测试替身更新后，合成旧记忆记录没有 `applicability_reason`，导致 Provenance 构造 `KeyError` | 初次完整日志未保留独立副本；从工具输出重建错误原因，修复为 `.get()` 后以同名最终日志复跑成功。重建说明不冒充原始日志。 |
 | `runs/m303-final/pytest-full-final.log` | 223 passed, 0 failed | 全量复跑最终通过，退出码见 `pytest-full-final.exit-code.txt`。 |
+| 原始本地 Web Task B：`task-8f2720b8-72b4-4e67-9fad-bae863de3c1d` / `run-8e65e032-5e99-4c24-96ea-867df3912a18` | 3 次 Worker 重试后 `WORKER_RETRY_EXHAUSTED`；0 Provider / 0 MCP attempt | 原 Domain 数据仍保留；generic Worker error 没有提供根因。结构化失败记录见 `runs/m303-final/FAILURE-original-web-task-b.json`，原因未推断。 |
+| 第二次原数据库 Web Task B：`task-dfe71a7a-caea-4c8c-a0b4-d2dcd3d8d124` / `run-9e9834db-ca90-431c-8e6a-c5ca0948eb56` | 同样 3 次 Worker 重试后 `WORKER_RETRY_EXHAUSTED`；0 Provider / 0 MCP attempt | 作为失败保留在同一结构化记录中；没有将其改写为成功。 |
+| `runs/m303-final/debug-run-clone.log` | 隔离克隆上的直接 Worker 调试调用返回 `WAITING_APPROVAL`，5 Provider / 4 MCP | 仅用于排查当前代码路径，不算 Web 验收；后续真实浏览器 Task B 使用独立 Run 并单独记录在 `TRACE-task-b.json`。 |
 
-本轮仍有产品层失败：26 轮真实 Web 会话中 5 个 Run 失败；真实 DeepSeek 对照中的 Rolling Summary / Hybrid 均未完成最终回答。真实跨进程浏览器恢复、Task B 跨任务使用和撤销后重放尚未形成新证据，因此保持 `PARTIAL`。
+本轮仍有产品层失败：26 轮真实 Web 会话中 5 个 Run 失败；真实 DeepSeek 对照中的 Rolling Summary / Hybrid 均未完成最终回答。Task B 跨任务使用现已有真实浏览器、Provider、MCP 和 Provenance 证据；Web 撤销后的新模型请求及跨进程恢复仍未执行，因此整体继续保持 `PARTIAL`。

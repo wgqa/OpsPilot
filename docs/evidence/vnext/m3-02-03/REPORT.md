@@ -1,6 +1,6 @@
 # M3-02 + M3-03 实施与证据报告
 
-**状态：PARTIAL，等待真实 Task B 浏览器链路及主 Agent 独立验收。** 本报告不自签 PASS。M3-02 的 Context Engineering 与 M3-03 的最小 Semantic Memory 已进入代码和自动化回归；M3-03 的候选创建、独立 APPROVER 确认已在真实 Web 完成。仍缺 Task B 的真实 Provider/MCP 使用、撤销后的新请求与恢复验证。
+**状态：PARTIAL，等待撤销后的新请求与恢复验证及主 Agent 独立验收。** 本报告不自签 PASS。M3-02 的 Context Engineering 与 M3-03 的最小 Semantic Memory 已进入代码和自动化回归；候选创建、独立 APPROVER 确认、Task B 的真实浏览器 Provider/MCP 使用均已完成。撤销后的后续模型调用和跨进程恢复尚未完成。
 
 ## Git 与冻结顺序
 
@@ -31,7 +31,9 @@ M3-03 在真实 v9 Schema 上向前迁移至 v11，增加项目 Semantic Memory�
 
 本轮额外完成 Episodic 检索理由与排除 Trace：选择按同租户/项目、Task 不同、问题类型、服务、状态、有效期、内容摘要和来源回执检查；默认仍选 1 条以保持既有风险上限，调用方最多可显式选 3 条，扫描上限为 100 条。Inspector 现在展示选用理由和同项目内未选记录的原因。当前 MCP Evidence 与确定性 Gate 仍优先，Episodic/Semantic 只提供历史方法提示。
 
-**未完成门禁：** 还未用 SUPPORT 身份完成不同 Task B 的真实 Web 对话，因此尚未证明这条已激活记忆出现在 Task B 的真实 Provider payload / Provenance；也未在真实 Web 执行撤销、之后的新请求和恢复。相关 Domain/Provider 边界由测试覆盖，但不能替代 E2E-03。用户切换至本地 `support-a` 登录后才可继续该链路。真实截图未写入证据目录；保留了浏览器可访问性状态、DB 审计和脱敏 Provider/MCP Trace，截图条件仍未满足。
+本轮在本地隔离 Domain 克隆上通过真实浏览器创建 Task B `task-7379b52e-d364-4836-84e5-579e5d3aad31`，Run `run-733ea4a7-56c8-4679-a899-02dbb914427a` 到达 `WAITING_APPROVAL`。真实 DeepSeek `deepseek-flash` 共 5 次调用、18,731 Provider Token；TaskBinding 范围内真实 MCP stdio 共 4 次成功查询，分别读取 Endpoint Probe、Principal、Auth Policy 与 Integration Config。5 份 Context Provenance 均记录了来源 Task A 的 `semantic-8669bb64-f2b1-41a9-ae9c-10c3ef5a7626 v1`。Task B 用户声称 403，但实际 Probe 为 401，Gate 仍为 `AUTHENTICATION_FAILURE_REMAINS_S1`；调查维持 S1，Plan 等待独立审批，没有 REPAIR、DELIVER 或 Scope 写入。脱敏轨迹见 `runs/m303-final/TRACE-task-b.json`。浏览器截图已在本轮交互中捕获并显示，但尚未写入证据目录。
+
+**未完成门禁：** Task B 的真实 Provider/MCP 与跨 Task Provenance 已核实；仍未在 Web 撤销该经验，也未验证撤销后新模型调用及 Worker 跨进程恢复不会再次加载它。原始主数据库中的第一次 Web Task B (`task-8f2720b8-72b4-4e67-9fad-bae863de3c1d`) 因 `WORKER_RETRY_EXHAUSTED` 阻断且 0 Provider/MCP 调用，失败记录保留，根因没有被证实。成功的 Task B 使用主数据库的隔离克隆及当前源码服务，不能替代撤销与恢复门禁。浏览器截图在交互中已捕获，但没有保存成仓库文件；保留了浏览器可访问性状态、Domain 审计和脱敏 Provider/MCP Trace。
 
 ## 最新验证与运行环境
 
