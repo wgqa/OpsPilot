@@ -1,0 +1,53 @@
+- main:
+  - strong: OpsPilot
+  - generic: SUPPORT WORKSPACE
+  - generic: 本地工作区
+  - generic: APPROVER
+  - generic: approver-a
+  - button "退出"
+  - text: INDEPENDENT APPROVER · tenant-a
+  - heading "独立审核工作区" [level=1]
+  - paragraph: Plan 与历史案例经验分开审核。案例经验只提供方法提示，不证明当前事实、授权或恢复。
+  - button "刷新待办"
+  - region "待审批计划":
+    - heading "待处理" [level=2]
+    - generic: "1"
+    - button "WAITING_APPROVAL Task task-c84ae518-8a09 Plan fc65f82607894aac40 orders-demo · integration-a · INC-A-001":
+      - generic: WAITING_APPROVAL
+      - strong: Task task-c84ae518-8a09
+      - code: Plan fc65f82607894aac40
+      - generic: orders-demo · integration-a · INC-A-001
+  - region "Plan 审核详情":
+    - generic: ◈
+    - heading "选择一个待审核 Plan" [level=2]
+    - paragraph: 审核视图只包含最小任务范围、当前 Domain 版本和 Plan 所引用的 MCP Evidence，不提供聊天记录或凭证秘密。
+    - status: 撤销已持久记录，后续模型调用将排除该经验。
+  - region "Episodic Memory 审核":
+    - generic: EPISODIC MEMORY · SAME-TENANT REVIEW
+    - heading "案例经验审核与撤销" [level=2]
+    - button "刷新"
+    - paragraph: 仅审核来自真实 Domain 收据的历史案例。Memory 不能替代当前 MCP Evidence、确定性 Gate、权限决策或业务审批。
+    - generic: 当前租户没有待审核的案例候选。
+    - generic: 状态 / 版本
+    - generic: REVOKED · v3
+    - generic: 案例摘要
+    - generic: 历史恢复案例：绑定业务路由 /api/orders/demo-order 曾返回 HTTP 401；经受控配置更新 v7→v8 后，同身份业务验证返回 HTTP 200。
+    - generic: 来源 Task / Outcome
+    - generic: task-f0b9d95b-d158-4b07-8888-91d4d8030004 · REPAIRED_VERIFIED
+    - strong: 历史案例事实
+    - code: "{\"business_order_id\":\"demo-order\",\"business_order_status\":\"CONFIRMED\",\"config_version_after\":8,\"config_version_before\":7,\"http_status_before\":401,\"route\":\"/api/orders/demo-order\",\"verified_http_status\":200}"
+    - strong: 调查方法提示
+    - code: "[\"For a new task, read current bound integration configuration, principal status, and authentication policy.\",\"Use the current task's bound business probe to distinguish authentication failure from other outcomes.\",\"Only current task Evidence and the deterministic Gate can establish a cause or action eligibility.\"]"
+    - strong: 来源引用
+    - code: "[{\"digest_or_version\":\"fdce5717d0064485928449ef17a20333556c8ee12883126f1e1a6b5eb40fd8c0\",\"id\":\"evidence-8c422209-4fb5-4de2-8808-800f6d5254c3\",\"kind\":\"EVIDENCE\"},{\"digest_or_version\":\"8f5d059010f85a337f38ce05d7da9ddeaffc1dd9026482551f12654e5b423f68\",\"id\":\"evidence-8d5de491-87d5-4d99-830a-fee469621897\",\"kind\":\"EVIDENCE\"},{\"digest_or_version\":\"07f8c371d0cf66b53637a3a117f9fcd66cc9a2efd01c5c704a7b244a0e6161dd\",\"id\":\"evidence-e4b3578d-911b-45a3-a5ca-327756130c98\",\"kind\":\"EVIDENCE\"},{\"digest_or_version\":\"7eafc468d4d00798312ff5f4aca575718aaa0d426c51354aed4c1db3f698fc41\",\"id\":\"evidence-f8b87b10-6b7d-4fee-a2db-17c2275af6f8\",\"kind\":\"EVIDENCE\"},{\"digest_or_version\":\"ae1fd635ceef2dcfe4142a905c6369de6f49b23a3e9fb340b2a8c46f1d56773b\",\"id\":\"report-351640dd-9ffb-4e9d-a0bb-6864ed29d6d6\",\"kind\":\"FROZEN_REPORT\"},{\"digest_or_version\":\"f7a18a9281808f5220d42bbba42e9179fed413af6bb9c3aa2a246d75d08e863d\",\"id\":\"ledger-9fb50208-680a-44a8-a435-18ef55d88a3c\",\"kind\":\"REPAIR_LEDGER\"},{\"digest_or_version\":\"b4d59c9ea88374ab0e1fca645569b588529dc93d9ef173fd033c1b0a58899edf\",\"id\":\"verification-109bf1e0-01e9-41ca-a569-00bfb22c9df5\",\"kind\":\"VERIFICATION_RECEIPT\"}]"
+    - strong: 适用限制
+    - code: "[\"Historical facts do not describe the target task's current state.\",\"This memory does not authorize a repair or prove that the target task is recovered.\"]"
+    - generic: Content SHA-256 80f18b74aae542698b7e36108350ca8ba7cfce204bc69b55b10e1838f5da6795
+  - region "Semantic Memory 审核":
+    - generic: SEMANTIC MEMORY · PROJECT SCOPE
+    - heading "项目约定审核与版本管理" [level=2]
+    - button "刷新"
+    - paragraph: 候选来自同一 Task 中已持久化的用户消息，只有项目授权的 APPROVER 可以确认。生效内容是非权威上下文，当前 Domain 与正式 Knowledge 始终优先。
+    - generic: 当前项目没有待审核或生效中的 Semantic Memory。
+    - heading "选择一条项目约定" [level=3]
+    - paragraph: 版本修订必须从支持端提交显式 supersedes 与预期版本；冲突不会静默覆盖。

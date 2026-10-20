@@ -1,0 +1,80 @@
+- main:
+  - strong: OpsPilot
+  - generic: SUPPORT WORKSPACE
+  - generic: 本地工作区
+  - generic: APPROVER
+  - generic: approver-a
+  - button "退出"
+  - text: INDEPENDENT APPROVER · tenant-a
+  - heading "独立审核工作区" [level=1]
+  - paragraph: Plan 与历史案例经验分开审核。案例经验只提供方法提示，不证明当前事实、授权或恢复。
+  - button "刷新待办"
+  - region "待审批计划":
+    - heading "待处理" [level=2]
+    - generic: "0"
+    - generic: 目前没有可审核的 S1 Plan。
+  - region "Plan 审核详情":
+    - generic: FROZEN PLAN REVIEW
+    - heading "核对动作范围" [level=2]
+    - generic: 待确认
+    - generic: Task
+    - code: task-f0b9d95b-d158-4b07-8888-91d4d8030004
+    - generic: Plan hash
+    - code: 2f3abcc08c9ec1672148db543c7818ee16ac9c9cfb7acdf144d9c5567eeb7ba6
+    - generic: 目标资源
+    - generic: integration-a
+    - generic: 服务 / 集成
+    - generic: orders-demo / integration-a
+    - generic: 主体
+    - generic: principal-a
+    - generic: 工单
+    - generic: INC-A-001
+    - generic: 凭证引用变更
+    - generic: cred-v1 → cred-v2
+    - generic: 配置版本
+    - generic: 7 → 7
+    - generic: 主体 / 策略版本
+    - generic: 2 / 3
+    - generic: 任务控制版本
+    - generic: "0"
+    - generic: 当前授权状态
+    - generic: 版本匹配，可审批
+    - heading "Plan Evidence 引用" [level=3]
+    - generic: "4"
+    - strong: endpoint_probe
+    - code: evidence-f8b87b10-6b7d-4fee-a2db-17c2275af6f8
+    - generic: "observed_versions {\"after\":{\"config_version\":7,\"policy_version\":3,\"principal_version\":2},\"before\":{\"config_version\":7,\"policy_version\":3,\"principal_version\":2}}"
+    - generic: "{\"credential_ref\":\"cred-v1\",\"http_status\":401,\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\",\"route\":\"/api/orders/demo-order\",\"service_id\":\"orders-demo\"}"
+    - strong: integration_config
+    - code: evidence-8d5de491-87d5-4d99-830a-fee469621897
+    - generic: "observed_versions {\"config_version\":7}"
+    - generic: "{\"config_version\":7,\"credential_ref\":\"cred-v1\",\"integration_id\":\"integration-a\",\"principal_id\":\"principal-a\"}"
+    - strong: principal_status
+    - code: evidence-8c422209-4fb5-4de2-8808-800f6d5254c3
+    - generic: "observed_versions {\"principal_version\":2}"
+    - generic: "{\"principal_id\":\"principal-a\",\"principal_version\":2,\"status\":\"ENABLED\"}"
+    - strong: auth_policy
+    - code: evidence-e4b3578d-911b-45a3-a5ca-327756130c98
+    - generic: "observed_versions {\"policy_version\":3}"
+    - generic: "{\"accepted_credential_ref\":\"cred-v2\",\"policy_version\":3,\"service_id\":\"orders-demo\"}"
+    - generic: 批准范围：一次配置 REPAIR 与独立 DELIVER。审批不会直接执行动作；恢复由可信 Worker 使用原调查 Graph 和服务端 executor 完成。
+    - strong: 批准已持久受理
+    - generic: Approval approval-9f8baf40-0e44-40ec-ba32-05707d07e254
+    - generic: 恢复 Run run-c40635c1-fd46-42e8-ba02-06a69bf93caa · 已排队
+    - status: 批准回执、恢复 Run 与事件已持久受理；受信 Worker 正在恢复原调查图。
+  - region "Episodic Memory 审核":
+    - generic: EPISODIC MEMORY · SAME-TENANT REVIEW
+    - heading "案例经验审核与撤销" [level=2]
+    - button "刷新"
+    - paragraph: 仅审核来自真实 Domain 收据的历史案例。Memory 不能替代当前 MCP Evidence、确定性 Gate、权限决策或业务审批。
+    - generic: 当前租户没有待审核的案例候选。
+    - heading "选择一条案例" [level=3]
+    - paragraph: 只展示 Domain 事实投影，不加载源任务的完整对话。
+  - region "Semantic Memory 审核":
+    - generic: SEMANTIC MEMORY · PROJECT SCOPE
+    - heading "项目约定审核与版本管理" [level=2]
+    - button "刷新"
+    - paragraph: 候选来自同一 Task 中已持久化的用户消息，只有项目授权的 APPROVER 可以确认。生效内容是非权威上下文，当前 Domain 与正式 Knowledge 始终优先。
+    - generic: 当前项目没有待审核或生效中的 Semantic Memory。
+    - heading "选择一条项目约定" [level=3]
+    - paragraph: 版本修订必须从支持端提交显式 supersedes 与预期版本；冲突不会静默覆盖。
