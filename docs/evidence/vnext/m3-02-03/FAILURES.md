@@ -23,4 +23,20 @@
 | 临时隔离 API 的 APPROVER 登录 | `POST /api/auth/login` 返回 401；本地克隆进程未配置 `OPSPILOT_WEB_APPROVER_PASSWORD` | 从本轮进程输出观察到 3 次 401；没有读取或保存口令。切回原 API 服务后，`approver-a` 登录和 Web 撤销成功。此项为测试环境配置失败，不是产品回归。 |
 | 撤销后 support-a 登录 | 页面仍停在登录表单，显示通用 401 文案“登录状态已过期，请重新登录” | 前端将过期会话与凭证拒绝映射到同一文案；未能判断确切原因。未重复提交、读取口令或更改认证配置，后续模型调用与恢复测试待有效 support-a 会话。 |
 
-本轮仍有产品层失败：26 轮真实 Web 会话中 5 个 Run 失败；真实 DeepSeek 对照中的 Rolling Summary / Hybrid 均未完成最终回答。Task B 跨任务使用和 Web 撤销均已核实；撤销后的新模型请求及跨进程恢复仍未执行，因此整体继续保持 `PARTIAL`。
+## 本次补充尝试（原始失败仍保留）
+
+| 运行 | 结果与处理 |
+|---|---|
+| `continuation-01/summary-priority-red.log` | 最初测试数据没有触发压缩，断言 compression 非空失败；这是测试设置失败，未当成目标缺陷复现。 |
+| `continuation-01/summary-priority-red-02.log` | 已有有效摘要被较长近期回答挤出，`summary_refs=[]`；最小调整可选块优先级。 |
+| `continuation-01/input-anchor-red.log` | 21 轮后原始任务输入丢失，正式纠错不在 Chat 查询范围；增加同范围原文锚点与来源校验。 |
+| `continuation-01/input-anchor-green.log` | 11/11 专项通过；最终完整回归 `pytest-full-final.log` 为225/225。 |
+| `continuation-01/process-events.jsonl` | 最初 stdin 控制器因空行 JSON 失败退出（没有独立原始 stdout 文件，此项为工具输出重建说明）；改为本地命令文件。一个崩溃监控误用不带 `::run_id` 的 thread key，未杀死进程，超时留存；该成功调查不算恢复测试。 |
+| `continuation-01/crash-trigger.json` | 纠正监控关联后，真实 kill/restart，保留同 Run、实际 Checkpoint、预留数；中断 Provider 的实际 usage 未知，不能计零。 |
+| `long-recovery-01/TRACE.json` Run `run-c616d2f0-83d5-4be6-9916-9bbd369187a5` | 真实崩溃发生在第一摘要提交后；下一预留尝试被标 INTERRUPTED。恢复后第三次摘要成功，但总预算3用尽，Run FAILED/CHAT_ATTEMPTS_EXHAUSTED。没有最终回答，不算恢复完成业务回答。 |
+| `long-recovery-01/TRACE.json` Run `run-b7ad6557-588e-4c4f-9eef-fc388b02c6ed` | 新 Run 在原 Session 继续，真实一次摘要+一次回答成功；与上一个失败分别计数。未提升1400输入预算。 |
+| `continuation-01/LONG_CHAT_CASES.json` | 另一个20轮补充计划只实际提交第1轮；浏览器工具等待输入框超时，但对应真实模型 Run 最终成功（2901 Token）。没有重发，没有把未执行19轮计入验收；长对话证明使用原26轮的真实延续。 |
+| `continuation-01/login-401-red.dom.txt` / `login-401-green.dom.txt` | 测试副本故意错误口令验证401文案；正确测试口令可登录。不改用户口令，原服务继续运行。 |
+| `export_continuation_trace.py` 首次导出 | 临时导出排序误用不存在的 event_sequence，报SQLite错误（仅工具输出，无独立原始文件）；改按created_at/event_id，不影响业务数据。 |
+
+当前累计真实长会话28个Chat Run：22成功、6失败；原对照的Rolling/Hybrid失败、原库Task B失败以及本次故障注入失败均不抹除。Semantic Web撤销、新请求和恢复已补证；严格的新鲜Episodic业务案例Web整链尚未在本阶段重录，整体仍为PARTIAL，交主Agent审查。

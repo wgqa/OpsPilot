@@ -14,7 +14,7 @@
 
 ## Web 与审计链
 
-`opspilot/web/schemas.py`、`opspilot/web/app.py` 暴露项目候选、审批、修订和撤销接口；`frontend/src/App.vue` 展示审核队列、有效版本、来源和 Provenance。真实 Task A 在 Web 建立，真实 DeepSeek/MCP 调查后创建项目约定，`approver-a` 确认为 ACTIVE v1。当前浏览器仍需 `support-a` 完成 Task B 的真实对话和撤销后再调用，因此 E2E-03 保持未完成。
+`opspilot/web/schemas.py`、`opspilot/web/app.py` 暴露项目候选、审批、修订和撤销接口；`frontend/src/App.vue` 展示审核队列、有效版本、来源和 Provenance。真实 Task A 在 Web 建立，真实 DeepSeek/MCP 调查后创建项目约定，`approver-a` 确认为 ACTIVE v1。真实Task B已选入Task A的Semantic约定，完成5个Provider响应和4次MCP。独立APPROVER Web撤销后，新Chat排除该记忆及依赖它的旧回答；新的调查Run经真实进程崩溃恢复后仍未加载撤销内容。见`runs/continuation-01/TRACE.json`与截图。该链路是Semantic，不可冒充从业务Receipt抽取的Episodic案例；本阶段没有重新录制一整条新鲜Episodic Web旅程。
 
 ## 安全和限制
 
@@ -27,3 +27,7 @@
 ## 验证
 
 新增定向命令：`.venv\\Scripts\\python.exe -m pytest -q tests/test_m301_memory.py tests/test_m303_semantic_memory.py`。构建命令：`npm run build`（目录 `frontend/`）。完整新鲜全量回归以 `docs/evidence/vnext/m3-02-03/runs/m303-final/pytest-full-final.log` 和同目录 exit-code 文件为准。
+
+## 成本和恢复的解释
+
+恢复调查有6次预留MODEL attempt，仅5个完成响应共17066 Token；中断请求费用未知。已预留的调用没有从预算中消失。Chat压缩崩溃另触发三次上限，未完成回答；新的Run才得到回答。这两类结果必须分开讲。最终完整225项回归通过；Memory效用仍为历史12/16、UTILITY_NOT_PROVEN。上述证据不代表主Agent已验收本阶段。

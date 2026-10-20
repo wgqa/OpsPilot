@@ -12,9 +12,15 @@
 - Token 估算是可复现的预算工具，不代表 Provider 账单成本；报告优先采用 Provider 返回的实际 token usage。
 - 摘要是可重建的派生材料。它必须记录来源引用，并在压缩或模型调用前重新验证，不能成为当前 Evidence。
 - `recent_window`、`rolling_summary` 和 `hybrid` 的比较必须保留失败样本。当前真实比较中 Recent Window 完成回答，另两种策略触发 `CHAT_ATTEMPTS_EXHAUSTED`，因此效用没有被证明。
-- 浏览器长对话有成功与失败 Run；完整 PID 到跨进程恢复 Run 的持久关联证据缺失，故 CTX-07 仍为 `UNVERIFIED`。
+- 浏览器长会话原26轮保留21成功/5失败；此次同一持久会话续至28轮，22成功/6失败。跨进程尝试保留同Run和调用数，预算耗尽安全停止；新Run真实一次摘要+一次回答成功。原始记录在`runs/long-recovery-01/`，不能将安全停止说成有回答。
 - Context Engineering 仅决定模型看见什么；TaskControl、Domain Gate、Approval 和动作事务决定 Agent 能做什么。
 
 ## 验证记录
 
 主回归命令：`.venv\\Scripts\\python.exe -m pytest -q`。M3-02 当轮全量记录为 `215 passed, 1 deselected`，排除的是当时尚未实现的 M3-03 语义记忆 RED 项。M3-03 合并后的新鲜全量结果以 `docs/evidence/vnext/m3-02-03/runs/m303-final/pytest-full-final.log` 为准。前端命令：`npm run build`（在 `frontend/` 目录）。
+
+## 真实失败后的两个最小修复
+
+`_prepare_context`曾把有效摘要置于近期长回答之后，导致预算1400时生成了摘要却没给模型。补充RED先复现，再调整可选块顺序。另一个缺口是正式`CORRECT_TASK_INPUT`不在旧Chat历史查询中；现在同Tenant/Session/Task的最初任务与最近正式纠错作为原文锚点，依然是未验证用户输入。摘要不可靠时保住目标原文，比让摘要成为权威更容易审计；代价是锚点过大时必须显式失败。
+
+最终专项11/11、全量225/225。真实第28轮Inspector选入Summary v24及两条原文锚点，估算1374/1400；模型准确复述最初目标、禁止事项和正式更正。原对照的失败没有改写，收益仍NOT_PROVEN。索引见`docs/evidence/vnext/m3-02-03/REPORT.md`。

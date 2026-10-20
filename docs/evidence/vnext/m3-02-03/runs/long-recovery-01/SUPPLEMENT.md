@@ -1,0 +1,3 @@
+# Long-session restart continuation
+
+Supplement to the unchanged CTX/E2E Gold. Source: consistent SQLite backup of the actual 26-turn Web session, not reconstructed messages. Preserve its five failed Runs. Use HYBRID and the same 1400 input-token stress budget as the earlier run. Current source fixes only optional summary priority. A new API process must continue that persistent session through real browser and Provider calls; selected summary and original goal, negation, latest formal correction must be inspectable. No business writes are authorized. A crash, if injected, must preserve attempt count and source validity. No budget increase or reset.

@@ -2,12 +2,12 @@
   "schema_version": "opspilot-m302-m303-results-v1",
   "release_ref": "m3-02-03-final-candidate",
   "initial_baseline": "5ade2b5deedbb3704b09e9d6fbbfbffa3ab8deb8",
-  "freeze_commit": "3cb826d",
+  "freeze_commit": "3cb826d0d41984c898aefa5081d347d94a7c9c21",
   "red_commit": "48be70422f03b567b09a6bd45efc42d7a98ad598",
   "m302_implementation_commit": "f9f9d8a7c724a477578ff9eed2a48f4972078ee0",
   "m303_implementation_commit": "a0ac67836c5dc641d316628689621c986e91b57a",
   "overall_status": "PARTIAL",
-  "completion_blocker": "WEB_APPROVER_REVOCATION_AND_POST_REVOKE_NEW_RUN_RECOVERY_NOT_COMPLETED",
+  "completion_blocker": "FRESH_EPISODIC_BUSINESS_CASE_WEB_CHAIN_NOT_RECORDED_THIS_STAGE",
   "historical_m301": {
     "pairs": 8,
     "arms": 16,
@@ -62,6 +62,49 @@
       "passed": true,
       "exit_code": 0,
       "log": "runs/m303-final/frontend-build-episodic.log"
+    },
+    {
+      "name": "continuation full baseline",
+      "passed": 223,
+      "failed": 0,
+      "exit_code": 0,
+      "duration_seconds": 173.61,
+      "log": "runs/continuation-01/pytest-full.log"
+    },
+    {
+      "name": "summary priority fix full regression",
+      "passed": 224,
+      "failed": 0,
+      "exit_code": 0,
+      "duration_seconds": 169.99,
+      "log": "runs/continuation-01/pytest-full-after-summary-fix.log"
+    },
+    {
+      "name": "final context focused",
+      "passed": 11,
+      "failed": 0,
+      "exit_code": 0,
+      "log": "runs/continuation-01/input-anchor-green.log"
+    },
+    {
+      "name": "final full regression",
+      "passed": 225,
+      "failed": 0,
+      "exit_code": 0,
+      "duration_seconds": 173.64,
+      "log": "runs/continuation-01/pytest-full-final.log"
+    },
+    {
+      "name": "continuation frontend build",
+      "passed": true,
+      "exit_code": 0,
+      "log": "runs/continuation-01/frontend-build.log"
+    },
+    {
+      "name": "continuation frontend lint",
+      "passed": true,
+      "exit_code": 0,
+      "log": "runs/continuation-01/frontend-lint.log"
     }
   ],
   "acceptance": [
@@ -72,18 +115,18 @@
     },
     {
       "id": "CTX-02",
-      "status": "PARTIAL",
-      "evidence": "26 Web turns; 21 succeeded and 5 failed"
+      "status": "REAL_LONG_SESSION_OBSERVED_WITH_FAILURE_HISTORY",
+      "evidence": "28 Chat Runs: 22 succeeded / 6 failed; original input and latest formal correction selected verbatim; real final answer retains both. runs/long-recovery-01/TRACE.json"
     },
     {
       "id": "CTX-03",
-      "status": "AUTOMATED_PASS",
-      "evidence": "summary invalidation tests in frozen run"
+      "status": "AUTOMATED_PASS_WITH_INPUT_ANCHOR_REGRESSION",
+      "evidence": "11 focused and 225 full tests; anchors retain untrusted latest correction independently of lossy summary"
     },
     {
       "id": "CTX-04",
-      "status": "AUTOMATED_PASS",
-      "evidence": "summary projection and preservation regression"
+      "status": "AUTOMATED_AND_REAL_TRACE_WITH_LIMITATIONS",
+      "evidence": "Final real answer preserves initial goal, negation, formal correction and missing evidence; summary alone remains lossy"
     },
     {
       "id": "CTX-05",
@@ -97,8 +140,8 @@
     },
     {
       "id": "CTX-07",
-      "status": "UNVERIFIED",
-      "evidence": "no durable real browser PID-to-resumed-Run trace"
+      "status": "REAL_BOUNDED_RECOVERY_OBSERVED",
+      "evidence": "Same Investigator Run and checkpoints recovered across killed process trees with revoked memory absent; Chat compression crash retained attempts and safely exhausted; new Chat Run selected persisted summary after restart"
     },
     {
       "id": "CTX-08",
@@ -117,8 +160,8 @@
     },
     {
       "id": "MEM-01",
-      "status": "PASS_FOR_SEMANTIC_CANDIDATE_APPROVAL",
-      "evidence": "Web candidate and approver-a confirmed event"
+      "status": "AUTOMATED_PASS_HISTORICAL_WEB_CASE_ONLY",
+      "evidence": "Fresh regression checks Episodic trusted receipts and independent confirmation. M3-01 Web case is historical; current Semantic candidate is not an Episodic business case."
     },
     {
       "id": "MEM-02",
@@ -137,8 +180,8 @@
     },
     {
       "id": "MEM-05",
-      "status": "AUTOMATED_PASS",
-      "evidence": "cross-task context and revocation dependency tests"
+      "status": "AUTOMATED_AND_REAL_SEMANTIC_REVOCATION_OBSERVED",
+      "evidence": "Post-revoke Chat excludes direct memory and dependent Assistant; recovered Investigator contexts exclude revoked memory; recursive Summary invalidation covered in tests."
     },
     {
       "id": "MEM-06",
@@ -147,8 +190,8 @@
     },
     {
       "id": "E2E-01",
-      "status": "PARTIAL",
-      "evidence": "Web long conversation had 5 failed runs; recovery PID trace unavailable"
+      "status": "REAL_OBSERVED_WITH_FAILURE_HISTORY",
+      "evidence": "Same 26-turn Web Session continued after new process; turn27 crash budget stop, turn28 real compression and answer succeeded at 1374/1400 local estimate; 28 total Chat Runs retained."
     },
     {
       "id": "E2E-02",
@@ -157,8 +200,8 @@
     },
     {
       "id": "E2E-03",
-      "status": "PARTIAL",
-      "evidence": "Task A and APPROVER confirmation; real browser Task B selected Task A Semantic Memory in all 5 real Provider calls and made 4 MCP calls (TRACE-task-b.json). Web revoke, post-revoke Run and recovery remain pending."
+      "status": "PARTIAL_FRESH_SEMANTIC_CHAIN_ONLY",
+      "evidence": "Fresh Semantic Task A -> APPROVER -> Task B Provider/MCP -> revoke -> new Chat -> same Run recovery verified. Full fresh Episodic business case Web journey not re-recorded; historical M3-01 evidence kept separate."
     }
   ],
   "real_strategy_comparison": [
@@ -204,21 +247,67 @@
     "task_b_gate_reason": "AUTHENTICATION_FAILURE_REMAINS_S1",
     "task_b_current_http_status": 401,
     "task_b_database": "isolated local clone, accessed through real browser and current Web worker",
-    "post_revocation_model_call": "PENDING_SUPPORT_AUTH",
-    "post_revocation_cross_process_recovery": "PENDING_SUPPORT_AUTH",
+    "post_revocation_model_call": "SUCCEEDED_EXCLUDES_REVOKED_MEMORY_AND_DEPENDENT_ASSISTANT",
+    "post_revocation_cross_process_recovery": "SAME_INVESTIGATE_RUN_RECOVERED_WITH_NO_REVOKED_MEMORY",
     "isolated_clone_approver_login": "HTTP_401_UNCONFIGURED_LOCAL_PASSWORD; no credential recorded; original API used for Web revoke",
-    "support_login_status": "UNAUTHENTICATED_GENERIC_401; model and recovery checks pending"
+    "support_login_status": "ISOLATED_LOOPBACK_TEST_LOGIN_VERIFIED; ORIGINAL_PASSWORD_UNCHANGED",
+    "continuation_clone": {
+      "trace": "runs/continuation-01/TRACE.json",
+      "memory_revoked_at": "2026-10-20T15:34:29.477+00:00",
+      "distinct_from_original_api_revocation": true,
+      "new_chat_run": "run-d8d3a865-a29a-424f-90b5-74fdef397090",
+      "same_recovered_run": "run-5b0d9abe-20ca-438c-8f3d-2a5f92d6da37",
+      "model_attempts_reserved": 6,
+      "provider_responses_completed": 5,
+      "mcp_attempts": 4,
+      "provider_tokens_reported": 17066,
+      "interrupted_usage": "UNKNOWN_NOT_ZERO",
+      "business_writes": 0
+    }
   },
   "evidence": {
     "trace": "runs/m303-final/TRACE-task-a.json",
-    "full_test_log": "runs/m303-final/pytest-full-final.log",
+    "full_test_log": "runs/continuation-01/pytest-full-final.log",
     "initial_full_test_failure_log": "runs/m303-final/pytest-full-episodic.log",
     "failures": "FAILURES.md",
-    "browser_screenshot_file": "CAPTURED_IN_THREAD_NOT_SAVED_TO_REPOSITORY",
+    "browser_screenshot_file": "runs/long-recovery-01/screenshots/03-after-restart-answer.png",
     "task_b_trace": "runs/m303-final/TRACE-task-b.json",
     "semantic_revocation_trace": "runs/m303-final/TRACE-semantic-revocation.json",
     "original_browser_task_b_failures": "runs/m303-final/FAILURE-original-web-task-b.json",
     "debug_clone_log": "runs/m303-final/debug-run-clone.log",
-    "browser_run_database": "isolated clone of the original local Domain database; no claim that original blocked Runs passed"
+    "browser_run_database": "isolated clone of the original local Domain database; no claim that original blocked Runs passed",
+    "post_revoke_trace": "runs/continuation-01/TRACE.json",
+    "summary_recovery_trace": "runs/long-recovery-01/TRACE.json",
+    "commands": "RUNBOOK.md"
+  },
+  "supplemental_red_commit": "9d264d1780d585d4b763f8e54af919ac0d29f1a0",
+  "supplemental_fix_commit": "e2c48e78e5d41f2cc0c74632665fa3600502005e",
+  "long_session_continuation": {
+    "trace": "runs/long-recovery-01/TRACE.json",
+    "session_id": "session-110cf55c-6d52-4f6e-b301-60bc2282c019",
+    "chat_runs": 28,
+    "succeeded": 22,
+    "failed": 6,
+    "original_chat_runs": 26,
+    "original_failed": 5,
+    "new_failure_injected_crash": 1,
+    "input_budget_tokens": 1400,
+    "crashed_run": "run-c616d2f0-83d5-4be6-9916-9bbd369187a5",
+    "crashed_run_attempt_states": [
+      "SUCCEEDED",
+      "INTERRUPTED",
+      "SUCCEEDED"
+    ],
+    "crashed_run_final_status": "FAILED_CHAT_ATTEMPTS_EXHAUSTED",
+    "interrupted_usage": "UNKNOWN",
+    "successful_new_run": "run-b7ad6557-588e-4c4f-9eef-fc388b02c6ed",
+    "new_run_estimated_input_tokens": 1374,
+    "new_run_reported_answer_input_tokens": 1298,
+    "new_run_reported_answer_output_tokens": 851,
+    "new_run_reported_answer_total_tokens": 2149,
+    "new_run_compression_tokens": 1360,
+    "new_run_selected_summary_version": 24,
+    "new_run_selected_original_and_correction": true,
+    "business_writes": 0
   }
 }
