@@ -1,0 +1,198 @@
+.FFF.                                                                    [100%]
+================================== FAILURES ===================================
+___ test_hybrid_context_compression_commits_versioned_source_linked_summary ___
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-focused-06/test_hybrid_context_compressio0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021A50F368B0>
+
+    def test_hybrid_context_compression_commits_versioned_source_linked_summary(demo_db: Path, monkeypatch) -> None:
+        session_id, owner = _long_history(demo_db)
+        run_id = _new_run(demo_db, session_id, owner)
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+    
+>       compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m302_context.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-focused-06/test_hybrid_context_compressio0/domain.sqlite3')
+run_id = 'run-b524ccfb-208d-444d-b58a-7dfa30ec4d4e'
+worker_id = 'm302-context-worker', model_id = 'test-model'
+
+    def prepare_chat_compression_attempt(
+        path: str | Path, run_id: str, worker_id: str, model_id: str,
+    ) -> dict[str, Any] | None:
+        """Persist a bounded summary request before provider I/O; return None when no compression is needed."""
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _check_worker_fence(connection, worker_id)
+            run = connection.execute(
+                "SELECT * FROM task_runs WHERE run_id = ? AND kind = 'CHAT_READONLY'", (run_id,)
+            ).fetchone()
+            if run is None:
+                raise TaskControlError("TASK_RUN_NOT_FOUND")
+            if str(run["status"]) != "RUNNING":
+                raise TaskControlError("TASK_RUN_NOT_ACTIVE")
+            answer = connection.execute("SELECT 1 FROM chat_run_answers WHERE run_id = ?", (run_id,)).fetchone()
+            if answer is not None:
+                raise TaskControlError("CHAT_ANSWER_ALREADY_COMMITTED")
+            answer_count, compression_count = _chat_attempt_counts(connection, run_id)
+            attempt_count = answer_count + compression_count
+            if attempt_count >= MAX_CHAT_ATTEMPTS:
+                _fail_exhausted_chat_run(connection, run, run_id, attempt_count)
+                return {"error": "CHAT_ATTEMPTS_EXHAUSTED", "run_id": run_id, "attempt_count": attempt_count}
+            owner = connection.execute(
+                "SELECT owner_id FROM sessions WHERE session_id = ? AND tenant_id = ?",
+                (run["session_id"], run["tenant_id"]),
+            ).fetchone()
+            if owner is None:
+                raise TaskControlError("SESSION_SCOPE_DENIED")
+            actor = trusted_identity(path, str(owner["owner_id"]))
+            _verify_identity(connection, actor)
+            prepared = _prepare_context(connection, run, model_id, path)
+            if not prepared.get("needs_compression"):
+                return None
+            budget = context_budget_for_model(model_id)
+            estimated = estimate_messages_tokens(prepared["compression_messages"])
+            effective_limit = min(MAX_COMPRESSION_INPUT_TOKENS, int(budget["input_budget_tokens"]))
+            if estimated > effective_limit:
+>               raise ContextBudgetExceeded(
+                    "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET",
+                    required_tokens=estimated, input_budget_tokens=effective_limit,
+                )
+E               opspilot.domain.context_engineering.ContextBudgetExceeded: SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET (1972 > 1400 tokens)
+
+opspilot\domain\chat.py:1136: ContextBudgetExceeded
+________ test_compression_source_change_is_rejected_before_provider_io ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-focused-06/test_compression_source_change0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021A51031B50>
+
+    def test_compression_source_change_is_rejected_before_provider_io(demo_db: Path, monkeypatch) -> None:
+        session_id, owner = _long_history(demo_db)
+        run_id = _new_run(demo_db, session_id, owner, key="m302-invalidation")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+>       compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m302_context.py:146: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-focused-06/test_compression_source_change0/domain.sqlite3')
+run_id = 'run-040566c7-d20b-448d-9460-e49afee710b4'
+worker_id = 'm302-context-worker', model_id = 'test-model'
+
+    def prepare_chat_compression_attempt(
+        path: str | Path, run_id: str, worker_id: str, model_id: str,
+    ) -> dict[str, Any] | None:
+        """Persist a bounded summary request before provider I/O; return None when no compression is needed."""
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _check_worker_fence(connection, worker_id)
+            run = connection.execute(
+                "SELECT * FROM task_runs WHERE run_id = ? AND kind = 'CHAT_READONLY'", (run_id,)
+            ).fetchone()
+            if run is None:
+                raise TaskControlError("TASK_RUN_NOT_FOUND")
+            if str(run["status"]) != "RUNNING":
+                raise TaskControlError("TASK_RUN_NOT_ACTIVE")
+            answer = connection.execute("SELECT 1 FROM chat_run_answers WHERE run_id = ?", (run_id,)).fetchone()
+            if answer is not None:
+                raise TaskControlError("CHAT_ANSWER_ALREADY_COMMITTED")
+            answer_count, compression_count = _chat_attempt_counts(connection, run_id)
+            attempt_count = answer_count + compression_count
+            if attempt_count >= MAX_CHAT_ATTEMPTS:
+                _fail_exhausted_chat_run(connection, run, run_id, attempt_count)
+                return {"error": "CHAT_ATTEMPTS_EXHAUSTED", "run_id": run_id, "attempt_count": attempt_count}
+            owner = connection.execute(
+                "SELECT owner_id FROM sessions WHERE session_id = ? AND tenant_id = ?",
+                (run["session_id"], run["tenant_id"]),
+            ).fetchone()
+            if owner is None:
+                raise TaskControlError("SESSION_SCOPE_DENIED")
+            actor = trusted_identity(path, str(owner["owner_id"]))
+            _verify_identity(connection, actor)
+            prepared = _prepare_context(connection, run, model_id, path)
+            if not prepared.get("needs_compression"):
+                return None
+            budget = context_budget_for_model(model_id)
+            estimated = estimate_messages_tokens(prepared["compression_messages"])
+            effective_limit = min(MAX_COMPRESSION_INPUT_TOKENS, int(budget["input_budget_tokens"]))
+            if estimated > effective_limit:
+>               raise ContextBudgetExceeded(
+                    "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET",
+                    required_tokens=estimated, input_budget_tokens=effective_limit,
+                )
+E               opspilot.domain.context_engineering.ContextBudgetExceeded: SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET (2004 > 1400 tokens)
+
+opspilot\domain\chat.py:1136: ContextBudgetExceeded
+_____ test_worker_recovery_marks_reserved_compression_attempt_interrupted _____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-focused-06/test_worker_recovery_marks_res0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021A51085370>
+
+    def test_worker_recovery_marks_reserved_compression_attempt_interrupted(demo_db: Path, monkeypatch) -> None:
+        session_id, owner = _long_history(demo_db)
+        run_id = _new_run(demo_db, session_id, owner, key="m302-worker-crash")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+>       compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m302_context.py:177: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-focused-06/test_worker_recovery_marks_res0/domain.sqlite3')
+run_id = 'run-3f8dc0ec-009d-4558-bfb4-bc0e1a689603'
+worker_id = 'm302-context-worker', model_id = 'test-model'
+
+    def prepare_chat_compression_attempt(
+        path: str | Path, run_id: str, worker_id: str, model_id: str,
+    ) -> dict[str, Any] | None:
+        """Persist a bounded summary request before provider I/O; return None when no compression is needed."""
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _check_worker_fence(connection, worker_id)
+            run = connection.execute(
+                "SELECT * FROM task_runs WHERE run_id = ? AND kind = 'CHAT_READONLY'", (run_id,)
+            ).fetchone()
+            if run is None:
+                raise TaskControlError("TASK_RUN_NOT_FOUND")
+            if str(run["status"]) != "RUNNING":
+                raise TaskControlError("TASK_RUN_NOT_ACTIVE")
+            answer = connection.execute("SELECT 1 FROM chat_run_answers WHERE run_id = ?", (run_id,)).fetchone()
+            if answer is not None:
+                raise TaskControlError("CHAT_ANSWER_ALREADY_COMMITTED")
+            answer_count, compression_count = _chat_attempt_counts(connection, run_id)
+            attempt_count = answer_count + compression_count
+            if attempt_count >= MAX_CHAT_ATTEMPTS:
+                _fail_exhausted_chat_run(connection, run, run_id, attempt_count)
+                return {"error": "CHAT_ATTEMPTS_EXHAUSTED", "run_id": run_id, "attempt_count": attempt_count}
+            owner = connection.execute(
+                "SELECT owner_id FROM sessions WHERE session_id = ? AND tenant_id = ?",
+                (run["session_id"], run["tenant_id"]),
+            ).fetchone()
+            if owner is None:
+                raise TaskControlError("SESSION_SCOPE_DENIED")
+            actor = trusted_identity(path, str(owner["owner_id"]))
+            _verify_identity(connection, actor)
+            prepared = _prepare_context(connection, run, model_id, path)
+            if not prepared.get("needs_compression"):
+                return None
+            budget = context_budget_for_model(model_id)
+            estimated = estimate_messages_tokens(prepared["compression_messages"])
+            effective_limit = min(MAX_COMPRESSION_INPUT_TOKENS, int(budget["input_budget_tokens"]))
+            if estimated > effective_limit:
+>               raise ContextBudgetExceeded(
+                    "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET",
+                    required_tokens=estimated, input_budget_tokens=effective_limit,
+                )
+E               opspilot.domain.context_engineering.ContextBudgetExceeded: SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET (1977 > 1400 tokens)
+
+opspilot\domain\chat.py:1136: ContextBudgetExceeded
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_hybrid_context_compression_commits_versioned_source_linked_summary
+FAILED tests/test_m302_context.py::test_compression_source_change_is_rejected_before_provider_io
+FAILED tests/test_m302_context.py::test_worker_recovery_marks_reserved_compression_attempt_interrupted
+3 failed, 2 passed in 4.46s

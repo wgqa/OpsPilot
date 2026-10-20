@@ -771,6 +771,10 @@ CREATE TABLE IF NOT EXISTS d5_context_provenance (
     evidence_ids_json TEXT NOT NULL,
     selected_input_messages_json TEXT NOT NULL DEFAULT '[]',
     task_run_control_json TEXT NOT NULL DEFAULT '{}',
+    context_budget_json TEXT NOT NULL DEFAULT '{}',
+    context_blocks_json TEXT NOT NULL DEFAULT '[]',
+    summary_refs_json TEXT NOT NULL DEFAULT '[]',
+    excluded_sources_json TEXT NOT NULL DEFAULT '[]',
     built_at TEXT NOT NULL,
     model_status TEXT NOT NULL DEFAULT 'PREPARED',
     completed_at TEXT,
@@ -816,6 +820,69 @@ CREATE TABLE IF NOT EXISTS chat_context_manifests (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_chat_context_run ON chat_context_manifests(run_id, created_at);
+CREATE TABLE IF NOT EXISTS context_compression_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES task_bindings(task_id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES task_runs(run_id) ON DELETE CASCADE,
+    attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+    model_id TEXT NOT NULL,
+    prompt_digest TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('RESERVED', 'SUCCEEDED', 'FAILED', 'INVALIDATED', 'INTERRUPTED')),
+    source_dependencies_json TEXT NOT NULL,
+    estimated_input_tokens INTEGER NOT NULL CHECK (estimated_input_tokens >= 0),
+    provider_response_id TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER,
+    summary_id TEXT,
+    error_class TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    UNIQUE (run_id, attempt_no)
+);
+CREATE INDEX IF NOT EXISTS ix_context_compression_run
+    ON context_compression_attempts(run_id, attempt_no);
+CREATE TABLE IF NOT EXISTS context_summaries (
+    summary_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    task_id TEXT REFERENCES task_bindings(task_id) ON DELETE CASCADE,
+    summary_version INTEGER NOT NULL CHECK (summary_version > 0),
+    state TEXT NOT NULL CHECK (state IN ('CURRENT', 'SUPERSEDED', 'INVALID')),
+    strategy TEXT NOT NULL CHECK (strategy IN ('ROLLING_SUMMARY', 'HYBRID')),
+    summary_json TEXT NOT NULL,
+    summary_digest TEXT NOT NULL,
+    covered_from_seq INTEGER NOT NULL,
+    covered_to_seq INTEGER NOT NULL,
+    depends_on_summary_id TEXT REFERENCES context_summaries(summary_id),
+    source_attempt_id TEXT NOT NULL REFERENCES context_compression_attempts(attempt_id),
+    model_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    invalidation_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_context_summaries_scope
+    ON context_summaries(tenant_id, session_id, task_id, state, summary_version);
+CREATE TABLE IF NOT EXISTS context_summary_dependencies (
+    summary_id TEXT NOT NULL REFERENCES context_summaries(summary_id) ON DELETE CASCADE,
+    dependency_kind TEXT NOT NULL CHECK (dependency_kind IN ('MESSAGE', 'ASSISTANT_MESSAGE', 'MODEL_ATTEMPT', 'MEMORY', 'EVIDENCE', 'TASK_STATE', 'KNOWLEDGE', 'SKILL', 'SUMMARY')),
+    dependency_ref TEXT NOT NULL,
+    dependency_version TEXT,
+    dependency_digest TEXT NOT NULL,
+    source_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (summary_id, dependency_kind, dependency_ref)
+);
+CREATE INDEX IF NOT EXISTS ix_context_summary_dependency_ref
+    ON context_summary_dependencies(dependency_kind, dependency_ref);
+CREATE TABLE IF NOT EXISTS chat_message_summary_sources (
+    message_id TEXT NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
+    summary_id TEXT NOT NULL REFERENCES context_summaries(summary_id),
+    summary_version INTEGER NOT NULL,
+    summary_digest TEXT NOT NULL,
+    PRIMARY KEY (message_id, summary_id)
+);
 CREATE TABLE IF NOT EXISTS chat_answer_chunks (
     chunk_id TEXT PRIMARY KEY,
     attempt_id TEXT NOT NULL REFERENCES chat_attempts(attempt_id) ON DELETE CASCADE,
@@ -878,7 +945,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 9:
+        if version > 10:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1156,6 +1223,21 @@ def initialize(path: str | Path) -> None:
                     "ON d5_memories(tenant_id, project_id, problem_type, state, expires_at)"
                 )
             connection.execute("PRAGMA user_version = 9")
+            version = 9
+        if version < 10:
+            provenance_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(d5_context_provenance)").fetchall()
+            }
+            for name, definition in (
+                ("context_budget_json", "TEXT NOT NULL DEFAULT '{}'"),
+                ("context_blocks_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("summary_refs_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("excluded_sources_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                if name not in provenance_columns:
+                    connection.execute(f"ALTER TABLE d5_context_provenance ADD COLUMN {name} {definition}")
+            connection.execute("PRAGMA user_version = 10")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -1167,6 +1249,10 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
         connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_update")
         connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_delete")
         for table in (
+            "chat_message_summary_sources",
+            "context_summary_dependencies",
+            "context_summaries",
+            "context_compression_attempts",
             "chat_run_answers",
             "chat_message_sources",
             "chat_answer_chunks",

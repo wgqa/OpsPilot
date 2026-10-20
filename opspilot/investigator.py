@@ -28,6 +28,12 @@ from opspilot.config import (
     ROOT,
     database_path,
 )
+from opspilot.domain.context_engineering import (
+    ContextBudgetExceeded,
+    context_budget_for_model,
+    estimate_messages_tokens,
+    estimate_text_tokens,
+)
 from opspilot.domain.d2 import (
     EVIDENCE_MAX_AGE_SECONDS,
     MAX_MCP_ATTEMPTS,
@@ -197,6 +203,105 @@ def _content_text(content: object) -> str:
                 chunks.append(item)
         return "\n".join(chunks)
     return str(content) if content is not None else ""
+
+
+def _investigator_context_budget(
+    messages: list[SystemMessage | HumanMessage], model_id: str,
+    tool_specs: list[dict[str, object]], metadata: dict[str, object],
+) -> dict[str, object]:
+    serialized_messages = [
+        {"role": str(message.type), "content": str(message.content)} for message in messages
+    ]
+    budget = context_budget_for_model(model_id)
+    prompt_tokens = estimate_messages_tokens(serialized_messages)
+    tool_tokens = estimate_text_tokens(canonical_json(tool_specs)) if tool_specs else 0
+    estimated = prompt_tokens + tool_tokens + 8
+    input_limit = int(budget["input_budget_tokens"])
+    if estimated > input_limit:
+        raise ContextBudgetExceeded(
+            "INVESTIGATOR_CONTEXT_EXCEEDS_BUDGET",
+            required_tokens=estimated, input_budget_tokens=input_limit,
+        )
+    input_refs = metadata.get("selected_input_messages", [])
+    evidence_ids = metadata.get("evidence_ids", [])
+    memories = metadata.get("selected_memories", [])
+    knowledge = metadata.get("selected_knowledge", [])
+    component_estimates = metadata.get("context_component_estimates", {})
+    component_estimates = component_estimates if isinstance(component_estimates, dict) else {}
+    selected_inputs = [
+        str(item.get("message_id")) for item in input_refs
+        if isinstance(item, dict) and item.get("message_id")
+    ]
+    task_run_control = metadata.get("task_run_control", {})
+    task_state_refs = [
+        str(task_run_control.get(key)) for key in ("run_id", "source_message_id")
+        if isinstance(task_run_control, dict) and task_run_control.get(key)
+    ]
+    selected_skill = metadata.get("selected_skill")
+    external_refs = [
+        str(item.get("memory_id")) for item in memories
+        if isinstance(item, dict) and item.get("memory_id")
+    ] + [
+        str(item.get("document_id")) for item in knowledge
+        if isinstance(item, dict) and item.get("document_id")
+    ]
+    if isinstance(selected_skill, dict) and selected_skill.get("name"):
+        external_refs.append(str(selected_skill["name"]))
+    blocks = [
+        {
+            "block_id": "investigator-trusted-control", "category": "TRUSTED_CONTROL",
+            "authority": "APPLICATION_DEFINED_SAFETY_POLICY", "status": "SELECTED",
+            "estimated_tokens": int(component_estimates.get("trusted_control", prompt_tokens)),
+            "source_refs": [],
+        },
+        {
+            "block_id": "investigator-current-task-state", "category": "CURRENT_TASK_STATE",
+            "authority": "TRUSTED_TASK_BINDING_AND_RUN_CONTROL", "status": "SELECTED",
+            "estimated_tokens": int(component_estimates.get("current_task_state", 0)),
+            "source_refs": task_state_refs,
+        },
+        {
+            "block_id": "investigator-current-facts", "category": "CURRENT_FACTS",
+            "authority": "TASK_SCOPED_MCP_EVIDENCE_AND_OBSERVATIONS", "status": "SELECTED",
+            "estimated_tokens": int(component_estimates.get("current_facts", 0)),
+            "source_refs": [str(item) for item in evidence_ids],
+        },
+        {
+            "block_id": "investigator-recent-interaction", "category": "RECENT_INTERACTION",
+            "authority": "UNTRUSTED_USER_INPUT", "status": "SELECTED",
+            "estimated_tokens": int(component_estimates.get("recent_interaction", 0)),
+            "source_refs": selected_inputs,
+        },
+        {
+            "block_id": "investigator-historical-summary", "category": "HISTORICAL_SUMMARY",
+            "authority": "NONE_IN_INVESTIGATION_RUN", "status": "NOT_APPLICABLE",
+            "estimated_tokens": 0, "source_refs": [],
+        },
+        {
+            "block_id": "investigator-external-guidance", "category": "EXTERNAL_GUIDANCE",
+            "authority": "HISTORICAL_METHOD_HINT_AND_VERSIONED_KNOWLEDGE",
+            "status": "SELECTED" if external_refs else "EMPTY",
+            "estimated_tokens": int(component_estimates.get("external_guidance", 0)),
+            "source_refs": external_refs,
+        },
+        {
+            "block_id": "read-only-mcp-tool-schemas", "category": "TOOL_SCHEMA",
+            "authority": "APPLICATION_DEFINED_READ_ONLY_TOOLS", "status": "SELECTED",
+            "estimated_tokens": tool_tokens, "source_refs": [],
+        },
+    ]
+    result = {
+        **budget, "strategy": "FAIL_CLOSED_NO_HISTORY_COMPRESSION",
+        "estimated_input_tokens": estimated, "prompt_estimated_tokens": prompt_tokens,
+        "tool_schema_estimated_tokens": tool_tokens,
+        "input_budget_tokens": input_limit,
+        "utilization": round(estimated / input_limit, 4) if input_limit else 1.0,
+    }
+    metadata["context_budget"] = result
+    metadata["context_blocks"] = blocks
+    metadata.setdefault("summary_refs", [])
+    metadata.setdefault("excluded_sources", [])
+    return result
 
 
 def _redact_text(value: str) -> str:
@@ -773,6 +878,20 @@ def _prompt_messages(
     )
     if context_metadata is not None:
         context_metadata.clear()
+        task_state_context = {
+            "authoritative_task_binding": context["authoritative_task_binding"],
+            "current_task_run_control": run_control,
+            "deterministic_gate_feedback": context["deterministic_gate_feedback"],
+        }
+        fact_context = {
+            "current_mcp_evidence": evidence,
+            "untrusted_tool_observations": context["untrusted_tool_observations"],
+        }
+        external_guidance = {
+            "historical_memory_guidance": historical_guidance,
+            "skill_methodology": skill_guidance,
+            "versioned_api_scope_knowledge": context["versioned_api_scope_knowledge"],
+        }
         context_metadata.update({
             "selected_skill": ({key: skill[key] for key in ("name", "version", "digest")} if skill else None),
             "selected_memories": [
@@ -798,6 +917,13 @@ def _prompt_messages(
                 for item in selected_inputs
             ],
             "task_run_control": run_control,
+            "context_component_estimates": {
+                "trusted_control": estimate_text_tokens(SYSTEM_PROMPT + canonical_json(context["claim_vs_verification"])),
+                "current_task_state": estimate_text_tokens(canonical_json(task_state_context)),
+                "current_facts": estimate_text_tokens(canonical_json(fact_context)),
+                "recent_interaction": estimate_text_tokens(canonical_json(context["untrusted_user_inputs"])),
+                "external_guidance": estimate_text_tokens(canonical_json(external_guidance)),
+            },
         })
     return [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_text)]
 
@@ -1102,6 +1228,25 @@ def build_investigation_graph(
             )),
             HumanMessage(content=canonical_json(normalizer_context)),
         ]
+        try:
+            _investigator_context_budget(messages, model_id, [], metadata)
+        except ContextBudgetExceeded as error:
+            draft["evaluation_normalization_status"] = error.code
+            draft["evaluation_normalization_attempted"] = True
+            draft["h_normalized_cues"] = None
+            draft["h_normalization_trace"] = {
+                "schema_version": "m2-02-hf-normalization-trace-v1",
+                "parse_status": "CONTEXT_BUDGET_EXCEEDED",
+                "raw_response_summary": None,
+                "normalized_cues": None,
+                "validation_status": "SAFE_RULE_FALLBACK",
+                "consumed_fields": [],
+                "policy_action": "RULE_FALLBACK",
+                "policy_reason": error.code,
+                "context_budget": {"required_tokens": error.required_tokens,
+                                   "input_budget_tokens": error.input_budget_tokens},
+            }
+            return draft
         prompt_digest = digest_json([{"role": message.type, "content": message.content} for message in messages])
         schema_digest = digest_json({
             "schema": "m2-02-hf-normalized-cues-v1",
@@ -1122,6 +1267,10 @@ def build_investigation_graph(
             "evidence_ids": metadata.get("evidence_ids", []),
             "selected_input_messages": metadata.get("selected_input_messages", []),
             "task_run_control": metadata.get("task_run_control", {}),
+            "context_budget": metadata.get("context_budget", {}),
+            "context_blocks": metadata.get("context_blocks", []),
+            "summary_refs": metadata.get("summary_refs", []),
+            "excluded_sources": metadata.get("excluded_sources", []),
         }
         try:
             attempt_id, _ = reserve_attempt(
@@ -1282,6 +1431,23 @@ def build_investigation_graph(
                 db_path, task_id, state, context_metadata=context_metadata,
                 run_id=run_id, s2_mode=s2_mode, memory_enabled=memory_enabled,
             )
+            try:
+                _investigator_context_budget(messages, model_id, available_tool_specs, context_metadata)
+            except ContextBudgetExceeded as error:
+                return {
+                    "stage": "model_budget_exhausted",
+                    "budget": attempt_counts(db_path, task_id),
+                    "pending_call_refs": [],
+                    "last_investigation_action": "CONTEXT_BUDGET_EXCEEDED",
+                    "diagnosis_draft": {
+                        **dict(state.get("diagnosis_draft", {})),
+                        "context_budget_exceeded": {
+                            "required_tokens": error.required_tokens,
+                            "input_budget_tokens": error.input_budget_tokens,
+                            "reason_code": error.code,
+                        },
+                    },
+                }
             prompt_digest = digest_json([{"role": message.type, "content": message.content} for message in messages])
             context_provenance = {
                 "model_id": model_id,
@@ -2046,6 +2212,8 @@ def build_investigation_graph(
 
     def after_gate(state: InvestigatorState) -> str:
         decision = state.get("gate_decision", {}).get("decision")
+        if state.get("last_investigation_action") == "CONTEXT_BUDGET_EXCEEDED":
+            return "s2_safe_stop" if s2_mode else "report"
         if decision == "NEED_MORE":
             if s2_mode:
                 budget = attempt_counts(db_path, task_id)

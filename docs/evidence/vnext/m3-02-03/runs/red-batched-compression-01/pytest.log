@@ -1,0 +1,80 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______ test_hybrid_compression_batches_old_history_within_input_budget _______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m3-02-03/runs/red-batched-compression-01/pytest-tmp/test_hybrid_compression_batche0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000147425F9350>
+
+    def test_hybrid_compression_batches_old_history_within_input_budget(demo_db: Path, monkeypatch) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        owner = "m302-batched-compression-worker"
+        register_worker_owner(demo_db, owner, 72011)
+        for index in range(18):
+            _turn(
+                demo_db, session_id, owner,
+                f"User turn {index}: preserve the original goal and constraints.",
+                key=f"m302-batched-history-{index}",
+                answer=(f"Earlier assistant answer {index} preserves context and uncertainty. " * 12),
+            )
+        run_id = _new_run(demo_db, session_id, owner, key="m302-batched-compression-current")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+    
+>       compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m302_context.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m3-02-03/runs/red-batched-compression-01/pytest-tmp/test_hybrid_compression_batche0/domain.sqlite3')
+run_id = 'run-c6704693-e0a5-43c9-aaa5-10d21d0bcb5a'
+worker_id = 'm302-batched-compression-worker', model_id = 'test-model'
+
+    def prepare_chat_compression_attempt(
+        path: str | Path, run_id: str, worker_id: str, model_id: str,
+    ) -> dict[str, Any] | None:
+        """Persist a bounded summary request before provider I/O; return None when no compression is needed."""
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _check_worker_fence(connection, worker_id)
+            run = connection.execute(
+                "SELECT * FROM task_runs WHERE run_id = ? AND kind = 'CHAT_READONLY'", (run_id,)
+            ).fetchone()
+            if run is None:
+                raise TaskControlError("TASK_RUN_NOT_FOUND")
+            if str(run["status"]) != "RUNNING":
+                raise TaskControlError("TASK_RUN_NOT_ACTIVE")
+            answer = connection.execute("SELECT 1 FROM chat_run_answers WHERE run_id = ?", (run_id,)).fetchone()
+            if answer is not None:
+                raise TaskControlError("CHAT_ANSWER_ALREADY_COMMITTED")
+            answer_count, compression_count = _chat_attempt_counts(connection, run_id)
+            attempt_count = answer_count + compression_count
+            if attempt_count >= MAX_CHAT_ATTEMPTS:
+                _fail_exhausted_chat_run(connection, run, run_id, attempt_count)
+                return {"error": "CHAT_ATTEMPTS_EXHAUSTED", "run_id": run_id, "attempt_count": attempt_count}
+            owner = connection.execute(
+                "SELECT owner_id FROM sessions WHERE session_id = ? AND tenant_id = ?",
+                (run["session_id"], run["tenant_id"]),
+            ).fetchone()
+            if owner is None:
+                raise TaskControlError("SESSION_SCOPE_DENIED")
+            actor = trusted_identity(path, str(owner["owner_id"]))
+            _verify_identity(connection, actor)
+            prepared = _prepare_context(connection, run, model_id, path)
+            if not prepared.get("needs_compression"):
+                return None
+            budget = context_budget_for_model(model_id)
+            estimated = estimate_messages_tokens(prepared["compression_messages"])
+            effective_limit = min(MAX_COMPRESSION_INPUT_TOKENS, int(budget["input_budget_tokens"]))
+            if estimated > effective_limit:
+>               raise ContextBudgetExceeded(
+                    "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET",
+                    required_tokens=estimated, input_budget_tokens=effective_limit,
+                )
+E               opspilot.domain.context_engineering.ContextBudgetExceeded: SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET (2071 > 1400 tokens)
+
+opspilot\domain\chat.py:1216: ContextBudgetExceeded
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_hybrid_compression_batches_old_history_within_input_budget
+1 failed in 2.77s

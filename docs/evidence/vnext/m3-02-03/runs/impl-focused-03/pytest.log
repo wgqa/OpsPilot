@@ -1,0 +1,90 @@
+.............................F..........                                 [100%]
+================================== FAILURES ===================================
+______ test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-ctx-focused-03/test_v8_schema_migration_prese0/domain.sqlite3')
+
+    def test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun(demo_db: Path) -> None:
+        binding = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a")
+        task_id = str(binding["task_id"])
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with connect(demo_db) as connection:
+            connection.execute("DROP INDEX IF EXISTS ix_d5_memories_lookup")
+            connection.execute("DROP TABLE d5_memory_events")
+            connection.execute("DROP TABLE d5_memories")
+            connection.execute(
+                """CREATE TABLE d5_memories (
+                     memory_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+                     project_id TEXT NOT NULL, type TEXT NOT NULL CHECK(type='EPISODIC'), problem_type TEXT NOT NULL,
+                     summary TEXT NOT NULL, applicability_constraints_json TEXT NOT NULL,
+                     source_task_id TEXT NOT NULL REFERENCES task_bindings(task_id), source_evidence_ids_json TEXT NOT NULL,
+                     source_report_ref TEXT NOT NULL, source_verification_id TEXT NOT NULL,
+                     state TEXT NOT NULL CHECK(state IN ('CANDIDATE','ACTIVE','REVOKED')), version INTEGER NOT NULL,
+                     confirmed_by TEXT, confirmed_at TEXT, revoked_by TEXT, revoked_at TEXT,
+                     expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+                     UNIQUE(tenant_id, project_id, problem_type, source_task_id))"""
+            )
+            connection.execute(
+                """CREATE TABLE d5_memory_events (
+                     event_id TEXT PRIMARY KEY, memory_id TEXT NOT NULL REFERENCES d5_memories(memory_id),
+                     tenant_id TEXT NOT NULL, project_id TEXT NOT NULL,
+                     event_type TEXT NOT NULL CHECK(event_type IN ('CANDIDATE_CREATED','CONFIRMED','REVOKED')),
+                     actor_id TEXT NOT NULL, memory_version INTEGER NOT NULL, occurred_at TEXT NOT NULL,
+                     details_json TEXT NOT NULL)"""
+            )
+            connection.execute(
+                """INSERT INTO d3_verification_receipts
+                   (verification_id, tenant_id, task_id, plan_hash, repair_action_id, service_id, integration_id,
+                    principal_id, business_route, probe_observed_versions_json, observed_at, response_status,
+                    business_assertions_json, recovery_verified, result_digest)
+                   VALUES ('migration-verification', 'tenant-a', ?, 'migration-plan', 'migration-action',
+                           'orders-demo', 'integration-a', 'principal-a', '/api/orders/demo-order', '{}', ?, 200,
+                           '{}', 1, 'verification-digest')""",
+                (task_id, now),
+            )
+            connection.execute(
+                """INSERT INTO d3_report_artifacts
+                   (report_ref, tenant_id, task_id, plan_hash, repair_action_id, verification_id, report_version,
+                    content_digest, immutable_content_json, created_at)
+                   VALUES ('migration-report', 'tenant-a', ?, 'migration-plan', 'migration-action',
+                           'migration-verification', 1, 'report-digest', '{}', ?)""",
+                (task_id, now),
+            )
+            connection.execute(
+                """INSERT INTO d2_evidence
+                   (evidence_id, tenant_id, task_id, call_id, tool_call_id, resource_id, principal_id,
+                    data_source, fetched_at, observed_versions_json, fact_type, facts_json,
+                    original_result_ref, trust_class, digest)
+                   VALUES ('migration-evidence', 'tenant-a', ?, 'c', 't', 'r', 'principal-a', 'MCP', ?, '{}',
+                           'endpoint_probe', '{}', 'ref', 'untrusted_tool_observation', 'evidence-digest')""",
+                (task_id, now),
+            )
+            connection.execute(
+                """INSERT INTO d5_memories
+                   (memory_id, tenant_id, project_id, type, problem_type, summary, applicability_constraints_json,
+                    source_task_id, source_evidence_ids_json, source_report_ref, source_verification_id,
+                    state, version, expires_at, created_at)
+                   VALUES ('legacy-memory', 'tenant-a', 'service:orders-demo', 'EPISODIC', 'auth_401',
+                           'preserved fixed D5 guidance', '{}', ?, '[\"migration-evidence\"]',
+                           'migration-report', 'migration-verification', 'ACTIVE', 4, '2999-01-01T00:00:00+00:00', ?)""",
+                (task_id, now),
+            )
+            connection.execute(
+                """INSERT INTO d5_memory_events
+                   VALUES ('legacy-event', 'legacy-memory', 'tenant-a', 'service:orders-demo',
+                           'CANDIDATE_CREATED', 'support-a', 1, ?, '{}')""",
+                (now,),
+            )
+            connection.execute("PRAGMA user_version = 8")
+    
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+>           assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 9
+E           assert 10 == 9
+E            +  where 10 = int(10)
+
+tests\test_m301_memory.py:438: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m301_memory.py::test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun
+1 failed, 39 passed in 14.66s

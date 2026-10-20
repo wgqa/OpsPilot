@@ -1,0 +1,43 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+____ test_rolling_compression_bounds_a_single_oversized_assistant_message _____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-impl-oversized-01/test_rolling_compression_bound0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000020DC32ED5B0>
+
+    def test_rolling_compression_bounds_a_single_oversized_assistant_message(demo_db: Path, monkeypatch) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        owner = "m302-oversized-assistant-worker"
+        register_worker_owner(demo_db, owner, 72012)
+        for index in range(8):
+            answer = (
+                "This older assistant response is verbose historical conversation, not current trusted evidence. " * 160
+                if index == 0 else f"Short answer {index} preserves uncertainty."
+            )
+            _turn(
+                demo_db, session_id, owner,
+                f"User turn {index}: keep the original goal, negations, and unresolved items.",
+                key=f"m302-oversized-history-{index}", answer=answer,
+            )
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "ROLLING_SUMMARY")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+    
+        first_run = _new_run(demo_db, session_id, owner, key="m302-oversized-first")
+        first_compression = prepare_chat_compression_attempt(demo_db, first_run, owner, "test-model")
+        assert first_compression is not None
+        complete_chat_compression_attempt(
+            demo_db, owner, str(first_compression["attempt_id"]),
+            _summary_json(list(first_compression["allowed_message_sequences"])),
+            provider_response_id="provider-summary-first", input_tokens=100, output_tokens=30, total_tokens=130,
+        )
+        first_answer = prepare_chat_attempt(demo_db, first_run, owner, "test-model")
+>       persist_chat_chunk(demo_db, owner, str(first_answer["attempt_id"]), 1, "The original goal remains active.")
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'attempt_id'
+
+tests\test_m302_context.py:225: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_rolling_compression_bounds_a_single_oversized_assistant_message
+1 failed in 2.36s
+exit_code=1

@@ -1651,6 +1651,11 @@ def recover_running_task_runs(
                     "WHERE run_id = ? AND status IN ('RESERVED', 'STREAMING')",
                     (now, run["run_id"]),
                 )
+                connection.execute(
+                    "UPDATE context_compression_attempts SET status = 'INTERRUPTED', error_class = 'WorkerRestarted', completed_at = ? "
+                    "WHERE run_id = ? AND status = 'RESERVED'",
+                    (now, run["run_id"]),
+                )
             elif run["task_id"] is not None:
                 connection.execute(
                     """UPDATE task_bindings SET status = ?
@@ -1690,6 +1695,11 @@ def mark_run_interrupted_by_worker(
             connection.execute(
                 "UPDATE chat_attempts SET status = 'INTERRUPTED', error_class = ?, completed_at = ? "
                 "WHERE run_id = ? AND status IN ('RESERVED', 'STREAMING')",
+                (reason[:100], now, run_id),
+            )
+            connection.execute(
+                "UPDATE context_compression_attempts SET status = 'INTERRUPTED', error_class = ?, completed_at = ? "
+                "WHERE run_id = ? AND status = 'RESERVED'",
                 (reason[:100], now, run_id),
             )
         elif run["task_id"] is not None:

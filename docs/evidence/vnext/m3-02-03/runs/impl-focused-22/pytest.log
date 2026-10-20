@@ -1,0 +1,30 @@
+...F....                                                                 [100%]
+================================== FAILURES ===================================
+__ test_summary_projection_and_storage_are_bounded_and_keep_core_categories ___
+
+    def test_summary_projection_and_storage_are_bounded_and_keep_core_categories() -> None:
+        source = {"source_message_ids": [f"message-{index}" for index in range(1, 20)]}
+        document = {
+            "initial_goal": {"text": "Original goal and limitations " * 20, **source},
+            "constraints": [{"text": "Keep the caller and route unchanged " * 12, **source}],
+            "user_assertions": [{"text": "An unverified user assertion " * 12, **source}],
+            "corrections": [{"text": "Latest formal correction remains untrusted " * 12, **source}],
+            "rejected_hypotheses": [{"text": "Credential expiry is an unverified hypothesis " * 12, **source}],
+            "unresolved_items": [{"text": "Current status and recovery remain unverified " * 12, **source}],
+            "timeline": [{"text": "A versioned event occurred at a known sequence " * 12, **source}],
+        }
+    
+        compact = _compact_summary_document(document)
+        estimate = estimate_messages_tokens([{"role": "system", "content": _canonical(compact)}])
+    
+        assert estimate <= 512
+        assert compact["initial_goal"]["text"]
+        for field in ("constraints", "corrections", "rejected_hypotheses", "unresolved_items", "timeline"):
+>           assert compact[field], field
+E           AssertionError: unresolved_items
+E           assert []
+
+tests\test_m302_context.py:216: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_summary_projection_and_storage_are_bounded_and_keep_core_categories
+1 failed, 7 passed in 7.04s

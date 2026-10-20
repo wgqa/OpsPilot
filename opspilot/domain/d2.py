@@ -644,10 +644,16 @@ def reserve_attempt(
             evidence_ids = context_provenance.get("evidence_ids", [])
             input_refs = context_provenance.get("selected_input_messages", [])
             run_control = context_provenance.get("task_run_control", {})
+            context_budget = context_provenance.get("context_budget", {})
+            context_blocks = context_provenance.get("context_blocks", [])
+            summary_refs = context_provenance.get("summary_refs", [])
+            excluded_sources = context_provenance.get("excluded_sources", [])
             if not isinstance(memories, list) or not isinstance(knowledge, list) or not isinstance(evidence_ids, list) or not isinstance(input_refs, list):
                 raise ValueError("Context Provenance source lists must be arrays.")
             if not isinstance(run_control, dict):
                 raise ValueError("Task Run control provenance must be an object.")
+            if not isinstance(context_budget, dict) or not all(isinstance(value, list) for value in (context_blocks, summary_refs, excluded_sources)):
+                raise ValueError("Context budget and provenance blocks have invalid shapes.")
             insert_context_provenance_in_transaction(
                 connection,
                 task_id=task_id,
@@ -663,6 +669,10 @@ def reserve_attempt(
                 selected_knowledge=[item for item in knowledge if isinstance(item, dict)],
                 selected_input_messages=[item for item in input_refs if isinstance(item, dict)],
                 task_run_control=run_control,
+                context_budget=context_budget,
+                context_blocks=[item for item in context_blocks if isinstance(item, dict)],
+                summary_refs=[item for item in summary_refs if isinstance(item, dict)],
+                excluded_sources=[item for item in excluded_sources if isinstance(item, dict)],
             )
     return attempt_id, used + 1
 

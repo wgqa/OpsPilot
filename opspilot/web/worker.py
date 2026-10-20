@@ -307,13 +307,19 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
 
     from opspilot.config import MODEL_API_KEY, MODEL_NAME
     from opspilot.domain.chat import (
+        assert_chat_compression_sources_current,
+        assert_chat_context_current,
         complete_chat_attempt,
+        complete_chat_compression_attempt,
         fail_chat_attempt,
+        fail_chat_compression_attempt,
         fail_chat_run_without_attempt,
         persist_chat_chunk,
         prepare_chat_attempt,
+        prepare_chat_compression_attempt,
         _record_provider_metadata,
     )
+    from opspilot.domain.context_engineering import ContextBudgetExceeded
 
     run_id = str(run["run_id"])
     actor_id = await asyncio.to_thread(_chat_run_actor, db_path, run_id)
@@ -330,9 +336,86 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
         )
         return
     attempt_id: str | None = None
+    compression_attempt_id: str | None = None
+    model = ChatOpenAI(
+        model=model_id, api_key=api_key,
+        base_url=os.environ.get("OPSPILOT_MODEL_BASE_URL") or None,
+        temperature=0, max_tokens=512, timeout=30, max_retries=0, stream_usage=True,
+        include_response_headers=True,
+    )
     try:
+        while True:
+            try:
+                compression = await asyncio.to_thread(
+                    prepare_chat_compression_attempt, db_path, run_id, worker_id, model_id
+                )
+            except ContextBudgetExceeded as error:
+                await asyncio.to_thread(
+                    fail_chat_run_without_attempt, db_path, worker_id, run_id, error.code
+                )
+                return
+            if compression is None:
+                break
+            if compression.get("error"):
+                return
+            compression_attempt_id = str(compression["attempt_id"])
+            try:
+                current = await asyncio.to_thread(
+                    assert_chat_compression_sources_current, db_path, worker_id, compression_attempt_id
+                )
+                if not current.get("current"):
+                    compression_attempt_id = None
+                    continue
+                compression_messages = []
+                for message in compression["messages"]:
+                    compression_messages.append(
+                        SystemMessage(content=str(message["content"]))
+                        if str(message["role"]) == "system"
+                        else HumanMessage(content=str(message["content"]))
+                    )
+                response = await model.ainvoke(compression_messages)
+                response_metadata = getattr(response, "response_metadata", {}) or {}
+                response_id = _provider_response_identifier(response_metadata) or getattr(response, "id", None)
+                usage = getattr(response, "usage_metadata", None)
+                if not isinstance(usage, dict):
+                    usage = response_metadata.get("token_usage", {}) if isinstance(response_metadata, dict) else {}
+                if not isinstance(usage, dict):
+                    usage = {}
+                result = await asyncio.to_thread(
+                    complete_chat_compression_attempt, db_path, worker_id, compression_attempt_id,
+                    _stream_text(getattr(response, "content", "")),
+                    provider_response_id=str(response_id) if response_id else None,
+                    input_tokens=usage.get("input_tokens", usage.get("prompt_tokens")),
+                    output_tokens=usage.get("output_tokens", usage.get("completion_tokens")),
+                    total_tokens=usage.get("total_tokens"),
+                )
+                compression_attempt_id = None
+                if result.get("status") == "INVALIDATED":
+                    continue
+                if result.get("status") != "SUCCEEDED":
+                    raise RuntimeError("ContextCompressionNotCommitted")
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if compression_attempt_id is not None:
+                    failure = await asyncio.to_thread(
+                        fail_chat_compression_attempt, db_path, worker_id,
+                        compression_attempt_id, type(error).__name__,
+                    )
+                    if failure.get("status") == "INTERRUPTED_RECOVERABLE":
+                        await asyncio.to_thread(
+                            schedule_worker_retry, db_path, worker_id, run_id,
+                            error_code=str(failure.get("error_class") or "CHAT_COMPRESSION_FAILED"),
+                        )
+                    return
+                raise
         prepared = await asyncio.to_thread(prepare_chat_attempt, db_path, run_id, worker_id, model_id)
         if prepared.get("error"):
+            if prepared.get("error") == "CHAT_CONTEXT_COMPRESSION_REQUIRED":
+                await asyncio.to_thread(
+                    fail_chat_run_without_attempt, db_path, worker_id, run_id,
+                    "CHAT_CONTEXT_COMPRESSION_REQUIRED",
+                )
             return
         attempt_id = str(prepared["attempt_id"])
         messages = []
@@ -344,12 +427,6 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
                 messages.append(AIMessage(content=content))
             else:
                 messages.append(HumanMessage(content=content))
-        model = ChatOpenAI(
-            model=model_id, api_key=api_key,
-            base_url=os.environ.get("OPSPILOT_MODEL_BASE_URL") or None,
-            temperature=0, max_tokens=512, timeout=30, max_retries=0, stream_usage=True,
-            include_response_headers=True,
-        )
         output: list[str] = []
         response_id: str | None = None
         input_tokens: int | None = None
@@ -366,6 +443,7 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
                 str(run["task_id"]),
                 [item for item in prepared.get("memory_refs", []) if isinstance(item, dict)],
             )
+        await asyncio.to_thread(assert_chat_context_current, db_path, worker_id, attempt_id)
         async for part in model.astream(messages):
             metadata = getattr(part, "response_metadata", {}) or {}
             if not metadata_shape_logged and os.environ.get("OPSPILOT_TRACE_PROVIDER_METADATA") == "1":
@@ -412,7 +490,8 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
     except Exception as error:
         if attempt_id is None:
             await asyncio.to_thread(
-                fail_chat_run_without_attempt, db_path, worker_id, run_id, type(error).__name__
+                fail_chat_run_without_attempt, db_path, worker_id, run_id,
+                error.code if isinstance(error, ContextBudgetExceeded) else type(error).__name__,
             )
         else:
             result = await asyncio.to_thread(

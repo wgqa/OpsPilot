@@ -1,0 +1,134 @@
+........................................................................ [ 33%]
+.........F................F............................................. [ 67%]
+.....F.......................F..............................F.......     [100%]
+================================== FAILURES ===================================
+________ test_schema_v3_database_adds_context_input_provenance_columns ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m3-02-03/runs/pytest-tmp-full-m302-02/test_schema_v3_database_adds_c0/domain.sqlite3')
+
+    def test_schema_v3_database_adds_context_input_provenance_columns(demo_db: Path) -> None:
+        from opspilot.domain.database import initialize
+    
+        with connect(demo_db) as connection:
+            connection.execute("ALTER TABLE d5_context_provenance DROP COLUMN selected_input_messages_json")
+            connection.execute("ALTER TABLE d5_context_provenance DROP COLUMN task_run_control_json")
+            connection.execute("PRAGMA user_version = 3")
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(d5_context_provenance)")}
+        # M2-03 adds handoff records in v8; M3-01 adds case-memory provenance in v9.
+>       assert version == 9
+E       assert 10 == 9
+
+tests\test_m1_dynamic_investigation.py:289: AssertionError
+_____ test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m3-02-03/runs/pytest-tmp-full-m302-02/test_schema_migration_is_idemp0/domain.sqlite3')
+live_api = 'http://127.0.0.1:50594'
+
+    def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
+        demo_db: Path, live_api: str
+    ) -> None:
+        from opspilot.domain.database import initialize
+    
+        binding, _, plan = _ready_task(demo_db, live_api, "migration")
+        task_id = str(binding["task_id"])
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_controls WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM session_task_links WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM sessions WHERE session_id = ?", (binding["session_id"],))
+            connection.execute("PRAGMA user_version = 0")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            control = connection.execute("SELECT terminal_state, control_revision FROM task_controls WHERE task_id = ?", (task_id,)).fetchone()
+            session_link = connection.execute("SELECT COUNT(*) FROM session_task_links WHERE task_id = ?", (task_id,)).fetchone()[0]
+            migrated_plan = connection.execute("SELECT plan_hash FROM d3_plans WHERE task_id = ?", (task_id,)).fetchone()[0]
+            plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        assert tuple(control) == ("ACTIVE", 0)
+        # M3-01 adds the latest additive case-memory migration in v9.
+>       assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 9
+E       AssertionError: assert (1 == 1 and '73d2fa9ba21b...4a4d7de83b292' == '73d2fa9ba21b...4a4d7de83b292'
+E         
+E         Skipping 53 identical leading characters in diff, use -v to show
+E           4d7de83b292 and 1 == 1 and 10 == 9)
+
+tests\test_m1_task_control.py:645: AssertionError
+__ test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero __
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m3-02-03/runs/pytest-tmp-full-m302-02/test_m2_01_s2fact09_migration_0/domain.sqlite3')
+live_api = 'http://127.0.0.1:51162'
+
+    def test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero(
+        demo_db: Path, live_api: str
+    ) -> None:
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            connection.execute("DROP INDEX IF EXISTS ux_auth_events_request_id")
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(auth_events)")}
+            if "credential_policy_version" in columns:
+                connection.execute("ALTER TABLE auth_events DROP COLUMN credential_policy_version")
+            if "request_id" in columns:
+                connection.execute("ALTER TABLE auth_events DROP COLUMN request_id")
+            connection.execute("PRAGMA user_version = 5")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            # M2-03 adds handoff tables in v8; M3-01 versions D5 case memory in v9.
+>           assert connection.execute("PRAGMA user_version").fetchone()[0] == 9
+E           assert 10 == 9
+
+tests\test_m2_01_facts.py:368: AssertionError
+___________ test_m203_migration_from_v7_is_additive_and_idempotent ____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m3-02-03/runs/pytest-tmp-full-m302-02/test_m203_migration_from_v7_is0/domain.sqlite3')
+
+    def test_m203_migration_from_v7_is_additive_and_idempotent(demo_db: Path) -> None:
+        from opspilot.domain.database import initialize
+    
+        with connect(demo_db) as connection:
+            connection.execute("DROP TABLE s2_handoff_receipts")
+            connection.execute("DROP TABLE s2_handoff_queue_entries")
+            connection.execute("PRAGMA user_version = 7")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+>           assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 9
+E           assert 10 == 9
+E            +  where 10 = int(10)
+
+tests\test_m2_03_handoff.py:56: AssertionError
+___________ test_ctx08_chat_manifest_has_token_budget_and_strategy ____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m3-02-03/runs/pytest-tmp-full-m302-02/test_ctx08_chat_manifest_has_t0/domain.sqlite3')
+
+    def test_ctx08_chat_manifest_has_token_budget_and_strategy(demo_db: Path) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        admitted = admit_task_message(
+            demo_db, identity, session_id=session_id, task_id=None,
+            input_kind="CHAT_READONLY", body="Orders are failing; do not assume recovery.",
+            idempotency_key="m302-red-context-budget",
+        )
+        run_id = str(admitted["run_id"])
+        register_worker_owner(demo_db, "m302-red-worker", 64001)
+        claim_task_run(demo_db, identity, run_id)
+        prepare_chat_attempt(demo_db, run_id, "m302-red-worker", "test-model")
+    
+        manifest = get_chat_manifest(demo_db, identity, run_id)["attempts"][0]["manifest"]
+    
+>       assert manifest["context_budget"]["strategy"] == "HYBRID"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'context_budget'
+
+tests\test_m302_m303_red.py:31: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_dynamic_investigation.py::test_schema_v3_database_adds_context_input_provenance_columns
+FAILED tests/test_m1_task_control.py::test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash
+FAILED tests/test_m2_01_facts.py::test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero
+FAILED tests/test_m2_03_handoff.py::test_m203_migration_from_v7_is_additive_and_idempotent
+FAILED tests/test_m302_m303_red.py::test_ctx08_chat_manifest_has_token_budget_and_strategy
+5 failed, 207 passed, 1 deselected in 164.21s (0:02:44)

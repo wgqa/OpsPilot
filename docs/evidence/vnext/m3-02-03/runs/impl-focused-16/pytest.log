@@ -1,0 +1,29 @@
+F..........                                                              [100%]
+================================== FAILURES ===================================
+___________ test_ctx08_chat_manifest_has_token_budget_and_strategy ____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m3-02-03/runs/pytest-tmp-focused-16/test_ctx08_chat_manifest_has_t0/domain.sqlite3')
+
+    def test_ctx08_chat_manifest_has_token_budget_and_strategy(demo_db: Path) -> None:
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        admitted = admit_task_message(
+            demo_db, identity, session_id=session_id, task_id=None,
+            input_kind="CHAT_READONLY", body="Orders are failing; do not assume recovery.",
+            idempotency_key="m302-red-context-budget",
+        )
+        run_id = str(admitted["run_id"])
+        register_worker_owner(demo_db, "m302-red-worker", 64001)
+        claim_task_run(demo_db, identity, run_id)
+        prepare_chat_attempt(demo_db, run_id, "m302-red-worker", "test-model")
+    
+        manifest = get_chat_manifest(demo_db, identity, run_id)["attempts"][0]["manifest"]
+    
+>       assert manifest["context_budget"]["strategy"] == "HYBRID"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'context_budget'
+
+tests\test_m302_m303_red.py:31: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_m303_red.py::test_ctx08_chat_manifest_has_token_budget_and_strategy
+1 failed, 10 passed in 8.53s

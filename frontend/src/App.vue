@@ -50,6 +50,9 @@ const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
 const displayStream = computed(() => activeChatRun.value?.status === 'RUNNING' && chunks.value.length > 0);
 const latestContextProvenance = computed(() => inspector.value?.investigator_context_provenance[0] ?? null);
+const activeChatContext = computed(() => inspector.value?.chat_context_provenance.find(
+  (item) => item.run_id === activeChatRun.value?.run_id,
+) ?? null);
 const latestSelectedInputs = computed(() => Array.isArray(latestContextProvenance.value?.selected_input_messages)
   ? latestContextProvenance.value.selected_input_messages as Array<Record<string, unknown>> : []);
 const latestSelectedKnowledge = computed(() => Array.isArray(latestContextProvenance.value?.selected_knowledge)
@@ -923,6 +926,23 @@ onBeforeUnmount(() => {
             <div v-if="latestBusinessRun" class="run-card"><div class="run-icon">⌁</div><div class="run-copy"><strong>{{ readableStatus(latestBusinessRun.kind) }}</strong><small>{{ readableStatus(latestBusinessRun.status) }}<template v-if="latestBusinessRun.blocked_reason"> · {{ readableRunReason(latestBusinessRun.blocked_reason) }}</template></small></div><span class="status-dot" :class="statusTone(latestBusinessRun.status)"></span></div>
             <div v-else class="muted-card">尚未关联业务调查 Run。</div>
             <div v-if="activeChatRun" class="run-card chat-run-card"><div class="run-icon chat-run-icon">✳</div><div class="run-copy"><strong>只读聊天回答</strong><small>{{ readableStatus(activeChatRun.status) }}<template v-if="activeChatRun.waiting_reason"> · {{ activeChatRun.waiting_reason }}</template></small></div><span class="status-dot" :class="statusTone(activeChatRun.status)"></span></div>
+            <div v-if="activeChatContext" class="plan-card context-budget-card" data-testid="context-budget-provenance">
+              <div class="section-heading"><h3>模型上下文预算</h3><span class="read-only-label">Domain 估算</span></div>
+              <div class="plan-row"><span>策略 / 估算器</span><b>{{ String((activeChatContext.context_budget as Record<string, unknown>)?.strategy ?? '—') }} · {{ String((activeChatContext.context_budget as Record<string, unknown>)?.estimator ?? '—') }}</b></div>
+              <div class="plan-row"><span>输入 Token</span><b>{{ String((activeChatContext.context_budget as Record<string, unknown>)?.estimated_input_tokens ?? '—') }} / {{ String((activeChatContext.context_budget as Record<string, unknown>)?.input_budget_tokens ?? '—') }}</b></div>
+              <div class="plan-row"><span>实际模型调用 / 摘要调用</span><b>{{ Array.isArray(activeChatContext.answer_attempts) ? activeChatContext.answer_attempts.length : 0 }} / {{ Array.isArray(activeChatContext.compression_attempts) ? activeChatContext.compression_attempts.length : 0 }}</b></div>
+              <div v-for="item in (activeChatContext.answer_attempts as Array<Record<string, unknown>> ?? [])" :key="String(item.attempt_id)" class="trace-row">
+                <span class="trace-icon model-icon">✳</span><span><strong>回答 {{ String(item.status) }} · #{{ String(item.attempt_no) }}</strong><small>Provider {{ String(item.provider_response_id ?? 'request id unavailable') }} · {{ String((item.token_usage as Record<string, unknown>)?.input_tokens ?? '—') }} in / {{ String((item.token_usage as Record<string, unknown>)?.output_tokens ?? '—') }} out / {{ String((item.token_usage as Record<string, unknown>)?.total_tokens ?? 'usage unavailable') }} total</small></span>
+              </div>
+              <div v-for="item in (activeChatContext.compression_attempts as Array<Record<string, unknown>> ?? [])" :key="String(item.attempt_id)" class="trace-row">
+                <span class="trace-icon model-icon">↻</span><span><strong>摘要 {{ String(item.status) }} · #{{ String(item.attempt_no) }}</strong><small>{{ String(item.estimated_input_tokens) }} estimated input tokens · {{ String((item.token_usage as Record<string, unknown>)?.total_tokens ?? 'provider usage unavailable') }} reported total</small><small>Summary {{ String(item.summary_id ?? '未提交') }} · {{ String(item.error_class ?? 'source-linked') }}</small><small>依赖 {{ JSON.stringify(item.dependencies ?? []) }}</small></span>
+              </div>
+              <div v-for="item in (activeChatContext.context_blocks as Array<Record<string, unknown>> ?? [])" :key="String(item.block_id)" class="trace-row">
+                <span class="trace-icon">▦</span><span><strong>{{ String(item.category) }} · {{ String(item.status) }}</strong><small>{{ String(item.estimated_tokens ?? '—') }} estimated tokens · {{ JSON.stringify(item.source_refs ?? []) }}</small></span>
+              </div>
+              <div v-if="Array.isArray(activeChatContext.summary_refs) && activeChatContext.summary_refs.length" class="evidence-footer">已用历史摘要：{{ JSON.stringify(activeChatContext.summary_refs) }}</div>
+              <div v-if="Array.isArray(activeChatContext.excluded_sources) && activeChatContext.excluded_sources.length" class="evidence-footer">排除来源：{{ JSON.stringify(activeChatContext.excluded_sources) }}</div>
+            </div>
           </div>
           <div class="inspector-section">
             <div class="section-heading"><h3>当前 Evidence</h3><span class="section-count">{{ inspector.evidence.length }}</span></div>

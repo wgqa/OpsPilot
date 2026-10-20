@@ -1,0 +1,46 @@
+.F...                                                                    [100%]
+================================== FAILURES ===================================
+___ test_hybrid_context_compression_commits_versioned_source_linked_summary ___
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-focused-07/test_hybrid_context_compressio0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F7B4576780>
+
+    def test_hybrid_context_compression_commits_versioned_source_linked_summary(demo_db: Path, monkeypatch) -> None:
+        session_id, owner = _long_history(demo_db)
+        run_id = _new_run(demo_db, session_id, owner)
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+    
+        compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+    
+        assert compression is not None
+        assert compression["estimated_input_tokens"] <= compression["input_budget_tokens"]
+        assert assert_chat_compression_sources_current(demo_db, owner, str(compression["attempt_id"]))["current"] is True
+        result = complete_chat_compression_attempt(
+            demo_db, owner, str(compression["attempt_id"]),
+            _summary_json(list(compression["allowed_message_sequences"])),
+            provider_response_id="provider-summary-1", input_tokens=800, output_tokens=60, total_tokens=860,
+        )
+        assert result["status"] == "SUCCEEDED"
+        assert result["token_usage"] == {"input_tokens": 800, "output_tokens": 60, "total_tokens": 860}
+    
+        answer = prepare_chat_attempt(demo_db, run_id, owner, "test-model")
+        assert answer["attempt_no"] == 2
+        assert answer["summary_refs"][0]["summary_id"] == result["summary_id"]
+        assert int(answer["context_budget"]["estimated_input_tokens"]) <= int(answer["context_budget"]["input_budget_tokens"])
+        persist_chat_chunk(demo_db, owner, str(answer["attempt_id"]), 1, "The current question is preserved with the earlier goal summary.")
+        complete_chat_attempt(
+            demo_db, owner, str(answer["attempt_id"]), "The current question is preserved with the earlier goal summary.",
+            provider_response_id="provider-answer-2", input_tokens=500, output_tokens=15, total_tokens=515,
+        )
+        manifest = get_chat_manifest(demo_db, trusted_identity(demo_db, "support-a"), run_id)
+        assert manifest["compression_attempts"][0]["status"] == "SUCCEEDED"
+        assert manifest["compression_attempts"][0]["token_usage"]["total_tokens"] == 860
+>       assert manifest["attempts"][0]["manifest"]["summary_refs"][0]["summary_id"] == result["summary_id"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'summary_refs'
+
+tests\test_m302_context.py:133: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_hybrid_context_compression_commits_versioned_source_linked_summary
+1 failed, 4 passed in 4.46s

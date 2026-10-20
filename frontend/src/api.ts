@@ -54,6 +54,7 @@ export interface Inspector {
   runs: Array<Record<string, unknown>>;
   investigation_model_traces: Array<Record<string, unknown>>;
   chat_model_attempts: Array<Record<string, unknown>>;
+  chat_context_provenance: Array<Record<string, unknown>>;
   task_input_messages: Array<Record<string, unknown>>;
   investigator_context_provenance: Array<Record<string, unknown>>;
   current_gate: Record<string, unknown>;

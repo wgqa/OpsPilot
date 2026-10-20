@@ -1125,6 +1125,10 @@ def insert_context_provenance_in_transaction(
     selected_knowledge: list[dict[str, object]] | None = None,
     selected_input_messages: list[dict[str, object]] | None = None,
     task_run_control: dict[str, object] | None = None,
+    context_budget: dict[str, object] | None = None,
+    context_blocks: list[dict[str, object]] | None = None,
+    summary_refs: list[dict[str, object]] | None = None,
+    excluded_sources: list[dict[str, object]] | None = None,
 ) -> str:
     """Validate current memory rows and register provenance in reserve_attempt's transaction."""
     binding = _trusted_binding(connection, task_id)
@@ -1195,15 +1199,18 @@ def insert_context_provenance_in_transaction(
             tool_schema_version, tool_schema_digest, selected_skill_name,
             selected_skill_version, selected_skill_digest, selected_memories_json,
             selected_knowledge_json, evidence_ids_json, selected_input_messages_json,
-            task_run_control_json, built_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            task_run_control_json, context_budget_json, context_blocks_json,
+            summary_refs_json, excluded_sources_json, built_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (call_id, task_id, attempt_id, model_id, prompt_version, prompt_digest,
          tool_schema_version, tool_schema_digest,
          selected_skill.get("name") if selected_skill else None,
          selected_skill.get("version") if selected_skill else None,
          selected_skill.get("digest") if selected_skill else None,
          canonical_json(memory_refs), canonical_json(knowledge_refs), canonical_json(evidence_ids),
-         canonical_json(selected_input_messages or []), canonical_json(task_run_control or {}), _now_text()),
+         canonical_json(selected_input_messages or []), canonical_json(task_run_control or {}),
+         canonical_json(context_budget or {}), canonical_json(context_blocks or []),
+         canonical_json(summary_refs or []), canonical_json(excluded_sources or []), _now_text()),
     )
     return call_id
 
@@ -1323,6 +1330,10 @@ def list_context_provenance(
         item["evidence_ids"] = json.loads(str(item.pop("evidence_ids_json")))
         item["selected_input_messages"] = json.loads(str(item.pop("selected_input_messages_json", "[]")))
         item["task_run_control"] = json.loads(str(item.pop("task_run_control_json", "{}")))
+        item["context_budget"] = json.loads(str(item.pop("context_budget_json", "{}")))
+        item["context_blocks"] = json.loads(str(item.pop("context_blocks_json", "[]")))
+        item["summary_refs"] = json.loads(str(item.pop("summary_refs_json", "[]")))
+        item["excluded_sources"] = json.loads(str(item.pop("excluded_sources_json", "[]")))
         item["prompt_digest_matches_trace"] = item.get("model_trace_prompt_digest") in (None, item["prompt_digest"])
         current_memory_states: list[dict[str, str]] = []
         with connect(path) as connection:

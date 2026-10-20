@@ -1,0 +1,71 @@
+.F...                                                                    [100%]
+================================== FAILURES ===================================
+___ test_hybrid_context_compression_commits_versioned_source_linked_summary ___
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-focused-09/test_hybrid_context_compressio0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000020CDA0868B0>
+
+    def test_hybrid_context_compression_commits_versioned_source_linked_summary(demo_db: Path, monkeypatch) -> None:
+        session_id, owner = _long_history(demo_db)
+        run_id = _new_run(demo_db, session_id, owner)
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "1400")
+    
+        compression = prepare_chat_compression_attempt(demo_db, run_id, owner, "test-model")
+    
+        assert compression is not None
+        assert compression["estimated_input_tokens"] <= compression["input_budget_tokens"]
+        assert assert_chat_compression_sources_current(demo_db, owner, str(compression["attempt_id"]))["current"] is True
+        result = complete_chat_compression_attempt(
+            demo_db, owner, str(compression["attempt_id"]),
+            _summary_json(list(compression["allowed_message_sequences"])),
+            provider_response_id="provider-summary-1", input_tokens=800, output_tokens=60, total_tokens=860,
+        )
+        assert result["status"] == "SUCCEEDED"
+        assert result["token_usage"] == {"input_tokens": 800, "output_tokens": 60, "total_tokens": 860}
+    
+        answer = prepare_chat_attempt(demo_db, run_id, owner, "test-model")
+        assert answer["attempt_no"] == 2
+        assert answer["summary_refs"][0]["summary_id"] == result["summary_id"]
+        assert int(answer["context_budget"]["estimated_input_tokens"]) <= int(answer["context_budget"]["input_budget_tokens"])
+        persist_chat_chunk(demo_db, owner, str(answer["attempt_id"]), 1, "The current question is preserved with the earlier goal summary.")
+        complete_chat_attempt(
+            demo_db, owner, str(answer["attempt_id"]), "The current question is preserved with the earlier goal summary.",
+            provider_response_id="provider-answer-2", input_tokens=500, output_tokens=15, total_tokens=515,
+        )
+        manifest = get_chat_manifest(demo_db, trusted_identity(demo_db, "support-a"), run_id)
+        assert manifest["compression_attempts"][0]["status"] == "SUCCEEDED"
+        assert manifest["compression_attempts"][0]["token_usage"]["total_tokens"] == 860
+        assert manifest["attempts"][0]["manifest"]["truncation"]["summary_refs"][0]["summary_id"] == result["summary_id"]
+        with connect(demo_db) as connection:
+            lineage = connection.execute(
+                "SELECT summary_id, summary_version, summary_digest FROM chat_message_summary_sources WHERE message_id = (SELECT message_id FROM chat_run_answers WHERE run_id = ?)",
+                (run_id,),
+            ).fetchone()
+            source_ref = connection.execute(
+                """SELECT dependency_ref FROM context_summary_dependencies
+                   WHERE summary_id = ? AND dependency_kind = 'MESSAGE' ORDER BY source_order LIMIT 1""",
+                (result["summary_id"],),
+            ).fetchone()[0]
+            prior_answer_id = connection.execute(
+                "SELECT message_id FROM chat_run_answers WHERE run_id = ?", (run_id,),
+            ).fetchone()[0]
+        assert lineage is not None and lineage["summary_id"] == result["summary_id"]
+    
+        with connect(demo_db) as connection:
+            connection.execute("UPDATE messages SET body_digest = 'invalidated-source-digest' WHERE message_id = ?", (source_ref,))
+        next_run = _new_run(demo_db, session_id, owner, key="m302-after-source-invalidation")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "RECENT_WINDOW")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        next_context = prepare_chat_attempt(demo_db, next_run, owner, "test-model")
+        assert all(item["summary_id"] != result["summary_id"] for item in next_context["summary_refs"])
+        assert str(prior_answer_id) not in next_context["selected_message_ids"]
+>       assert any(item.get("source_id") == result["summary_id"] and "SUMMARY_" in str(item["reason"])
+                   for item in next_context["excluded_sources"])
+E       assert False
+E        +  where False = any(<generator object test_hybrid_context_compression_commits_versioned_source_linked_summary.<locals>.<genexpr> at 0x0000020CDA19C4F0>)
+
+tests\test_m302_context.py:157: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_context.py::test_hybrid_context_compression_commits_versioned_source_linked_summary
+1 failed, 4 passed in 4.50s

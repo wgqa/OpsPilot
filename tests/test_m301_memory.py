@@ -435,7 +435,17 @@ def test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun(demo_db: P
     initialize(demo_db)
     initialize(demo_db)
     with connect(demo_db) as connection:
-        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 9
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 10
+        context_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(d5_context_provenance)").fetchall()
+        }
+        assert {"context_budget_json", "context_blocks_json", "summary_refs_json", "excluded_sources_json"}.issubset(context_columns)
+        context_tables = {
+            str(row["name"])
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+        assert {"context_compression_attempts", "context_summaries", "context_summary_dependencies"}.issubset(context_tables)
         rows = connection.execute("SELECT * FROM d5_memories WHERE memory_id='legacy-memory'").fetchall()
         events = connection.execute("SELECT * FROM d5_memory_events WHERE memory_id='legacy-memory'").fetchall()
         foreign_keys = connection.execute("PRAGMA foreign_key_list(d5_memory_events)").fetchall()

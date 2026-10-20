@@ -1,0 +1,31 @@
+........................................................................ [ 33%]
+........................................................................ [ 66%]
+.................................................................F...... [100%]
+================================== FAILURES ===================================
+___________ test_mem04_semantic_memory_has_versioned_audit_storage ____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-m302-full-verification-01/test_mem04_semantic_memory_has0/domain.sqlite3')
+
+    def test_mem04_semantic_memory_has_versioned_audit_storage(demo_db: Path) -> None:
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            tables = {
+                str(row["name"])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            version_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(semantic_memories)").fetchall()
+            } if "semantic_memories" in tables else set()
+    
+>       assert "semantic_memories" in tables
+E       AssertionError: assert 'semantic_memories' in {'approval_resume_links', 'auth_events', 'auth_policies', 'authz_events', 'chat_answer_chunks', 'chat_attempts', ...}
+
+tests\test_m302_m303_red.py:66: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m302_m303_red.py::test_mem04_semantic_memory_has_versioned_audit_storage
+1 failed, 215 passed in 169.46s (0:02:49)
+
+EXIT_CODE=1
