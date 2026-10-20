@@ -663,6 +663,19 @@ def test_hf01_c03_provider_started_before_revocation_is_recorded_in_order(
             ).fetchall()
         }
     assert model_calls == {str(row["call_id"]) for row in provenance if row["model_status"] == "OK"}
+    print(json.dumps({
+        "event": "hf01_c03_provider_revocation_order",
+        "task_id": task_id,
+        "run_id": run_id,
+        "memory_id": memory_id,
+        "events": events,
+        "provider_calls": len(provider_payloads),
+        "memory_present_by_provider_call": [memory_id in payload for payload in provider_payloads],
+        "provider_payload_digests": [digest_json(payload) for payload in provider_payloads],
+        "selected_memory_provenance_call_ids": [str(row["call_id"]) for row in provenance
+                                                    if any(item["memory_id"] == memory_id for item in row["selected_memories"])],
+        "model_trace_call_ids": sorted(model_calls),
+    }, sort_keys=True))
 
 
 @pytest.mark.parametrize("invalidation", ["expired", "version_changed", "source_invalid"])
