@@ -367,7 +367,15 @@ def _message_source_valid(
     evidence_exclusion_reasons: dict[str, str],
     memories_by_id: dict[str, dict[str, Any]],
     summary_seen: set[str] | None = None,
+    message_seen: set[str] | None = None,
+    model_source_cache: dict[str, tuple[bool, str | None]] | None = None,
 ) -> tuple[bool, str | None]:
+    visiting_messages = set(message_seen or ())
+    message_id = str(row["message_id"])
+    if message_id in visiting_messages:
+        return False, "MESSAGE_DEPENDENCY_CYCLE"
+    visiting_messages.add(message_id)
+    source_cache = model_source_cache if model_source_cache is not None else {}
     sources = connection.execute(
         """SELECT source_kind, source_ref, source_version, source_digest FROM chat_message_sources
            WHERE message_id = ?
@@ -412,6 +420,33 @@ def _message_source_valid(
             response_digest = _digest(str(attempt["provider_response_id"] or ""))
             if response_digest != digest:
                 return False, "MODEL_RESPONSE_REFERENCE_CHANGED"
+            ancestor = connection.execute(
+                """SELECT m.*, a.run_id AS answer_run_id, a.attempt_id AS answer_attempt_id,
+                          a.manifest_id AS answer_manifest_id
+                   FROM chat_run_answers a JOIN messages m ON m.message_id = a.message_id
+                   WHERE a.attempt_id = ? AND m.role = 'ASSISTANT' AND m.tenant_id = ?
+                     AND m.session_id = ? AND ((m.task_id = ?) OR (m.task_id IS NULL AND ? IS NULL))""",
+                (ref, tenant_id, session_id, task_id, task_id),
+            ).fetchone()
+            if ancestor is None:
+                return False, "MODEL_RESPONSE_SOURCE_SCOPE_CHANGED"
+            ancestor_id = str(ancestor["message_id"])
+            # Every answer references its own completed model attempt. Other
+            # attempts are historical input and retain their source dependencies,
+            # even when a direct Memory block was omitted by the token allocator.
+            if ancestor_id != message_id:
+                if ancestor_id not in source_cache:
+                    source_cache[ancestor_id] = _message_source_valid(
+                        connection, ancestor, session_id=session_id, tenant_id=tenant_id,
+                        task_id=task_id, state_digest=state_digest,
+                        evidence_by_id=evidence_by_id,
+                        evidence_exclusion_reasons=evidence_exclusion_reasons,
+                        memories_by_id=memories_by_id, summary_seen=summary_seen,
+                        message_seen=visiting_messages, model_source_cache=source_cache,
+                    )
+                valid, reason = source_cache[ancestor_id]
+                if not valid:
+                    return False, reason or "MODEL_RESPONSE_DEPENDENCY_INVALID"
     summary_sources = connection.execute(
         """SELECT summary_id, summary_version, summary_digest
            FROM chat_message_summary_sources WHERE message_id = ? ORDER BY summary_id""",
