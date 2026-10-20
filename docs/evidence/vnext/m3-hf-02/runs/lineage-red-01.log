@@ -1,0 +1,126 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned[EPISODIC] _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/m3-hf-02/pytest-lineage-red-01/test_revocation_excludes_deriv0/domain.sqlite3')
+live_api = 'http://127.0.0.1:57510'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000203EC340E90>
+asset_type = 'EPISODIC'
+
+    @pytest.mark.parametrize("asset_type", ["EPISODIC", "SEMANTIC"])
+    def test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned(
+        demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch, asset_type: str,
+    ) -> None:
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        if asset_type == "EPISODIC":
+            source = _s2_case(demo_db, live_api, "hf02-source")
+            candidate = create_memory_candidate(
+                demo_db, str(source["task_id"]), "support-a", idempotency_key="hf02-episodic-candidate",
+            )
+            active = confirm_memory(
+                demo_db, str(candidate["memory_id"]), "approver-a", idempotency_key="hf02-episodic-confirm",
+            )
+            target = _s2_case(demo_db, live_api, "hf02-target", reset=False)
+            from opspilot.domain.database import connect
+    
+            with connect(demo_db) as connection:
+                session_id = str(connection.execute(
+                    "SELECT session_id FROM task_runs WHERE run_id = ?", (target["run_id"],),
+                ).fetchone()[0])
+            task_id = str(target["task_id"])
+            finish_task_run(demo_db, trusted_identity(demo_db, "support-a"), str(target["run_id"]), "SUCCEEDED")
+            revoke = revoke_memory
+        else:
+            session_id, source_task, source_message = _session_and_task(demo_db, "hf02-semantic-source")
+            task_id, _ = _create_task(demo_db, session_id, "hf02-semantic-target")
+            candidate = _candidate(demo_db, source_task, source_message, "hf02-semantic")
+            active = confirm_semantic_memory(
+                demo_db, str(candidate["memory_id"]), "approver-a", idempotency_key="hf02-semantic-confirm",
+            )
+            revoke = revoke_semantic_memory
+    
+        _, first = _prepare_task_chat(demo_db, session_id, task_id, "hf02-first")
+>       assert any(r["memory_id"] == active["memory_id"] for r in first["memory_refs"])
+E       assert False
+E        +  where False = any(<generator object test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned.<locals>.<genexpr> at 0x00000203EC36F920>)
+
+tests\test_m3_hf02_lineage.py:54: AssertionError
+_ test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned[SEMANTIC] _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/m3-hf-02/pytest-lineage-red-01/test_revocation_excludes_deriv1/domain.sqlite3')
+live_api = 'http://127.0.0.1:57513'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000203EC3409D0>
+asset_type = 'SEMANTIC'
+
+    @pytest.mark.parametrize("asset_type", ["EPISODIC", "SEMANTIC"])
+    def test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned(
+        demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch, asset_type: str,
+    ) -> None:
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        if asset_type == "EPISODIC":
+            source = _s2_case(demo_db, live_api, "hf02-source")
+            candidate = create_memory_candidate(
+                demo_db, str(source["task_id"]), "support-a", idempotency_key="hf02-episodic-candidate",
+            )
+            active = confirm_memory(
+                demo_db, str(candidate["memory_id"]), "approver-a", idempotency_key="hf02-episodic-confirm",
+            )
+            target = _s2_case(demo_db, live_api, "hf02-target", reset=False)
+            from opspilot.domain.database import connect
+    
+            with connect(demo_db) as connection:
+                session_id = str(connection.execute(
+                    "SELECT session_id FROM task_runs WHERE run_id = ?", (target["run_id"],),
+                ).fetchone()[0])
+            task_id = str(target["task_id"])
+            finish_task_run(demo_db, trusted_identity(demo_db, "support-a"), str(target["run_id"]), "SUCCEEDED")
+            revoke = revoke_memory
+        else:
+            session_id, source_task, source_message = _session_and_task(demo_db, "hf02-semantic-source")
+            task_id, _ = _create_task(demo_db, session_id, "hf02-semantic-target")
+            candidate = _candidate(demo_db, source_task, source_message, "hf02-semantic")
+            active = confirm_semantic_memory(
+                demo_db, str(candidate["memory_id"]), "approver-a", idempotency_key="hf02-semantic-confirm",
+            )
+            revoke = revoke_semantic_memory
+    
+        _, first = _prepare_task_chat(demo_db, session_id, task_id, "hf02-first")
+        assert any(r["memory_id"] == active["memory_id"] for r in first["memory_refs"])
+        first_answer = "Historical method from the approved case: correlate current facts before drawing a conclusion."
+        first_result = complete_chat_attempt(
+            demo_db, str(first["worker_id"]), str(first["attempt_id"]), first_answer,
+            provider_response_id="TEST_DOUBLE_HF02_FIRST", input_tokens=200, output_tokens=20, total_tokens=220,
+        )
+        memory_cost = sum(
+            int(block["estimated_tokens"]) for block in first["context_blocks"]
+            if block["category"] == "EXTERNAL_GUIDANCE" and block["status"] == "SELECTED"
+        )
+        # Enough for the required state and short prior answer; insufficient for the
+        # lower-priority direct Memory block. This uses the normal allocator.
+        second_budget = int(first["context_budget"]["estimated_input_tokens"]) - memory_cost + 120
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", str(second_budget))
+        _, second = _prepare_task_chat(demo_db, session_id, task_id, "hf02-second")
+        assert second["memory_refs"] == []
+        assert first_result["message_id"] in second["selected_message_ids"]
+        assert first_answer in [m["content"] for m in second["messages"]]
+        assert first["attempt_id"] in second["model_call_refs"]
+        derived_answer = "The prior case method still suggests correlating current facts; this is no authorization."
+        second_result = complete_chat_attempt(
+            demo_db, str(second["worker_id"]), str(second["attempt_id"]), derived_answer,
+            provider_response_id="TEST_DOUBLE_HF02_DERIVED", input_tokens=200, output_tokens=20, total_tokens=220,
+        )
+    
+        revoke(demo_db, str(active["memory_id"]), "approver-a", idempotency_key="hf02-revoke-" + asset_type)
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        _, after = _prepare_task_chat(demo_db, session_id, task_id, "hf02-after-revocation")
+        assert first_result["message_id"] not in after["selected_message_ids"]
+>       assert second_result["message_id"] not in after["selected_message_ids"]
+E       AssertionError: assert 'message-c74efc19-ac9a-4099-b59c-144a0931a043' not in ['message-53d13772-16c8-4c81-8f35-f4220b68652e', 'message-240461b3-37a9-45cd-8592-4bdfb81016f2', 'message-ce988348-d04...d65-9b66-71e998eff2c4', 'message-c74efc19-ac9a-4099-b59c-144a0931a043', 'message-4b0b4918-01d2-44e3-b444-6f6a5018b432']
+
+tests\test_m3_hf02_lineage.py:83: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m3_hf02_lineage.py::test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned[EPISODIC]
+FAILED tests/test_m3_hf02_lineage.py::test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned[SEMANTIC]
+2 failed in 1.11s

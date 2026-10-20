@@ -1,0 +1,130 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned[EPISODIC] _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/m3-hf-02/pytest-lineage-red-02/test_revocation_excludes_deriv0/domain.sqlite3')
+live_api = 'http://127.0.0.1:53949'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CEAEA4A060>
+asset_type = 'EPISODIC'
+
+    @pytest.mark.parametrize("asset_type", ["EPISODIC", "SEMANTIC"])
+    def test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned(
+        demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch, asset_type: str,
+    ) -> None:
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        if asset_type == "EPISODIC":
+            target = _seed_hf01_chat_target(demo_db, live_api, "hf02-episodic")
+            active = target["memory"]
+            session_id = str(target["session_id"])
+            task_id = str(target["task_id"])
+            revoke = revoke_memory
+        else:
+            session_id, source_task, source_message = _session_and_task(demo_db, "hf02-semantic-source")
+            task_id, _ = _create_task(demo_db, session_id, "hf02-semantic-target")
+            candidate = _candidate(demo_db, source_task, source_message, "hf02-semantic")
+            active = confirm_semantic_memory(
+                demo_db, str(candidate["memory_id"]), "approver-a", idempotency_key="hf02-semantic-confirm",
+            )
+            revoke = revoke_semantic_memory
+    
+        _, first = _prepare_task_chat(demo_db, session_id, task_id, "hf02-first")
+        assert any(r["memory_id"] == active["memory_id"] for r in first["memory_refs"])
+        first_answer = "Historical method from the approved case: correlate current facts before drawing a conclusion."
+        first_result = complete_chat_attempt(
+            demo_db, str(first["worker_id"]), str(first["attempt_id"]), first_answer,
+            provider_response_id="TEST_DOUBLE_HF02_FIRST", input_tokens=200, output_tokens=20, total_tokens=220,
+        )
+        memory_cost = sum(
+            int(block["estimated_tokens"]) for block in first["context_blocks"]
+            if block["category"] == "EXTERNAL_GUIDANCE" and block["status"] == "SELECTED"
+        )
+        # Enough for the required state and short prior answer; insufficient for the
+        # lower-priority direct Memory block. This uses the normal allocator.
+        second_budget = int(first["context_budget"]["estimated_input_tokens"]) - memory_cost + 120
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", str(second_budget))
+        _, second = _prepare_task_chat(demo_db, session_id, task_id, "hf02-second")
+        assert second["memory_refs"] == []
+        assert first_result["message_id"] in second["selected_message_ids"]
+        assert first_answer in [m["content"] for m in second["messages"]]
+        assert first["attempt_id"] in second["model_call_refs"]
+        derived_answer = "The prior case method still suggests correlating current facts; this is no authorization."
+        second_result = complete_chat_attempt(
+            demo_db, str(second["worker_id"]), str(second["attempt_id"]), derived_answer,
+            provider_response_id="TEST_DOUBLE_HF02_DERIVED", input_tokens=200, output_tokens=20, total_tokens=220,
+        )
+    
+        revoke(demo_db, str(active["memory_id"]), "approver-a", idempotency_key="hf02-revoke-" + asset_type)
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        _, after = _prepare_task_chat(demo_db, session_id, task_id, "hf02-after-revocation")
+        assert first_result["message_id"] not in after["selected_message_ids"]
+>       assert second_result["message_id"] not in after["selected_message_ids"]
+E       AssertionError: assert 'message-95b1bc44-2763-401c-8c32-84f0e6e2dcca' not in ['message-456364f0-56d3-41be-856b-72868318a6f2', 'message-e9d204f0-3370-45dd-a678-2884c3b0f068', 'message-b68288cd-7484-4fb7-a7ac-82954adcf1a4', 'message-95b1bc44-2763-401c-8c32-84f0e6e2dcca', 'message-d87e7d72-ceba-4aea-8646-62840db52378']
+
+tests\test_m3_hf02_lineage.py:70: AssertionError
+_ test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned[SEMANTIC] _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/m3-hf-02/pytest-lineage-red-02/test_revocation_excludes_deriv1/domain.sqlite3')
+live_api = 'http://127.0.0.1:53951'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CEAEA49940>
+asset_type = 'SEMANTIC'
+
+    @pytest.mark.parametrize("asset_type", ["EPISODIC", "SEMANTIC"])
+    def test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned(
+        demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch, asset_type: str,
+    ) -> None:
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        if asset_type == "EPISODIC":
+            target = _seed_hf01_chat_target(demo_db, live_api, "hf02-episodic")
+            active = target["memory"]
+            session_id = str(target["session_id"])
+            task_id = str(target["task_id"])
+            revoke = revoke_memory
+        else:
+            session_id, source_task, source_message = _session_and_task(demo_db, "hf02-semantic-source")
+            task_id, _ = _create_task(demo_db, session_id, "hf02-semantic-target")
+            candidate = _candidate(demo_db, source_task, source_message, "hf02-semantic")
+            active = confirm_semantic_memory(
+                demo_db, str(candidate["memory_id"]), "approver-a", idempotency_key="hf02-semantic-confirm",
+            )
+            revoke = revoke_semantic_memory
+    
+        _, first = _prepare_task_chat(demo_db, session_id, task_id, "hf02-first")
+        assert any(r["memory_id"] == active["memory_id"] for r in first["memory_refs"])
+        first_answer = "Historical method from the approved case: correlate current facts before drawing a conclusion."
+        first_result = complete_chat_attempt(
+            demo_db, str(first["worker_id"]), str(first["attempt_id"]), first_answer,
+            provider_response_id="TEST_DOUBLE_HF02_FIRST", input_tokens=200, output_tokens=20, total_tokens=220,
+        )
+        memory_cost = sum(
+            int(block["estimated_tokens"]) for block in first["context_blocks"]
+            if block["category"] == "EXTERNAL_GUIDANCE" and block["status"] == "SELECTED"
+        )
+        # Enough for the required state and short prior answer; insufficient for the
+        # lower-priority direct Memory block. This uses the normal allocator.
+        second_budget = int(first["context_budget"]["estimated_input_tokens"]) - memory_cost + 120
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", str(second_budget))
+        _, second = _prepare_task_chat(demo_db, session_id, task_id, "hf02-second")
+        assert second["memory_refs"] == []
+        assert first_result["message_id"] in second["selected_message_ids"]
+        assert first_answer in [m["content"] for m in second["messages"]]
+        assert first["attempt_id"] in second["model_call_refs"]
+        derived_answer = "The prior case method still suggests correlating current facts; this is no authorization."
+        second_result = complete_chat_attempt(
+            demo_db, str(second["worker_id"]), str(second["attempt_id"]), derived_answer,
+            provider_response_id="TEST_DOUBLE_HF02_DERIVED", input_tokens=200, output_tokens=20, total_tokens=220,
+        )
+    
+        revoke(demo_db, str(active["memory_id"]), "approver-a", idempotency_key="hf02-revoke-" + asset_type)
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        _, after = _prepare_task_chat(demo_db, session_id, task_id, "hf02-after-revocation")
+        assert first_result["message_id"] not in after["selected_message_ids"]
+>       assert second_result["message_id"] not in after["selected_message_ids"]
+E       AssertionError: assert 'message-39db4662-1844-4c65-a9ba-cbc155ed6b4e' not in ['message-9eb1976b-3a24-4c4e-a606-bef73bf7d50c', 'message-546e4e03-c76b-4d48-b072-27ce329fc51f', 'message-8de2ee9f-cc8...700-99bd-9291051e4148', 'message-39db4662-1844-4c65-a9ba-cbc155ed6b4e', 'message-00bba4fc-ab90-46c6-97ce-023f97fdb831']
+
+tests\test_m3_hf02_lineage.py:70: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m3_hf02_lineage.py::test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned[EPISODIC]
+FAILED tests/test_m3_hf02_lineage.py::test_revocation_excludes_derived_answer_when_direct_memory_block_was_pruned[SEMANTIC]
+2 failed in 2.25s
