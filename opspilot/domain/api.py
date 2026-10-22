@@ -27,7 +27,8 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self) -> None:
-        if self.path != "/api/orders/demo-order":
+        from opspilot.domain.s3 import ROUTE as S3_ROUTE, SERVICE as S3_SERVICE, order_http_payload
+        if self.path not in {"/api/orders/demo-order", S3_ROUTE}:
             self._respond(404, {"error": "NOT_FOUND"})
             return
 
@@ -39,7 +40,7 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
         decision = authorize_business_request(
             db_path,
             tenant_id=tenant_id,
-            service_id="orders-demo",
+            service_id=S3_SERVICE if self.path == S3_ROUTE else "orders-demo",
             route=self.path,
             integration_id=integration_id,
             authorization=authorization,
@@ -62,6 +63,10 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
                     "authz_event_id": decision["authz_event_id"],
                 },
             )
+            return
+        if self.path == S3_ROUTE:
+            payload = order_http_payload(db_path, tenant_id, integration_id, request_id, authn_event_id)
+            self._respond(200 if payload else 404, payload or {"error": "ORDER_NOT_FOUND"})
             return
         try:
             with connect(db_path) as connection:

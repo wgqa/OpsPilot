@@ -106,6 +106,11 @@ def _current_task_state(connection: sqlite3.Connection, task_id: str) -> dict[st
         "plan": ({key: plan[key] for key in plan.keys()} if plan else None),
         "action_counts": [{key: row[key] for key in row.keys()} for row in action_counts],
     }
+    if binding["service_id"] == "orders-async-demo":
+        from opspilot.domain.s3 import s3_outcome_in_transaction
+        outcome = s3_outcome_in_transaction(connection, task_id)
+        if outcome:
+            result["s3_outcome"] = {k:outcome[k] for k in ("receipt_id","outcome","currentness","recovered","gate","explanation")}
     return result
 
 
@@ -125,6 +130,14 @@ def _current_evidence(
     *,
     excluded_sources: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
+    if state.get("service_id") == "orders-async-demo":
+        from opspilot.domain.s3 import current_s3_evidence
+        items, excluded = current_s3_evidence(connection, task_id)
+        if excluded_sources is not None:
+            excluded_sources.extend(excluded)
+        return [{"evidence_id":e["evidence_id"],"fact_type":e["fact_type"],"fetched_at":e["fetched_at"],
+                 "digest":e["digest"],"versions_digest":_digest(_canonical(e["observed_versions"])),
+                 "versions":e["observed_versions"],"facts":e["facts"]} for e in items]
     binding = connection.execute(
         "SELECT tenant_id FROM task_bindings WHERE task_id = ?", (task_id,)
     ).fetchone()
@@ -304,6 +317,8 @@ def _current_memories(
         probe_facts = latest_probe.get("facts") if latest_probe is not None else None
         status = probe_facts.get("http_status") if isinstance(probe_facts, dict) else None
         problem_type: str | None = "auth_401" if status == 401 else "auth_403_scope" if status == 403 else None
+        if state.get("service_id") == "orders-async-demo":
+            problem_type = "async_callback"
         if problem_type == "auth_403_scope":
             request_id = probe_facts.get("request_id") if isinstance(probe_facts, dict) else None
             decisions = [
@@ -2296,6 +2311,10 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
         if s2_outcome.get("currentness") == "INVALIDATED_BY_CURRENT_FACTS":
             gate["decision"] = "INCONCLUSIVE"
             gate["reason_code"] = s2_outcome.get("reason_code")
+    if binding["service_id"] == "orders-async-demo":
+        from opspilot.domain.s3 import get_s3_outcome, evaluate_s3_gate
+        s3_outcome = get_s3_outcome(path, task_id)
+        gate = s3_outcome["gate"] if s3_outcome else evaluate_s3_gate(path, task_id)
     return {
         "task": {key: binding[key] for key in ("task_id", "tenant_id", "service_id", "integration_id", "principal_id", "ticket_id", "status")},
         "trusted_state": trusted_state,

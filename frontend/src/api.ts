@@ -281,10 +281,10 @@ export const api = {
       },
     );
   },
-  createTask(sessionId: string, initialMessage: string, csrf: string) {
+  createTask(sessionId: string, initialMessage: string, csrf: string, investigationKind: 'AUTH_INCIDENT' | 'ASYNC_CALLBACK' = 'AUTH_INCIDENT') {
     return request<{ task_id: string; run_id: string; status: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
       method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': crypto.randomUUID() },
-      body: JSON.stringify({ initial_message: initialMessage }),
+      body: JSON.stringify({ initial_message: initialMessage, investigation_kind: investigationKind }),
     });
   },
   runs(taskId: string) { return request<{ items: RunItem[] }>(`/api/tasks/${encodeURIComponent(taskId)}/runs`); },

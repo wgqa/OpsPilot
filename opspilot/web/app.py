@@ -393,8 +393,8 @@ def create_app(
             raise TaskControlError("TASK_OWNER_REQUIRED")
         result = create_task_with_initial_run(
             resolved_db, context.identity, session_id=session_id,
-            service_id=os.environ.get("OPSPILOT_DEMO_SERVICE_ID", "orders-demo"),
-            integration_id=os.environ.get("OPSPILOT_DEMO_INTEGRATION_ID", "integration-a"),
+            service_id="orders-async-demo" if body.investigation_kind == "ASYNC_CALLBACK" else os.environ.get("OPSPILOT_DEMO_SERVICE_ID", "orders-demo"),
+            integration_id=f"async-integration-{context.identity.tenant_id.removeprefix('tenant-')}" if body.investigation_kind == "ASYNC_CALLBACK" else os.environ.get("OPSPILOT_DEMO_INTEGRATION_ID", "integration-a"),
             ticket_id=os.environ.get("OPSPILOT_DEMO_TICKET_ID", "INC-A-001"),
             initial_message=body.initial_message, idempotency_key=key,
             deadline_ms=deadline_ms,

@@ -616,6 +616,8 @@ def _mcp_child_environment(db_path: Path) -> dict[str, str]:
     environment = {key: os.environ[key] for key in allowed if os.environ.get(key)}
     environment["OPSPILOT_DB_PATH"] = str(db_path)
     environment["PYTHONPATH"] = str(ROOT)
+    if os.environ.get("OPSPILOT_S3_KNOWLEDGE_DIRECTORY"):
+        environment["OPSPILOT_S3_KNOWLEDGE_DIRECTORY"] = os.environ["OPSPILOT_S3_KNOWLEDGE_DIRECTORY"]
     return environment
 
 
@@ -1149,6 +1151,7 @@ def build_investigation_graph(
     s2_mode: bool = False,
     evaluation_strategy: str = "A",
     memory_enabled: bool = True,
+    s3_mode: bool = False,
     interrupt_after_for_test: tuple[str, ...] = (),
 ):
     async def intake(state: InvestigatorState) -> dict[str, object]:
@@ -2289,6 +2292,22 @@ def build_investigation_graph(
         receipt = get_verification_receipt(db_path, task_id, str(state["verification_id"]), executor_id)
         return "d3_freeze_report" if receipt.get("recovery_verified") else "d3_unresolved_report"
 
+    if s3_mode:
+        from opspilot.s3_investigation import S3Nodes
+        s3 = S3Nodes(db_path, task_id, run_id, llm, model_id, mcp_client, model_tool_specs,
+                     strategy=evaluation_strategy, memory_enabled=memory_enabled)
+        investigate, execute_read_tools, evidence_gate, report = s3.investigate, s3.execute, s3.gate, s3.report
+        def after_investigate(state):
+            return "execute_read_tools" if state.get("pending_call_refs") or state.get("policy_tool_call") else "evidence_gate"
+        def after_tool_execution(state):
+            return "evidence_gate"
+        def after_gate(state):
+            counts = attempt_counts(db_path, task_id)
+            return "report" if (
+                state.get("gate_decision", {}).get("decision") == "DIAGNOSED"
+                or counts["MCP"] >= MAX_MCP_ATTEMPTS or counts["MODEL"] >= MAX_MODEL_CALLS
+                or state.get("last_investigation_action") in {"MODEL_NO_TOOL","MODEL_NO_PROGRESS","MCP_NO_PROGRESS","POLICY_NO_ACTION","BUDGET_EXHAUSTED"}
+            ) else "investigate"
     graph = StateGraph(InvestigatorState)
     graph.add_node("intake", intake)
     graph.add_node("clarify_scope", clarify_scope)
@@ -2442,6 +2461,9 @@ async def run_investigation(
     if d3_mode and not executor_id:
         raise ValueError("D3 mode requires an explicit trusted executor service identity.")
     task_id = str(binding["task_id"])
+    s3_mode = binding["service_id"] == "orders-async-demo"
+    if s3_mode:
+        d3_mode = False
 
     if run_id is None:
         # Early fail-closed check before model configuration, MCP startup, or any
@@ -2547,9 +2569,11 @@ async def run_investigation(
                 )
         async with Client(server_params) as mcp_client:
             catalog_result = await mcp_client.list_tools()
-            tool_catalog, model_tool_specs = _mcp_catalog(
-                catalog_result.tools, include_scope_authz=s2_mode,
-            )
+            if s3_mode:
+                from opspilot.s3_investigation import s3_catalog
+                tool_catalog, model_tool_specs = s3_catalog(catalog_result.tools)
+            else:
+                tool_catalog, model_tool_specs = _mcp_catalog(catalog_result.tools, include_scope_authz=s2_mode)
             async with AsyncSqliteSaver.from_conn_string(str(resolved_checkpoint_db)) as checkpointer:
                 await checkpointer.setup()
                 graph = build_investigation_graph(
@@ -2568,6 +2592,7 @@ async def run_investigation(
                     business_api_url=verification_url,
                     run_id=run_id,
                     s2_mode=s2_mode,
+                    s3_mode=s3_mode,
                     evaluation_strategy=evaluation_strategy,
                     memory_enabled=_memory_enabled_for_test,
                     interrupt_after_for_test=_interrupt_after_for_test,
@@ -2661,6 +2686,12 @@ async def run_investigation(
                                 "graph_state": dict(snapshot.values),
                                 "action_state": action_state,
                             }
+                        if s3_mode:
+                            from opspilot.domain.s3 import get_s3_outcome
+                            if run_id is not None and task_identity is not None:
+                                from opspilot.domain.task_control import finish_task_run
+                                finish_task_run(resolved_db, task_identity, run_id, "SUCCEEDED")
+                            return {"task_id":task_id,"thread_id":binding["thread_id"],"graph_state":dict(snapshot.values),"s3_outcome":get_s3_outcome(resolved_db,task_id)}
                         saved = read_report(resolved_db, task_id)
                         if saved is None:
                             raise RuntimeError("Completed checkpoint has no immutable D2 report.")
@@ -2768,7 +2799,7 @@ async def run_investigation(
                         resolved_db, task_identity, run_id, run_status,
                         blocked_reason=blocked_reason,
                     )
-                if d3_mode or s2_mode:
+                if d3_mode or s2_mode or s3_mode:
                     result = {
                         "task_id": task_id,
                         "thread_id": binding["thread_id"],

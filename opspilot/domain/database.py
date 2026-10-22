@@ -1051,9 +1051,10 @@ def initialize(path: str | Path) -> None:
         # executescript normally commits any open transaction before executing.
         # Put the transaction opener inside the script so schema creation and the
         # versioned compatibility backfill commit or roll back together.
-        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 12:
+        if version > 13:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1361,6 +1362,8 @@ def initialize(path: str | Path) -> None:
             version = 11
         if version < 12:
             connection.execute("PRAGMA user_version = 12")
+        if version < 13:
+            connection.execute("PRAGMA user_version = 13")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -1371,7 +1374,14 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
     with connect(path) as connection:
         connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_update")
         connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_delete")
+        connection.execute("DROP TRIGGER IF EXISTS s3_diagnoses_no_delete")
         for table in (
+            "s3_model_contexts",
+            "s3_diagnoses",
+            "s3_http_observations",
+            "s3_receivers",
+            "s3_deliveries",
+            "s3_orders",
             "investigation_update_attempts",
             "investigation_update_assessments",
             "chat_message_summary_sources",

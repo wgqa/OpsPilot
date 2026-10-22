@@ -156,7 +156,7 @@ def _read_context(connection: sqlite3.Connection, task_id: str, run_id: str) -> 
             "service_id": str(row["service_id"]),
             "integration_id": str(row["integration_id"]),
             "principal_id": str(row["principal_id"]),
-            "route": "GET /api/orders/demo-order",
+            "route": "GET /api/async-orders/async-order" if str(row["service_id"]) == "orders-async-demo" else "GET /api/orders/demo-order",
         },
     }
 

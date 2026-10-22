@@ -1,0 +1,1 @@
+Check the bound callback delivery record, correlate order version and event ID. FAILED/503 suggests a delivery failure. ACKNOWLEDGED/202 requires receiver processing verification for the same event. QUEUED does not mean processed. Use query retrieval for the current integration contract if uncertain. Never resend or modify permissions.

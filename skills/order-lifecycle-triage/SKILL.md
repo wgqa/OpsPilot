@@ -1,0 +1,1 @@
+Investigate the bound order lifecycle. HTTP 200 confirms a successful read only. If PROCESSING, explain callback is not due yet; do not label transport broken. If COMPLETED, investigate the correlated callback event next. Current MCP facts override all historical hints.

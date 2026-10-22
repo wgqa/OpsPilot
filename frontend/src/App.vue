@@ -14,6 +14,7 @@ const sessionId = ref('');
 const messages = ref<MessageItem[]>([]);
 const taskId = ref('');
 const investigationUpdates = ref<InvestigationUpdateAssessment[]>([]);
+const investigationKind = ref<'AUTH_INCIDENT' | 'ASYNC_CALLBACK'>('AUTH_INCIDENT');
 const inspector = ref<Inspector | null>(null);
 const taskOutcome = ref<TaskOutcome | null>(null);
 const taskMemoryContext = ref<TaskMemoryContext | null>(null);
@@ -444,9 +445,9 @@ async function createDemoTask(): Promise<void> {
   if (!sessionId.value || !csrf.value || !symptom) return;
   busy.value = true;
   errorMessage.value = '';
-  notice.value = '正在通过固定 S1 orders-demo / integration-a 绑定启动调查；故障描述作为未验证用户输入记录。';
+  notice.value = investigationKind.value === 'ASYNC_CALLBACK' ? '正在启动订单异步回调只读调查；订单、投递与接收处理将分别核实。' : '正在通过固定 S1 orders-demo / integration-a 绑定启动调查；故障描述作为未验证用户输入记录。';
   try {
-    const created = await api.createTask(sessionId.value, symptom, csrf.value);
+    const created = await api.createTask(sessionId.value, symptom, csrf.value, investigationKind.value);
     initialSymptom.value = '';
     showTaskForm.value = false;
     taskId.value = created.task_id;
@@ -786,7 +787,7 @@ function acceptEvent(item: EventItem): void {
     void loadChunks(runId);
   }
   if (item.event_kind.startsWith('RUN_STATUS_') || item.event_kind === 'CHAT_ANSWER_COMMITTED'
-    || ['PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED', 'REPORT_FROZEN', 'DELIVERY_COMMITTED'].includes(item.event_kind)) {
+    || ['PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED', 'REPORT_FROZEN', 'DELIVERY_COMMITTED', 'S3_DIAGNOSIS_FROZEN'].includes(item.event_kind)) {
     void refreshSessionMessagesOnly();
     if (taskId.value) void refreshInspector();
   }
@@ -815,7 +816,7 @@ function connectEvents(): void {
     'RUN_STATUS_WAITING_INPUT', 'RUN_STATUS_INTERRUPTED_RECOVERABLE', 'CHAT_CHUNK_AVAILABLE',
     'CHAT_ANSWER_COMMITTED', 'CHAT_ATTEMPT_FAILED', 'RUN_RETRY_INTERRUPTED_RECOVERABLE', 'RUN_RETRY_BLOCKED',
     'PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED',
-    'REPORT_FROZEN', 'DELIVERY_COMMITTED',
+    'REPORT_FROZEN', 'DELIVERY_COMMITTED', 'S3_DIAGNOSIS_FROZEN',
   ]) source.addEventListener(name, listener);
   source.onerror = () => {
     source.close();
@@ -1053,9 +1054,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="demo-notice"><span class="notice-icon">i</span><span>业务调查使用可信绑定 <b>orders-demo / integration-a</b> 与固定订单路由。用户描述和关键更正只提供调查线索，真实状态来自当前 MCP Evidence。</span></div>
+        <div class="demo-notice"><span class="notice-icon">i</span><span>业务调查使用服务端可信资源绑定。用户描述和关键更正只提供调查线索，真实状态来自当前 MCP Evidence。S3 只做诊断，不重发回调。</span></div>
         <form v-if="showTaskForm && canCreateTask" class="task-input-card" data-testid="new-task-form" @submit.prevent="createDemoTask">
           <div><span class="eyebrow">NEW INVESTIGATION</span><h2>描述实际故障</h2><p>请写下你观察到的现象。状态码未确认时可以明确说明；资源仍由服务端绑定。</p></div>
+          <label>调查场景 <select v-model="investigationKind" data-testid="investigation-kind" :disabled="busy || !csrf"><option value="AUTH_INCIDENT">订单 API 认证与权限</option><option value="ASYNC_CALLBACK">订单 200 但下游未收到回调（只读）</option></select></label>
           <textarea v-model="initialSymptom" data-testid="initial-symptom-input" rows="3" maxlength="20000" placeholder="例如：昨晚凭证轮换后订单 API 一直提示未认证，请核实当前情况。" :disabled="busy || !csrf"></textarea>
           <div class="task-input-actions"><span>输入会以未验证用户来源加入 Investigator 上下文。</span><button class="primary-button" type="submit" :disabled="!initialSymptom.trim() || busy || !csrf">启动调查 <span>→</span></button></div>
         </form>
@@ -1274,6 +1276,7 @@ onBeforeUnmount(() => {
             <div v-if="latestContextProvenance?.selected_skill" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).name) }} · v{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).version) }}</strong><small>Skill SHA-256 {{ String((latestContextProvenance.selected_skill as Record<string, unknown>).digest).slice(0, 16) }}</small></span></div>
             <div v-for="item in latestSelectedKnowledge" :key="String(item.document_id)" class="trace-row"><span class="trace-icon">▤</span><span><strong>{{ String(item.document_id) }} · v{{ String(item.version) }}</strong><small>{{ String(item.source) }} · SHA-256 {{ String(item.digest).slice(0, 16) }}</small></span></div>
             <div class="gate-card"><span>确定性 Evidence Gate</span><b>{{ readableGate(inspector.current_gate.decision) }}</b><small>{{ String(inspector.current_gate.reason_code ?? '—') }} · 当前有效 Evidence {{ Array.isArray(inspector.current_gate.checked_fact_ids) ? (inspector.current_gate.checked_fact_ids as unknown[]).length : 0 }} 项</small></div>
+            <div v-if="inspector.trusted_state.s3_outcome" class="gate-card" data-testid="s3-diagnosis"><span>异步回调调查结果</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
           </div>
           <div v-if="canCreateTask && taskId" class="inspector-section correction-section">
             <div class="section-heading"><h3>正式关键更正</h3><span class="status-badge warm">会提升控制版本</span></div>

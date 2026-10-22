@@ -20,6 +20,7 @@ class CreateSessionRequest(StrictModel):
 
 class CreateTaskRequest(StrictModel):
     initial_message: str = Field(min_length=1, max_length=20_000)
+    investigation_kind: Literal["AUTH_INCIDENT", "ASYNC_CALLBACK"] = "AUTH_INCIDENT"
 
 
 class MessageRequest(StrictModel):

@@ -1,5 +1,7 @@
 # OpsPilot
 
+M4-02 新增订单异步回调只读调查切片（验收候选）：可从 Web 选择场景，区分订单处理中、投递失败和接收方排队；模型自主选择只读调查行动，Knowledge/Skill 按需检索，复用既有经审核 Episodic Memory。[运行与证据](docs/evidence/vnext/m4-02/REPORT.md)。不重发回调，不表示业务恢复；等待主 Agent 独立验收。
+
 面向企业 API 接入问题调查与协作处置的对话式 Agent，使用 Python、LangChain 和 LangGraph，同时承载大厂校招 Agent Engineering / AI 应用研发的知识实践。
 
 > **当前指导入口（2026-10-22 更新）：** 开始规划、开发或评审前，先读 [项目北极星](PROJECT_NORTH_STAR.md) 和 [AGENTS.md](AGENTS.md)。项目同时要求用户可感知的智能任务推进，以及 Context Engineering、分层 Memory、Knowledge、Skills、MCP 等知识的实践与验证；以白皮书原理、源码、实验和面试表达形成学习闭环。当前需重点补齐业务智能与连续任务体验相对治理能力的差距。方向更新不代表新阶段已获准启动。

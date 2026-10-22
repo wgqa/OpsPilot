@@ -591,6 +591,10 @@ def _source_for_s2_task(connection: sqlite3.Connection, task_id: str) -> dict[st
 def _source_for_task(
     connection: sqlite3.Connection, task_id: str, problem_type: str | None = None,
 ) -> dict[str, object]:
+    binding = _trusted_binding(connection, task_id)
+    if binding["service_id"] == "orders-async-demo" and problem_type in (None, "async_callback"):
+        from opspilot.domain.s3 import s3_memory_source
+        return s3_memory_source(connection, task_id)
     if problem_type in (None, PROBLEM_TYPE):
         try:
             return _source_for_s1_task(connection, task_id)
@@ -802,6 +806,21 @@ def _case_experience(source: dict[str, object]) -> tuple[str, dict[str, object],
             "problem_type": problem_type, "service_id": service_id,
             "source_outcome": outcome, "required_current_checks": experience["required_current_checks"],
         }
+    elif problem_type == "async_callback" and outcome == "DIAGNOSED":
+        summary = f"历史异步订单诊断：{facts['route']} 的可信结论为 {facts['outcome']}；仅诊断，未重发回调，未证明恢复。"
+        experience = {
+            "source_authority": MEMORY_AUTHORITY,
+            "case_specific_facts": facts,
+            "investigation_guidance": [
+                "HTTP 200 only proves an order read; establish current lifecycle before calling a missing callback a fault.",
+                "For a completed order, correlate delivery event and version; a 202 acknowledgement requires receiver processing verification.",
+                "Historical outcome is not the target task's cause. Retrieve the applicable current contract or delivery Skill if uncertain.",
+            ],
+            "required_current_checks": facts["required_current_checks"],
+            "limitations": ["Historical method only; no authorization, resend or recovery proof."],
+        }
+        constraints = {"problem_type":problem_type,"service_id":service_id,"source_outcome":outcome,
+                       "required_current_checks":facts["required_current_checks"]}
     else:
         raise MemorySourceRejected("Unsupported trusted Memory outcome.")
     return summary, experience, constraints
@@ -1392,6 +1411,11 @@ def assert_task_skill_compatible(
         "auth-incident-triage": load_applicable_skill("auth_401"),
         "auth-scope-triage": load_applicable_skill(SCOPE_PROBLEM_TYPE),
     }
+    if any(str(row["selected_skill_name"]) in {"order-lifecycle-triage", "callback-delivery-triage"} for row in rows) or (selected_skill and selected_skill.get("name") in {"order-lifecycle-triage", "callback-delivery-triage"}):
+        from opspilot.domain.s3_assets import SKILLS, load_s3_skill
+        for name in SKILLS:
+            approved_names.add(name)
+            expected_by_name[name] = load_s3_skill(name)
     if selected_skill is not None:
         name = str(selected_skill.get("name", ""))
         expected = expected_by_name.get(name)

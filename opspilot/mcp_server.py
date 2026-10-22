@@ -66,6 +66,9 @@ def build_task_server(
     trusted_db_path = database_path(db_path)
     initialize(trusted_db_path)
     binding = get_task_binding(trusted_db_path, task_id)
+    if binding["service_id"] == "orders-async-demo":
+        from opspilot.domain.s3_mcp import build_s3_server
+        return build_s3_server(trusted_db_path, task_id, business_api_url)
     server = MCPServer("OpsPilot D2 task-bound read-only investigator")
 
     @server.tool(

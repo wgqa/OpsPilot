@@ -18,6 +18,9 @@ class KnowledgeIntegrityError(RuntimeError):
 
 def load_scope_knowledge(service_id: str, *, include_legacy: bool = False) -> list[dict[str, str]]:
     """Load only digest-verified versioned scope documents applicable to this service."""
+    if service_id == "orders-async-demo":
+        from opspilot.domain.s3_assets import load_knowledge
+        return load_knowledge()
     try:
         manifest = json.loads((KNOWLEDGE_DIRECTORY / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
