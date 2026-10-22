@@ -1164,7 +1164,7 @@ def get_task_memory_context(
         ).fetchall()
     applicable = []
     excluded_memories = []
-    for problem_type in (PROBLEM_TYPE, S2_PROBLEM_TYPE):
+    for problem_type in (("async_callback",) if binding["service_id"] == "orders-async-demo" else (PROBLEM_TYPE, S2_PROBLEM_TYPE)):
         selected, excluded = select_applicable_memories(path, task_id, problem_type)
         applicable.extend(selected)
         excluded_memories.extend(excluded)

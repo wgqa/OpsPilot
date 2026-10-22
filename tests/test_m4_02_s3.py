@@ -245,7 +245,7 @@ def test_s3_chat_currentness_invalidates_previous_facts(tmp_path):
 
 
 def test_real_case_memory_is_separate_and_revocation_reloads_current_db(tmp_path):
-    from opspilot.domain.episodic_memory import create_memory_candidate,confirm_memory,revoke_memory,select_applicable_memories
+    from opspilot.domain.episodic_memory import create_memory_candidate,confirm_memory,revoke_memory,select_applicable_memories,get_task_memory_context
     from opspilot.smokes.m4_02 import task as new_task
     from opspilot.domain.s3 import prepare_s3_fixture,PROBLEM
     from opspilot.domain.task_control import claim_task_run,apply_pending_critical_inputs,trusted_identity
@@ -263,10 +263,12 @@ def test_real_case_memory_is_separate_and_revocation_reloads_current_db(tmp_path
     nodes=S3Nodes(db,target["task_id"],target["run_id"],None,"test-model",None,[])
     _,metadata=nodes.prompt({"evidence_ids":[],"diagnosis_draft":{}})
     assert metadata["selected_memories"][0]["source_task_id"] == source["task_id"] != target["task_id"]
+    assert get_task_memory_context(db,target["task_id"],"support-a")["applicable_memories"][0]["memory_id"] == candidate["memory_id"]
     assert not metadata["evidence_ids"]
     revoke_memory(db,candidate["memory_id"],"approver-a")
     _,after=nodes.prompt({"evidence_ids":[],"diagnosis_draft":{}})
     assert after["selected_memories"] == []
+    assert get_task_memory_context(db,target["task_id"],"support-a")["applicable_memories"] == []
     assert any(x["reason"] == "MEMORY_REVOKED" for x in after["excluded_sources"])
 
 
