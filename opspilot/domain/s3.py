@@ -292,7 +292,7 @@ def evaluate_s3_gate(path, task_id, evidence_ids=None):
     return {**_gate_from_evidence(evidence), "excluded_sources": excluded, "policy": POLICY}
 
 
-def persist_s3_diagnosis(path, task_id, run_id, evidence_ids, summary="", *, stop_reason=None, summary_gate_outcome=None):
+def persist_s3_diagnosis(path, task_id, run_id, evidence_ids, summary="", *, stop_reason=None, summary_gate_outcome=None, summary_call_id=None):
     from opspilot.domain.task_control import assert_task_control_in_transaction, _insert_outbox
     with connect(path) as c:
         c.execute("BEGIN IMMEDIATE")
@@ -305,12 +305,14 @@ def persist_s3_diagnosis(path, task_id, run_id, evidence_ids, summary="", *, sto
         gate = {**_gate_from_evidence(evidence), "excluded_sources": excluded, "policy": POLICY}
         if gate["decision"] != "DIAGNOSED":
             gate.update(decision="INCONCLUSIVE", outcome="INCONCLUSIVE", reason_code=stop_reason or "S3_INSUFFICIENT_CURRENT_FACTS")
-        if summary_gate_outcome != gate["outcome"]:
+        narrative = c.execute("SELECT p.call_id FROM d5_context_provenance p JOIN d2_model_traces t ON t.call_id=p.call_id JOIN d2_attempts a ON a.attempt_id=t.attempt_id WHERE p.call_id=? AND p.task_id=? AND a.run_id=? AND t.status='OK'", (summary_call_id,task_id,run_id)).fetchone() if summary_call_id else None
+        if summary_gate_outcome != gate["outcome"] or narrative is None:
             summary = ""
         revision = int(c.execute("SELECT control_revision FROM task_controls WHERE task_id=?", (task_id,)).fetchone()[0])
         body = {"schema": POLICY, "task_id": task_id, "run_id": run_id, "control_revision": revision,
                 "gate": gate, "evidence": [{"id": e["evidence_id"], "digest": e["digest"], "fact_type": e["fact_type"], "facts": e["facts"], "versions": e["observed_versions"]} for e in evidence],
-                "model_summary_untrusted": summary[:1200], "recovered": False, "business_writes": 0}
+                "model_summary_untrusted": summary[:1200], "explanation_call_id":summary_call_id if narrative else None,
+                "recovered": False, "business_writes": 0}
         ref = f"s3-diagnosis-{uuid.uuid4()}"
         c.execute("INSERT INTO s3_diagnoses VALUES(?,?,?,?,?,?,?,?,?,?,?)", (ref,b["tenant_id"],task_id,run_id,revision,POLICY,gate["outcome"],canonical_json(gate["checked_fact_ids"]),canonical_json(body),digest_json(body),utc_now()))
         c.execute("UPDATE task_bindings SET status=? WHERE task_id=?", ("NO_ACTION" if gate["decision"] == "DIAGNOSED" else "INCONCLUSIVE",task_id))
@@ -332,10 +334,51 @@ def s3_outcome_in_transaction(c, task_id):
         evidence, excluded = current_s3_evidence(c, task_id, json.loads(row["evidence_ids_json"]))
         rev = c.execute("SELECT control_revision FROM task_controls WHERE task_id=?", (task_id,)).fetchone()[0]
         current = not excluded and rev == row["control_revision"] and digest_json(body) == row["digest"]
+        narrative_exclusions = _explanation_exclusions(c, task_id, body) if current else [{"source_id":row["receipt_id"],"reason":"S3_CURRENT_FACTS_INVALIDATED"}]
+        narrative_current = current and not narrative_exclusions
         return {"receipt_id":row["receipt_id"],"outcome":row["outcome"] if current else "INCONCLUSIVE",
                 "currentness":"CURRENT" if current else "INVALIDATED_BY_CURRENT_FACTS", "recovered":False,
-                "explanation":body.get("model_summary_untrusted","") if current else "",
+                "explanation":body.get("model_summary_untrusted","") if narrative_current else "",
+                "explanation_currentness":"CURRENT" if narrative_current else "SOURCE_INVALIDATED",
+                "explanation_excluded_sources":narrative_exclusions,
                 "gate":body["gate"] if current else {"decision":"INCONCLUSIVE","reason_code":"S3_SOURCE_INVALIDATED","excluded_sources":excluded},"body":body}
+
+
+def _explanation_exclusions(c, task_id, body):
+    """A frozen narrative is not current merely because its factual Gate still is."""
+    if not body.get("model_summary_untrusted"):
+        return []
+    provenance = c.execute("SELECT * FROM d5_context_provenance WHERE call_id=? AND task_id=?", (body.get("explanation_call_id"),task_id)).fetchone()
+    if provenance is None:
+        return [{"source_id":body.get("explanation_call_id"),"reason":"EXPLANATION_PROVENANCE_UNAVAILABLE"}]
+    from opspilot.domain.episodic_memory import _memory_exclusion_reason, _now
+    from opspilot.domain.s3_assets import load_knowledge, load_s3_skill
+    excluded=[]
+    binding=get_s3_binding(c,task_id)
+    for ref in json.loads(provenance["selected_memories_json"]):
+        memory=c.execute("SELECT * FROM d5_memories WHERE memory_id=?", (ref["memory_id"],)).fetchone()
+        reason="MEMORY_MISSING" if memory is None else _memory_exclusion_reason(c,memory,task_id=task_id,problem_type=PROBLEM,service_id=SERVICE,now=_now())
+        if memory and (memory["tenant_id"] != binding["tenant_id"] or int(memory["version"]) != int(ref["version"]) or memory["content_digest"] != ref["digest"]):
+            reason=reason or "MEMORY_VERSION_CHANGED"
+        if reason:
+            excluded.append({"source_type":"EPISODIC_MEMORY","source_id":ref["memory_id"],"reason":f"EXPLANATION_{reason}"})
+    available={d["document_id"]:d for d in load_knowledge()}
+    for ref in json.loads(provenance["selected_knowledge_json"]):
+        doc=available.get(ref["document_id"])
+        if doc is None or any(doc.get(k) != ref.get(k) for k in ("version","digest","source","valid_from")):
+            excluded.append({"source_type":"KNOWLEDGE","source_id":ref["document_id"],"reason":"EXPLANATION_KNOWLEDGE_INVALIDATED"})
+    name=provenance["selected_skill_name"]
+    if name:
+        try:
+            skill=load_s3_skill(name)
+            valid=skill["version"] == provenance["selected_skill_version"] and skill["digest"] == provenance["selected_skill_digest"]
+        except (OSError,ValueError,KeyError):
+            valid=False
+        if not valid:
+            excluded.append({"source_type":"SKILL","source_id":name,"reason":"EXPLANATION_SKILL_INVALIDATED"})
+    _,fact_excluded=current_s3_evidence(c,task_id,json.loads(provenance["evidence_ids_json"]))
+    excluded.extend(fact_excluded)
+    return excluded
 
 
 def s3_memory_source(connection, task_id):

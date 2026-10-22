@@ -361,3 +361,63 @@ def test_no_tool_and_budget_exhaustion_stop_without_business_writes(tmp_path):
     assert asyncio.run(nodes.investigate(state))["last_investigation_action"] == "BUDGET_EXHAUSTED"
     asyncio.run(nodes.report(state))
     assert get_s3_outcome(db,task["task_id"])["outcome"] == "INCONCLUSIVE"
+
+
+def test_revoked_memory_invalidates_frozen_model_explanation_not_current_facts(tmp_path):
+    import asyncio
+    from langchain_core.messages import AIMessage
+    from opspilot.domain.episodic_memory import create_memory_candidate,confirm_memory,revoke_memory
+    from opspilot.domain.s3 import prepare_s3_fixture,get_s3_outcome
+    from opspilot.domain.task_control import claim_task_run,trusted_identity
+    from opspilot.smokes.m4_02 import task as new_task
+    from opspilot.s3_investigation import S3Nodes
+    db,source,_,_=completed_readonly_case(tmp_path)
+    memory=create_memory_candidate(db,source["task_id"],"support-a")
+    confirm_memory(db,memory["memory_id"],"approver-a")
+    prepare_s3_fixture(db,"PROCESSING")
+    target=new_task(db,"订单还没有回调，请核实","explanation-target")
+    claim_task_run(db,trusted_identity(db,"support-a"),target["run_id"])
+    order,_,_=facts(db,target)
+    ids=[observe(db,target,"get_order_status",order)]
+    class ExplanationModel:
+        async def ainvoke(self,_messages):
+            return AIMessage(content="unit-test historical-method-dependent explanation",id="unit-explanation")
+    nodes=S3Nodes(db,target["task_id"],target["run_id"],ExplanationModel(),"unit-model",None,[])
+    asyncio.run(nodes.report({"evidence_ids":ids,"diagnosis_draft":{}}))
+    assert get_s3_outcome(db,target["task_id"])["explanation"]
+    revoke_memory(db,memory["memory_id"],"approver-a")
+    after=get_s3_outcome(db,target["task_id"])
+    assert after["outcome"] == "ORDER_PROCESSING"
+    assert after["explanation"] == ""
+    assert after["explanation_currentness"] == "SOURCE_INVALIDATED"
+
+
+def test_expired_knowledge_invalidates_frozen_explanation_not_current_facts(tmp_path,monkeypatch):
+    import asyncio,shutil
+    from langchain_core.messages import AIMessage
+    from opspilot.domain import s3_assets
+    from opspilot.domain.s3 import get_s3_outcome
+    from opspilot.domain.task_control import claim_task_run,trusted_identity
+    from opspilot.s3_investigation import S3Nodes
+    from opspilot.domain.database import connect
+    directory=tmp_path/"knowledge-copy"
+    shutil.copytree(s3_assets.DIRECTORY,directory)
+    monkeypatch.setattr(s3_assets,"DIRECTORY",directory)
+    doc=s3_assets.search_knowledge("processing lifecycle")[0]
+    db,task,_=prepared(tmp_path,"PROCESSING")
+    claim_task_run(db,trusted_identity(db,"support-a"),task["run_id"])
+    order,_,_=facts(db,task)
+    ids=[observe(db,task,"get_order_status",order)]
+    class ExplanationModel:
+        async def ainvoke(self,_messages): return AIMessage(content="unit-test knowledge-dependent explanation",id="unit-knowledge-explanation")
+    nodes=S3Nodes(db,task["task_id"],task["run_id"],ExplanationModel(),"unit-model",None,[])
+    state={"evidence_ids":ids,"diagnosis_draft":{"s3_knowledge_refs":[{k:doc[k] for k in ("document_id","version","digest","source","valid_from")}]}}
+    asyncio.run(nodes.report(state))
+    assert get_s3_outcome(db,task["task_id"])["explanation"]
+    manifest_path=directory/"manifest.json"
+    manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+    for item in manifest["documents"]: item["expires_at"]="2000-01-01T00:00:00+00:00"
+    manifest_path.write_text(json.dumps(manifest),encoding="utf-8")
+    outcome=get_s3_outcome(db,task["task_id"])
+    assert outcome["outcome"] == "ORDER_PROCESSING" and not outcome["explanation"]
+    assert any(x["reason"] == "EXPLANATION_KNOWLEDGE_INVALIDATED" for x in outcome["explanation_excluded_sources"])

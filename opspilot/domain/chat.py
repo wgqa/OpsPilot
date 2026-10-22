@@ -110,7 +110,7 @@ def _current_task_state(connection: sqlite3.Connection, task_id: str) -> dict[st
         from opspilot.domain.s3 import s3_outcome_in_transaction
         outcome = s3_outcome_in_transaction(connection, task_id)
         if outcome:
-            result["s3_outcome"] = {k:outcome[k] for k in ("receipt_id","outcome","currentness","recovered","gate","explanation")}
+            result["s3_outcome"] = {k:outcome[k] for k in ("receipt_id","outcome","currentness","recovered","gate","explanation","explanation_currentness","explanation_excluded_sources")}
     return result
 
 
@@ -956,6 +956,8 @@ def _prepare_context(
             }
             state_digest = _digest(_canonical(state))
     excluded: list[dict[str, str]] = []
+    if state and isinstance(state.get("s3_outcome"),dict):
+        excluded.extend(state["s3_outcome"].get("explanation_excluded_sources",[]))
     evidence = (
         _current_evidence(connection, task_id, state, excluded_sources=excluded)
         if task_id and state else []

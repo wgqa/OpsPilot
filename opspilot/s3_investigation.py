@@ -270,15 +270,15 @@ class S3Nodes:
         return {"stage":"evidence_gate_complete","gate_decision":evaluate_s3_gate(self.db,self.task,state.get("evidence_ids",[])),"budget":attempt_counts(self.db,self.task)}
 
     async def report(self,state):
-        summary = state.get("diagnosis_draft",{}).get("latest_model_summary","")
+        summary, summary_call = "", None
         expected = evaluate_s3_gate(self.db,self.task,state.get("evidence_ids",[])).get("outcome")
         if self.strategy == "A" and expected and attempt_counts(self.db,self.task)["MODEL"] < MAX_MODEL_CALLS:
             try:
-                _, _, summary = await self.model_call(state,explain=True)
+                summary_call, _, summary = await self.model_call(state,explain=True)
             except Exception:
                 # Model explanation is optional. Gate/receipt safety never depends on prose.
                 summary = ""
         receipt = persist_s3_diagnosis(self.db,self.task,self.run,state.get("evidence_ids",[]),
-                                      summary, summary_gate_outcome=expected,
+                                      summary, summary_gate_outcome=expected, summary_call_id=summary_call,
                                       stop_reason=state.get("last_investigation_action"))
         return {"stage":"complete","report_ref":receipt["receipt_id"],"gate_decision":json.loads(receipt["body_json"])["gate"],"budget":attempt_counts(self.db,self.task)}

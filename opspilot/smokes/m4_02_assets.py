@@ -11,10 +11,12 @@ import subprocess
 import sys
 import time
 import traceback
+import uuid
 from datetime import datetime, timezone
 
 from opspilot.config import ROOT, load_local_environment
 from opspilot.domain.database import connect, reset_fixture
+from opspilot.domain.d2 import canonical_json
 from opspilot.domain.episodic_memory import create_memory_candidate, confirm_memory, revoke_memory
 from opspilot.domain.s3 import prepare_s3_fixture, get_s3_outcome
 from opspilot.investigator import run_investigation
@@ -28,6 +30,49 @@ async def run(db, created, *, resume=False, pause=False, memory=True):
                                   checkpoint_db_path=db.with_suffix(".checkpoints.sqlite3"),run_id=created["run_id"],
                                   s2_mode=True,resume=resume,_memory_enabled_for_test=memory,
                                   _interrupt_after_for_test=("investigate",) if pause else ())
+
+
+async def post_completion_invalidation(db,target,memory,manifest_path,directory,*,kind):
+    """Real follow-up through the existing Worker/Provider after a frozen narrative loses a source."""
+    from unittest.mock import patch
+    from opspilot.domain import chat
+    from opspilot.domain.task_control import admit_task_message,trusted_identity,register_worker_owner
+    from opspilot.web.worker import _process_chat_run
+    before=get_s3_outcome(db,target["task_id"])
+    if kind == "MEMORY":
+        revoke_memory(db,memory["memory_id"],"approver-a",idempotency_key=f"post-finish-{target['task_id']}")
+    else:
+        manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+        for doc in manifest["documents"]: doc["expires_at"]="2020-01-01T00:00:00+00:00"
+        manifest_path.write_text(json.dumps(manifest,indent=2),encoding="utf-8")
+    after=get_s3_outcome(db,target["task_id"])
+    accepted=admit_task_message(db,trusted_identity(db,"support-a"),session_id=target["session_id"],task_id=target["task_id"],
+                                input_kind="CHAT_READONLY",body="请只依据当前仍有效的来源解释这个订单和下游处理状态，不能把旧资料当成现在的证据。",idempotency_key=f"post-chat-{kind}")
+    worker=f"asset-followup-{uuid.uuid4()}"
+    register_worker_owner(db,worker,os.getpid())
+    captured=[]
+    original=chat.prepare_chat_attempt
+    def capture_actual(*args,**kwargs):
+        value=original(*args,**kwargs)
+        captured.append(value)
+        return value
+    # Instrumentation only: the real builder result is returned unchanged to
+    # the existing Worker, which streams the actual configured Provider answer.
+    with patch.object(chat,"prepare_chat_attempt",side_effect=capture_actual):
+        await _process_chat_run(db,worker,{"run_id":accepted["run_id"]})
+    with connect(db) as c:
+        attempts=[dict(x) for x in c.execute("SELECT * FROM chat_attempts WHERE run_id=?", (accepted["run_id"],))]
+        manifests=[dict(x) for x in c.execute("SELECT * FROM chat_context_manifests WHERE run_id=?", (accepted["run_id"],))]
+        run_row=dict(c.execute("SELECT * FROM task_runs WHERE run_id=?", (accepted["run_id"],)).fetchone())
+        answers=[dict(x) for x in c.execute("SELECT message_id,role,body FROM messages WHERE task_id=? AND role='ASSISTANT' ORDER BY sequence", (target["task_id"],))]
+    result={"kind":kind,"before":before,"after":after,"chat_run":run_row,"actual_context_builder_results":captured,
+            "provider_attempts":attempts,"context_manifests":manifests,"answers":answers}
+    write_json(directory/"POST_COMPLETION_INVALIDATION.json",result)
+    assert before["explanation"] and not after["explanation"]
+    assert before["outcome"] == after["outcome"] and after["explanation_currentness"] == "SOURCE_INVALIDATED"
+    assert run_row["status"] == "SUCCEEDED" and attempts
+    assert before["explanation"] not in canonical_json(captured)
+    return {"kind":kind,"status":"PASS","chat_run_id":accepted["run_id"]}
 
 
 async def case(name, base, runtime):
@@ -113,6 +158,12 @@ async def case(name, base, runtime):
             "tokens":sum(int(t["usage"].get("total_tokens",0)) for t in raw["model_traces"]),
             "latency_seconds":round(time.perf_counter()-started,3),"failure":failure,"control_safe":before == after and all(n == 0 for n in raw["business_write_counts"].values())}
     result["correct"] = result["actual"] == result["expected"]
+    if result["correct"] and name in {"assets-on","memory-off"}:
+        try:
+            result["post_completion_invalidation"]=await post_completion_invalidation(db,target,memory,manifest_path,directory,kind="MEMORY" if name == "assets-on" else "KNOWLEDGE")
+        except Exception as error:
+            result["post_completion_invalidation"]={"status":"FAIL","error":type(error).__name__}
+            (directory/"POST_COMPLETION_FAILURE.txt").write_text("".join(traceback.format_exception(error)),encoding="utf-8")
     write_json(directory/"RESULT.json",result)
     print(json.dumps(result,ensure_ascii=False),flush=True)
     return result
@@ -138,7 +189,7 @@ async def main_async(args):
             (base/f"{name}-UNHANDLED.txt").write_text("".join(traceback.format_exception(error)),encoding="utf-8")
             results.append({"case":name,"correct":False,"failure":type(error).__name__})
     write_json(base/"RESULTS.json",{"release":stamp,"cases":results,"correct":sum(r["correct"] for r in results),"denominator":len(results)})
-    return 0 if all(r["correct"] for r in results) else 1
+    return 0 if all(r["correct"] and r.get("post_completion_invalidation",{}).get("status") != "FAIL" for r in results) else 1
 
 
 def main():
