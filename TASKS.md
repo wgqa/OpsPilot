@@ -1,5 +1,9 @@
 # TASKS.md — OpsPilot 相对 D1 的实施追踪
 
+> **当前规划约束（2026-10-22 更新）：** 先读 [PROJECT_NORTH_STAR.md](PROJECT_NORTH_STAR.md) 和 [AGENTS.md](AGENTS.md)。后续任务须同时写明用户旅程/智能决策与学习目标，并沿“白皮书原理 → 实现取舍 → 实验与失败 → 面试表达”留下证据。Context/Memory 等核心知识不能因当前业务狭窄而被长期排除；能力实验、业务接入、效果验证分别记录。业务切片优先补齐连续对话到实际调查和业务推进的差距，安全不变量始终有效。
+>
+> **历史追踪说明：** 下方 D1–D7 / M1 勾选和待审说明保留其原阶段语境，不表示当前开发停留在这些阶段。当前范围须结合 Git SHA、已授权任务卡和主 Agent 正式验收核对；近期证据见 [M3 收口](docs/evidence/vnext/m3-closeout-01/REPORT.md) 与 [M3 HF-02](docs/evidence/vnext/m3-hf-02/REPORT.md)。本次仅同步指导，不新增开发任务、不改变历史验收结论。
+
 **主合同**：[`docs/baseline/v1.0-implementation-baseline.md`](docs/baseline/v1.0-implementation-baseline.md)
 **设计放行**：2026-10-17 R5 · DESIGN APPROVED。**D1–D5 已通过主 Agent 验收；D2 PR #2 合入 `main@171f028`。D6 E01–E10 评测及证据已完成，交主 Agent 复核。**
 

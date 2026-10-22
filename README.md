@@ -1,6 +1,12 @@
 # OpsPilot
 
-面向客户 API 接入故障的智能调查与受控处置 Agent，使用 Python、LangChain 和 LangGraph。首周唯一业务场景是 S1：客户端凭证引用过旧导致业务 API 返回 401。
+面向企业 API 接入问题调查与协作处置的对话式 Agent，使用 Python、LangChain 和 LangGraph，同时承载大厂校招 Agent Engineering / AI 应用研发的知识实践。
+
+> **当前指导入口（2026-10-22 更新）：** 开始规划、开发或评审前，先读 [项目北极星](PROJECT_NORTH_STAR.md) 和 [AGENTS.md](AGENTS.md)。项目同时要求用户可感知的智能任务推进，以及 Context Engineering、分层 Memory、Knowledge、Skills、MCP 等知识的实践与验证；以白皮书原理、源码、实验和面试表达形成学习闭环。当前需重点补齐业务智能与连续任务体验相对治理能力的差距。方向更新不代表新阶段已获准启动。
+>
+> **进度说明：** 下方 D1–D7 / M1 状态及运行 SHA 为历史记录，不是当前完整进度；S1/S2 是回归基线，不是长期业务范围上限。请结合当前 Git SHA、阶段任务卡与正式验收核实状态。近期证据入口：[M3 收口报告](docs/evidence/vnext/m3-closeout-01/REPORT.md)、[M3 HF-02 报告](docs/evidence/vnext/m3-hf-02/REPORT.md)；不据此推定 M3 总体验收通过。
+
+首周历史范围仅为 S1：客户端凭证引用过旧导致业务 API 返回 401。
 
 **设计状态：** R5 · DESIGN APPROVED
 **D1 状态：** D1 技术 smoke、S1 业务闭环与 8 项自动化测试已通过主 Agent 审查。
