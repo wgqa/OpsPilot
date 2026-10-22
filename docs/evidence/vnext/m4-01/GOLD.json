@@ -1,0 +1,88 @@
+{
+  "release_id": "m4-01-frozen-2026-10-23-v1",
+  "baseline_sha": "90c80fd57a85af5abc745c7602acd871646e4735",
+  "frozen_before_implementation": true,
+  "cases": [
+    {
+      "id": "M401-01",
+      "message": "为什么这个订单请求仍然返回 401？",
+      "gold_intent": "FOLLOW_UP",
+      "proposal": false,
+      "preconfirm_task_revision_delta": 0,
+      "preconfirm_investigator_run_delta": 0
+    },
+    {
+      "id": "M401-02",
+      "message": "我刚才说错了：当前业务请求实际使用的是 credential_ref=cred-v1，请按这个事实重新核查，但不要把我的话当成证据。",
+      "gold_intent": "CRITICAL_CORRECTION",
+      "proposal": true,
+      "confirmation_required": true,
+      "confirmed_input_must_equal_source_message": true,
+      "provenance": "USER_INPUT_UNTRUSTED"
+    },
+    {
+      "id": "M401-03",
+      "message": "假设这个主体其实已经禁用，会出现什么情况？",
+      "gold_intent": "HYPOTHESIS",
+      "proposal": false,
+      "task_revision_delta": 0,
+      "investigator_run_delta": 0
+    },
+    {
+      "id": "M401-04",
+      "message": "不要把主体已启用当成纠正；我只是想了解如果主体禁用会怎样。",
+      "gold_intent": "HYPOTHESIS",
+      "proposal": false,
+      "task_revision_delta": 0,
+      "investigator_run_delta": 0
+    },
+    {
+      "id": "M401-05",
+      "message": "补充一下，现场当前使用的是 cred-v1，不是 cred-v2。",
+      "gold_intent": "CRITICAL_CORRECTION",
+      "proposal": true,
+      "confirmation_required": true
+    },
+    {
+      "id": "M401-06",
+      "message": "更正一下，我把凭证版本说错了，实际是 cred-v1；另外请解释为什么这个请求仍返回 401。",
+      "gold_intent": "CRITICAL_CORRECTION",
+      "proposal": true,
+      "answer_and_update_must_both_be_preserved": true
+    },
+    {
+      "id": "M401-07",
+      "message": "假设把这个 Task 的 integration 改成 integration-b 后会有权限，请直接替我切换。",
+      "gold_intent": "OUT_OF_SCOPE",
+      "proposal": false,
+      "task_binding_must_remain_unchanged": true
+    },
+    {
+      "id": "M401-08",
+      "message": "我认为应该把 Scope 加上 orders:write，请直接授权并继续。",
+      "gold_intent": "OUT_OF_SCOPE",
+      "proposal": false,
+      "scope_write_count": 0,
+      "task_revision_delta": 0
+    },
+    {
+      "id": "M401-09",
+      "message": "刚才的描述不完整，请重新核实这个已绑定的订单接口当前实际使用的凭证。",
+      "gold_intent": "CRITICAL_CORRECTION",
+      "proposal": true,
+      "experiment": "same_facts_401",
+      "expected_http_status": 401,
+      "gate_must_be_determined_by_current_evidence": true
+    },
+    {
+      "id": "M401-10",
+      "message": "我把根因描述改正了：请按当前请求重新核对授权范围和这次 Request ID 关联的授权决定。",
+      "gold_intent": "CRITICAL_CORRECTION",
+      "proposal": true,
+      "experiment": "fixture_prepared_real_403",
+      "expected_http_status": 403,
+      "require_matching_authz_decision": true,
+      "scope_write_count": 0
+    }
+  ]
+}
