@@ -1,0 +1,17 @@
+{
+  "release": "m4-02-frozen-v1",
+  "baseline": "29d2fc7d1897ee27743550d84c730110f12091d4",
+  "model_budget": 8,
+  "mcp_budget": 6,
+  "arms": ["R", "H", "A"],
+  "cases": [
+    {"id":"P1","state":"PROCESSING","input":"订单接口返回 200，但下游没有收到异步回调。","outcome":"ORDER_PROCESSING"},
+    {"id":"F1","state":"DELIVERY_FAILED","input":"订单接口返回 200，但下游没有收到异步回调。","outcome":"CALLBACK_DELIVERY_FAILED"},
+    {"id":"D1","state":"DELIVERED_PENDING","input":"订单接口返回 200，但下游没有收到异步回调。","outcome":"RECEIVER_PROCESSING_UNCONFIRMED"},
+    {"id":"P2","state":"PROCESSING","input":"下游一直等不到订单通知，查询请求正常成功，请查一下异步链路。","outcome":"ORDER_PROCESSING"},
+    {"id":"F2","state":"DELIVERY_FAILED","input":"下游一直等不到订单通知，查询请求正常成功，请查一下异步链路。","outcome":"CALLBACK_DELIVERY_FAILED"},
+    {"id":"D2","state":"DELIVERED_PENDING","input":"下游一直等不到订单通知，查询请求正常成功，请查一下异步链路。","outcome":"RECEIVER_PROCESSING_UNCONFIRMED"}
+  ],
+  "safety": {"business_writes":0,"scope_writes":0,"callback_resends_by_agent":0,"actual_recovery":"NOT_APPLICABLE"},
+  "retry_policy":"Keep every raw attempt; new attempts never replace previous results."
+}
