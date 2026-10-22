@@ -1080,7 +1080,7 @@ onBeforeUnmount(() => {
               <div class="message-bubble">{{ message.body }}</div>
             </div>
           </article>
-          <div v-if="inspector.trusted_state.s3_outcome" class="s3-result-card" data-testid="s3-diagnosis"><span>当前调查结果 · 持久业务回执</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
+          <div v-if="inspector && inspector.trusted_state.s3_outcome" class="s3-result-card" data-testid="s3-diagnosis"><span>当前调查结果 · 持久业务回执</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
           <section
             v-for="assessment in pendingInvestigationUpdates"
             :key="assessment.assessment_id"
