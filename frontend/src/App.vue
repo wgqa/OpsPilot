@@ -1080,6 +1080,7 @@ onBeforeUnmount(() => {
               <div class="message-bubble">{{ message.body }}</div>
             </div>
           </article>
+          <div v-if="inspector.trusted_state.s3_outcome" class="s3-result-card" data-testid="s3-diagnosis"><span>当前调查结果 · 持久业务回执</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
           <section
             v-for="assessment in pendingInvestigationUpdates"
             :key="assessment.assessment_id"
@@ -1165,7 +1166,7 @@ onBeforeUnmount(() => {
             <div v-if="inspector.evidence.length === 0" class="muted-card">当前 Task 尚无可展示的有效 MCP Evidence。</div>
             <div v-for="item in inspector.evidence" :key="String(item.evidence_id)" class="evidence-card">
               <div class="evidence-heading"><span class="evidence-type">{{ String(item.fact_type).replaceAll('_', ' ') }}</span><span class="verified-mark">✓ VERIFIED</span></div>
-              <div class="evidence-facts"><template v-for="(value, key) in (item.facts as Record<string, unknown>)" :key="String(key)"><div><span>{{ String(key).replaceAll('_', ' ') }}</span><strong>{{ String(value) }}</strong></div></template></div>
+              <div class="evidence-facts"><template v-for="(value, key) in (item.facts as Record<string, unknown>)" :key="String(key)"><div><span>{{ String(key).replaceAll('_', ' ') }}</span><strong :title="typeof value === 'object' ? JSON.stringify(value) : String(value)">{{ typeof value === 'object' ? JSON.stringify(value) : String(value) }}</strong></div></template></div>
               <div class="evidence-footer"><code>{{ String(item.evidence_id).slice(0, 22) }}</code><span>{{ dateLabel(item.fetched_at) }}</span></div>
             </div>
           </div>
@@ -1276,7 +1277,6 @@ onBeforeUnmount(() => {
             <div v-if="latestContextProvenance?.selected_skill" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).name) }} · v{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).version) }}</strong><small>Skill SHA-256 {{ String((latestContextProvenance.selected_skill as Record<string, unknown>).digest).slice(0, 16) }}</small></span></div>
             <div v-for="item in latestSelectedKnowledge" :key="String(item.document_id)" class="trace-row"><span class="trace-icon">▤</span><span><strong>{{ String(item.document_id) }} · v{{ String(item.version) }}</strong><small>{{ String(item.source) }} · SHA-256 {{ String(item.digest).slice(0, 16) }}</small></span></div>
             <div class="gate-card"><span>确定性 Evidence Gate</span><b>{{ readableGate(inspector.current_gate.decision) }}</b><small>{{ String(inspector.current_gate.reason_code ?? '—') }} · 当前有效 Evidence {{ Array.isArray(inspector.current_gate.checked_fact_ids) ? (inspector.current_gate.checked_fact_ids as unknown[]).length : 0 }} 项</small></div>
-            <div v-if="inspector.trusted_state.s3_outcome" class="gate-card" data-testid="s3-diagnosis"><span>异步回调调查结果</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
           </div>
           <div v-if="canCreateTask && taskId" class="inspector-section correction-section">
             <div class="section-heading"><h3>正式关键更正</h3><span class="status-badge warm">会提升控制版本</span></div>
