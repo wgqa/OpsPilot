@@ -22,6 +22,38 @@ export interface MessageItem {
   applied_run_id: string | null;
 }
 
+export interface InvestigationUpdateProposal {
+  proposal_id: string;
+  operation_id: string;
+  source_message_id: string;
+  target_task_id: string;
+  expected_control_revision: number;
+  current_input: string;
+  proposed_input: string;
+  change_summary: string;
+  status: string;
+  provenance: 'USER_INPUT_UNTRUSTED';
+}
+
+export interface InvestigationUpdateAssessment {
+  assessment_id: string;
+  proposal_id: string | null;
+  operation_id: string;
+  source_message_id: string;
+  target_task_id: string;
+  intent: string;
+  status: string;
+  expected_control_revision: number;
+  current_control_revision: number;
+  original_message: string;
+  change_summary: string;
+  proposal: InvestigationUpdateProposal | null;
+  correction_message_id: string | null;
+  investigation_run_id: string | null;
+  model_attempt: Record<string, unknown> | null;
+  failure_code: string | null;
+}
+
 export interface RunItem {
   run_id: string;
   task_id: string | null;
@@ -211,6 +243,41 @@ export const api = {
       `/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({ body, task_id: taskId, input_kind: inputKind }),
+      },
+    );
+  },
+  assessTaskUpdate(taskId: string, sourceMessageId: string, csrf: string) {
+    return request<InvestigationUpdateAssessment>(
+      `/api/tasks/${encodeURIComponent(taskId)}/investigation-updates/proposals`, {
+        method: 'POST',
+        headers: { ...writeHeaders(csrf), 'Idempotency-Key': sourceMessageId },
+        body: JSON.stringify({ source_message_id: sourceMessageId }),
+      },
+    );
+  },
+  investigationUpdates(taskId: string) {
+    return request<{ items: InvestigationUpdateAssessment[] }>(
+      `/api/tasks/${encodeURIComponent(taskId)}/investigation-updates`,
+    );
+  },
+  confirmTaskUpdate(taskId: string, proposal: InvestigationUpdateProposal, csrf: string) {
+    return request<{ status: string; message_id: string; run_id: string; proposal_id: string }>(
+      `/api/tasks/${encodeURIComponent(taskId)}/investigation-updates/${encodeURIComponent(proposal.proposal_id)}/confirm`, {
+        method: 'POST',
+        headers: { ...writeHeaders(csrf), 'Idempotency-Key': proposal.operation_id },
+        body: JSON.stringify({
+          expected_control_revision: proposal.expected_control_revision,
+          operation_id: proposal.operation_id,
+        }),
+      },
+    );
+  },
+  cancelTaskUpdate(taskId: string, proposal: InvestigationUpdateProposal, csrf: string) {
+    return request<{ status: string; proposal_id: string; replayed: boolean }>(
+      `/api/tasks/${encodeURIComponent(taskId)}/investigation-updates/${encodeURIComponent(proposal.proposal_id)}/cancel`, {
+        method: 'POST',
+        headers: { ...writeHeaders(csrf), 'Idempotency-Key': proposal.operation_id },
+        body: JSON.stringify({ operation_id: proposal.operation_id }),
       },
     );
   },

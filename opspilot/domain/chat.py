@@ -2287,7 +2287,7 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                WHERE task_id = ? ORDER BY created_at DESC, trace_id DESC LIMIT 1""",
             (task_id,),
         ).fetchone()
-    if s2_gate_row is not None:
+    if s2_gate_row is not None and str(s2_gate_row["decision"]) != "NOT_APPLICABLE":
         gate = {
             "decision": str(s2_gate_row["decision"]),
             "reason_code": str(s2_gate_row["reason_code"]),

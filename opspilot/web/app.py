@@ -36,7 +36,8 @@ from opspilot.web.auth import (
 from opspilot.web.schemas import (
     AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest,
     MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
-    SemanticMemoryCandidateRequest,
+    SemanticMemoryCandidateRequest, InvestigationUpdateProposalRequest,
+    InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest,
 )
 
 
@@ -66,6 +67,8 @@ _STATUS_BY_CODE = {
     "TASK_SCOPE_DENIED": 404,
     "TASK_RUN_NOT_FOUND": 404,
     "RESOURCE_NOT_FOUND": 404,
+    "UPDATE_SOURCE_MESSAGE_INVALID": 404,
+    "UPDATE_PROPOSAL_NOT_FOUND": 404,
     "MEMORY_SCOPE_DENIED": 403,
     "MEMORY_SOURCE_REJECTED": 409,
     "MEMORY_IDEMPOTENCY_CONFLICT": 409,
@@ -80,6 +83,10 @@ _STATUS_BY_CODE = {
     "TASK_ABORTED": 409,
     "TASK_ALREADY_TERMINAL": 409,
     "TASK_CONTROL_STALE": 409,
+    "ASSESSMENT_IN_PROGRESS": 409,
+    "UPDATE_ASSESSMENT_NOT_ACTIVE": 409,
+    "UPDATE_ASSESSMENT_RETRY_LIMIT": 409,
+    "UPDATE_PROPOSAL_ALREADY_RESOLVED": 409,
     "DRAFT_STALE": 409,
     "QUEUE_ALREADY_ACCEPTED": 409,
     "HANDOFF_INTEGRITY_ERROR": 409,
@@ -100,6 +107,10 @@ _STATUS_BY_CODE = {
     "TASK_REQUIRED_FOR_BUSINESS_RUN": 409,
     "CORRECTION_REQUIRES_TASK": 422,
     "INVALID_REQUEST": 422,
+    "INVALID_UPDATE_PROPOSAL": 422,
+    "INVALID_MODEL_CLASSIFICATION": 502,
+    "MODEL_CONFIGURATION_MISSING": 503,
+    "UPDATE_MODEL_UNAVAILABLE": 502,
 }
 
 
@@ -589,6 +600,107 @@ def create_app(
                 item["applied_run_id"] = None
             items.append(item)
         return {"items": items}
+
+    @app.post("/api/tasks/{task_id}/investigation-updates/proposals")
+    async def assess_investigation_update(
+        task_id: str,
+        body: InvestigationUpdateProposalRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.config import MODEL_NAME
+        from opspilot.domain.investigation_updates import (
+            classify_input, complete_assessment, fail_assessment, reserve_assessment,
+        )
+
+        key = require_idempotency_key(idempotency_key)
+        model_id = os.environ.get(MODEL_NAME, "").strip()
+        reservation = await asyncio.to_thread(
+            reserve_assessment,
+            resolved_db,
+            context.identity,
+            task_id=task_id,
+            source_message_id=body.source_message_id,
+            idempotency_key=key,
+            model_id=model_id,
+        )
+        if not reservation.get("should_call_model"):
+            return reservation
+        prepared = reservation["prepared"]
+        assessment_id = str(prepared["assessment_id"])
+        attempt_id = str(prepared["attempt_id"])
+        try:
+            classification = await asyncio.to_thread(
+                classify_input, prepared=prepared, model_id=model_id,
+            )
+            return await asyncio.to_thread(
+                complete_assessment,
+                resolved_db,
+                assessment_id=assessment_id,
+                attempt_id=attempt_id,
+                classification=classification,
+            )
+        except TaskControlError:
+            await asyncio.to_thread(
+                fail_assessment, resolved_db, assessment_id=assessment_id,
+                attempt_id=attempt_id, error_code="DOMAIN_REJECTED",
+            )
+            raise
+        except Exception as error:
+            raw_code = str(error)
+            safe_code = raw_code if raw_code in {"MODEL_CONFIGURATION_MISSING", "INVALID_MODEL_CLASSIFICATION"} else "UPDATE_MODEL_UNAVAILABLE"
+            await asyncio.to_thread(
+                fail_assessment, resolved_db, assessment_id=assessment_id,
+                attempt_id=attempt_id, error_code=safe_code,
+            )
+            raise TaskControlError(safe_code) from error
+
+    @app.get("/api/tasks/{task_id}/investigation-updates")
+    async def get_investigation_updates(
+        task_id: str, context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.investigation_updates import list_assessments
+
+        return list_assessments(resolved_db, context.identity, task_id)
+
+    @app.post("/api/tasks/{task_id}/investigation-updates/{proposal_id}/confirm")
+    async def confirm_investigation_update(
+        task_id: str,
+        proposal_id: str,
+        body: InvestigationUpdateConfirmRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.investigation_updates import confirm_assessment
+
+        return confirm_assessment(
+            resolved_db,
+            context.identity,
+            task_id=task_id,
+            proposal_id=proposal_id,
+            expected_control_revision=body.expected_control_revision,
+            operation_id=body.operation_id,
+            idempotency_key=require_idempotency_key(idempotency_key),
+        )
+
+    @app.post("/api/tasks/{task_id}/investigation-updates/{proposal_id}/cancel")
+    async def cancel_investigation_update(
+        task_id: str,
+        proposal_id: str,
+        body: InvestigationUpdateCancelRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.investigation_updates import cancel_assessment
+
+        return cancel_assessment(
+            resolved_db,
+            context.identity,
+            task_id=task_id,
+            proposal_id=proposal_id,
+            operation_id=body.operation_id,
+            idempotency_key=require_idempotency_key(idempotency_key),
+        )
 
     @app.get("/api/tasks/{task_id}/memories")
     async def get_task_memories(

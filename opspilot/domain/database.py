@@ -972,6 +972,51 @@ CREATE TABLE IF NOT EXISTS chat_run_answers (
     body_digest TEXT NOT NULL,
     committed_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS investigation_update_assessments (
+    assessment_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id) ON DELETE CASCADE,
+    source_message_id TEXT NOT NULL UNIQUE REFERENCES messages(message_id) ON DELETE CASCADE,
+    source_digest TEXT NOT NULL,
+    conversation_digest TEXT NOT NULL,
+    expected_control_revision INTEGER NOT NULL CHECK (expected_control_revision >= 0),
+    prior_input_text TEXT NOT NULL,
+    intent TEXT CHECK (intent IS NULL OR intent IN ('FOLLOW_UP', 'CRITICAL_CORRECTION', 'HYPOTHESIS', 'OUT_OF_SCOPE')),
+    change_summary TEXT,
+    status TEXT NOT NULL CHECK (status IN ('ASSESSING', 'NO_UPDATE', 'PENDING_CONFIRMATION', 'CONFIRMED', 'CANCELLED', 'STALE', 'FAILED')),
+    operation_id TEXT NOT NULL UNIQUE,
+    correction_message_id TEXT REFERENCES messages(message_id),
+    investigation_run_id TEXT REFERENCES task_runs(run_id),
+    failure_code TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    confirmed_at TEXT,
+    cancelled_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_investigation_update_task
+    ON investigation_update_assessments(tenant_id, task_id, created_at);
+CREATE TABLE IF NOT EXISTS investigation_update_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    assessment_id TEXT NOT NULL REFERENCES investigation_update_assessments(assessment_id) ON DELETE CASCADE,
+    attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+    model_id TEXT NOT NULL,
+    prompt_digest TEXT NOT NULL,
+    input_digest TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('RESERVED', 'SUCCEEDED', 'FAILED')),
+    response_digest TEXT,
+    provider_response_id TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER,
+    error_code TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    UNIQUE (assessment_id, attempt_no)
+);
+CREATE INDEX IF NOT EXISTS ix_investigation_update_attempts
+    ON investigation_update_attempts(assessment_id, attempt_no);
 CREATE TABLE IF NOT EXISTS worker_retry_state (
     run_id TEXT PRIMARY KEY REFERENCES task_runs(run_id) ON DELETE CASCADE,
     retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
@@ -1008,7 +1053,7 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 11:
+        if version > 12:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1313,6 +1358,9 @@ def initialize(path: str | Path) -> None:
                    WHERE o.role = 'APPROVER'"""
             )
             connection.execute("PRAGMA user_version = 11")
+            version = 11
+        if version < 12:
+            connection.execute("PRAGMA user_version = 12")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -1324,6 +1372,8 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
         connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_update")
         connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_delete")
         for table in (
+            "investigation_update_attempts",
+            "investigation_update_assessments",
             "chat_message_summary_sources",
             "context_summary_dependencies",
             "context_summaries",

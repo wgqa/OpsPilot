@@ -1035,6 +1035,8 @@ def admit_task_message(
     input_kind: MessageKind,
     body: str,
     idempotency_key: str,
+    expected_control_revision: int | None = None,
+    update_proposal_id: str | None = None,
 ) -> dict[str, object]:
     if input_kind not in {"CHAT_READONLY", "CORRECT_TASK_INPUT"}:
         raise ValueError("Unsupported task message kind.")
@@ -1044,6 +1046,14 @@ def admit_task_message(
         raise ValueError("Message body must be non-empty text.")
     if task_id is None and input_kind != "CHAT_READONLY":
         raise TaskControlError("CORRECTION_REQUIRES_TASK")
+    if expected_control_revision is not None and (
+        input_kind != "CORRECT_TASK_INPUT" or expected_control_revision < 0
+    ):
+        raise TaskControlError("INVALID_UPDATE_PROPOSAL")
+    if update_proposal_id is not None and (
+        input_kind != "CORRECT_TASK_INPUT" or expected_control_revision is None
+    ):
+        raise TaskControlError("INVALID_UPDATE_PROPOSAL")
     command_kind = input_kind
     target_ref = task_id or session_id
     request = {
@@ -1053,6 +1063,9 @@ def admit_task_message(
         "task_id": task_id,
         "body": body,
     }
+    if update_proposal_id is not None:
+        request["expected_control_revision"] = expected_control_revision
+        request["update_proposal_id"] = update_proposal_id
     request_digest = _digest(request)
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -1084,6 +1097,41 @@ def admit_task_message(
                     raise TaskControlError("TASK_ABORTED")
                 if _is_business_complete(connection, identity.tenant_id, task_id):
                     raise TaskControlError("TASK_ALREADY_TERMINAL")
+                if update_proposal_id is not None:
+                    proposal = connection.execute(
+                        """SELECT * FROM investigation_update_assessments
+                           WHERE assessment_id = ? AND tenant_id = ? AND actor_id = ? AND task_id = ?""",
+                        (update_proposal_id, identity.tenant_id, identity.actor_id, task_id),
+                    ).fetchone()
+                    if proposal is None or str(proposal["intent"] or "") != "CRITICAL_CORRECTION":
+                        raise TaskControlError("UPDATE_PROPOSAL_NOT_FOUND")
+                    if str(proposal["operation_id"]) != idempotency_key:
+                        raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
+                    if int(proposal["expected_control_revision"]) != expected_control_revision:
+                        raise TaskControlError("TASK_CONTROL_STALE")
+                    if str(proposal["status"]) != "PENDING_CONFIRMATION":
+                        raise TaskControlError("UPDATE_PROPOSAL_ALREADY_RESOLVED")
+                    source = connection.execute(
+                        """SELECT body, body_digest FROM messages WHERE message_id = ? AND task_id = ?
+                           AND tenant_id = ? AND session_id = ? AND input_kind = 'CHAT_READONLY'
+                           AND role = 'USER'""",
+                        (proposal["source_message_id"], task_id, identity.tenant_id, session_id),
+                    ).fetchone()
+                    if source is None or str(source["body"]) != body or str(source["body_digest"]) != str(proposal["source_digest"]):
+                        raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+                    if int(control["control_revision"]) != expected_control_revision:
+                        connection.execute(
+                            """UPDATE investigation_update_assessments SET status = 'STALE', completed_at = ?
+                               WHERE assessment_id = ? AND status = 'PENDING_CONFIRMATION'""",
+                            (_utc_now(), update_proposal_id),
+                        )
+                        return {
+                            "status": "REJECTED", "error_code": "TASK_CONTROL_STALE",
+                            "proposal_id": update_proposal_id,
+                            "control_revision": int(control["control_revision"]),
+                        }
+                elif expected_control_revision is not None and int(control["control_revision"]) != expected_control_revision:
+                    raise TaskControlError("TASK_CONTROL_STALE")
         seq = int(connection.execute(
             "SELECT COALESCE(MAX(sequence), 0) + 1 FROM messages WHERE session_id = ?", (session_id,)
         ).fetchone()[0])
@@ -1163,6 +1211,17 @@ def admit_task_message(
             (run_id, identity.tenant_id, task_id, session_id, command_id, message_id,
              run_kind, expected_revision, expected_revision, seq, now),
         )
+        if update_proposal_id is not None:
+            updated = connection.execute(
+                """UPDATE investigation_update_assessments SET status = 'CONFIRMED',
+                   correction_message_id = ?, investigation_run_id = ?, confirmed_at = ?, completed_at = ?
+                   WHERE assessment_id = ? AND tenant_id = ? AND actor_id = ? AND task_id = ?
+                     AND status = 'PENDING_CONFIRMATION'""",
+                (message_id, run_id, now, now, update_proposal_id,
+                 identity.tenant_id, identity.actor_id, task_id),
+            )
+            if updated.rowcount != 1:
+                raise TaskControlError("UPDATE_PROPOSAL_ALREADY_RESOLVED")
         if input_kind == "CHAT_READONLY":
             connection.execute(
                 """INSERT INTO worker_retry_state (run_id, retry_count, max_retries, updated_at)

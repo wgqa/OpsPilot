@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from opspilot.domain.database import connect, reset_fixture
+from opspilot.domain.chat import get_task_inspector
 from opspilot.domain.task_control import admit_task_message, trusted_identity
 from opspilot.web.app import create_app
 
@@ -125,12 +126,38 @@ def test_m401_01_followup_is_explanation_only(m4_client, monkeypatch: pytest.Mon
     assert _counts(db, task_id) == before
 
 
+def test_s2_not_applicable_trace_does_not_replace_current_s1_gate(
+    m4_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, db = m4_client
+    headers = _login(client)
+    _, task_id, _ = _new_task(client, headers)
+    monkeypatch.setattr(
+        "opspilot.domain.d2.evaluate_evidence_gate",
+        lambda *_args, **_kwargs: {"decision": "READY", "reason_code": "S1_CURRENT_AUTH_FAILURE"},
+    )
+    with connect(db) as connection:
+        connection.execute(
+            """INSERT INTO s2_gate_traces
+               (trace_id, tenant_id, task_id, run_id, decision, reason_code, request_id,
+                decision_id, evidence_ids_json, evidence_digests_json, predicate_json, created_at)
+               VALUES ('m4-s1-s2-not-applicable', 'tenant-a', ?, NULL, 'NOT_APPLICABLE',
+                       'AUTHENTICATION_FAILURE_REMAINS_S1', NULL, NULL, '[]', '{}', '{}',
+                       '2099-01-01T00:00:00+00:00')""",
+            (task_id,),
+        )
+
+    inspector = get_task_inspector(db, trusted_identity(db, "support-a"), task_id)
+    assert inspector["current_gate"]["decision"] == "READY"
+    assert inspector["current_gate"]["reason_code"] == "S1_CURRENT_AUTH_FAILURE"
+
+
 def test_m401_02_confirmed_correction_reuses_task_control_and_replays_once(
     m4_client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, db = m4_client
     headers = _login(client)
-    session_id, task_id, _ = _new_task(client, headers)
+    session_id, task_id, created = _new_task(client, headers)
     original = "我刚才说错了：当前业务请求实际使用的是 credential_ref=cred-v1，请重新核查。"
     message_id = _send_chat(client, headers, session_id, task_id, original)
     before = _counts(db, task_id)
@@ -183,11 +210,17 @@ def test_m401_02_confirmed_correction_reuses_task_control_and_replays_once(
             "SELECT kind, source_message_id, expected_control_revision FROM task_runs WHERE run_id = ?",
             (first.json()["run_id"],),
         ).fetchone()
+        retired_run = connection.execute(
+            "SELECT status, blocked_reason FROM task_runs WHERE run_id = ?",
+            (created["run_id"],),
+        ).fetchone()
     assert correction["body"] == original
     assert correction["application_state"] == "RECEIVED_NOT_APPLIED"
     assert run["kind"] == "INVESTIGATE"
     assert run["source_message_id"] == first.json()["message_id"]
     assert run["expected_control_revision"] == before["revision"] + 1
+    assert retired_run["status"] == "BLOCKED"
+    assert retired_run["blocked_reason"] == "TASK_CONTROL_STALE"
 
 
 @pytest.mark.parametrize(

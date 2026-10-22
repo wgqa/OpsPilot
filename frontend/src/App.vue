@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -13,6 +13,7 @@ const sessions = ref<SessionItem[]>([]);
 const sessionId = ref('');
 const messages = ref<MessageItem[]>([]);
 const taskId = ref('');
+const investigationUpdates = ref<InvestigationUpdateAssessment[]>([]);
 const inspector = ref<Inspector | null>(null);
 const taskOutcome = ref<TaskOutcome | null>(null);
 const taskMemoryContext = ref<TaskMemoryContext | null>(null);
@@ -53,6 +54,9 @@ let seenEventSeq = new Set<number>();
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const isApprover = computed(() => user.value?.role === 'APPROVER');
 const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run.kind !== 'CHAT_READONLY') ?? null);
+const pendingInvestigationUpdates = computed(() => investigationUpdates.value.filter(
+  (item) => item.proposal !== null && item.status === 'PENDING_CONFIRMATION',
+));
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
 const displayStream = computed(() => activeChatRun.value?.status === 'RUNNING' && chunks.value.length > 0);
 const latestContextProvenance = computed(() => inspector.value?.investigator_context_provenance[0] ?? null);
@@ -324,6 +328,7 @@ async function createSession(): Promise<void> {
 async function selectSession(value: string): Promise<void> {
   sessionId.value = value;
   taskId.value = '';
+  investigationUpdates.value = [];
   taskMemoryContext.value = null;
   taskSemanticContext.value = null;
   messages.value = [];
@@ -378,6 +383,7 @@ async function refreshInspector(): Promise<void> {
   try {
     inspector.value = await api.inspector(taskId.value);
     if (user.value?.role === 'SUPPORT') {
+      investigationUpdates.value = (await api.investigationUpdates(taskId.value)).items;
       const [handoffOutcome, taskOutcomeResult] = await Promise.all([
         api.handoff(taskId.value), api.taskOutcome(taskId.value),
       ]);
@@ -467,8 +473,63 @@ async function sendMessage(): Promise<void> {
     activeChatRun.value = await api.run(accepted.run_id);
     await refreshSessionMessagesOnly();
     await watchRun(accepted.run_id);
+    if (taskId.value) {
+      const assessment = await api.assessTaskUpdate(taskId.value, accepted.message_id, csrf.value);
+      if (assessment.proposal?.status === 'PENDING_CONFIRMATION') {
+        notice.value = 'OpsPilot 发现这条消息可能是 Task 关键纠错。请核对原文、当前输入和变更摘要，再决定是否重新调查。';
+      }
+      await refreshInspector();
+    }
   } catch (error) {
     errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function confirmInvestigationUpdate(proposal: InvestigationUpdateProposal): Promise<void> {
+  const currentTask = taskId.value;
+  if (!currentTask || !csrf.value || busy.value || user.value?.role !== 'SUPPORT') return;
+  busy.value = true;
+  errorMessage.value = '';
+  notice.value = '正在由 TaskControl 核对身份、控制版本和重复提交，再受理新的调查 Run。';
+  try {
+    const accepted = await api.confirmTaskUpdate(currentTask, proposal, csrf.value);
+    const previousGate = String(inspector.value?.current_gate.decision ?? '未形成');
+    await refreshSessionMessagesOnly();
+    await refreshInspector();
+    notice.value = `正式纠错已受理，新调查 Run ${accepted.run_id} 正在重新读取当前可信事实；纠错文字仍是未验证线索。`;
+    await watchRun(accepted.run_id);
+    const completed = await api.run(accepted.run_id);
+    const currentGate = String(inspector.value?.current_gate.decision ?? 'INCONCLUSIVE');
+    const reason = String(inspector.value?.current_gate.reason_code ?? '');
+    const currentEvidence = inspector.value?.evidence ?? [];
+    const probeFacts = currentEvidence
+      .map((item) => item.facts as Record<string, unknown> | undefined)
+      .find((facts) => typeof facts?.http_status === 'number');
+    const probeSummary = typeof probeFacts?.http_status === 'number'
+      ? `；当前真实 Probe HTTP ${probeFacts.http_status}` : '';
+    notice.value = `重新调查已结束：Run ${readableStatus(completed.status)}；确定性 Gate ${readableGate(previousGate)} → ${readableGate(currentGate)}${reason ? `（${reason}）` : ''}；当前有效 Evidence ${currentEvidence.length} 项${probeSummary}。判断依据是新 Run 的可信事实，用户纠错仍是未验证线索。`;
+  } catch (error) {
+    errorMessage.value = explainError(error);
+    await refreshInspector();
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function cancelInvestigationUpdate(proposal: InvestigationUpdateProposal): Promise<void> {
+  const currentTask = taskId.value;
+  if (!currentTask || !csrf.value || busy.value || user.value?.role !== 'SUPPORT') return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    await api.cancelTaskUpdate(currentTask, proposal, csrf.value);
+    await refreshInspector();
+    notice.value = '已取消这条调查更新提议；Task 控制版本和业务调查状态未改变。';
+  } catch (error) {
+    errorMessage.value = explainError(error);
+    await refreshInspector();
   } finally {
     busy.value = false;
   }
@@ -617,6 +678,26 @@ function sourceKind(message: MessageItem): string | null {
 
 function readableInputKind(value: unknown): string {
   return value === 'INITIAL_SYMPTOM' ? '初始故障描述' : value === 'CRITICAL_CORRECTION' ? '关键更正' : '用户输入';
+}
+
+function readableUpdateIntent(value: unknown): string {
+  return ({
+    FOLLOW_UP: '普通追问',
+    CRITICAL_CORRECTION: '关键纠错候选',
+    HYPOTHESIS: '假设讨论',
+    OUT_OF_SCOPE: '超出当前 Task 范围',
+  } as Record<string, string>)[String(value)] ?? '未识别';
+}
+
+function readableUpdateStatus(value: unknown): string {
+  return ({
+    PENDING_CONFIRMATION: '等待你确认',
+    CONFIRMED: '已由 TaskControl 受理',
+    CANCELLED: '已取消',
+    STALE: '版本已过期',
+    NO_UPDATE: '只解释，不更新 Task',
+    FAILED: '模型判断失败，未更新 Task',
+  } as Record<string, string>)[String(value)] ?? String(value ?? '未知');
 }
 
 function readableGate(value: unknown): string {
@@ -997,6 +1078,25 @@ onBeforeUnmount(() => {
               <div class="message-bubble">{{ message.body }}</div>
             </div>
           </article>
+          <section
+            v-for="assessment in pendingInvestigationUpdates"
+            :key="assessment.assessment_id"
+            class="update-proposal-card"
+            :data-testid="`investigation-update-${assessment.assessment_id}`"
+            :data-source-message-id="assessment.source_message_id"
+          >
+            <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">TASK INPUT PROPOSAL</span><h2>这条消息可能是关键纠错</h2></div><span class="status-badge warm">等待你确认</span></div>
+            <p class="update-proposal-summary">模型摘要：{{ assessment.proposal?.change_summary }}。这是对话意图判断，不是业务事实或授权。</p>
+            <div class="update-diff-grid">
+              <div><span>当前 Task 调查输入</span><pre>{{ assessment.proposal?.current_input || '暂无已提交的正式更正' }}</pre></div>
+              <div><span>确认后加入的原始消息</span><pre>{{ assessment.proposal?.proposed_input }}</pre></div>
+            </div>
+            <div class="update-proposal-meta">Task {{ assessment.proposal?.target_task_id }} · 控制版本 {{ assessment.proposal?.expected_control_revision }} · 来源 {{ assessment.proposal?.source_message_id }} · USER_INPUT_UNTRUSTED</div>
+            <div class="update-proposal-actions">
+              <button class="outline-button" type="button" :disabled="busy || !csrf" @click="cancelInvestigationUpdate(assessment.proposal!)">取消提议</button>
+              <button class="primary-button" type="button" :disabled="busy || !csrf" @click="confirmInvestigationUpdate(assessment.proposal!)">确认并重新调查 <span>→</span></button>
+            </div>
+          </section>
           <div v-if="displayStream" class="streaming-row" data-testid="live-stream">
             <div class="message-avatar assistant-avatar">✳</div>
             <div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label"><i></i>正在生成 · 暂存片段</span></div>
@@ -1013,7 +1113,7 @@ onBeforeUnmount(() => {
           <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}<button v-if="errorMessage.includes('登录状态')" type="button" @click="logout">重新登录</button></div>
           <form class="composer" @submit.prevent="sendMessage">
             <textarea v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" placeholder="询问当前证据、任务状态，或继续上一轮对话…" @keydown.enter="submitOnEnter"></textarea>
-            <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 只读聊天不能批准或修改业务对象</span><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
+            <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 模型可识别纠错候选，Task 只在你确认后更新</span><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
           </form>
           <div class="composer-footnote">回答只解释已授权信息。审批、修复和交付需要后续的可信控制流程。</div>
         </div>
@@ -1032,6 +1132,14 @@ onBeforeUnmount(() => {
             <div v-if="latestBusinessRun" class="run-card"><div class="run-icon">⌁</div><div class="run-copy"><strong>{{ readableStatus(latestBusinessRun.kind) }}</strong><small>{{ readableStatus(latestBusinessRun.status) }}<template v-if="latestBusinessRun.blocked_reason"> · {{ readableRunReason(latestBusinessRun.blocked_reason) }}</template></small></div><span class="status-dot" :class="statusTone(latestBusinessRun.status)"></span></div>
             <div v-else class="muted-card">尚未关联业务调查 Run。</div>
             <div v-if="activeChatRun" class="run-card chat-run-card"><div class="run-icon chat-run-icon">✳</div><div class="run-copy"><strong>只读聊天回答</strong><small>{{ readableStatus(activeChatRun.status) }}<template v-if="activeChatRun.waiting_reason"> · {{ activeChatRun.waiting_reason }}</template></small></div><span class="status-dot" :class="statusTone(activeChatRun.status)"></span></div>
+            <div v-if="investigationUpdates.length" class="update-history-section" data-testid="investigation-update-history">
+              <div class="section-heading"><h3>对话更新判断</h3><span class="section-count">{{ investigationUpdates.length }}</span></div>
+              <div v-for="item in investigationUpdates.slice(-6).reverse()" :key="item.assessment_id" class="update-history-row">
+                <span class="trace-icon model-icon">✳</span>
+                <span><strong>{{ readableUpdateIntent(item.intent) }} · {{ readableUpdateStatus(item.status) }}</strong><small>{{ item.change_summary || '无纠错摘要' }} · 版本 {{ item.expected_control_revision }}</small><small>Provider {{ String(item.model_attempt?.provider_response_id ?? 'request id unavailable') }} · {{ item.model_attempt?.total_tokens ?? 'Token 未提供' }} tokens · {{ item.source_message_id }}</small></span>
+                <i class="status-dot" :class="statusTone(item.status)"></i>
+              </div>
+            </div>
             <div v-if="activeChatContext" class="plan-card context-budget-card" data-testid="context-budget-provenance">
               <div class="section-heading"><h3>模型上下文预算</h3><span class="read-only-label">Domain 估算</span></div>
               <div class="plan-row"><span>策略 / 估算器</span><b>{{ String((activeChatContext.context_budget as Record<string, unknown>)?.strategy ?? '—') }} · {{ String((activeChatContext.context_budget as Record<string, unknown>)?.estimator ?? '—') }}</b></div>
@@ -1186,7 +1294,7 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>新建 S1 调查并输入真实故障描述后，这里会显示来源引用、可信 Evidence 和确定性 Gate。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = true">新建调查任务</button></div>
-        <footer class="inspector-footer"><span>OpsPilot vNext · M3-01</span><span>LOOPBACK ONLY</span></footer>
+        <footer class="inspector-footer"><span>OpsPilot vNext · M4-01</span><span>LOOPBACK ONLY</span></footer>
       </aside>
     </section>
   </main>

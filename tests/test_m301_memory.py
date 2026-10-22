@@ -473,7 +473,7 @@ def test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun(demo_db: P
     initialize(demo_db)
     initialize(demo_db)
     with connect(demo_db) as connection:
-        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 11
+        assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 12
         context_columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(d5_context_provenance)").fetchall()

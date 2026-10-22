@@ -28,6 +28,19 @@ class MessageRequest(StrictModel):
     task_id: str | None = Field(default=None, max_length=100)
 
 
+class InvestigationUpdateProposalRequest(StrictModel):
+    source_message_id: str = Field(min_length=1, max_length=200)
+
+
+class InvestigationUpdateConfirmRequest(StrictModel):
+    expected_control_revision: int = Field(ge=0)
+    operation_id: str = Field(min_length=1, max_length=200)
+
+
+class InvestigationUpdateCancelRequest(StrictModel):
+    operation_id: str = Field(min_length=1, max_length=200)
+
+
 class AbortTaskRequest(StrictModel):
     reason: str = Field(min_length=1, max_length=500)
 
