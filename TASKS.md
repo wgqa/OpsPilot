@@ -134,3 +134,12 @@
 | 2026-10-18 | vNext M1-03（本轮实施完成，待主 Agent 独立审查） | 起点 `main@9d49e726f75e49cab23efc93ff472b36c560dcf0`；源码实现终点与最终交付 SHA 见本轮 Git 历史/报告 | CHAT-01..08/UI-01..02 PASS；全量 pytest **101/101**、定向 **36/36**；真实 Edge、Provider、MCP、SSE 和服务重启证据见 `docs/evidence/vnext/m1-03/` | 两次最早浏览器原始 stdout 被 harness 覆写，已如实登记；不声称 M1 总体验收，不进入 M1-04/M1-05 |
 
 **时间估计**：27–37 小时有效开发 + 3–5 小时排错是独立评审的初步规划；若每天只能保障 3 小时，改为约 10–14 天，不缩减恢复和安全门禁。
+
+## vNext M4-01 — 对话驱动调查（实现交付，等待独立验收）
+
+- [x] 基于 `main@90c80fd`，在实现前以 `cf9c9fb` 独立冻结任务卡、Gold、Rubric、验收计划与 RED 测试。
+- [x] 持久自然语言调查更新提议，Web 展示原消息/输入差异/摘要/控制版本；owner 确认后复用 `CORRECT_TASK_INPUT` 与 TaskControl，拒绝过期/取消/重复/越域/终态 Task 提议。
+- [x] 新 Run 实际重新读取可信 MCP 事实。真实 Edge 两组成对实验通过：用户改口但事实仍 401；独立准备的真实 403 与同请求 Authz Decision/DiagnosisReceipt 匹配；页面完成提示、刷新和 API 进程重启均有证据。
+- [x] 新鲜完整 pytest **242/242**、定向 **15/15**、最终真实 Provider Gold **10/10**；首轮 **8/10** 与全部浏览器失败保留。前端 build/typecheck/lint 通过，依赖不变。
+- [x] 源码主实现 `050509d`，最终源码/守卫测试 `6ae53a9`；报告、机器结果、Trace、成本、失败、截图与学习材料见 [M4-01 REPORT](docs/evidence/vnext/m4-01/REPORT.md)。最终证据提交 SHA 见交付消息和 Git。
+- [ ] 主 Agent 独立验收。M4 总验收尚未签署；不进入 M4-02。

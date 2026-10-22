@@ -1,0 +1,215 @@
+FFFFFFFF                                                                 [100%]
+================================== FAILURES ===================================
+__________________ test_m401_01_followup_is_explanation_only __________________
+
+m4_client = (<starlette.testclient.TestClient object at 0x000002404C8D5A90>, WindowsPath('D:/学习/agent新项目/.runtime/m4-01/green-01/test_m401_01_followup_is_expla0/m4-01.sqlite3'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002404C8E09D0>
+
+    def test_m401_01_followup_is_explanation_only(m4_client, monkeypatch: pytest.MonkeyPatch) -> None:
+        client, db = m4_client
+        headers = _login(client)
+        session_id, task_id, _ = _new_task(client, headers)
+        message = "为什么这个订单请求仍然返回 401？"
+        message_id = _send_chat(client, headers, session_id, task_id, message)
+        before = _counts(db, task_id)
+    
+        _install_classifier(monkeypatch, "FOLLOW_UP", "询问当前调查状态")
+        response = _assess(client, headers, task_id, message_id)
+>       assert response.status_code == 200, response.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_01_dialogue_updates.py:121: AssertionError
+___ test_m401_02_confirmed_correction_reuses_task_control_and_replays_once ____
+
+m4_client = (<starlette.testclient.TestClient object at 0x000002404CB23890>, WindowsPath('D:/学习/agent新项目/.runtime/m4-01/green-01/test_m401_02_confirmed_correct0/m4-01.sqlite3'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002404C8E2C40>
+
+    def test_m401_02_confirmed_correction_reuses_task_control_and_replays_once(
+        m4_client, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, db = m4_client
+        headers = _login(client)
+        session_id, task_id, _ = _new_task(client, headers)
+        original = "我刚才说错了：当前业务请求实际使用的是 credential_ref=cred-v1，请重新核查。"
+        message_id = _send_chat(client, headers, session_id, task_id, original)
+        before = _counts(db, task_id)
+    
+        _install_classifier(monkeypatch, "CRITICAL_CORRECTION", "当前凭证引用应按 cred-v1 重新核对")
+        proposal_response = _assess(client, headers, task_id, message_id)
+>       assert proposal_response.status_code == 200, proposal_response.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_01_dialogue_updates.py:140: AssertionError
+_ test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize[\u5047\u8bbe\u8fd9\u4e2a\u4e3b\u4f53\u5176\u5b9e\u5df2\u7ecf\u7981\u7528\uff0c\u4f1a\u51fa\u73b0\u4ec0\u4e48\u60c5\u51b5\uff1f-HYPOTHESIS] _
+
+m4_client = (<starlette.testclient.TestClient object at 0x000002404CC01950>, WindowsPath('D:/学习/agent新项目/.runtime/m4-01/green-01/test_m401_03_hypothesis_negati0/m4-01.sqlite3'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002404CA169F0>
+text = '假设这个主体其实已经禁用，会出现什么情况？', intent = 'HYPOTHESIS'
+
+    @pytest.mark.parametrize(
+        ("text", "intent"),
+        [
+            ("假设这个主体其实已经禁用，会出现什么情况？", "HYPOTHESIS"),
+            ("不要把主体已启用当成纠正；我只是想了解如果主体禁用会怎样。", "HYPOTHESIS"),
+            ("假设把这个 Task 的 integration 改成 integration-b 后会有权限，请直接替我切换。", "OUT_OF_SCOPE"),
+        ],
+    )
+    def test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize(
+        m4_client, monkeypatch: pytest.MonkeyPatch, text: str, intent: str
+    ) -> None:
+        client, db = m4_client
+        headers = _login(client)
+        session_id, task_id, _ = _new_task(client, headers)
+        message_id = _send_chat(client, headers, session_id, task_id, text)
+        before = _counts(db, task_id)
+        _install_classifier(monkeypatch, intent, "这是讨论或越出当前 Task 范围的请求")
+    
+        response = _assess(client, headers, task_id, message_id)
+>       assert response.status_code == 200, response.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_01_dialogue_updates.py:212: AssertionError
+_ test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize[\u4e0d\u8981\u628a\u4e3b\u4f53\u5df2\u542f\u7528\u5f53\u6210\u7ea0\u6b63\uff1b\u6211\u53ea\u662f\u60f3\u4e86\u89e3\u5982\u679c\u4e3b\u4f53\u7981\u7528\u4f1a\u600e\u6837\u3002-HYPOTHESIS] _
+
+m4_client = (<starlette.testclient.TestClient object at 0x000002404CC30180>, WindowsPath('D:/学习/agent新项目/.runtime/m4-01/green-01/test_m401_03_hypothesis_negati1/m4-01.sqlite3'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002404CCE5260>
+text = '不要把主体已启用当成纠正；我只是想了解如果主体禁用会怎样。', intent = 'HYPOTHESIS'
+
+    @pytest.mark.parametrize(
+        ("text", "intent"),
+        [
+            ("假设这个主体其实已经禁用，会出现什么情况？", "HYPOTHESIS"),
+            ("不要把主体已启用当成纠正；我只是想了解如果主体禁用会怎样。", "HYPOTHESIS"),
+            ("假设把这个 Task 的 integration 改成 integration-b 后会有权限，请直接替我切换。", "OUT_OF_SCOPE"),
+        ],
+    )
+    def test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize(
+        m4_client, monkeypatch: pytest.MonkeyPatch, text: str, intent: str
+    ) -> None:
+        client, db = m4_client
+        headers = _login(client)
+        session_id, task_id, _ = _new_task(client, headers)
+        message_id = _send_chat(client, headers, session_id, task_id, text)
+        before = _counts(db, task_id)
+        _install_classifier(monkeypatch, intent, "这是讨论或越出当前 Task 范围的请求")
+    
+        response = _assess(client, headers, task_id, message_id)
+>       assert response.status_code == 200, response.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_01_dialogue_updates.py:212: AssertionError
+_ test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize[\u5047\u8bbe\u628a\u8fd9\u4e2a Task \u7684 integration \u6539\u6210 integration-b \u540e\u4f1a\u6709\u6743\u9650\uff0c\u8bf7\u76f4\u63a5\u66ff\u6211\u5207\u6362\u3002-OUT_OF_SCOPE] _
+
+m4_client = (<starlette.testclient.TestClient object at 0x000002404CC31940>, WindowsPath('D:/学习/agent新项目/.runtime/m4-01/green-01/test_m401_03_hypothesis_negati2/m4-01.sqlite3'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002404CDC0270>
+text = '假设把这个 Task 的 integration 改成 integration-b 后会有权限，请直接替我切换。'
+intent = 'OUT_OF_SCOPE'
+
+    @pytest.mark.parametrize(
+        ("text", "intent"),
+        [
+            ("假设这个主体其实已经禁用，会出现什么情况？", "HYPOTHESIS"),
+            ("不要把主体已启用当成纠正；我只是想了解如果主体禁用会怎样。", "HYPOTHESIS"),
+            ("假设把这个 Task 的 integration 改成 integration-b 后会有权限，请直接替我切换。", "OUT_OF_SCOPE"),
+        ],
+    )
+    def test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize(
+        m4_client, monkeypatch: pytest.MonkeyPatch, text: str, intent: str
+    ) -> None:
+        client, db = m4_client
+        headers = _login(client)
+        session_id, task_id, _ = _new_task(client, headers)
+        message_id = _send_chat(client, headers, session_id, task_id, text)
+        before = _counts(db, task_id)
+        _install_classifier(monkeypatch, intent, "这是讨论或越出当前 Task 范围的请求")
+    
+        response = _assess(client, headers, task_id, message_id)
+>       assert response.status_code == 200, response.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_01_dialogue_updates.py:212: AssertionError
+___ test_m401_06_stale_proposal_is_rejected_after_control_revision_changes ____
+
+m4_client = (<starlette.testclient.TestClient object at 0x000002404CA16B10>, WindowsPath('D:/学习/agent新项目/.runtime/m4-01/green-01/test_m401_06_stale_proposal_is0/m4-01.sqlite3'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002404CDD4450>
+
+    def test_m401_06_stale_proposal_is_rejected_after_control_revision_changes(
+        m4_client, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, db = m4_client
+        headers = _login(client)
+        session_id, task_id, _ = _new_task(client, headers)
+        original = "更正：现场当前使用的是 cred-v1，不是 cred-v2。"
+        message_id = _send_chat(client, headers, session_id, task_id, original)
+        _install_classifier(monkeypatch, "CRITICAL_CORRECTION", "纠正当前使用的凭证引用")
+        proposal_response = _assess(client, headers, task_id, message_id)
+>       assert proposal_response.status_code == 200, proposal_response.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_01_dialogue_updates.py:228: AssertionError
+____ test_m401_07_cancelled_proposal_survives_reload_without_task_mutation ____
+
+m4_client = (<starlette.testclient.TestClient object at 0x000002404CF219D0>, WindowsPath('D:/学习/agent新项目/.runtime/m4-01/green-01/test_m401_07_cancelled_proposa0/m4-01.sqlite3'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002404CDD5E50>
+
+    def test_m401_07_cancelled_proposal_survives_reload_without_task_mutation(
+        m4_client, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, db = m4_client
+        headers = _login(client)
+        session_id, task_id, _ = _new_task(client, headers)
+        original = "更正：当前请求的 credential_ref 是 cred-v1。"
+        message_id = _send_chat(client, headers, session_id, task_id, original)
+        _install_classifier(monkeypatch, "CRITICAL_CORRECTION", "核对当前凭证引用")
+        created = _assess(client, headers, task_id, message_id)
+>       assert created.status_code == 200, created.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_01_dialogue_updates.py:262: AssertionError
+_________ test_m401_08_non_owner_cannot_assess_or_confirm_a_proposal __________
+
+m4_client = (<starlette.testclient.TestClient object at 0x000002404D00D6A0>, WindowsPath('D:/学习/agent新项目/.runtime/m4-01/green-01/test_m401_08_non_owner_cannot_0/m4-01.sqlite3'))
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002404CF6D220>
+
+    def test_m401_08_non_owner_cannot_assess_or_confirm_a_proposal(
+        m4_client, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, db = m4_client
+        support_headers = _login(client)
+        session_id, task_id, _ = _new_task(client, support_headers)
+        message_id = _send_chat(
+            client, support_headers, session_id, task_id,
+            "我刚才说错了，实际请求使用 cred-v1，请重新核查。",
+        )
+        _install_classifier(monkeypatch, "CRITICAL_CORRECTION", "核对凭证引用")
+        proposal_response = _assess(client, support_headers, task_id, message_id)
+>       assert proposal_response.status_code == 200, proposal_response.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_01_dialogue_updates.py:299: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_01_dialogue_updates.py::test_m401_01_followup_is_explanation_only
+FAILED tests/test_m4_01_dialogue_updates.py::test_m401_02_confirmed_correction_reuses_task_control_and_replays_once
+FAILED tests/test_m4_01_dialogue_updates.py::test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize[\u5047\u8bbe\u8fd9\u4e2a\u4e3b\u4f53\u5176\u5b9e\u5df2\u7ecf\u7981\u7528\uff0c\u4f1a\u51fa\u73b0\u4ec0\u4e48\u60c5\u51b5\uff1f-HYPOTHESIS]
+FAILED tests/test_m4_01_dialogue_updates.py::test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize[\u4e0d\u8981\u628a\u4e3b\u4f53\u5df2\u542f\u7528\u5f53\u6210\u7ea0\u6b63\uff1b\u6211\u53ea\u662f\u60f3\u4e86\u89e3\u5982\u679c\u4e3b\u4f53\u7981\u7528\u4f1a\u600e\u6837\u3002-HYPOTHESIS]
+FAILED tests/test_m4_01_dialogue_updates.py::test_m401_03_hypothesis_negation_and_out_of_scope_never_formalize[\u5047\u8bbe\u628a\u8fd9\u4e2a Task \u7684 integration \u6539\u6210 integration-b \u540e\u4f1a\u6709\u6743\u9650\uff0c\u8bf7\u76f4\u63a5\u66ff\u6211\u5207\u6362\u3002-OUT_OF_SCOPE]
+FAILED tests/test_m4_01_dialogue_updates.py::test_m401_06_stale_proposal_is_rejected_after_control_revision_changes
+FAILED tests/test_m4_01_dialogue_updates.py::test_m401_07_cancelled_proposal_survives_reload_without_task_mutation
+FAILED tests/test_m4_01_dialogue_updates.py::test_m401_08_non_owner_cannot_assess_or_confirm_a_proposal
+8 failed in 1.35s
