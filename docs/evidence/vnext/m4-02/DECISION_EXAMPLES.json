@@ -1,0 +1,1110 @@
+{
+  "P1-A": [
+    {
+      "call_id": "call-2f456f4b-bc87-4a39-9ad2-17c3e3915c0e",
+      "provider_response_id": "3bd6331f-e2c3-4492-88de-8812dcd7053e",
+      "input_evidence_ids": [],
+      "tool_calls": [
+        {
+          "args": {
+            "reason": "Determine current order lifecycle and whether callback delivery should already have occurred."
+          },
+          "id": "call_00_jVUjKXpi2am7GKt1RsQ06098",
+          "name": "get_order_status",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "I’ll first confirm the bound order’s current lifecycle state, since HTTP 200 on the API does not establish that the async callback is due.",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 1152
+        },
+        "input_tokens": 1480,
+        "output_token_details": {
+          "reasoning": 98
+        },
+        "output_tokens": 178,
+        "total_tokens": 1658
+      }
+    },
+    {
+      "call_id": "call-00833c70-c859-48a3-a8af-24acfb0cf287",
+      "provider_response_id": "4f821552-21b6-4134-9179-ed3eac6bb99d",
+      "input_evidence_ids": [
+        "evidence-f7f7e896-9385-48c0-ad72-0629ace3147d"
+      ],
+      "tool_calls": [],
+      "assistant_text": "1. 当前订单 `async-order`（版本 1，`request_id=55deae0091bbfb87`）的状态是 `PROCESSING`，认证事件为 1，HTTP 状态为 200；HTTP 200 仅表示接口受理，不等于接收方已完成处理。  \n2. 受信任 Gate 依据该事实判定为 `ORDER_PROCESSING`，`recovered=false`，未授权写操作或恢复。  \n3. 原始“下游没有收到异步回调”的说法超出了现有证据：当前事实中没有回调投递或接收完成记录，不能据此断言未收到。  \n4. 因此应将问题定位为订单仍在处理中，而非回调丢失，必须区分 HTTP 受理与接收方完成。  \n5. 若历史建议据此要求重发回调或宣称已恢复，与当前订单事实冲突，不应采用。",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 0
+        },
+        "input_tokens": 842,
+        "output_token_details": {
+          "reasoning": 351
+        },
+        "output_tokens": 539,
+        "total_tokens": 1381
+      }
+    }
+  ],
+  "F1-A": [
+    {
+      "call_id": "call-c34f8019-db62-4869-8702-6de939d221a8",
+      "provider_response_id": "3ef948b3-2816-47cf-9e77-9759d66a7eda",
+      "input_evidence_ids": [],
+      "tool_calls": [
+        {
+          "args": {
+            "reason": "First establish the bound order's current lifecycle state; HTTP 200 alone does not prove callback completion."
+          },
+          "id": "call_00_bQOq8M7CRqrsHenttJUZ9745",
+          "name": "get_order_status",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 1152
+        },
+        "input_tokens": 1484,
+        "output_token_details": {
+          "reasoning": 95
+        },
+        "output_tokens": 152,
+        "total_tokens": 1636
+      }
+    },
+    {
+      "call_id": "call-1aee1426-e855-4e9d-925e-e8e2fb2970a2",
+      "provider_response_id": "c0001090-c36d-4193-8245-5c21d2056d7e",
+      "input_evidence_ids": [
+        "evidence-fb9b31c9-d6fb-4922-a831-40865544d2b8"
+      ],
+      "tool_calls": [
+        {
+          "args": {
+            "reason": "Order is COMPLETED but user reports no callback; need actual delivery event, version and transport ack/failure."
+          },
+          "id": "call_00_YEzPmzi6UKHb0pYJWLWA1142",
+          "name": "get_callback_delivery",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "I'll start by reading the callback delivery facts — the order reports COMPLETED, but that says nothing about whether a callback event was produced or acknowledged.",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 1024
+        },
+        "input_tokens": 1716,
+        "output_token_details": {
+          "reasoning": 109
+        },
+        "output_tokens": 203,
+        "total_tokens": 1919
+      }
+    },
+    {
+      "call_id": "call-0100827c-5959-4636-b218-b7abebcd549f",
+      "provider_response_id": "9c4d8b62-c0ff-47ff-bdbe-5db087d0c2f0",
+      "input_evidence_ids": [
+        "evidence-fb9b31c9-d6fb-4922-a831-40865544d2b8",
+        "evidence-4d6c12bb-fe74-4794-973e-cbeb2d4f8c96"
+      ],
+      "tool_calls": [],
+      "assistant_text": "当前订单 `async-order` v1 状态为 `COMPLETED`，订单接口返回 HTTP 200，但这只说明订单受理/生命周期完成，不等于回调完成。同一订单 v1 的回调事件 `event-3da0e2d6-0ce5-45a6-a3f3-404cd7bce43e` 状态为 `FAILED`，`receiver_http_status` 为 503，说明投递尝试到接收方后失败。可信 Gate 已固定诊断为 `CALLBACK_DELIVERY_FAILED`（`recovered=false`），应区分 HTTP 受理与接收方处理完成。因此原“下游没有收到异步回调”应更正为“回调投递失败、接收方返回 503”，不能把订单 200 当作回调成功。也不应按冲突的历史建议重发、声明恢复或声称回调成功。",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 0
+        },
+        "input_tokens": 1139,
+        "output_token_details": {
+          "reasoning": 527
+        },
+        "output_tokens": 718,
+        "total_tokens": 1857
+      }
+    }
+  ],
+  "D1-A": [
+    {
+      "call_id": "call-2fc6aef1-81e3-4158-9461-266934b566cd",
+      "provider_response_id": "9dc7a88f-4ac0-48e9-bbc4-27bb3805de5d",
+      "input_evidence_ids": [],
+      "tool_calls": [
+        {
+          "args": {
+            "reason": "HTTP 200 does not prove lifecycle completion; need current order state and whether delivery is due."
+          },
+          "id": "call_00_xS7EoOGpWHbvqwoXoqYV8355",
+          "name": "get_order_status",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 1152
+        },
+        "input_tokens": 1478,
+        "output_token_details": {
+          "reasoning": 140
+        },
+        "output_tokens": 196,
+        "total_tokens": 1674
+      }
+    },
+    {
+      "call_id": "call-b402f88a-23d1-474f-9f16-bd9ae16a48d0",
+      "provider_response_id": "6613f34a-88ec-4daa-b803-455f8a695f55",
+      "input_evidence_ids": [
+        "evidence-a04b07a6-affd-4a7b-a303-be0c486382cb"
+      ],
+      "tool_calls": [
+        {
+          "args": {
+            "reason": "Order shows COMPLETED; need the bound callback event, its version and actual transport acknowledgement to test the missing-callback claim."
+          },
+          "id": "call_00_gBkgtrWwWbBvqOOnn5E37445",
+          "name": "get_callback_delivery",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 1024
+        },
+        "input_tokens": 1708,
+        "output_token_details": {
+          "reasoning": 76
+        },
+        "output_tokens": 142,
+        "total_tokens": 1850
+      }
+    },
+    {
+      "call_id": "call-9f1ba107-cbe2-404b-829b-fb8434d0d872",
+      "provider_response_id": "6d265164-736e-49de-9cf8-6b7913670df2",
+      "input_evidence_ids": [
+        "evidence-a04b07a6-affd-4a7b-a303-be0c486382cb",
+        "evidence-f6d2063a-4826-44ab-be50-589d052c140d"
+      ],
+      "tool_calls": [
+        {
+          "args": {
+            "reason": "Delivery is ACKNOWLEDGED (HTTP 202) but ACK isn't processing; need receiver's actual processing state to test the \"downstream没收到\" claim."
+          },
+          "id": "call_00_lB9PXn4xMynKNzILcUho1453",
+          "name": "get_receiver_processing",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 1152
+        },
+        "input_tokens": 1960,
+        "output_token_details": {
+          "reasoning": 67
+        },
+        "output_tokens": 143,
+        "total_tokens": 2103
+      }
+    },
+    {
+      "call_id": "call-16e6d189-cc6d-4841-aff1-097246238d24",
+      "provider_response_id": "43dbf1bc-ec7a-4d0d-81a6-07c718d1b8c0",
+      "input_evidence_ids": [
+        "evidence-a04b07a6-affd-4a7b-a303-be0c486382cb",
+        "evidence-f6d2063a-4826-44ab-be50-589d052c140d",
+        "evidence-5ddd27c4-eace-45b8-915b-318532b28187"
+      ],
+      "tool_calls": [],
+      "assistant_text": "当前订单 `async-order` v1 查询返回 HTTP 200 且 `status=COMPLETED`（`request_id=a78b17e1c7f37447`）。同一订单 v1 的投递事件 `event-be5a9309...` 为 `ACKNOWLEDGED`、`receiver_http_status=202`，接收侧同一事件仍为 `QUEUED`。因此 HTTP 200/202 只表示请求被接受或确认，不等于接收方已完成处理。可信 Gate 结果为 `RECEIVER_PROCESSING_UNCONFIRMED`（`recovered=false`），接收处理尚未确认。这纠正了“下游没有收到回调”的说法：回调已被 HTTP 202 确认但仍排队，不能据此声称恢复或已重发。",
+      "usage": {
+        "input_token_details": {
+          "cache_read": 0
+        },
+        "input_tokens": 1315,
+        "output_token_details": {
+          "reasoning": 718
+        },
+        "output_tokens": 889,
+        "total_tokens": 2204
+      }
+    }
+  ],
+  "assets-on": {
+    "model_decisions": [
+      {
+        "call_id": "call-fe971588-3a0c-403f-84c6-0eb634db2ddb",
+        "tool_calls": [
+          {
+            "args": {
+              "query": "async order submission HTTP 200 vs 202 contract, callback notification timing",
+              "reason": "User is unsure whether 200 on the order endpoint implies an async callback; need the authoritative contract before judging."
+            },
+            "id": "call_00_FTvlikF9VPI9NTr5uhP17261",
+            "name": "search_callback_knowledge",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "I'll start by retrieving the versioned integration contract for the 200/202 semantics, since the user's uncertainty is about what a 200 on the order endpoint does and does not imply."
+      },
+      {
+        "call_id": "call-db1f03e1-d8ed-4dfe-82dd-896011df6d91",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "知识表明回调仅在订单COMPLETED后触发，需先核实当前生命周期，避免把未完成的订单误判为投递故障"
+            },
+            "id": "call_00_TnT9C6EofY6HTAvI4PBz7558",
+            "name": "get_order_status",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "我先说明判断方向：接入知识已经检索到，核心方法是「HTTP 200 只代表读取请求成功，不代表订单已完成；回调只在 COMPLETED 之后发出」。因此尚未核实的关键事实是**当前订单生命周期状态**——在不知道订单是否完成之前，把“没有异步通知”直接当成投递故障是站不住的。\n\n先读取当前订单状态。"
+      },
+      {
+        "call_id": "call-d821e983-ea8b-4e55-b39b-c0f6dea3c16b",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "Order is COMPLETED at version 2; need the current callback event and transport acknowledgement before assessing downstream processing."
+            },
+            "id": "call_00_rJfs4CE472IzqacsyRgH7843",
+            "name": "get_callback_delivery",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-343d53a0-d6b0-4a50-92ef-b270b202866d",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "Order v2 is COMPLETED and callback v2 is ACKNOWLEDGED (HTTP 202); need receiver-side processing state, since ACK is not completion."
+            },
+            "id": "call_00_zR3WxYIhcPrNkSrCMfar4646",
+            "name": "get_receiver_processing",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-c24f270d-32f1-44e7-96f2-0d95f8e33003",
+        "tool_calls": [],
+        "assistant_text": "可信 Gate 结论固定为 `RECEIVER_PROCESSING_UNCONFIRMED`（`recovered=false`），不能授权写入或改变结果。当前订单 `async-order`（`order_version=2`）为 `COMPLETED`，订单读取 `HTTP 200` 只证明读取成功，不证明接收方已完成处理。投递事件 `event-cd4d3fd0...`（`delivery_version=2`）为 `ACKNOWLEDGED` 且 `receiver_http_status=202`，这仅是 HTTP/传输层接受，不等于接收方处理完成。同一事件在接收方仍为 `QUEUED`（`receiver_version=2`），因此原称“下游没有异步通知”不准确，准确说法是通知已受理但接收方处理未确认。历史 `CALLBACK_DELIVERY_FAILED` 仅是方法提示，不能覆盖当前事实；未证明恢复，也未重发回调。"
+      }
+    ],
+    "selected_assets": [
+      {
+        "call_id": "call-fe971588-3a0c-403f-84c6-0eb634db2ddb",
+        "memories": [
+          {
+            "digest": "84d424aa0111ad92f25e7005fbba1fbe9d88165921ec81446307c97a57bf4976",
+            "memory_id": "episodic-dab9849f-2a8d-4045-9e08-c537f5d76920",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "5b210b890d3539aafb71ed30675ff30df3e74518bd86b187d1c00292387536ef",
+                "id": "s3-diagnosis-1ba2633c-8e38-464b-8725-10bf27670866",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "870d20b5b5a80e430bd64aac3bdb61dc9e59e8a416314c68d51b2609a084525f",
+                "id": "evidence-e4089839-f3f1-46d0-a721-88b958bae350",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "54105e602e9625b101758938805d0b029a810763da5ae98e6889de4ce36d4c15",
+                "id": "evidence-088ba26e-d1bc-448f-aabd-95c00b523c80",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-276153c4-b344-4969-b2ed-15b168b99e24",
+            "version": 2
+          }
+        ],
+        "knowledge": [],
+        "skill": null,
+        "excluded": []
+      },
+      {
+        "call_id": "call-db1f03e1-d8ed-4dfe-82dd-896011df6d91",
+        "memories": [
+          {
+            "digest": "84d424aa0111ad92f25e7005fbba1fbe9d88165921ec81446307c97a57bf4976",
+            "memory_id": "episodic-dab9849f-2a8d-4045-9e08-c537f5d76920",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "5b210b890d3539aafb71ed30675ff30df3e74518bd86b187d1c00292387536ef",
+                "id": "s3-diagnosis-1ba2633c-8e38-464b-8725-10bf27670866",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "870d20b5b5a80e430bd64aac3bdb61dc9e59e8a416314c68d51b2609a084525f",
+                "id": "evidence-e4089839-f3f1-46d0-a721-88b958bae350",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "54105e602e9625b101758938805d0b029a810763da5ae98e6889de4ce36d4c15",
+                "id": "evidence-088ba26e-d1bc-448f-aabd-95c00b523c80",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-276153c4-b344-4969-b2ed-15b168b99e24",
+            "version": 2
+          }
+        ],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": null,
+        "excluded": []
+      },
+      {
+        "call_id": "call-d821e983-ea8b-4e55-b39b-c0f6dea3c16b",
+        "memories": [
+          {
+            "digest": "84d424aa0111ad92f25e7005fbba1fbe9d88165921ec81446307c97a57bf4976",
+            "memory_id": "episodic-dab9849f-2a8d-4045-9e08-c537f5d76920",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "5b210b890d3539aafb71ed30675ff30df3e74518bd86b187d1c00292387536ef",
+                "id": "s3-diagnosis-1ba2633c-8e38-464b-8725-10bf27670866",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "870d20b5b5a80e430bd64aac3bdb61dc9e59e8a416314c68d51b2609a084525f",
+                "id": "evidence-e4089839-f3f1-46d0-a721-88b958bae350",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "54105e602e9625b101758938805d0b029a810763da5ae98e6889de4ce36d4c15",
+                "id": "evidence-088ba26e-d1bc-448f-aabd-95c00b523c80",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-276153c4-b344-4969-b2ed-15b168b99e24",
+            "version": 2
+          }
+        ],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": null,
+        "excluded": []
+      },
+      {
+        "call_id": "call-343d53a0-d6b0-4a50-92ef-b270b202866d",
+        "memories": [
+          {
+            "digest": "84d424aa0111ad92f25e7005fbba1fbe9d88165921ec81446307c97a57bf4976",
+            "memory_id": "episodic-dab9849f-2a8d-4045-9e08-c537f5d76920",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "5b210b890d3539aafb71ed30675ff30df3e74518bd86b187d1c00292387536ef",
+                "id": "s3-diagnosis-1ba2633c-8e38-464b-8725-10bf27670866",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "870d20b5b5a80e430bd64aac3bdb61dc9e59e8a416314c68d51b2609a084525f",
+                "id": "evidence-e4089839-f3f1-46d0-a721-88b958bae350",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "54105e602e9625b101758938805d0b029a810763da5ae98e6889de4ce36d4c15",
+                "id": "evidence-088ba26e-d1bc-448f-aabd-95c00b523c80",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-276153c4-b344-4969-b2ed-15b168b99e24",
+            "version": 2
+          }
+        ],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": null,
+        "excluded": []
+      },
+      {
+        "call_id": "call-c24f270d-32f1-44e7-96f2-0d95f8e33003",
+        "memories": [
+          {
+            "digest": "84d424aa0111ad92f25e7005fbba1fbe9d88165921ec81446307c97a57bf4976",
+            "memory_id": "episodic-dab9849f-2a8d-4045-9e08-c537f5d76920",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "5b210b890d3539aafb71ed30675ff30df3e74518bd86b187d1c00292387536ef",
+                "id": "s3-diagnosis-1ba2633c-8e38-464b-8725-10bf27670866",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "870d20b5b5a80e430bd64aac3bdb61dc9e59e8a416314c68d51b2609a084525f",
+                "id": "evidence-e4089839-f3f1-46d0-a721-88b958bae350",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "54105e602e9625b101758938805d0b029a810763da5ae98e6889de4ce36d4c15",
+                "id": "evidence-088ba26e-d1bc-448f-aabd-95c00b523c80",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-276153c4-b344-4969-b2ed-15b168b99e24",
+            "version": 2
+          }
+        ],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": null,
+        "excluded": []
+      }
+    ]
+  },
+  "memory-off": {
+    "model_decisions": [
+      {
+        "call_id": "call-9000edfe-264d-487e-a684-871c8262c9c0",
+        "tool_calls": [
+          {
+            "args": {
+              "query": "async order API 200 vs 202 response contract and callback notification timing",
+              "reason": "用户不清楚 200/202 契约，先取接入方法以区分\"受理成功\"与\"回调完成\"。"
+            },
+            "id": "call_00_ilMv2HmJmNtC50AMyVTx1791",
+            "name": "search_callback_knowledge",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "我先弄清接入契约中 200 与 202 的含义，再按方法核实现状。"
+      },
+      {
+        "call_id": "call-f456e8db-3aaa-434c-8de0-d66aacb62953",
+        "tool_calls": [
+          {
+            "args": {
+              "name": "order-lifecycle-triage",
+              "reason": "Select the applicable method to distinguish an HTTP success from an order lifecycle state that triggers callbacks."
+            },
+            "id": "call_00_QaxE9zNP5AcNe5yWT9gi6996",
+            "name": "load_callback_skill",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "Since the core ambiguity is whether the order ever reached a callback-triggering lifecycle state, I’ll first load the order-lifecycle triage method; current order facts are still missing."
+      },
+      {
+        "call_id": "call-1de1dcd5-7b20-4720-ad44-6150e845be4d",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "Determine whether the bound order is still PROCESSING (callback not yet due) or COMPLETED (callback should exist)."
+            },
+            "id": "call_00_udjPvTRyeNeuOqDNI8ef9826",
+            "name": "get_order_status",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "I have the lifecycle contract and method loaded. The key unknown is the order's *current* lifecycle state — a 200 on the read only confirms the read succeeded."
+      },
+      {
+        "call_id": "call-5a7dca31-e49d-4358-8f87-575875ed321f",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "Order is COMPLETED at version 2; need the bound callback event's actual delivery/ACK state to see whether transport succeeded."
+            },
+            "id": "call_00_RdLGQJG3mwMC0wipMq8D1233",
+            "name": "get_callback_delivery",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "The order read already returned a COMPLETED lifecycle state, so the \"200 means completed\" ambiguity is resolved. Next I need the correlated callback event's transport facts, since the complaint is about a missing downstream notification."
+      },
+      {
+        "call_id": "call-13c0e353-82ce-47ed-a68e-156e0b8f63de",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "Order is COMPLETED and delivery is ACKNOWLEDGED (202), but ACK ≠ completed processing; need receiver-side processing state for this event."
+            },
+            "id": "call_00_Wif4n3oRixxf2GiT5ksp3895",
+            "name": "get_receiver_processing",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": ""
+      },
+      {
+        "call_id": "call-cd9734ae-0b0a-4b9f-99d8-93b8189b54c9",
+        "tool_calls": [],
+        "assistant_text": "只读核查的受信 Gate 结论固定为 `RECEIVER_PROCESSING_UNCONFIRMED`，不能授权写入或改变结果。当前订单 `async-order` 为 `COMPLETED`（order_version=2、authn_event_id=2、request_id=a377260b5887af9f），说明订单 HTTP 200 只代表读取成功，不能据此认定“下游没有异步通知”。投递事件 `event-c8c67dcb...` 为 `ACKNOWLEDGED`、`receiver_http_status=202`，只证明接收方在 HTTP 层接受回调，不等于接收方处理完成。接收方事实仍为 `QUEUED`（delivery_version=2），因此既不能认定回调失败，也不能认定处理完成，且不应据此重发。Knowledge/Skill 仅是调查方法，这些当前事实纠正原说法为：回调已获接收确认，但接收方处理未确认。"
+      }
+    ],
+    "selected_assets": [
+      {
+        "call_id": "call-9000edfe-264d-487e-a684-871c8262c9c0",
+        "memories": [],
+        "knowledge": [],
+        "skill": null,
+        "excluded": [
+          {
+            "reason": "EVALUATION_MEMORY_OFF",
+            "source_type": "EPISODIC_MEMORY"
+          }
+        ]
+      },
+      {
+        "call_id": "call-f456e8db-3aaa-434c-8de0-d66aacb62953",
+        "memories": [],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": null,
+        "excluded": [
+          {
+            "reason": "EVALUATION_MEMORY_OFF",
+            "source_type": "EPISODIC_MEMORY"
+          }
+        ]
+      },
+      {
+        "call_id": "call-1de1dcd5-7b20-4720-ad44-6150e845be4d",
+        "memories": [],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": "order-lifecycle-triage",
+        "excluded": [
+          {
+            "reason": "EVALUATION_MEMORY_OFF",
+            "source_type": "EPISODIC_MEMORY"
+          }
+        ]
+      },
+      {
+        "call_id": "call-5a7dca31-e49d-4358-8f87-575875ed321f",
+        "memories": [],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": "order-lifecycle-triage",
+        "excluded": [
+          {
+            "reason": "EVALUATION_MEMORY_OFF",
+            "source_type": "EPISODIC_MEMORY"
+          }
+        ]
+      },
+      {
+        "call_id": "call-13c0e353-82ce-47ed-a68e-156e0b8f63de",
+        "memories": [],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": "order-lifecycle-triage",
+        "excluded": [
+          {
+            "reason": "EVALUATION_MEMORY_OFF",
+            "source_type": "EPISODIC_MEMORY"
+          }
+        ]
+      },
+      {
+        "call_id": "call-cd9734ae-0b0a-4b9f-99d8-93b8189b54c9",
+        "memories": [],
+        "knowledge": [
+          {
+            "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+            "document_id": "order-lifecycle-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": "order-lifecycle-triage",
+        "excluded": [
+          {
+            "reason": "EVALUATION_MEMORY_OFF",
+            "source_type": "EPISODIC_MEMORY"
+          }
+        ]
+      }
+    ]
+  },
+  "knowledge-conflict": {
+    "model_decisions": [
+      {
+        "call_id": "call-bf2b908d-08aa-459f-b5ea-217e9808a51b",
+        "tool_calls": [
+          {
+            "args": {
+              "query": "async order callback contract HTTP 200 GET versus 202 acknowledgement and receiver processing",
+              "reason": "The symptom hinges on whether HTTP 200 means order availability rather than callback delivery/processing completion."
+            },
+            "id": "call_00_cvORKD4wTHoDURTibp0O5923",
+            "name": "search_callback_knowledge",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "I’ll first retrieve the applicable versioned callback contract to distinguish order-read HTTP 200 from callback acceptance semantics."
+      },
+      {
+        "call_id": "call-f15f9221-053e-4201-8f6b-124d07044f05",
+        "tool_calls": [
+          {
+            "args": {
+              "name": "order-lifecycle-triage",
+              "reason": "200 不等于完成；需先确定订单是否真正到达可触发异步通知的生命周期节点，再判断回调是否应发。"
+            },
+            "id": "call_00_m8agFvHMeNek1fiqQoDJ2459",
+            "name": "load_callback_skill",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "我先说明判断：已检索到的知识文档提到“HTTP 200 恒等于 COMPLETED”，这与实时生命周期事实可能冲突，属于低优先级方法提示，不能当作事实。用户的核心疑问是“200 是否等于异步通知已应发出”，因此先加载订单生命周期方法。"
+      },
+      {
+        "call_id": "call-e22d32c9-dc18-4dd0-ba5b-b97456257e64",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "先确认绑定订单当前生命周期状态；200 仅代表读取成功，决定回调是否到期"
+            },
+            "id": "call_00_4a2KqtN34hAMNBzcPJpr7404",
+            "name": "get_order_status",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "我先核对当前订单生命周期。历史知识文档声称“HTTP 200 一定等于 COMPLETED”，这与现行生命周期语义冲突，不能作为事实依据，因此必须以当前订单读数为准。"
+      },
+      {
+        "call_id": "call-ee280755-d6b8-49aa-9a2c-d65bfc4253ec",
+        "tool_calls": [],
+        "assistant_text": "当前MCP仅见s3_order证据：order_id=async-order、order_version=2、status=PROCESSING、request_id=67a23dc6e8fa2d8e、authn_event_id=2、HTTP 200，未提供当前投递或接收方完成事件。HTTP 200只证明订单读取被接受，不等同于接收方完成回调处理。订单仍为PROCESSING说明回调尚未到期，不能据此认定“下游无异步通知”就是投递故障。这纠正了原症状的故障推断，也否定了历史“200=COMPLETED/缺失回调即失败”的冲突指引；可信Gate固定为ORDER_PROCESSING，recovered=false且无副作用。未证明恢复或重发，Knowledge/Memory/Skill仅作方法，不改变当前事实。"
+      }
+    ],
+    "selected_assets": [
+      {
+        "call_id": "call-bf2b908d-08aa-459f-b5ea-217e9808a51b",
+        "memories": [
+          {
+            "digest": "0c004578003f041d292000ed5e51a51d1a4f712d60e96d5002828bacc906287c",
+            "memory_id": "episodic-8b6dd064-8ede-4ff7-88a8-d937858b5d08",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "851e8584bb650bf918f60ae9ec71f4f3c3af5045789958f6189870e2e2f5e2d0",
+                "id": "s3-diagnosis-c9ef8ea9-e984-4574-b3c3-8db3dcec8936",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "0c11ef8405fc86d22e9045e1d92c15876c364c4e534d36dc961c3aa5e76aee8c",
+                "id": "evidence-2b76c2a4-a316-4ed6-be16-b42a746a2c0b",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "575d7f1c1cd4803377c8520d7061b3a616062856176dc9529b9e4e4905cbd7bb",
+                "id": "evidence-21686178-9244-4e90-9f22-3305947f7dc8",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-b351f0a9-b52a-4cd2-a92a-704d6cebd420",
+            "version": 2
+          }
+        ],
+        "knowledge": [],
+        "skill": null,
+        "excluded": []
+      },
+      {
+        "call_id": "call-f15f9221-053e-4201-8f6b-124d07044f05",
+        "memories": [
+          {
+            "digest": "0c004578003f041d292000ed5e51a51d1a4f712d60e96d5002828bacc906287c",
+            "memory_id": "episodic-8b6dd064-8ede-4ff7-88a8-d937858b5d08",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "851e8584bb650bf918f60ae9ec71f4f3c3af5045789958f6189870e2e2f5e2d0",
+                "id": "s3-diagnosis-c9ef8ea9-e984-4574-b3c3-8db3dcec8936",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "0c11ef8405fc86d22e9045e1d92c15876c364c4e534d36dc961c3aa5e76aee8c",
+                "id": "evidence-2b76c2a4-a316-4ed6-be16-b42a746a2c0b",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "575d7f1c1cd4803377c8520d7061b3a616062856176dc9529b9e4e4905cbd7bb",
+                "id": "evidence-21686178-9244-4e90-9f22-3305947f7dc8",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-b351f0a9-b52a-4cd2-a92a-704d6cebd420",
+            "version": 2
+          }
+        ],
+        "knowledge": [
+          {
+            "digest": "e01bebde289e4c3e3ece17f5cc3e75b409af6a098a86d3eb5506b79dbf09b6ae",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "0.9.0"
+          }
+        ],
+        "skill": null,
+        "excluded": []
+      },
+      {
+        "call_id": "call-e22d32c9-dc18-4dd0-ba5b-b97456257e64",
+        "memories": [
+          {
+            "digest": "0c004578003f041d292000ed5e51a51d1a4f712d60e96d5002828bacc906287c",
+            "memory_id": "episodic-8b6dd064-8ede-4ff7-88a8-d937858b5d08",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "851e8584bb650bf918f60ae9ec71f4f3c3af5045789958f6189870e2e2f5e2d0",
+                "id": "s3-diagnosis-c9ef8ea9-e984-4574-b3c3-8db3dcec8936",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "0c11ef8405fc86d22e9045e1d92c15876c364c4e534d36dc961c3aa5e76aee8c",
+                "id": "evidence-2b76c2a4-a316-4ed6-be16-b42a746a2c0b",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "575d7f1c1cd4803377c8520d7061b3a616062856176dc9529b9e4e4905cbd7bb",
+                "id": "evidence-21686178-9244-4e90-9f22-3305947f7dc8",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-b351f0a9-b52a-4cd2-a92a-704d6cebd420",
+            "version": 2
+          }
+        ],
+        "knowledge": [
+          {
+            "digest": "e01bebde289e4c3e3ece17f5cc3e75b409af6a098a86d3eb5506b79dbf09b6ae",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "0.9.0"
+          }
+        ],
+        "skill": "order-lifecycle-triage",
+        "excluded": []
+      },
+      {
+        "call_id": "call-ee280755-d6b8-49aa-9a2c-d65bfc4253ec",
+        "memories": [
+          {
+            "digest": "0c004578003f041d292000ed5e51a51d1a4f712d60e96d5002828bacc906287c",
+            "memory_id": "episodic-8b6dd064-8ede-4ff7-88a8-d937858b5d08",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "851e8584bb650bf918f60ae9ec71f4f3c3af5045789958f6189870e2e2f5e2d0",
+                "id": "s3-diagnosis-c9ef8ea9-e984-4574-b3c3-8db3dcec8936",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "0c11ef8405fc86d22e9045e1d92c15876c364c4e534d36dc961c3aa5e76aee8c",
+                "id": "evidence-2b76c2a4-a316-4ed6-be16-b42a746a2c0b",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "575d7f1c1cd4803377c8520d7061b3a616062856176dc9529b9e4e4905cbd7bb",
+                "id": "evidence-21686178-9244-4e90-9f22-3305947f7dc8",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-b351f0a9-b52a-4cd2-a92a-704d6cebd420",
+            "version": 2
+          }
+        ],
+        "knowledge": [
+          {
+            "digest": "e01bebde289e4c3e3ece17f5cc3e75b409af6a098a86d3eb5506b79dbf09b6ae",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "0.9.0"
+          }
+        ],
+        "skill": "order-lifecycle-triage",
+        "excluded": []
+      }
+    ]
+  },
+  "checkpoint-invalidation": {
+    "model_decisions": [
+      {
+        "call_id": "call-e292f737-a91a-4f79-9253-f0ea1061240a",
+        "tool_calls": [
+          {
+            "args": {
+              "query": "async order callback contract 200 vs 202 acknowledgement",
+              "reason": "用户不清楚 200/202 契约，需先取版本化接入方法以界定同步响应与回调语义"
+            },
+            "id": "call_00_ClsBfqbm9PcCgNfXUKEj0605",
+            "name": "search_callback_knowledge",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "我会先按你的要求检索版本化的接入契约方法，再加载适用的 Skill，最后用当前订单、投递与接收方事实核实。先检索知识："
+      },
+      {
+        "call_id": "call-47785800-f7a6-4a2e-af4f-bc2965025983",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "确认订单当前生命周期状态与版本，判断异步回调是否已到期，避免把未到期误判为故障"
+            },
+            "id": "call_00_IGzpCdUUA8MGMHwqYFPo6479",
+            "name": "get_order_status",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "我先确认当前订单生命周期——200 只表示订单读取成功，不能证明回调已到期或已送达。"
+      },
+      {
+        "call_id": "call-b0a74dbc-9767-4276-8579-c52fed243e26",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "订单已 COMPLETED 但下游无通知；需查回调事件的实际传输确认/失败结果，而非仅凭订单 GET 200"
+            },
+            "id": "call_00_vjoLEDsfOOgPGAg0aJdn3625",
+            "name": "get_callback_delivery",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "我将继续调查。订单状态显示 HTTP 200 且订单已 `COMPLETED`，但这不能证明回调已到达或被处理。当前缺少的核心事实正是投递事件的实际传输结果，因此先读取投递记录。"
+      },
+      {
+        "call_id": "call-db283448-6896-46df-9ae7-6cb0179a4f63",
+        "tool_calls": [
+          {
+            "args": {
+              "reason": "ACK 202 from delivery does not prove receiver completed the event; need current receiver processing state for event-e8db19e2."
+            },
+            "id": "call_00_5U3m9H9eDbbNUF11hKnb4128",
+            "name": "get_receiver_processing",
+            "type": "tool_call"
+          }
+        ],
+        "assistant_text": "The order reads COMPLETED (order_version 2) and the delivery shows a 202 ACK — but ACK is not completed processing. The missing fact is what the receiver actually did with the event, so I'll read receiver processing next."
+      },
+      {
+        "call_id": "call-16bc6f96-9bc7-4043-b721-4b9d1c98eece",
+        "tool_calls": [],
+        "assistant_text": "当前订单 `async-order` v2 为 `COMPLETED`；投递事件 `event-e8db19e2…` 为 `ACKNOWLEDGED`、`receiver_http_status=202`，但接收方同一事件仍为 `QUEUED`。  \n这说明订单接口的 200 是订单事实，202 仅是回调接收端的 HTTP 受理，不等于接收方处理完成。  \nGate 结论为 `RECEIVER_PROCESSING_UNCONFIRMED`、`recovered=false`，故不能认定“下游没有异步通知”，也不能重发或授权写入。  \n若历史建议与此冲突，应以这些当前订单、投递和接收方事实为准。  \n已失效或撤销的知识/记忆内容不复述，仅保留生命周期与投递排查的方法用途。"
+      }
+    ],
+    "selected_assets": [
+      {
+        "call_id": "call-e292f737-a91a-4f79-9253-f0ea1061240a",
+        "memories": [
+          {
+            "digest": "7d55b85f9a843c2234d3df9ad1c9674f31c0b8b98f64aba80d083bddc15f3b01",
+            "memory_id": "episodic-7d6476c7-1b98-42fd-b6c3-aec5f00ec3d0",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "95389735d648a538170a2c1f02b2614df6c3ca7a217aa6fb2c863756be58a9b1",
+                "id": "s3-diagnosis-716e4af9-46b3-4fdc-b262-d07340f7ac26",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "a2df9d5fcb5968fc3367ccd63a6362830aa4dd38f2513fbb52cac79d663ff84b",
+                "id": "evidence-df5ca3fe-3e4c-4bf9-93c9-65054ef28374",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "881dfe66669edfc4dc280493ae52e389bfd425b7f1830ec32fa6f9b383b75099",
+                "id": "evidence-b12b7a64-7988-437d-9443-1ee0b668cc39",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-f90ac67c-378f-4a3b-a553-93ca9f66bfba",
+            "version": 2
+          }
+        ],
+        "knowledge": [],
+        "skill": null,
+        "excluded": []
+      },
+      {
+        "call_id": "call-47785800-f7a6-4a2e-af4f-bc2965025983",
+        "memories": [
+          {
+            "digest": "7d55b85f9a843c2234d3df9ad1c9674f31c0b8b98f64aba80d083bddc15f3b01",
+            "memory_id": "episodic-7d6476c7-1b98-42fd-b6c3-aec5f00ec3d0",
+            "source_authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "source_outcome": "DIAGNOSED",
+            "source_refs": [
+              {
+                "digest_or_version": "95389735d648a538170a2c1f02b2614df6c3ca7a217aa6fb2c863756be58a9b1",
+                "id": "s3-diagnosis-716e4af9-46b3-4fdc-b262-d07340f7ac26",
+                "kind": "S3_DIAGNOSIS"
+              },
+              {
+                "digest_or_version": "a2df9d5fcb5968fc3367ccd63a6362830aa4dd38f2513fbb52cac79d663ff84b",
+                "id": "evidence-df5ca3fe-3e4c-4bf9-93c9-65054ef28374",
+                "kind": "EVIDENCE"
+              },
+              {
+                "digest_or_version": "881dfe66669edfc4dc280493ae52e389bfd425b7f1830ec32fa6f9b383b75099",
+                "id": "evidence-b12b7a64-7988-437d-9443-1ee0b668cc39",
+                "kind": "EVIDENCE"
+              }
+            ],
+            "source_task_id": "task-f90ac67c-378f-4a3b-a553-93ca9f66bfba",
+            "version": 2
+          }
+        ],
+        "knowledge": [
+          {
+            "digest": "e9eab67593f7078e284f6ab855b07d096793325791499df2820e2a06ffa6d3aa",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "skill": null,
+        "excluded": []
+      },
+      {
+        "call_id": "call-b0a74dbc-9767-4276-8579-c52fed243e26",
+        "memories": [],
+        "knowledge": [],
+        "skill": null,
+        "excluded": [
+          {
+            "reason": "KNOWLEDGE_REMOVED_EXPIRED_OR_CHANGED",
+            "source_id": "callback-ack-contract",
+            "source_type": "KNOWLEDGE"
+          },
+          {
+            "reason": "MEMORY_REVOKED",
+            "source_id": "episodic-7d6476c7-1b98-42fd-b6c3-aec5f00ec3d0",
+            "source_type": "EPISODIC_MEMORY",
+            "version": 3
+          }
+        ]
+      },
+      {
+        "call_id": "call-db283448-6896-46df-9ae7-6cb0179a4f63",
+        "memories": [],
+        "knowledge": [],
+        "skill": null,
+        "excluded": [
+          {
+            "reason": "KNOWLEDGE_REMOVED_EXPIRED_OR_CHANGED",
+            "source_id": "callback-ack-contract",
+            "source_type": "KNOWLEDGE"
+          },
+          {
+            "reason": "MEMORY_REVOKED",
+            "source_id": "episodic-7d6476c7-1b98-42fd-b6c3-aec5f00ec3d0",
+            "source_type": "EPISODIC_MEMORY",
+            "version": 3
+          }
+        ]
+      },
+      {
+        "call_id": "call-16bc6f96-9bc7-4043-b721-4b9d1c98eece",
+        "memories": [],
+        "knowledge": [],
+        "skill": null,
+        "excluded": [
+          {
+            "reason": "KNOWLEDGE_REMOVED_EXPIRED_OR_CHANGED",
+            "source_id": "callback-ack-contract",
+            "source_type": "KNOWLEDGE"
+          },
+          {
+            "reason": "MEMORY_REVOKED",
+            "source_id": "episodic-7d6476c7-1b98-42fd-b6c3-aec5f00ec3d0",
+            "source_type": "EPISODIC_MEMORY",
+            "version": 3
+          }
+        ]
+      }
+    ]
+  }
+}

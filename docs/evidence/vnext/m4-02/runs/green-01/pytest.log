@@ -1,0 +1,105 @@
+FFFF.F..                                                                 [100%]
+================================== FAILURES ===================================
+______ test_three_current_factual_outcomes[PROCESSING-ORDER_PROCESSING] _______
+
+tmp_path = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-green-01/test_three_current_factual_out0')
+state = 'PROCESSING', outcome = 'ORDER_PROCESSING'
+
+    @pytest.mark.parametrize("state,outcome", [
+        ("PROCESSING", "ORDER_PROCESSING"),
+        ("DELIVERY_FAILED", "CALLBACK_DELIVERY_FAILED"),
+        ("DELIVERED_PENDING", "RECEIVER_PROCESSING_UNCONFIRMED"),
+    ])
+    def test_three_current_factual_outcomes(tmp_path, state, outcome):
+        from opspilot.domain.s3 import evaluate_s3_gate
+        db, task, setup = prepared(tmp_path, state)
+        order, delivery, receiver = facts(db, task)
+        ids = [observe(db, task, name, fact) for name, fact in zip(
+            ("get_order_status", "get_callback_delivery", "get_receiver_processing"), (order, delivery, receiver),
+        )]
+        gate = evaluate_s3_gate(db, task["task_id"], ids)
+>       assert gate["outcome"] == outcome
+E       AssertionError: assert None == 'ORDER_PROCESSING'
+
+tests\test_m4_02_s3.py:67: AssertionError
+_ test_three_current_factual_outcomes[DELIVERY_FAILED-CALLBACK_DELIVERY_FAILED] _
+
+tmp_path = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-green-01/test_three_current_factual_out1')
+state = 'DELIVERY_FAILED', outcome = 'CALLBACK_DELIVERY_FAILED'
+
+    @pytest.mark.parametrize("state,outcome", [
+        ("PROCESSING", "ORDER_PROCESSING"),
+        ("DELIVERY_FAILED", "CALLBACK_DELIVERY_FAILED"),
+        ("DELIVERED_PENDING", "RECEIVER_PROCESSING_UNCONFIRMED"),
+    ])
+    def test_three_current_factual_outcomes(tmp_path, state, outcome):
+        from opspilot.domain.s3 import evaluate_s3_gate
+        db, task, setup = prepared(tmp_path, state)
+        order, delivery, receiver = facts(db, task)
+        ids = [observe(db, task, name, fact) for name, fact in zip(
+            ("get_order_status", "get_callback_delivery", "get_receiver_processing"), (order, delivery, receiver),
+        )]
+        gate = evaluate_s3_gate(db, task["task_id"], ids)
+>       assert gate["outcome"] == outcome
+E       AssertionError: assert None == 'CALLBACK_DELIVERY_FAILED'
+
+tests\test_m4_02_s3.py:67: AssertionError
+_ test_three_current_factual_outcomes[DELIVERED_PENDING-RECEIVER_PROCESSING_UNCONFIRMED] _
+
+tmp_path = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-green-01/test_three_current_factual_out2')
+state = 'DELIVERED_PENDING', outcome = 'RECEIVER_PROCESSING_UNCONFIRMED'
+
+    @pytest.mark.parametrize("state,outcome", [
+        ("PROCESSING", "ORDER_PROCESSING"),
+        ("DELIVERY_FAILED", "CALLBACK_DELIVERY_FAILED"),
+        ("DELIVERED_PENDING", "RECEIVER_PROCESSING_UNCONFIRMED"),
+    ])
+    def test_three_current_factual_outcomes(tmp_path, state, outcome):
+        from opspilot.domain.s3 import evaluate_s3_gate
+        db, task, setup = prepared(tmp_path, state)
+        order, delivery, receiver = facts(db, task)
+        ids = [observe(db, task, name, fact) for name, fact in zip(
+            ("get_order_status", "get_callback_delivery", "get_receiver_processing"), (order, delivery, receiver),
+        )]
+        gate = evaluate_s3_gate(db, task["task_id"], ids)
+>       assert gate["outcome"] == outcome
+E       AssertionError: assert None == 'RECEIVER_PROCESSING_UNCONFIRMED'
+
+tests\test_m4_02_s3.py:67: AssertionError
+_______________ test_processing_does_not_require_callback_reads _______________
+
+tmp_path = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-green-01/test_processing_does_not_requi0')
+
+    def test_processing_does_not_require_callback_reads(tmp_path):
+        from opspilot.domain.s3 import evaluate_s3_gate
+        db, task, _ = prepared(tmp_path, "PROCESSING")
+        order, _, _ = facts(db, task)
+        gate = evaluate_s3_gate(db, task["task_id"], [observe(db, task, "get_order_status", order)])
+>       assert gate["outcome"] == "ORDER_PROCESSING"
+E       AssertionError: assert None == 'ORDER_PROCESSING'
+
+tests\test_m4_02_s3.py:79: AssertionError
+______________ test_version_change_and_forged_evidence_excluded _______________
+
+tmp_path = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-green-01/test_version_change_and_forged0')
+
+    def test_version_change_and_forged_evidence_excluded(tmp_path):
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import evaluate_s3_gate, current_s3_evidence
+        db, task, _ = prepared(tmp_path)
+        order, delivery, _ = facts(db, task)
+        ids = [observe(db, task, "get_order_status", order), observe(db, task, "get_callback_delivery", delivery)]
+>       assert evaluate_s3_gate(db, task["task_id"], ids)["decision"] == "DIAGNOSED"
+E       AssertionError: assert 'NEED_MORE' == 'DIAGNOSED'
+E         
+E         - DIAGNOSED
+E         + NEED_MORE
+
+tests\test_m4_02_s3.py:101: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_02_s3.py::test_three_current_factual_outcomes[PROCESSING-ORDER_PROCESSING]
+FAILED tests/test_m4_02_s3.py::test_three_current_factual_outcomes[DELIVERY_FAILED-CALLBACK_DELIVERY_FAILED]
+FAILED tests/test_m4_02_s3.py::test_three_current_factual_outcomes[DELIVERED_PENDING-RECEIVER_PROCESSING_UNCONFIRMED]
+FAILED tests/test_m4_02_s3.py::test_processing_does_not_require_callback_reads
+FAILED tests/test_m4_02_s3.py::test_version_change_and_forged_evidence_excluded
+5 failed, 3 passed in 11.23s

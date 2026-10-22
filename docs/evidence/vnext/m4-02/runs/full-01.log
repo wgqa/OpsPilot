@@ -1,0 +1,89 @@
+........................................................................ [ 28%]
+.........F................F............................................. [ 57%]
+........................................................................ [ 86%]
+..F...............................                                       [100%]
+================================== FAILURES ===================================
+________ test_schema_v3_database_adds_context_input_provenance_columns ________
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-full-01/test_schema_v3_database_adds_c0/domain.sqlite3')
+
+    def test_schema_v3_database_adds_context_input_provenance_columns(demo_db: Path) -> None:
+        from opspilot.domain.database import initialize
+    
+        with connect(demo_db) as connection:
+            connection.execute("ALTER TABLE d5_context_provenance DROP COLUMN selected_input_messages_json")
+            connection.execute("ALTER TABLE d5_context_provenance DROP COLUMN task_run_control_json")
+            connection.execute("PRAGMA user_version = 3")
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(d5_context_provenance)")}
+        # M3-03 adds the semantic-memory lifecycle in v11.
+>       assert version == 12
+E       assert 13 == 12
+
+tests\test_m1_dynamic_investigation.py:289: AssertionError
+_____ test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash ______
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-full-01/test_schema_migration_is_idemp0/domain.sqlite3')
+live_api = 'http://127.0.0.1:49747'
+
+    def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
+        demo_db: Path, live_api: str
+    ) -> None:
+        from opspilot.domain.database import initialize
+    
+        binding, _, plan = _ready_task(demo_db, live_api, "migration")
+        task_id = str(binding["task_id"])
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_controls WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM session_task_links WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM sessions WHERE session_id = ?", (binding["session_id"],))
+            connection.execute("PRAGMA user_version = 0")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            control = connection.execute("SELECT terminal_state, control_revision FROM task_controls WHERE task_id = ?", (task_id,)).fetchone()
+            session_link = connection.execute("SELECT COUNT(*) FROM session_task_links WHERE task_id = ?", (task_id,)).fetchone()[0]
+            migrated_plan = connection.execute("SELECT plan_hash FROM d3_plans WHERE task_id = ?", (task_id,)).fetchone()[0]
+            plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        assert tuple(control) == ("ACTIVE", 0)
+>       assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 12
+E       AssertionError: assert (1 == 1 and '93551383d280...7e83bb7666528' == '93551383d280...7e83bb7666528'
+E         
+E         Skipping 53 identical leading characters in diff, use -v to show
+E           83bb7666528 and 1 == 1 and 13 == 12)
+
+tests\test_m1_task_control.py:644: AssertionError
+___________ test_m303_schema_v11_migration_is_repeatable_and_scoped ___________
+
+demo_db = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-full-01/test_m303_schema_v11_migration0/domain.sqlite3')
+
+    def test_m303_schema_v11_migration_is_repeatable_and_scoped(demo_db: Path) -> None:
+        initialize(demo_db)
+        _session_and_task(demo_db, "migration-a")
+        other_identity = trusted_identity(demo_db, "support-b")
+        other_session = str(create_session(demo_db, other_identity)["session_id"])
+        _create_task(demo_db, other_session, "migration-b", actor_id="support-b", integration_id="integration-b")
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM semantic_memory_project_approvers")
+            connection.execute("PRAGMA user_version = 10")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            grants = [tuple(row) for row in connection.execute(
+                "SELECT tenant_id, project_id, actor_id, active FROM semantic_memory_project_approvers ORDER BY tenant_id, actor_id"
+            )]
+            foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+>       assert version == 12
+E       assert 13 == 12
+
+tests\test_m303_semantic_memory.py:282: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_dynamic_investigation.py::test_schema_v3_database_adds_context_input_provenance_columns
+FAILED tests/test_m1_task_control.py::test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash
+FAILED tests/test_m303_semantic_memory.py::test_m303_schema_v11_migration_is_repeatable_and_scoped
+3 failed, 247 passed in 187.79s (0:03:07)

@@ -1,0 +1,240 @@
+{
+  "setup_only": [
+    {
+      "preparation_only": true,
+      "agent_actions": [],
+      "state": "DELIVERY_FAILED",
+      "order_version": 1,
+      "receiver_http_status": 503,
+      "transport_trace": [
+        {
+          "request": {
+            "event_id": "event-ec280335-28ff-44c7-b00a-48a602965b39",
+            "order_id": "async-order",
+            "request_id": "transport-4ebec6eb-a33a-4b77-beed-2a5add784d66"
+          },
+          "http_status": 503,
+          "response": {
+            "event_id": "event-ec280335-28ff-44c7-b00a-48a602965b39",
+            "request_id": "transport-4ebec6eb-a33a-4b77-beed-2a5add784d66",
+            "receiver_state": "UNAVAILABLE"
+          }
+        }
+      ]
+    },
+    {
+      "preparation_only": true,
+      "agent_actions": [],
+      "state": "DELIVERED_PENDING",
+      "order_version": 2,
+      "receiver_http_status": 202,
+      "transport_trace": [
+        {
+          "request": {
+            "event_id": "event-55676d15-b64a-4b88-9e33-6d252def3e63",
+            "order_id": "async-order",
+            "request_id": "transport-4ca1c286-2ca6-40bc-b40a-ddeb8e96c579"
+          },
+          "http_status": 202,
+          "response": {
+            "event_id": "event-55676d15-b64a-4b88-9e33-6d252def3e63",
+            "request_id": "transport-4ca1c286-2ca6-40bc-b40a-ddeb8e96c579",
+            "receiver_state": "QUEUED"
+          }
+        }
+      ]
+    }
+  ],
+  "source_task": {
+    "status": "ACCEPTED",
+    "command_id": "command-f02a9e62-9953-4704-a9d0-4811a058ea2b",
+    "session_id": "session-c9bfda4f-ac0a-4882-8210-d9a314b34d0a",
+    "task_id": "task-53057e5a-7723-4b6b-9b97-923da4be04a2",
+    "thread_id": "opspilot-159833c0-3a7f-47e9-ad3f-128b6b46e1f1",
+    "message_id": "message-31863db9-fd6b-4c69-ae8f-e960bbb8b43a",
+    "run_id": "run-b49802f9-3e38-44d4-9872-8ee029d0c707",
+    "sequence": 1,
+    "run_status": "QUEUED",
+    "request_digest": "a083005959f13135bd41a07f132122ce2b8fc947a37638137374a9005b461ecd",
+    "application_state": "RECEIVED_NOT_APPLIED",
+    "replayed": false
+  },
+  "target_task": {
+    "status": "ACCEPTED",
+    "command_id": "command-0a022e5d-944c-40db-b1cb-893df06e2254",
+    "session_id": "session-1bcb5d7e-2b7b-4d8c-8cb3-755215646e6f",
+    "task_id": "task-587e9450-6e96-4a46-bc26-5796813c80a7",
+    "thread_id": "opspilot-2f42b7ea-f2ce-49f5-be6a-0072b6ad65fb",
+    "message_id": "message-59efcf17-a661-4d09-9e8c-29e0ec73374d",
+    "run_id": "run-7fa5d1e3-6465-490e-8843-4e56b03701b2",
+    "sequence": 1,
+    "run_status": "QUEUED",
+    "request_digest": "503621d3cd650d7f51c6e950ff3f5380b6541ac4dac8162458854742ad05605d",
+    "application_state": "RECEIVED_NOT_APPLIED",
+    "replayed": false
+  },
+  "memory": {
+    "memory_id": "episodic-5b4cbe46-b4f8-4f40-8e5a-673172b25c7e",
+    "tenant_id": "tenant-a",
+    "project_id": "service:orders-async-demo",
+    "type": "EPISODIC",
+    "problem_type": "async_callback",
+    "summary": "历史异步订单诊断：/api/async-orders/async-order 的可信结论为 CALLBACK_DELIVERY_FAILED；仅诊断，未重发回调，未证明恢复。",
+    "source_task_id": "task-53057e5a-7723-4b6b-9b97-923da4be04a2",
+    "source_report_ref": null,
+    "source_verification_id": null,
+    "source_outcome": "DIAGNOSED",
+    "schema_version": "opspilot-case-memory-v1",
+    "content_digest": "8c658d12b02fb97800fe01a7039281b5b0e5f7aebdc75e47e50b963cd267ec16",
+    "state": "ACTIVE",
+    "version": 2,
+    "confirmed_by": "approver-a",
+    "confirmed_at": "2026-10-22T18:28:09.674+00:00",
+    "revoked_by": null,
+    "revoked_at": null,
+    "expires_at": "2026-11-21T18:28:09.663+00:00",
+    "created_at": "2026-10-22T18:28:09.663+00:00",
+    "source_evidence_ids": [
+      "evidence-c2466d1d-d4d7-4f03-8e04-b35d1203b44f",
+      "evidence-11484dd1-a140-4bbf-8940-8c465823e299"
+    ],
+    "applicability_constraints": {
+      "problem_type": "async_callback",
+      "required_current_checks": [
+        "s3_order",
+        "s3_delivery"
+      ],
+      "service_id": "orders-async-demo",
+      "source_outcome": "DIAGNOSED"
+    },
+    "source_refs": [
+      {
+        "digest_or_version": "2190ff32b5047d1bed570bdf457672615d4dbd6bebb33d723e7296cb719ccb3c",
+        "id": "s3-diagnosis-ec538502-d6c7-4dbd-aea1-b65d800b1f6d",
+        "kind": "S3_DIAGNOSIS"
+      },
+      {
+        "digest_or_version": "2f8337e9bde904fd9da8a851e55b39b9d5fec0eebe852603d994dcff4e6f95c3",
+        "id": "evidence-c2466d1d-d4d7-4f03-8e04-b35d1203b44f",
+        "kind": "EVIDENCE"
+      },
+      {
+        "digest_or_version": "aa204360f5daabd26c442b12045dbcfe75fce48000091defd894fa05434965a0",
+        "id": "evidence-11484dd1-a140-4bbf-8940-8c465823e299",
+        "kind": "EVIDENCE"
+      }
+    ],
+    "experience": {
+      "case_specific_facts": {
+        "observed_facts": [
+          {
+            "body": {
+              "authn_event_id": 1,
+              "contract_version": 1,
+              "order_id": "async-order",
+              "order_version": 1,
+              "request_id": "1deb373bce87d35c",
+              "status": "COMPLETED"
+            },
+            "http_status": 200,
+            "versions_after": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 1,
+              "order_version": 1,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 1
+            },
+            "versions_before": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 1,
+              "order_version": 1,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 1
+            }
+          },
+          {
+            "event_id": "event-ec280335-28ff-44c7-b00a-48a602965b39",
+            "order_id": "async-order",
+            "order_version": 1,
+            "receiver_http_status": 503,
+            "response_digest": "4a7f48cdd794549d756509731af8a1bfe9f0bf563a85558303f8ad72ff2be82e",
+            "service_id": "orders-async-demo",
+            "status": "FAILED",
+            "tenant_id": "tenant-a",
+            "transport_request_id": "transport-4ebec6eb-a33a-4b77-beed-2a5add784d66",
+            "version": 1
+          }
+        ],
+        "outcome": "CALLBACK_DELIVERY_FAILED",
+        "required_current_checks": [
+          "s3_order",
+          "s3_delivery"
+        ],
+        "route": "/api/async-orders/async-order"
+      },
+      "investigation_guidance": [
+        "HTTP 200 only proves an order read; establish current lifecycle before calling a missing callback a fault.",
+        "For a completed order, correlate delivery event and version; a 202 acknowledgement requires receiver processing verification.",
+        "Historical outcome is not the target task's cause. Retrieve the applicable current contract or delivery Skill if uncertain."
+      ],
+      "limitations": [
+        "Historical method only; no authorization, resend or recovery proof."
+      ],
+      "required_current_checks": [
+        "s3_order",
+        "s3_delivery"
+      ],
+      "source_authority": "HISTORICAL_METHOD_HINT_ONLY"
+    }
+  },
+  "knowledge_manifest": {
+    "schema_version": 1,
+    "documents": [
+      {
+        "document_id": "order-lifecycle-contract",
+        "title": "Order lifecycle and callback trigger",
+        "file": "order-lifecycle-contract.md",
+        "version": "1.0.0",
+        "digest": "d7196a13ad8d7d631ff88b7907855dde15ee8efc9ea2827bdf37bcc8b5970a92",
+        "source": "local:orders-async-demo/contract-v1",
+        "valid_from": "2026-10-01T00:00:00+00:00",
+        "expires_at": "2030-01-01T00:00:00+00:00",
+        "active": true,
+        "keywords": [
+          "processing",
+          "lifecycle",
+          "200",
+          "处理中",
+          "订单",
+          "完成"
+        ]
+      },
+      {
+        "document_id": "callback-ack-contract",
+        "title": "Callback acknowledgement and receiver processing",
+        "file": "callback-ack-contract.md",
+        "version": "1.0.0",
+        "digest": "e9eab67593f7078e284f6ab855b07d096793325791499df2820e2a06ffa6d3aa",
+        "source": "local:orders-async-demo/contract-v1",
+        "valid_from": "2026-10-01T00:00:00+00:00",
+        "expires_at": "2030-01-01T00:00:00+00:00",
+        "active": true,
+        "keywords": [
+          "202",
+          "receiver",
+          "acknowledgement",
+          "processing",
+          "callback",
+          "delivery",
+          "503",
+          "回调",
+          "接收队列"
+        ]
+      }
+    ]
+  }
+}

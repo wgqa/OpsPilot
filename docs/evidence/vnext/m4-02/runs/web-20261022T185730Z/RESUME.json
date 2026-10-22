@@ -1,0 +1,1401 @@
+{
+  "task_id": "task-c581819a-1003-45aa-970d-22a2d1240e92",
+  "session_id": "session-136e07ef-f213-4466-a3b3-54b802cc8ac0",
+  "status": "PASS",
+  "mode": "resume",
+  "inspector": {
+    "task": {
+      "task_id": "task-c581819a-1003-45aa-970d-22a2d1240e92",
+      "tenant_id": "tenant-a",
+      "service_id": "orders-async-demo",
+      "integration_id": "async-integration-a",
+      "principal_id": "async-principal-a",
+      "ticket_id": "INC-A-001",
+      "status": "NO_ACTION"
+    },
+    "trusted_state": {
+      "task_id": "task-c581819a-1003-45aa-970d-22a2d1240e92",
+      "service_id": "orders-async-demo",
+      "integration_id": "async-integration-a",
+      "principal_id": "async-principal-a",
+      "ticket_id": "INC-A-001",
+      "task_status": "NO_ACTION",
+      "terminal_state": "ACTIVE",
+      "control_revision": 0,
+      "pending_critical_input": false,
+      "applied_critical_message_seq": 0,
+      "plan": null,
+      "action_counts": [],
+      "s3_outcome": {
+        "receipt_id": "s3-diagnosis-2a4058c4-fd4a-4f23-898a-364c79fd0013",
+        "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "currentness": "CURRENT",
+        "recovered": false,
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+            "evidence-38c85074-3fef-4459-8211-aee7a2056fa4",
+            "evidence-7e7e2935-f69e-43b2-912d-835f023bc65d"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": []
+        },
+        "explanation": "当前订单 async-order（版本1）为 COMPLETED，接口 HTTP 200 仅说明订单侧请求成功。同一事件 event-b63… 的回调投递为 ACKNOWLEDGED、接收方 HTTP 202，只表示已进入接收队列。对应 receiver 记录仍为 QUEUED（delivery_version 1），因此 Gate 结论为 RECEIVER_PROCESSING_UNCONFIRMED，且 recovered=false、无副作用。这纠正“下游没收到回调”的说法：回调已被接收队列接受，但处理完成尚未确认，202 不能当作最终完成。因此不应重发回调或改写状态，只能按该未确认结果处理。",
+        "explanation_currentness": "CURRENT",
+        "explanation_excluded_sources": []
+      }
+    },
+    "plan_history": [],
+    "evidence": [
+      {
+        "evidence_id": "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+        "fact_type": "s3_order",
+        "fetched_at": "2026-10-22T18:57:41.981+00:00",
+        "digest": "dfe758abe65e41c06ba399451d7627ea80bb8ea79d241db5a0992b71199ff855",
+        "versions_digest": "108000091dc2c8b42d28ca2ce1ad5a1d587d86a26d1f75033ae49db957c046f7",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 1,
+          "delivery_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 1
+        },
+        "facts": {
+          "body": {
+            "authn_event_id": 1,
+            "contract_version": 1,
+            "order_id": "async-order",
+            "order_version": 1,
+            "request_id": "e033e1afd9d3088c",
+            "status": "COMPLETED"
+          },
+          "http_status": 200,
+          "versions_after": {
+            "config_version": 1,
+            "contract_version": 1,
+            "delivery_version": 1,
+            "order_version": 1,
+            "policy_version": 1,
+            "principal_version": 1,
+            "receiver_version": 1
+          },
+          "versions_before": {
+            "config_version": 1,
+            "contract_version": 1,
+            "delivery_version": 1,
+            "order_version": 1,
+            "policy_version": 1,
+            "principal_version": 1,
+            "receiver_version": 1
+          }
+        }
+      },
+      {
+        "evidence_id": "evidence-38c85074-3fef-4459-8211-aee7a2056fa4",
+        "fact_type": "s3_delivery",
+        "fetched_at": "2026-10-22T18:57:45.609+00:00",
+        "digest": "b276385711f987d04de695346ee0c429900d472127fc7d6da21549c97baeebf0",
+        "versions_digest": "108000091dc2c8b42d28ca2ce1ad5a1d587d86a26d1f75033ae49db957c046f7",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 1,
+          "delivery_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 1
+        },
+        "facts": {
+          "event_id": "event-b63dedf9-70c1-4a91-b93e-bf8b14500799",
+          "order_id": "async-order",
+          "order_version": 1,
+          "receiver_http_status": 202,
+          "response_digest": "e992e20a9c2897cc105013012d3da1b57e294c9537caf3a49c1c83ac1d714245",
+          "service_id": "orders-async-demo",
+          "status": "ACKNOWLEDGED",
+          "tenant_id": "tenant-a",
+          "transport_request_id": "transport-6d56f2bc-271d-445e-8391-0e58289a90a8",
+          "version": 1
+        }
+      },
+      {
+        "evidence_id": "evidence-7e7e2935-f69e-43b2-912d-835f023bc65d",
+        "fact_type": "s3_receiver",
+        "fetched_at": "2026-10-22T18:57:47.143+00:00",
+        "digest": "5987d061c4e5e73b3a2d4d62412e3b74f92b06f0d228d439cedc8f99fcdc25ff",
+        "versions_digest": "108000091dc2c8b42d28ca2ce1ad5a1d587d86a26d1f75033ae49db957c046f7",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 1,
+          "delivery_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 1
+        },
+        "facts": {
+          "delivery_version": 1,
+          "event_id": "event-b63dedf9-70c1-4a91-b93e-bf8b14500799",
+          "order_id": "async-order",
+          "service_id": "orders-async-demo",
+          "status": "QUEUED",
+          "tenant_id": "tenant-a",
+          "version": 1
+        }
+      }
+    ],
+    "observations": [
+      {
+        "observation_id": "observation-794987db-b26a-4bc2-96ed-450cf8c2969f",
+        "tool_name": "get_receiver_processing",
+        "status": "OK",
+        "progress_added": 1,
+        "error_class": null,
+        "result_digest": "3c64ad3d7aa20b41dd2b5500e37421ebc080f8c687790a2aa9ee05dd0d425018",
+        "evidence_id": "evidence-7e7e2935-f69e-43b2-912d-835f023bc65d",
+        "created_at": "2026-10-22 18:57:47"
+      },
+      {
+        "observation_id": "observation-fc89e52d-287b-44a8-bb60-5ce55cfbb618",
+        "tool_name": "get_callback_delivery",
+        "status": "OK",
+        "progress_added": 1,
+        "error_class": null,
+        "result_digest": "c82c54a88a970f813fc61f4a71bac532dc09501ee664a21d0dffedc15687992b",
+        "evidence_id": "evidence-38c85074-3fef-4459-8211-aee7a2056fa4",
+        "created_at": "2026-10-22 18:57:45"
+      },
+      {
+        "observation_id": "observation-d776314b-5ade-4a70-8fb6-4d55cc93d072",
+        "tool_name": "load_callback_skill",
+        "status": "OK",
+        "progress_added": 1,
+        "error_class": null,
+        "result_digest": "bc946bc423259f3681d1c8cf05ce12fd48567a7b65a5c8a0800f15625b274006",
+        "evidence_id": null,
+        "created_at": "2026-10-22 18:57:44"
+      },
+      {
+        "observation_id": "observation-ec8e6aa4-9dd0-49dd-b2e8-4afdbfd8fe4b",
+        "tool_name": "get_order_status",
+        "status": "OK",
+        "progress_added": 1,
+        "error_class": null,
+        "result_digest": "e330edb861aa33e1b3eea1562f40617ba3f01af8e349c1dc164cdfe96725b379",
+        "evidence_id": "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+        "created_at": "2026-10-22 18:57:41"
+      },
+      {
+        "observation_id": "observation-ab801672-f27f-4d11-9b24-57694da9fcec",
+        "tool_name": "search_callback_knowledge",
+        "status": "OK",
+        "progress_added": 1,
+        "error_class": null,
+        "result_digest": "16649c9383ac26178fb180e45bdeb8ef12524db02fa8022a8b4451a3d05480c5",
+        "evidence_id": null,
+        "created_at": "2026-10-22 18:57:39"
+      }
+    ],
+    "runs": [
+      {
+        "run_id": "run-ab997df2-89b1-4807-ba2d-408623517762",
+        "kind": "CHAT_READONLY",
+        "status": "SUCCEEDED",
+        "blocked_reason": null,
+        "source_message_id": "message-9270b1fa-2bd3-4754-8095-ccd0ebcf8746",
+        "expected_control_revision": 0,
+        "consumed_message_seq": 2,
+        "applied_critical_message_seq": 0,
+        "created_at": "2026-10-22T18:57:52.713+00:00",
+        "started_at": "2026-10-22T18:57:52.759+00:00",
+        "ended_at": "2026-10-22T18:58:25.755+00:00",
+        "chat_attempt_count": 1,
+        "context_compression_attempt_count": 0
+      },
+      {
+        "run_id": "run-5cab5085-3208-4d3a-ad60-647299139b10",
+        "kind": "INVESTIGATE",
+        "status": "SUCCEEDED",
+        "blocked_reason": null,
+        "source_message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+        "expected_control_revision": 0,
+        "consumed_message_seq": 1,
+        "applied_critical_message_seq": 0,
+        "created_at": "2026-10-22T18:57:33.699+00:00",
+        "started_at": "2026-10-22T18:57:35.323+00:00",
+        "ended_at": "2026-10-22T18:57:52.225+00:00",
+        "chat_attempt_count": 0,
+        "context_compression_attempt_count": 0
+      }
+    ],
+    "task_input_messages": [
+      {
+        "message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+        "sequence": 1,
+        "kind": "INITIAL_SYMPTOM",
+        "input_kind": "CHAT_READONLY",
+        "digest": "67270e3fb004ffdf2d4c67407ac81b6e91453210f885703228cdf7541330cb69",
+        "provenance": "USER_INPUT_UNTRUSTED",
+        "application_state": "RECEIVED_NOT_APPLIED",
+        "applied_run_id": null,
+        "accepted_control_revision": 0,
+        "applied_control_revision": 0
+      }
+    ],
+    "investigation_model_traces": [
+      {
+        "model_id": "deepseek-flash",
+        "provider_response_id": "48b45e02-ce6e-4ffd-9fb6-6fcaa460e742",
+        "status": "OK",
+        "usage": {
+          "input_token_details": {
+            "cache_read": 0
+          },
+          "input_tokens": 1836,
+          "output_token_details": {
+            "reasoning": 599
+          },
+          "output_tokens": 743,
+          "total_tokens": 2579
+        },
+        "prompt_digest": "4cd242a094595dec9d30e28127d7dc2d1490b86934b7300f9d184073d21a9d31",
+        "tool_names": [],
+        "created_at": "2026-10-22 18:57:52"
+      },
+      {
+        "model_id": "deepseek-flash",
+        "provider_response_id": "ad334725-2720-4587-9b08-6fc3529438dd",
+        "status": "OK",
+        "usage": {
+          "input_token_details": {
+            "cache_read": 1152
+          },
+          "input_tokens": 2469,
+          "output_token_details": {
+            "reasoning": 53
+          },
+          "output_tokens": 126,
+          "total_tokens": 2595
+        },
+        "prompt_digest": "1751b52181c3e39209e81263c5df5db3f4393d725a547ee85b64782b5c786e97",
+        "tool_names": [
+          "get_receiver_processing"
+        ],
+        "created_at": "2026-10-22 18:57:47"
+      },
+      {
+        "model_id": "deepseek-flash",
+        "provider_response_id": "bbec59f8-6991-46f7-a67f-d4aee0f83f62",
+        "status": "OK",
+        "usage": {
+          "input_token_details": {
+            "cache_read": 1280
+          },
+          "input_tokens": 2216,
+          "output_token_details": {
+            "reasoning": 45
+          },
+          "output_tokens": 112,
+          "total_tokens": 2328
+        },
+        "prompt_digest": "4afb59831800722336ca2dd672644f90937343463f7a1e5eba19bd81aa5c3510",
+        "tool_names": [
+          "get_callback_delivery"
+        ],
+        "created_at": "2026-10-22 18:57:45"
+      },
+      {
+        "model_id": "deepseek-flash",
+        "provider_response_id": "86d416f6-fd98-43b2-9c75-904e417b6a01",
+        "status": "OK",
+        "usage": {
+          "input_token_details": {
+            "cache_read": 1024
+          },
+          "input_tokens": 2006,
+          "output_token_details": {
+            "reasoning": 189
+          },
+          "output_tokens": 345,
+          "total_tokens": 2351
+        },
+        "prompt_digest": "9425ed89f38080608a49d588be3e03747fb86836fec475378ab2b311c4a7d183",
+        "tool_names": [
+          "load_callback_skill"
+        ],
+        "created_at": "2026-10-22 18:57:44"
+      },
+      {
+        "model_id": "deepseek-flash",
+        "provider_response_id": "4c3a668a-596a-4a7c-beed-c05cb9bd5af8",
+        "status": "OK",
+        "usage": {
+          "input_token_details": {
+            "cache_read": 1408
+          },
+          "input_tokens": 1771,
+          "output_token_details": {
+            "reasoning": 124
+          },
+          "output_tokens": 229,
+          "total_tokens": 2000
+        },
+        "prompt_digest": "30196179d27c328a88db6f99a20ada4b72a52d99d27ccd239ef28619da419d52",
+        "tool_names": [
+          "get_order_status"
+        ],
+        "created_at": "2026-10-22 18:57:41"
+      },
+      {
+        "model_id": "deepseek-flash",
+        "provider_response_id": "65ebe7c8-e53b-466f-8912-3fdd1e37fe49",
+        "status": "OK",
+        "usage": {
+          "input_token_details": {
+            "cache_read": 1152
+          },
+          "input_tokens": 1497,
+          "output_token_details": {
+            "reasoning": 275
+          },
+          "output_tokens": 408,
+          "total_tokens": 1905
+        },
+        "prompt_digest": "15f42f153181bea175ce8e95783bb2151181ef95c4f417132a5451d6822146f3",
+        "tool_names": [
+          "search_callback_knowledge"
+        ],
+        "created_at": "2026-10-22 18:57:39"
+      }
+    ],
+    "chat_model_attempts": [
+      {
+        "attempt_id": "chat-attempt-1c69113f-7bca-44c6-bae3-e87accd3b406",
+        "run_id": "run-ab997df2-89b1-4807-ba2d-408623517762",
+        "attempt_no": 1,
+        "model_id": "deepseek-flash",
+        "status": "SUCCEEDED",
+        "provider_response_id": "4e4c1acd311e62bf3b4fe63ab4aaeb58",
+        "input_tokens": 1563,
+        "output_tokens": 1589,
+        "total_tokens": 3152,
+        "error_class": null,
+        "created_at": "2026-10-22T18:57:52.784+00:00",
+        "completed_at": "2026-10-22T18:58:25.755+00:00"
+      }
+    ],
+    "chat_context_provenance": [
+      {
+        "run_id": "run-ab997df2-89b1-4807-ba2d-408623517762",
+        "answer_attempts": [
+          {
+            "attempt_id": "chat-attempt-1c69113f-7bca-44c6-bae3-e87accd3b406",
+            "attempt_no": 1,
+            "model_id": "deepseek-flash",
+            "status": "SUCCEEDED",
+            "provider_response_id": "4e4c1acd311e62bf3b4fe63ab4aaeb58",
+            "token_usage": {
+              "input_tokens": 1563,
+              "output_tokens": 1589,
+              "total_tokens": 3152
+            },
+            "error_class": null,
+            "created_at": "2026-10-22T18:57:52.784+00:00",
+            "prompt_digest": "ed87e0b5f7f4c0b08c263215ebdb3227d933ec2835a87185fe2e602c7fe5cf75"
+          }
+        ],
+        "compression_attempts": [],
+        "context_budget": {
+          "configured_input_limit_tokens": 12000,
+          "context_window_tokens": 16384,
+          "estimated_input_tokens": 1558,
+          "estimator": "tiktoken:cl100k_base:0.14.0",
+          "input_budget_tokens": 12000,
+          "model_id": "deepseek-flash",
+          "output_reserved_tokens": 512,
+          "policy_version": "opspilot-context-budget-v1",
+          "safety_margin_tokens": 1024,
+          "strategy": "HYBRID",
+          "utilization": 0.1298
+        },
+        "context_blocks": [
+          {
+            "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+            "block_id": "trusted-control",
+            "category": "TRUSTED_CONTROL",
+            "estimated_tokens": 271,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "DOMAIN_TASK_STATE",
+            "block_id": "current-task-state",
+            "category": "CURRENT_TASK_STATE",
+            "estimated_tokens": 514,
+            "source_refs": [
+              "task-c581819a-1003-45aa-970d-22a2d1240e92"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "CURRENT_AUTHORIZED_MCP_EVIDENCE",
+            "block_id": "current-facts",
+            "category": "CURRENT_FACTS",
+            "estimated_tokens": 653,
+            "source_refs": [
+              "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+              "evidence-38c85074-3fef-4459-8211-aee7a2056fa4",
+              "evidence-7e7e2935-f69e-43b2-912d-835f023bc65d"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "UNTRUSTED_USER_INPUT",
+            "block_id": "message:message-a9580f08-11a8-4d9f-900b-f94097268797",
+            "category": "TASK_INPUT_ANCHOR",
+            "estimated_tokens": 65,
+            "source_refs": [
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "UNTRUSTED_USER_INPUT",
+            "block_id": "message:message-9270b1fa-2bd3-4754-8095-ccd0ebcf8746",
+            "category": "CURRENT_USER_INPUT",
+            "estimated_tokens": 55,
+            "source_refs": [
+              "message-9270b1fa-2bd3-4754-8095-ccd0ebcf8746"
+            ],
+            "status": "SELECTED"
+          }
+        ],
+        "summary_refs": [],
+        "excluded_sources": []
+      }
+    ],
+    "investigator_context_provenance": [
+      {
+        "call_id": "call-9b3b4aec-a40f-43aa-9552-5c21d7b60d5b",
+        "attempt_id": "attempt-ebdae03f-5cf6-4422-b2e4-9a5645ddc2fb",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m4-02-s3-v1",
+        "prompt_digest": "4cd242a094595dec9d30e28127d7dc2d1490b86934b7300f9d184073d21a9d31",
+        "selected_skill": {
+          "name": "callback-delivery-triage",
+          "version": "1.0.0",
+          "digest": "a31bdb42baecf65003edce02fa6c76779a28c604539cdd6a4f8b271809221507"
+        },
+        "selected_knowledge": [
+          {
+            "digest": "e9eab67593f7078e284f6ab855b07d096793325791499df2820e2a06ffa6d3aa",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "selected_memories": [],
+        "model_status": "OK",
+        "error_class": null,
+        "selected_input_messages": [
+          {
+            "message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+            "sequence": 1,
+            "digest": "67270e3fb004ffdf2d4c67407ac81b6e91453210f885703228cdf7541330cb69",
+            "kind": "INITIAL_SYMPTOM",
+            "input_kind": "CHAT_READONLY",
+            "provenance": "USER_INPUT_UNTRUSTED",
+            "accepted_control_revision": 0,
+            "applied_control_revision": 0
+          }
+        ],
+        "task_run_control": {
+          "run_id": "run-5cab5085-3208-4d3a-ad60-647299139b10",
+          "source_message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+          "expected_control_revision": 0,
+          "current_control_revision": 0,
+          "consumed_message_seq": 1,
+          "applied_critical_message_seq": 0,
+          "pending_critical_message_seq": null
+        },
+        "evidence_ids": [
+          "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+          "evidence-38c85074-3fef-4459-8211-aee7a2056fa4",
+          "evidence-7e7e2935-f69e-43b2-912d-835f023bc65d"
+        ],
+        "context_budget": {
+          "configured_input_limit_tokens": 12000,
+          "context_window_tokens": 16384,
+          "estimated_input_tokens": 1696,
+          "estimator": "tiktoken:cl100k_base:0.14.0",
+          "input_budget_tokens": 12000,
+          "model_id": "deepseek-flash",
+          "output_reserved_tokens": 512,
+          "policy_version": "opspilot-context-budget-v1",
+          "prompt_estimated_tokens": 1688,
+          "safety_margin_tokens": 1024,
+          "strategy": "FAIL_CLOSED_NO_HISTORY_COMPRESSION",
+          "tool_schema_estimated_tokens": 0,
+          "utilization": 0.1413
+        },
+        "context_blocks": [
+          {
+            "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+            "block_id": "investigator-trusted-control",
+            "category": "TRUSTED_CONTROL",
+            "estimated_tokens": 1688,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TRUSTED_TASK_BINDING_AND_RUN_CONTROL",
+            "block_id": "investigator-current-task-state",
+            "category": "CURRENT_TASK_STATE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "run-5cab5085-3208-4d3a-ad60-647299139b10",
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TASK_SCOPED_MCP_EVIDENCE_AND_OBSERVATIONS",
+            "block_id": "investigator-current-facts",
+            "category": "CURRENT_FACTS",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+              "evidence-38c85074-3fef-4459-8211-aee7a2056fa4",
+              "evidence-7e7e2935-f69e-43b2-912d-835f023bc65d"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "UNTRUSTED_USER_INPUT",
+            "block_id": "investigator-recent-interaction",
+            "category": "RECENT_INTERACTION",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "NONE_IN_INVESTIGATION_RUN",
+            "block_id": "investigator-historical-summary",
+            "category": "HISTORICAL_SUMMARY",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "NOT_APPLICABLE"
+          },
+          {
+            "authority": "HISTORICAL_METHOD_HINT_AND_VERSIONED_KNOWLEDGE",
+            "block_id": "investigator-external-guidance",
+            "category": "EXTERNAL_GUIDANCE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "callback-ack-contract",
+              "callback-delivery-triage"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "APPLICATION_DEFINED_READ_ONLY_TOOLS",
+            "block_id": "read-only-mcp-tool-schemas",
+            "category": "TOOL_SCHEMA",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "SELECTED"
+          }
+        ],
+        "summary_refs": [],
+        "excluded_sources": [],
+        "built_at": "2026-10-22T18:57:47.206+00:00"
+      },
+      {
+        "call_id": "call-37eb02c3-416b-44a4-9b8c-b9bd03d2d150",
+        "attempt_id": "attempt-b9a25c63-0476-495d-bfe8-13b0e8c0be70",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m4-02-s3-v1",
+        "prompt_digest": "1751b52181c3e39209e81263c5df5db3f4393d725a547ee85b64782b5c786e97",
+        "selected_skill": {
+          "name": "callback-delivery-triage",
+          "version": "1.0.0",
+          "digest": "a31bdb42baecf65003edce02fa6c76779a28c604539cdd6a4f8b271809221507"
+        },
+        "selected_knowledge": [
+          {
+            "digest": "e9eab67593f7078e284f6ab855b07d096793325791499df2820e2a06ffa6d3aa",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "selected_memories": [],
+        "model_status": "OK",
+        "error_class": null,
+        "selected_input_messages": [
+          {
+            "message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+            "sequence": 1,
+            "digest": "67270e3fb004ffdf2d4c67407ac81b6e91453210f885703228cdf7541330cb69",
+            "kind": "INITIAL_SYMPTOM",
+            "input_kind": "CHAT_READONLY",
+            "provenance": "USER_INPUT_UNTRUSTED",
+            "accepted_control_revision": 0,
+            "applied_control_revision": 0
+          }
+        ],
+        "task_run_control": {
+          "run_id": "run-5cab5085-3208-4d3a-ad60-647299139b10",
+          "source_message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+          "expected_control_revision": 0,
+          "current_control_revision": 0,
+          "consumed_message_seq": 1,
+          "applied_critical_message_seq": 0,
+          "pending_critical_message_seq": null
+        },
+        "evidence_ids": [
+          "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+          "evidence-38c85074-3fef-4459-8211-aee7a2056fa4"
+        ],
+        "context_budget": {
+          "configured_input_limit_tokens": 12000,
+          "context_window_tokens": 16384,
+          "estimated_input_tokens": 2013,
+          "estimator": "tiktoken:cl100k_base:0.14.0",
+          "input_budget_tokens": 12000,
+          "model_id": "deepseek-flash",
+          "output_reserved_tokens": 512,
+          "policy_version": "opspilot-context-budget-v1",
+          "prompt_estimated_tokens": 1507,
+          "safety_margin_tokens": 1024,
+          "strategy": "FAIL_CLOSED_NO_HISTORY_COMPRESSION",
+          "tool_schema_estimated_tokens": 498,
+          "utilization": 0.1678
+        },
+        "context_blocks": [
+          {
+            "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+            "block_id": "investigator-trusted-control",
+            "category": "TRUSTED_CONTROL",
+            "estimated_tokens": 1507,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TRUSTED_TASK_BINDING_AND_RUN_CONTROL",
+            "block_id": "investigator-current-task-state",
+            "category": "CURRENT_TASK_STATE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "run-5cab5085-3208-4d3a-ad60-647299139b10",
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TASK_SCOPED_MCP_EVIDENCE_AND_OBSERVATIONS",
+            "block_id": "investigator-current-facts",
+            "category": "CURRENT_FACTS",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+              "evidence-38c85074-3fef-4459-8211-aee7a2056fa4"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "UNTRUSTED_USER_INPUT",
+            "block_id": "investigator-recent-interaction",
+            "category": "RECENT_INTERACTION",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "NONE_IN_INVESTIGATION_RUN",
+            "block_id": "investigator-historical-summary",
+            "category": "HISTORICAL_SUMMARY",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "NOT_APPLICABLE"
+          },
+          {
+            "authority": "HISTORICAL_METHOD_HINT_AND_VERSIONED_KNOWLEDGE",
+            "block_id": "investigator-external-guidance",
+            "category": "EXTERNAL_GUIDANCE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "callback-ack-contract",
+              "callback-delivery-triage"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "APPLICATION_DEFINED_READ_ONLY_TOOLS",
+            "block_id": "read-only-mcp-tool-schemas",
+            "category": "TOOL_SCHEMA",
+            "estimated_tokens": 498,
+            "source_refs": [],
+            "status": "SELECTED"
+          }
+        ],
+        "summary_refs": [],
+        "excluded_sources": [],
+        "built_at": "2026-10-22T18:57:45.668+00:00"
+      },
+      {
+        "call_id": "call-bf59384f-9e80-4405-9d28-bf6aa126f3c4",
+        "attempt_id": "attempt-3caa1138-a8a1-4aa2-9ca0-31bdd7eb7e52",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m4-02-s3-v1",
+        "prompt_digest": "4afb59831800722336ca2dd672644f90937343463f7a1e5eba19bd81aa5c3510",
+        "selected_skill": {
+          "name": "callback-delivery-triage",
+          "version": "1.0.0",
+          "digest": "a31bdb42baecf65003edce02fa6c76779a28c604539cdd6a4f8b271809221507"
+        },
+        "selected_knowledge": [
+          {
+            "digest": "e9eab67593f7078e284f6ab855b07d096793325791499df2820e2a06ffa6d3aa",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "selected_memories": [],
+        "model_status": "OK",
+        "error_class": null,
+        "selected_input_messages": [
+          {
+            "message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+            "sequence": 1,
+            "digest": "67270e3fb004ffdf2d4c67407ac81b6e91453210f885703228cdf7541330cb69",
+            "kind": "INITIAL_SYMPTOM",
+            "input_kind": "CHAT_READONLY",
+            "provenance": "USER_INPUT_UNTRUSTED",
+            "accepted_control_revision": 0,
+            "applied_control_revision": 0
+          }
+        ],
+        "task_run_control": {
+          "run_id": "run-5cab5085-3208-4d3a-ad60-647299139b10",
+          "source_message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+          "expected_control_revision": 0,
+          "current_control_revision": 0,
+          "consumed_message_seq": 1,
+          "applied_critical_message_seq": 0,
+          "pending_critical_message_seq": null
+        },
+        "evidence_ids": [
+          "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8"
+        ],
+        "context_budget": {
+          "configured_input_limit_tokens": 12000,
+          "context_window_tokens": 16384,
+          "estimated_input_tokens": 1778,
+          "estimator": "tiktoken:cl100k_base:0.14.0",
+          "input_budget_tokens": 12000,
+          "model_id": "deepseek-flash",
+          "output_reserved_tokens": 512,
+          "policy_version": "opspilot-context-budget-v1",
+          "prompt_estimated_tokens": 1272,
+          "safety_margin_tokens": 1024,
+          "strategy": "FAIL_CLOSED_NO_HISTORY_COMPRESSION",
+          "tool_schema_estimated_tokens": 498,
+          "utilization": 0.1482
+        },
+        "context_blocks": [
+          {
+            "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+            "block_id": "investigator-trusted-control",
+            "category": "TRUSTED_CONTROL",
+            "estimated_tokens": 1272,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TRUSTED_TASK_BINDING_AND_RUN_CONTROL",
+            "block_id": "investigator-current-task-state",
+            "category": "CURRENT_TASK_STATE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "run-5cab5085-3208-4d3a-ad60-647299139b10",
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TASK_SCOPED_MCP_EVIDENCE_AND_OBSERVATIONS",
+            "block_id": "investigator-current-facts",
+            "category": "CURRENT_FACTS",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "UNTRUSTED_USER_INPUT",
+            "block_id": "investigator-recent-interaction",
+            "category": "RECENT_INTERACTION",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "NONE_IN_INVESTIGATION_RUN",
+            "block_id": "investigator-historical-summary",
+            "category": "HISTORICAL_SUMMARY",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "NOT_APPLICABLE"
+          },
+          {
+            "authority": "HISTORICAL_METHOD_HINT_AND_VERSIONED_KNOWLEDGE",
+            "block_id": "investigator-external-guidance",
+            "category": "EXTERNAL_GUIDANCE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "callback-ack-contract",
+              "callback-delivery-triage"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "APPLICATION_DEFINED_READ_ONLY_TOOLS",
+            "block_id": "read-only-mcp-tool-schemas",
+            "category": "TOOL_SCHEMA",
+            "estimated_tokens": 498,
+            "source_refs": [],
+            "status": "SELECTED"
+          }
+        ],
+        "summary_refs": [],
+        "excluded_sources": [],
+        "built_at": "2026-10-22T18:57:44.545+00:00"
+      },
+      {
+        "call_id": "call-b3e00bc4-1bd6-4fed-ac95-fc38aa66fcc1",
+        "attempt_id": "attempt-c684f3e2-25c9-4190-80cc-7f90e6544e00",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m4-02-s3-v1",
+        "prompt_digest": "9425ed89f38080608a49d588be3e03747fb86836fec475378ab2b311c4a7d183",
+        "selected_skill": null,
+        "selected_knowledge": [
+          {
+            "digest": "e9eab67593f7078e284f6ab855b07d096793325791499df2820e2a06ffa6d3aa",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "selected_memories": [],
+        "model_status": "OK",
+        "error_class": null,
+        "selected_input_messages": [
+          {
+            "message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+            "sequence": 1,
+            "digest": "67270e3fb004ffdf2d4c67407ac81b6e91453210f885703228cdf7541330cb69",
+            "kind": "INITIAL_SYMPTOM",
+            "input_kind": "CHAT_READONLY",
+            "provenance": "USER_INPUT_UNTRUSTED",
+            "accepted_control_revision": 0,
+            "applied_control_revision": 0
+          }
+        ],
+        "task_run_control": {
+          "run_id": "run-5cab5085-3208-4d3a-ad60-647299139b10",
+          "source_message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+          "expected_control_revision": 0,
+          "current_control_revision": 0,
+          "consumed_message_seq": 1,
+          "applied_critical_message_seq": 0,
+          "pending_critical_message_seq": null
+        },
+        "evidence_ids": [
+          "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8"
+        ],
+        "context_budget": {
+          "configured_input_limit_tokens": 12000,
+          "context_window_tokens": 16384,
+          "estimated_input_tokens": 1588,
+          "estimator": "tiktoken:cl100k_base:0.14.0",
+          "input_budget_tokens": 12000,
+          "model_id": "deepseek-flash",
+          "output_reserved_tokens": 512,
+          "policy_version": "opspilot-context-budget-v1",
+          "prompt_estimated_tokens": 1082,
+          "safety_margin_tokens": 1024,
+          "strategy": "FAIL_CLOSED_NO_HISTORY_COMPRESSION",
+          "tool_schema_estimated_tokens": 498,
+          "utilization": 0.1323
+        },
+        "context_blocks": [
+          {
+            "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+            "block_id": "investigator-trusted-control",
+            "category": "TRUSTED_CONTROL",
+            "estimated_tokens": 1082,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TRUSTED_TASK_BINDING_AND_RUN_CONTROL",
+            "block_id": "investigator-current-task-state",
+            "category": "CURRENT_TASK_STATE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "run-5cab5085-3208-4d3a-ad60-647299139b10",
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TASK_SCOPED_MCP_EVIDENCE_AND_OBSERVATIONS",
+            "block_id": "investigator-current-facts",
+            "category": "CURRENT_FACTS",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "UNTRUSTED_USER_INPUT",
+            "block_id": "investigator-recent-interaction",
+            "category": "RECENT_INTERACTION",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "NONE_IN_INVESTIGATION_RUN",
+            "block_id": "investigator-historical-summary",
+            "category": "HISTORICAL_SUMMARY",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "NOT_APPLICABLE"
+          },
+          {
+            "authority": "HISTORICAL_METHOD_HINT_AND_VERSIONED_KNOWLEDGE",
+            "block_id": "investigator-external-guidance",
+            "category": "EXTERNAL_GUIDANCE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "callback-ack-contract"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "APPLICATION_DEFINED_READ_ONLY_TOOLS",
+            "block_id": "read-only-mcp-tool-schemas",
+            "category": "TOOL_SCHEMA",
+            "estimated_tokens": 498,
+            "source_refs": [],
+            "status": "SELECTED"
+          }
+        ],
+        "summary_refs": [],
+        "excluded_sources": [],
+        "built_at": "2026-10-22T18:57:42.038+00:00"
+      },
+      {
+        "call_id": "call-51b32057-fbef-4963-b7e5-ee07189d5613",
+        "attempt_id": "attempt-932efe8c-d931-457c-aba0-457bf9d7a063",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m4-02-s3-v1",
+        "prompt_digest": "30196179d27c328a88db6f99a20ada4b72a52d99d27ccd239ef28619da419d52",
+        "selected_skill": null,
+        "selected_knowledge": [
+          {
+            "digest": "e9eab67593f7078e284f6ab855b07d096793325791499df2820e2a06ffa6d3aa",
+            "document_id": "callback-ack-contract",
+            "source": "local:orders-async-demo/contract-v1",
+            "valid_from": "2026-10-01T00:00:00+00:00",
+            "version": "1.0.0"
+          }
+        ],
+        "selected_memories": [],
+        "model_status": "OK",
+        "error_class": null,
+        "selected_input_messages": [
+          {
+            "message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+            "sequence": 1,
+            "digest": "67270e3fb004ffdf2d4c67407ac81b6e91453210f885703228cdf7541330cb69",
+            "kind": "INITIAL_SYMPTOM",
+            "input_kind": "CHAT_READONLY",
+            "provenance": "USER_INPUT_UNTRUSTED",
+            "accepted_control_revision": 0,
+            "applied_control_revision": 0
+          }
+        ],
+        "task_run_control": {
+          "run_id": "run-5cab5085-3208-4d3a-ad60-647299139b10",
+          "source_message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+          "expected_control_revision": 0,
+          "current_control_revision": 0,
+          "consumed_message_seq": 1,
+          "applied_critical_message_seq": 0,
+          "pending_critical_message_seq": null
+        },
+        "evidence_ids": [],
+        "context_budget": {
+          "configured_input_limit_tokens": 12000,
+          "context_window_tokens": 16384,
+          "estimated_input_tokens": 1366,
+          "estimator": "tiktoken:cl100k_base:0.14.0",
+          "input_budget_tokens": 12000,
+          "model_id": "deepseek-flash",
+          "output_reserved_tokens": 512,
+          "policy_version": "opspilot-context-budget-v1",
+          "prompt_estimated_tokens": 860,
+          "safety_margin_tokens": 1024,
+          "strategy": "FAIL_CLOSED_NO_HISTORY_COMPRESSION",
+          "tool_schema_estimated_tokens": 498,
+          "utilization": 0.1138
+        },
+        "context_blocks": [
+          {
+            "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+            "block_id": "investigator-trusted-control",
+            "category": "TRUSTED_CONTROL",
+            "estimated_tokens": 860,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TRUSTED_TASK_BINDING_AND_RUN_CONTROL",
+            "block_id": "investigator-current-task-state",
+            "category": "CURRENT_TASK_STATE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "run-5cab5085-3208-4d3a-ad60-647299139b10",
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TASK_SCOPED_MCP_EVIDENCE_AND_OBSERVATIONS",
+            "block_id": "investigator-current-facts",
+            "category": "CURRENT_FACTS",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "UNTRUSTED_USER_INPUT",
+            "block_id": "investigator-recent-interaction",
+            "category": "RECENT_INTERACTION",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "NONE_IN_INVESTIGATION_RUN",
+            "block_id": "investigator-historical-summary",
+            "category": "HISTORICAL_SUMMARY",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "NOT_APPLICABLE"
+          },
+          {
+            "authority": "HISTORICAL_METHOD_HINT_AND_VERSIONED_KNOWLEDGE",
+            "block_id": "investigator-external-guidance",
+            "category": "EXTERNAL_GUIDANCE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "callback-ack-contract"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "APPLICATION_DEFINED_READ_ONLY_TOOLS",
+            "block_id": "read-only-mcp-tool-schemas",
+            "category": "TOOL_SCHEMA",
+            "estimated_tokens": 498,
+            "source_refs": [],
+            "status": "SELECTED"
+          }
+        ],
+        "summary_refs": [],
+        "excluded_sources": [],
+        "built_at": "2026-10-22T18:57:39.387+00:00"
+      },
+      {
+        "call_id": "call-56a56842-54a1-47e1-8b5a-998d6050a3b5",
+        "attempt_id": "attempt-72250dc1-dd2d-4196-ac51-0ac98b22a763",
+        "model_id": "deepseek-flash",
+        "prompt_version": "m4-02-s3-v1",
+        "prompt_digest": "15f42f153181bea175ce8e95783bb2151181ef95c4f417132a5451d6822146f3",
+        "selected_skill": null,
+        "selected_knowledge": [],
+        "selected_memories": [],
+        "model_status": "OK",
+        "error_class": null,
+        "selected_input_messages": [
+          {
+            "message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+            "sequence": 1,
+            "digest": "67270e3fb004ffdf2d4c67407ac81b6e91453210f885703228cdf7541330cb69",
+            "kind": "INITIAL_SYMPTOM",
+            "input_kind": "CHAT_READONLY",
+            "provenance": "USER_INPUT_UNTRUSTED",
+            "accepted_control_revision": 0,
+            "applied_control_revision": 0
+          }
+        ],
+        "task_run_control": {
+          "run_id": "run-5cab5085-3208-4d3a-ad60-647299139b10",
+          "source_message_id": "message-a9580f08-11a8-4d9f-900b-f94097268797",
+          "expected_control_revision": 0,
+          "current_control_revision": 0,
+          "consumed_message_seq": 1,
+          "applied_critical_message_seq": 0,
+          "pending_critical_message_seq": null
+        },
+        "evidence_ids": [],
+        "context_budget": {
+          "configured_input_limit_tokens": 12000,
+          "context_window_tokens": 16384,
+          "estimated_input_tokens": 1110,
+          "estimator": "tiktoken:cl100k_base:0.14.0",
+          "input_budget_tokens": 12000,
+          "model_id": "deepseek-flash",
+          "output_reserved_tokens": 512,
+          "policy_version": "opspilot-context-budget-v1",
+          "prompt_estimated_tokens": 604,
+          "safety_margin_tokens": 1024,
+          "strategy": "FAIL_CLOSED_NO_HISTORY_COMPRESSION",
+          "tool_schema_estimated_tokens": 498,
+          "utilization": 0.0925
+        },
+        "context_blocks": [
+          {
+            "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+            "block_id": "investigator-trusted-control",
+            "category": "TRUSTED_CONTROL",
+            "estimated_tokens": 604,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TRUSTED_TASK_BINDING_AND_RUN_CONTROL",
+            "block_id": "investigator-current-task-state",
+            "category": "CURRENT_TASK_STATE",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "run-5cab5085-3208-4d3a-ad60-647299139b10",
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "TASK_SCOPED_MCP_EVIDENCE_AND_OBSERVATIONS",
+            "block_id": "investigator-current-facts",
+            "category": "CURRENT_FACTS",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "UNTRUSTED_USER_INPUT",
+            "block_id": "investigator-recent-interaction",
+            "category": "RECENT_INTERACTION",
+            "estimated_tokens": 0,
+            "source_refs": [
+              "message-a9580f08-11a8-4d9f-900b-f94097268797"
+            ],
+            "status": "SELECTED"
+          },
+          {
+            "authority": "NONE_IN_INVESTIGATION_RUN",
+            "block_id": "investigator-historical-summary",
+            "category": "HISTORICAL_SUMMARY",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "NOT_APPLICABLE"
+          },
+          {
+            "authority": "HISTORICAL_METHOD_HINT_AND_VERSIONED_KNOWLEDGE",
+            "block_id": "investigator-external-guidance",
+            "category": "EXTERNAL_GUIDANCE",
+            "estimated_tokens": 0,
+            "source_refs": [],
+            "status": "EMPTY"
+          },
+          {
+            "authority": "APPLICATION_DEFINED_READ_ONLY_TOOLS",
+            "block_id": "read-only-mcp-tool-schemas",
+            "category": "TOOL_SCHEMA",
+            "estimated_tokens": 498,
+            "source_refs": [],
+            "status": "SELECTED"
+          }
+        ],
+        "summary_refs": [],
+        "excluded_sources": [],
+        "built_at": "2026-10-22T18:57:36.212+00:00"
+      }
+    ],
+    "current_gate": {
+      "decision": "DIAGNOSED",
+      "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "missing_predicates": null,
+      "checked_fact_ids": [
+        "evidence-5d95105d-7676-4f8a-8df7-78a060536ba8",
+        "evidence-38c85074-3fef-4459-8211-aee7a2056fa4",
+        "evidence-7e7e2935-f69e-43b2-912d-835f023bc65d"
+      ],
+      "stale_or_conflicting_ids": null
+    },
+    "s2_outcome": null
+  },
+  "followup": null,
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/messages",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/runs",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/task-c581819a-1003-45aa-970d-22a2d1240e92/inspector",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/messages",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/task-c581819a-1003-45aa-970d-22a2d1240e92/inspector",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks//investigation-updates",
+      "status": 404
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/runs",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks//investigation-updates",
+      "status": 404
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/events/history",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/task-c581819a-1003-45aa-970d-22a2d1240e92/inspector",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/messages",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/runs/run-ab997df2-89b1-4807-ba2d-408623517762/chunks",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/task-c581819a-1003-45aa-970d-22a2d1240e92/inspector",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/messages",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/events",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/task-c581819a-1003-45aa-970d-22a2d1240e92/inspector",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/task-c581819a-1003-45aa-970d-22a2d1240e92/investigation-updates",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/runs/run-ab997df2-89b1-4807-ba2d-408623517762/chunks",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/task-c581819a-1003-45aa-970d-22a2d1240e92/inspector",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/task-c581819a-1003-45aa-970d-22a2d1240e92/inspector",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/session-136e07ef-f213-4466-a3b3-54b802cc8ac0/messages",
+      "status": 200
+    }
+  ],
+  "browser": "Microsoft Edge real browser"
+}

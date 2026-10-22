@@ -1,0 +1,82 @@
+.........F....F                                                          [100%]
+================================== FAILURES ===================================
+____________________ test_abort_prevents_frozen_diagnosis _____________________
+
+tmp_path = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-focused-05/test_abort_prevents_frozen_dia0')
+
+    def test_abort_prevents_frozen_diagnosis(tmp_path):
+        from opspilot.domain.task_control import abort_task, claim_task_run, trusted_identity, TaskControlError
+        from opspilot.domain.s3 import persist_s3_diagnosis
+        from opspilot.domain.database import connect
+        db,task,_=prepared(tmp_path)
+        identity=trusted_identity(db,"support-a")
+        claim_task_run(db,identity,task["run_id"])
+>       abort_task(db,identity,task["task_id"],reason="stop",idempotency_key="abort-s3")
+E       TypeError: abort_task() takes 2 positional arguments but 3 positional arguments (and 2 keyword-only arguments) were given
+
+tests\test_m4_02_s3.py:171: TypeError
+_________ test_live_mcp_stdio_rejects_extra_resource_and_cross_tenant _________
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\学习\agent新项目\tests\test_m4_02_s3.py", line 274, in test_live_mcp_stdio_rejects_extra_resource_and_cross_tenant
+  |     asyncio.run(check())
+  |     ~~~~~~~~~~~^^^^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 204, in run
+  |     return runner.run(main)
+  |            ~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 127, in run
+  |     return self._loop.run_until_complete(task)
+  |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\base_events.py", line 719, in run_until_complete
+  |     return future.result()
+  |            ~~~~~~~~~~~~~^^
+  |   File "D:\学习\agent新项目\tests\test_m4_02_s3.py", line 262, in check
+  |     async with Client(params) as client:
+  |                ~~~~~~^^^^^^^^
+  |   File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\client.py", line 480, in __aexit__
+  |     await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+  |   File "D:\python\Lib\contextlib.py", line 768, in __aexit__
+  |     raise exc
+  |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+  |     cb_suppress = await cb(*exc_details)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\contextlib.py", line 235, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 201, in stdio_client
+  |     async with anyio.create_task_group() as tg:
+  |                ~~~~~~~~~~~~~~~~~~~~~~~^^
+  |   File "D:\学习\agent新项目\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+  |     raise BaseExceptionGroup(
+  |         "unhandled errors in a TaskGroup", self._exceptions
+  |     ) from None
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 205, in stdio_client
+    |     yield read_stream, write_stream
+    |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+    |     cb_suppress = await cb(*exc_details)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\session.py", line 514, in __aexit__
+    |     result = await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\学习\agent新项目\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+    |     raise BaseExceptionGroup(
+    |         "unhandled errors in a TaskGroup", self._exceptions
+    |     ) from None
+    | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "D:\学习\agent新项目\tests\test_m4_02_s3.py", line 271, in check
+      |     c.execute("UPDATE task_bindings SET tenant_id='tenant-b' WHERE task_id=?",(task["task_id"],))
+      |     ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      | sqlite3.IntegrityError: FOREIGN KEY constraint failed
+      +------------------------------------
+---------------------------- Captured stderr call -----------------------------
+Tool 'get_order_status' failed: 'Error executing tool get_order_status: S3_INVALID_ARGUMENTS'
+
+Tool 'get_callback_delivery' failed: 'Error executing tool get_callback_delivery: S3_INVALID_ARGUMENTS'
+
+=========================== short test summary info ===========================
+FAILED tests/test_m4_02_s3.py::test_abort_prevents_frozen_diagnosis - TypeErr...
+FAILED tests/test_m4_02_s3.py::test_live_mcp_stdio_rejects_extra_resource_and_cross_tenant
+2 failed, 13 passed in 23.38s

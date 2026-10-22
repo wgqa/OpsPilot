@@ -137,9 +137,21 @@
 
 ## vNext M4-01 — 对话驱动调查（实现交付，等待独立验收）
 
+> 后续已按用户授权执行 M4-02，新增范围与真实运行证据见文末登记；原 M4 总验收仍保留。
+
 - [x] 基于 `main@90c80fd`，在实现前以 `cf9c9fb` 独立冻结任务卡、Gold、Rubric、验收计划与 RED 测试。
 - [x] 持久自然语言调查更新提议，Web 展示原消息/输入差异/摘要/控制版本；owner 确认后复用 `CORRECT_TASK_INPUT` 与 TaskControl，拒绝过期/取消/重复/越域/终态 Task 提议。
 - [x] 新 Run 实际重新读取可信 MCP 事实。真实 Edge 两组成对实验通过：用户改口但事实仍 401；独立准备的真实 403 与同请求 Authz Decision/DiagnosisReceipt 匹配；页面完成提示、刷新和 API 进程重启均有证据。
 - [x] 新鲜完整 pytest **242/242**、定向 **15/15**、最终真实 Provider Gold **10/10**；首轮 **8/10** 与全部浏览器失败保留。前端 build/typecheck/lint 通过，依赖不变。
 - [x] 源码主实现 `050509d`，最终源码/守卫测试 `6ae53a9`；报告、机器结果、Trace、成本、失败、截图与学习材料见 [M4-01 REPORT](docs/evidence/vnext/m4-01/REPORT.md)。最终证据提交 SHA 见交付消息和 Git。
 - [ ] 主 Agent 独立验收。M4 总验收尚未签署；不进入 M4-02。
+
+
+## vNext M4-02 — 动态调查首个 S3 业务切片（验收候选）
+
+- [x] 基于 main@29d2fc7，独立先行提交冻结设计、Gold 和 S3-01～S3-14 标准：23c6c1c。
+- [x] 复用现有 TaskControl / Graph / MCP / D5；三类真实事实、只读诊断、实际 Knowledge 检索和按需 Skill、经审核跨 Task Episodic 方法提示。
+- [x] 新鲜定向 21/21、完整 pytest 263/263；真实 R/H/A 18/18、资产/恢复 8/8；保留失败、真实 Web 追问与 API 重启、S1 401→200 审批/交付回归。
+- [x] 说明来源失效复现与最小修复；Memory 撤销或 Knowledge 过期后，旧模型说明不再进入后续真实聊天 Context，事实诊断与历史审计分开保留。
+- [x] 源码、原始日志、机器结果、全部补充尝试、截图及学习材料见 [M4-02 REPORT](docs/evidence/vnext/m4-02/REPORT.md)。
+- [ ] 主 Agent 独立验收。未授权进入下一阶段；不自签 M4 总体 PASS，不重发回调，不新增业务写能力。

@@ -1,0 +1,40 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_revoked_memory_invalidates_frozen_model_explanation_not_current_facts __
+
+tmp_path = WindowsPath('D:/学习/agent新项目/.runtime/m4-02/pytest-narrative-red/test_revoked_memory_invalidate0')
+
+    def test_revoked_memory_invalidates_frozen_model_explanation_not_current_facts(tmp_path):
+        import asyncio
+        from langchain_core.messages import AIMessage
+        from opspilot.domain.episodic_memory import create_memory_candidate,confirm_memory,revoke_memory
+        from opspilot.domain.s3 import prepare_s3_fixture,get_s3_outcome
+        from opspilot.domain.task_control import claim_task_run,trusted_identity
+        from opspilot.smokes.m4_02 import task as new_task
+        from opspilot.s3_investigation import S3Nodes
+        db,source,_,_=completed_readonly_case(tmp_path)
+        memory=create_memory_candidate(db,source["task_id"],"support-a")
+        confirm_memory(db,memory["memory_id"],"approver-a")
+        prepare_s3_fixture(db,"PROCESSING")
+        target=new_task(db,"订单还没有回调，请核实","explanation-target")
+        claim_task_run(db,trusted_identity(db,"support-a"),target["run_id"])
+        order,_,_=facts(db,target)
+        ids=[observe(db,target,"get_order_status",order)]
+        class ExplanationModel:
+            async def ainvoke(self,_messages):
+                return AIMessage(content="unit-test historical-method-dependent explanation",id="unit-explanation")
+        nodes=S3Nodes(db,target["task_id"],target["run_id"],ExplanationModel(),"unit-model",None,[])
+        asyncio.run(nodes.report({"evidence_ids":ids,"diagnosis_draft":{}}))
+        assert get_s3_outcome(db,target["task_id"])["explanation"]
+        revoke_memory(db,memory["memory_id"],"approver-a")
+        after=get_s3_outcome(db,target["task_id"])
+        assert after["outcome"] == "ORDER_PROCESSING"
+>       assert after["explanation"] == ""
+E       AssertionError: assert 'unit-test hi...t explanation' == ''
+E         
+E         + unit-test historical-method-dependent explanation
+
+tests\test_m4_02_s3.py:391: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_02_s3.py::test_revoked_memory_invalidates_frozen_model_explanation_not_current_facts
+1 failed in 4.74s

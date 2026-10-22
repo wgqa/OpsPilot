@@ -1,0 +1,45 @@
+HTTP Request: GET http://127.0.0.1:55700/api/async-orders/async-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:55714/api/async-orders/async-order "HTTP/1.0 200 OK"
+Tool 'get_receiver_processing' raised an unexpected exception
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py", line 179, in run
+    result = await self.fn_metadata.call_fn(self.fn, self.is_async, validated, pass_directly)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\utilities\func_metadata.py", line 164, in call_fn
+    return await anyio.to_thread.run_sync(functools.partial(fn, **kwargs))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "D:\ѧϰ\agent����Ŀ\opspilot\domain\s3_mcp.py", line 46, in get_receiver_processing
+    validate(reason,ctx,{"reason"})
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\opspilot\domain\s3_mcp.py", line 27, in validate
+    raise ValueError("A bounded investigation reason is required")
+ValueError: A bounded investigation reason is required
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\server.py", line 442, in _handle_call_tool
+    return await self.call_tool(params.name, params.arguments or {}, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\server.py", line 548, in call_tool
+    return await self._tool_manager.call_tool(name, arguments, context, convert_result=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\tool_manager.py", line 87, in call_tool
+    return await tool.run(arguments, context, convert_result=convert_result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py", line 213, in run
+    raise UnexpectedToolError(f"Error executing tool {self.name}") from exc
+mcp.server.mcpserver.exceptions.UnexpectedToolError: Error executing tool get_receiver_processing
+{"case": "assets-on", "source_task_id": "task-6d5098d3-4511-4e55-bc1c-17c60a87be5e", "target_task_id": "task-0ec93bd1-70d6-4f84-a35e-b50b433a72ff", "actual": "INCONCLUSIVE", "expected": "RECEIVER_PROCESSING_UNCONFIRMED", "tools": ["search_callback_knowledge", "get_order_status", "load_callback_skill", "get_callback_delivery", "get_receiver_processing"], "knowledge_prompts": 4, "skill_prompts": 2, "memory_prompts": 5, "memory_before_root_cause": true, "tokens": 12802, "latency_seconds": 11.613, "failure": null, "correct": false}
