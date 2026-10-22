@@ -273,10 +273,10 @@ async function runJourney() {
   if (businessRunsAfter.length !== initialBusinessRuns + 1) {
     throw new Error(`Expected exactly one new Investigator Run, observed ${businessRunsAfter.length - initialBusinessRuns}.`);
   }
-  const notice = await page.locator('[role="status"]').last().innerText().catch(() => '');
-  if (scenario === 'S1_401' && !notice.includes('Probe HTTP 401')) {
-    throw new Error('The post-correction UI did not explain that the real Probe still returns HTTP 401.');
-  }
+  const statusNotice = page.locator('[role="status"]').last();
+  await expect(statusNotice).toContainText('重新调查已结束', { timeout: 30000 });
+  await expect(statusNotice).toContainText(`Probe HTTP ${expectedStatus}`);
+  const notice = await statusNotice.innerText();
   await page.screenshot({ path: path.join(screenshotDir, '03-confirmed-and-reinvestigated.png'), fullPage: true });
   await page.reload({ waitUntil: 'domcontentloaded' });
   const reloadHistory = await apiJson(`/api/tasks/${encodeURIComponent(taskId)}/investigation-updates`);

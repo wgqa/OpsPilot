@@ -8,7 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from opspilot.domain.database import connect
+from opspilot.web.app import create_app
 from tests.test_m4_01_dialogue_updates import (
+    ORIGIN,
+    PASSWORDS,
     _assess,
     _counts,
     _install_classifier,
@@ -158,3 +161,66 @@ def test_cross_tenant_cannot_read_or_confirm_another_owner_proposal(m4_client, m
     assert listed.json().get("code") in {"TASK_OWNER_REQUIRED", "TASK_SCOPE_DENIED"}
     assert confirmed.json().get("code") in {"TASK_OWNER_REQUIRED", "TASK_SCOPE_DENIED"}
     assert _security_snapshot(db, task_id) == before
+
+
+def test_pending_update_cannot_restart_an_aborted_task(m4_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, db = m4_client
+    headers = _login(client)
+    session_id, task_id, _ = _new_task(client, headers)
+    message_id = _send_chat(client, headers, session_id, task_id, "更正：请重新核查当前请求。")
+    _install_classifier(monkeypatch, "CRITICAL_CORRECTION")
+    proposal = _assess(client, headers, task_id, message_id).json()["proposal"]
+    stopped = client.post(
+        f"/api/tasks/{task_id}/abort", headers={**headers, "Idempotency-Key": "m4-stop-before-confirm"},
+        json={"reason": "用户终止后不再接受旧提议"},
+    )
+    assert stopped.status_code == 202, stopped.text
+    before = _counts(db, task_id)
+    confirmed = client.post(
+        f"/api/tasks/{task_id}/investigation-updates/{proposal['proposal_id']}/confirm",
+        headers={**headers, "Idempotency-Key": proposal["operation_id"]},
+        json={"expected_control_revision": proposal["expected_control_revision"], "operation_id": proposal["operation_id"]},
+    )
+    assert confirmed.status_code == 409, confirmed.text
+    assert confirmed.json()["code"] == "TASK_ABORTED"
+    assert _counts(db, task_id) == before
+
+
+def test_pending_update_cannot_restart_a_really_delivered_s1_task(
+    demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from opspilot.domain.d3 import (
+        execute_deliver, execute_repair, get_or_create_action_intent, get_or_create_report,
+        submit_plan_approval, verify_repair_online,
+    )
+    from tests.test_m1_task_control import _ready_task
+
+    binding, _, plan = _ready_task(demo_db, live_api, "m4-completed-proposal")
+    task_id = str(binding["task_id"])
+    app = create_app(db_path=demo_db, start_worker=False, credentials=PASSWORDS, expected_origin=ORIGIN)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        headers = _login(client)
+        message_id = _send_chat(client, headers, str(binding["session_id"]), task_id, "更正：请重新调查原来的凭证现象。")
+        _install_classifier(monkeypatch, "CRITICAL_CORRECTION")
+        proposal = _assess(client, headers, task_id, message_id).json()["proposal"]
+        submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
+        repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+        repair = execute_repair(demo_db, str(repair_intent["action_id"]), "executor-a", "m4-actual-repair")
+        verified = verify_repair_online(demo_db, task_id, str(plan["plan_hash"]), str(repair_intent["action_id"]), "executor-a", live_api)
+        assert verified["recovery_verified"] is True
+        get_or_create_report(demo_db, task_id, str(plan["plan_hash"]), str(repair_intent["action_id"]), "executor-a")
+        delivery_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "DELIVER", "executor-a")
+        delivered = execute_deliver(demo_db, str(delivery_intent["action_id"]), "executor-a", "m4-actual-delivery")
+        assert repair["status"] == delivered["status"] == "COMMITTED"
+        before = _counts(demo_db, task_id)
+        confirmed = client.post(
+            f"/api/tasks/{task_id}/investigation-updates/{proposal['proposal_id']}/confirm",
+            headers={**headers, "Idempotency-Key": proposal["operation_id"]},
+            json={"expected_control_revision": proposal["expected_control_revision"], "operation_id": proposal["operation_id"]},
+        )
+        assert confirmed.status_code == 409, confirmed.text
+        assert confirmed.json()["code"] == "TASK_ALREADY_TERMINAL"
+        assert _counts(demo_db, task_id) == before
+        with connect(demo_db) as connection:
+            status = connection.execute("SELECT status FROM task_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
+        assert status == "COMPLETED"
