@@ -361,6 +361,8 @@ def test_sla_expiry_at_exact_deadline_keeps_evidence_but_invalidates_immutable_w
 def _run_mcp_facts(db: Path, identity, task: dict[str, object], run_id: str, server) -> list[str]:
     from opspilot.domain.d2 import digest_json, finish_attempt, record_tool_observation, reserve_attempt
     from opspilot.domain.investigation_context import load_investigation_context
+    from mcp.server.mcpserver.context import Context
+    from mcp.types import CallToolRequestParams
 
     evidence_ids: list[str] = []
     for tool in ("get_order_status", "get_callback_delivery", "get_receiver_processing"):
@@ -372,7 +374,14 @@ def _run_mcp_facts(db: Path, identity, task: dict[str, object], run_id: str, ser
             tool_call_id=tool_call_id, tool_name=tool, argument_digest=digest_json(args),
             run_id=run_id, task_run_control=control,
         )
-        result = asyncio.run(server.call_tool(tool, args))
+        # MCPServer.call_tool() is the real in-process server path; provide the
+        # same request params that _handle_call_tool() normally attaches so the
+        # server can enforce its raw argument allowlist.
+        context = Context(
+            mcp_server=server,
+            input_params=CallToolRequestParams(name=tool, arguments=args),
+        )
+        result = asyncio.run(server.call_tool(tool, args, context))
         assert not result.is_error
         value = result.structured_content
         if value is None:
@@ -496,7 +505,7 @@ def test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff(tmp_p
                 "FROM s3_http_observations WHERE request_id=?", (request_id,),
             ).fetchone()
             observations = connection.execute(
-                "SELECT tool_name,evidence_id FROM d2_tool_observations "
+                "SELECT DISTINCT tool_name,evidence_id FROM d2_tool_observations "
                 "WHERE task_id=? AND evidence_id IN (?,?,?) ORDER BY tool_name",
                 (task["task_id"], *fresh_ids),
             ).fetchall()
