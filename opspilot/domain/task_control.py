@@ -916,6 +916,7 @@ def create_task_with_initial_run(
     initial_message: str,
     idempotency_key: str,
     deadline_ms: int = 300_000,
+    s3_order_id: str | None = None,
 ) -> dict[str, object]:
     """Atomically create a trusted S1 binding and its first Message/Command/Run."""
     if not initial_message.strip():
@@ -932,6 +933,7 @@ def create_task_with_initial_run(
         "session_id": session_id,
         "service_id": service_id,
         "integration_id": integration_id,
+        "s3_order_id": s3_order_id if service_id == "orders-async-demo" else None,
         "ticket_id": ticket_id,
         "initial_message": initial_message,
     }
@@ -962,6 +964,19 @@ def create_task_with_initial_run(
         except ScopeDenied as error:
             raise TaskControlError("RESOURCE_NOT_FOUND") from error
         task_id = str(binding["task_id"])
+        if service_id == "orders-async-demo":
+            try:
+                from opspilot.domain.s3 import ORDER, bind_s3_order_in_transaction
+                bind_s3_order_in_transaction(
+                    connection, task_id=task_id, tenant_id=identity.tenant_id,
+                    service_id=service_id, integration_id=integration_id,
+                    order_id=s3_order_id or ORDER, actor_id=identity.actor_id,
+                    confirmed_at=_utc_now(),
+                )
+            except ScopeDenied as error:
+                raise TaskControlError("S3_ORDER_NOT_REGISTERED") from error
+        elif s3_order_id is not None:
+            raise TaskControlError("S3_ORDER_NOT_REGISTERED")
         sequence = int(connection.execute(
             "SELECT COALESCE(MAX(sequence), 0) + 1 FROM messages WHERE session_id = ?",
             (session_id,),

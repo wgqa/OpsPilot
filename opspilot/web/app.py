@@ -36,6 +36,7 @@ from opspilot.web.auth import (
 from opspilot.web.schemas import (
     AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest,
     MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
+    S3HandoffSubmitRequest,
     SemanticMemoryCandidateRequest, InvestigationUpdateProposalRequest,
     InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest,
 )
@@ -61,6 +62,12 @@ _STATUS_BY_CODE = {
     "ORIGIN_REJECTED": 403,
     "CSRF_REJECTED": 403,
     "TASK_OWNER_REQUIRED": 403,
+    "S3_RESOURCE_SELECTION_REQUIRES_SUPPORT_OWNER": 403,
+    "S3_ORDER_NOT_REGISTERED": 422,
+    "S3_RESOURCE_SELECTION_REQUIRED": 422,
+    "S3_DIAGNOSIS_NOT_HANDOFF_READY": 409,
+    "S3_DIAGNOSIS_STALE": 409,
+    "S3_HANDOFF_ALREADY_ACCEPTED": 409,
     "TASK_RUN_SCOPE_DENIED": 404,
     "SESSION_SCOPE_DENIED": 404,
     "SESSION_TASK_LINK_REQUIRED": 404,
@@ -381,6 +388,16 @@ def create_app(
             ).fetchall()
         return {"items": [_public_run(row) for row in rows]}
 
+    @app.get("/api/s3/order-resources")
+    async def get_s3_order_resources_route(context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+        from opspilot.domain.d2 import ScopeDenied
+        from opspilot.domain.s3 import list_s3_order_resources
+
+        try:
+            return {"items": list_s3_order_resources(resolved_db, context.identity)}
+        except ScopeDenied as error:
+            raise TaskControlError(str(error)) from error
+
     @app.post("/api/sessions/{session_id}/tasks", status_code=202)
     async def post_task(
         session_id: str,
@@ -391,13 +408,17 @@ def create_app(
         key = require_idempotency_key(idempotency_key)
         if context.identity.role != "SUPPORT":
             raise TaskControlError("TASK_OWNER_REQUIRED")
+        if body.investigation_kind == "ASYNC_CALLBACK" and not body.s3_order_id:
+            raise TaskControlError("S3_RESOURCE_SELECTION_REQUIRED")
+        if body.investigation_kind != "ASYNC_CALLBACK" and body.s3_order_id is not None:
+            raise TaskControlError("S3_ORDER_NOT_REGISTERED")
         result = create_task_with_initial_run(
             resolved_db, context.identity, session_id=session_id,
             service_id="orders-async-demo" if body.investigation_kind == "ASYNC_CALLBACK" else os.environ.get("OPSPILOT_DEMO_SERVICE_ID", "orders-demo"),
             integration_id=f"async-integration-{context.identity.tenant_id.removeprefix('tenant-')}" if body.investigation_kind == "ASYNC_CALLBACK" else os.environ.get("OPSPILOT_DEMO_INTEGRATION_ID", "integration-a"),
             ticket_id=os.environ.get("OPSPILOT_DEMO_TICKET_ID", "INC-A-001"),
             initial_message=body.initial_message, idempotency_key=key,
-            deadline_ms=deadline_ms,
+            deadline_ms=deadline_ms, s3_order_id=body.s3_order_id,
         )
         replayed = bool(result.pop("replayed", False))
         return JSONResponse({**result, "replayed": replayed}, status_code=200 if replayed else 202)
@@ -522,6 +543,37 @@ def create_app(
             draft_digest=body.draft_digest,
             expected_control_revision=body.expected_control_revision,
             handoff_kind=body.handoff_kind,
+        )
+        return JSONResponse(result, status_code=200 if result.get("replayed") else 202)
+
+    @app.get("/api/tasks/{task_id}/s3-handoff")
+    async def get_s3_handoff_route(
+        task_id: str, context: AuthContext = Depends(current_user)
+    ) -> dict[str, Any]:
+        require_task_reader(context.identity, task_id)
+        from opspilot.domain.s3_handoff import get_s3_handoff_outcome
+
+        result = get_s3_handoff_outcome(resolved_db, task_id)
+        return result or {"business_outcome": "NO_DIAGNOSIS", "submitted": False}
+
+    @app.post("/api/tasks/{task_id}/s3-handoff/submit")
+    async def post_s3_handoff_route(
+        task_id: str,
+        body: S3HandoffSubmitRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> Response:
+        key = require_idempotency_key(idempotency_key)
+        if key != body.operation_id:
+            raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
+        from opspilot.domain.s3_handoff import submit_s3_handoff
+
+        result = submit_s3_handoff(
+            resolved_db, context.identity, task_id=task_id,
+            operation_id=body.operation_id,
+            diagnosis_receipt_id=body.diagnosis_receipt_id,
+            diagnosis_digest=body.diagnosis_digest,
+            expected_control_revision=body.expected_control_revision,
         )
         return JSONResponse(result, status_code=200 if result.get("replayed") else 202)
 

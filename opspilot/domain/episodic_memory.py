@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1065,6 +1066,8 @@ def select_applicable_memories(
     problem_type: str,
     *,
     limit: int = MAX_MEMORY_RESULTS,
+    relevance_text: str | None = None,
+    current_s3_facts: dict[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Return bounded historical guidance and same-project exclusion reasons."""
     if not 1 <= limit <= MAX_MEMORY_LIMIT:
@@ -1080,27 +1083,49 @@ def select_applicable_memories(
         now = _now()
         selected: list[dict[str, object]] = []
         excluded: list[dict[str, object]] = []
+        ranked: list[tuple[float, dict[str, object]]] = []
         for row in rows[:MAX_MEMORY_SCAN]:
             reason = _memory_exclusion_reason(
                 connection, row, task_id=task_id, problem_type=problem_type,
                 service_id=str(binding["service_id"]), now=now,
             )
-            if reason is None and len(selected) >= limit:
-                reason = "MAX_SELECTION_LIMIT"
+            relevance: dict[str, object] | None = None
+            score = 0.0
+            if reason is None and (relevance_text is not None or current_s3_facts is not None):
+                if problem_type != "async_callback" or str(binding["service_id"]) != "orders-async-demo":
+                    reason = "RELEVANCE_SCOPE_UNSUPPORTED"
+                else:
+                    reason, relevance = _s3_memory_relevance(
+                        row, relevance_text or "", current_s3_facts or {},
+                    )
+                    score = float(relevance.get("score", 0.0)) if relevance else 0.0
             if reason is not None:
                 excluded.append({
                     "source_type": "EPISODIC_MEMORY",
                     "source_id": str(row["memory_id"]),
                     "version": int(row["version"]),
                     "reason": reason,
+                    **({"relevance": relevance} if relevance else {}),
                 })
                 continue
             item = _row_dict(row)
             item["summary"] = str(item["summary"])[:480]
             item["applicability_reason"] = (
+                str(relevance.get("reason")) if relevance else
                 "EXACT_PROBLEM_TYPE_AND_SERVICE; ACTIVE; NOT_EXPIRED; SOURCE_CURRENT"
             )
-            selected.append(item)
+            if relevance is not None:
+                item["relevance"] = relevance
+            ranked.append((score, item))
+        if relevance_text is not None or current_s3_facts is not None:
+            ranked.sort(key=lambda pair: (-pair[0], str(pair[1]["memory_id"])))
+        selected = [item for _, item in ranked[:limit]]
+        for _, item in ranked[limit:]:
+            excluded.append({
+                "source_type": "EPISODIC_MEMORY", "source_id": str(item["memory_id"]),
+                "version": int(item["version"]), "reason": "MAX_SELECTION_LIMIT",
+                **({"relevance": item["relevance"]} if item.get("relevance") else {}),
+            })
         if len(rows) > MAX_MEMORY_SCAN:
             excluded.append({
                 "source_type": "EPISODIC_MEMORY",
@@ -1109,6 +1134,99 @@ def select_applicable_memories(
                 "scanned_limit": MAX_MEMORY_SCAN,
             })
     return selected, excluded
+
+
+def _s3_memory_relevance(
+    row: sqlite3.Row, relevance_text: str, current_facts: dict[str, object],
+) -> tuple[str | None, dict[str, object]]:
+    """Rank only method hints that match the user's lead or current S3 facts."""
+    try:
+        experience = json.loads(str(row["experience_json"]))
+        case = experience.get("case_specific_facts", {})
+        observations = case.get("observed_facts", []) if isinstance(case, dict) else []
+    except (json.JSONDecodeError, TypeError):
+        return "MEMORY_CASE_PROFILE_INVALID", {}
+    case_profile: dict[str, object] = {}
+    if isinstance(observations, list):
+        for observed in observations:
+            if not isinstance(observed, dict):
+                continue
+            body = observed.get("body")
+            if isinstance(body, dict) and isinstance(body.get("status"), str):
+                case_profile["order_status"] = body.get("status")
+                case_profile["contract_version"] = body.get("contract_version")
+            if "receiver_http_status" in observed:
+                for key in ("status", "failure_code", "attempt_count", "max_attempts", "retry_state"):
+                    if key in observed:
+                        case_profile["delivery_" + key if key == "status" else key] = observed[key]
+            if "processing_sla_seconds" in observed:
+                case_profile["receiver_status"] = observed.get("status")
+    profile_fields = (
+        "order_status", "delivery_status", "failure_code", "attempt_count",
+        "max_attempts", "retry_state", "receiver_status",
+    )
+    matches: list[str] = []
+    conflicts: list[str] = []
+    for key in profile_fields:
+        actual = current_facts.get(key)
+        historical = case_profile.get(key)
+        if actual is None or historical is None:
+            continue
+        if actual == historical:
+            matches.append(key)
+        else:
+            conflicts.append(key)
+    current_outcome = current_facts.get("gate_outcome")
+    historical_outcome = case.get("outcome") if isinstance(case, dict) else None
+    if isinstance(current_outcome, str):
+        if current_outcome != historical_outcome:
+            return "CURRENT_EVIDENCE_CONFLICTS_WITH_MEMORY", {
+                "score": 0.0, "threshold": 0.08, "reason": "CURRENT_EVIDENCE_CONFLICTS_WITH_MEMORY",
+                "current_outcome": current_outcome, "historical_outcome": historical_outcome,
+                "matched_fields": matches, "conflicting_fields": conflicts,
+            }
+        return None, {
+            "score": 1.0, "threshold": 0.08, "reason": "S3_CURRENT_OUTCOME_MATCH",
+            "current_outcome": current_outcome, "historical_outcome": historical_outcome,
+            "matched_fields": matches, "conflicting_fields": conflicts,
+        }
+    if conflicts:
+        return "CURRENT_EVIDENCE_CONFLICTS_WITH_MEMORY", {
+            "score": 0.0, "threshold": 0.08, "reason": "CURRENT_EVIDENCE_CONFLICTS_WITH_MEMORY",
+            "matched_fields": matches, "conflicting_fields": conflicts,
+        }
+    summary = str(row["summary"])
+
+    def relevance_tokens(value: str) -> set[str]:
+        # Single Han characters are too common to establish case similarity
+        # ("财务" and "回调" previously shared several generic characters).
+        # Preserve English terms and use Han bigrams for this bounded lexical
+        # filter; current facts and the deterministic Gate remain authoritative.
+        result: set[str] = set()
+        for token in re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", value.casefold()):
+            if token[0].isascii():
+                result.add(token)
+            else:
+                result.update(token[index:index + 2] for index in range(len(token) - 1))
+        return result
+
+    query_tokens = relevance_tokens(relevance_text)
+    memory_tokens = relevance_tokens(summary + " " + str(experience.get("symptom_pattern", "")))
+    overlap = query_tokens & memory_tokens
+    score = len(overlap) / max(len(query_tokens), 1)
+    if matches:
+        score = max(score, min(0.95, 0.35 + 0.15 * len(matches)))
+    threshold = 0.08
+    if score < threshold:
+        return "MEMORY_IRRELEVANT_TO_CURRENT_CASE", {
+            "score": round(score, 4), "threshold": threshold, "reason": "MEMORY_IRRELEVANT_TO_CURRENT_CASE",
+            "matched_terms": sorted(overlap), "matched_fields": matches, "conflicting_fields": conflicts,
+        }
+    return None, {
+        "score": round(score, 4), "threshold": threshold,
+        "reason": "S3_CURRENT_FACT_MATCH" if matches else "S3_SYMPTOM_RELEVANCE",
+        "matched_terms": sorted(overlap), "matched_fields": matches, "conflicting_fields": conflicts,
+    }
 
 
 def list_applicable_memories(
@@ -1270,6 +1388,10 @@ def insert_context_provenance_in_transaction(
             "source_outcome": str(row["source_outcome"]),
             "source_refs": json.loads(str(row["source_refs_json"])),
             "source_authority": MEMORY_AUTHORITY,
+            **({"applicability_reason": selected["applicability_reason"]}
+               if isinstance(selected.get("applicability_reason"), str) else {}),
+            **({"relevance": selected["relevance"]}
+               if isinstance(selected.get("relevance"), dict) else {}),
         })
     if selected_skill is not None and not all(selected_skill.get(key) for key in ("name", "version", "digest")):
         raise ContextAssetInvalidated("Selected Skill provenance is incomplete.")

@@ -1052,9 +1052,10 @@ def initialize(path: str | Path) -> None:
         # Put the transaction opener inside the script so schema creation and the
         # versioned compatibility backfill commit or roll back together.
         from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
-        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA)
+        from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 13:
+        if version > 14:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1364,6 +1365,30 @@ def initialize(path: str | Path) -> None:
             connection.execute("PRAGMA user_version = 12")
         if version < 13:
             connection.execute("PRAGMA user_version = 13")
+            version = 13
+        if version < 14:
+            for table, additions in (
+                ("s3_deliveries", (
+                    ("failure_code", "TEXT"), ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+                    ("max_attempts", "INTEGER NOT NULL DEFAULT 3"), ("retry_state", "TEXT"),
+                    ("retry_at", "TEXT"), ("transport_response_json", "TEXT NOT NULL DEFAULT '{}'"),
+                )),
+                ("s3_receivers", (("accepted_at", "TEXT"), ("processing_sla_seconds", "INTEGER"))),
+            ):
+                columns = {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+                for name, definition in additions:
+                    if name not in columns:
+                        connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+            connection.execute(
+                """INSERT OR IGNORE INTO s3_task_resources
+                   (task_id,tenant_id,service_id,integration_id,order_id,confirmed_by,confirmed_at,selection_digest)
+                   SELECT b.task_id,b.tenant_id,b.service_id,b.integration_id,o.order_id,b.actor_id,b.created_at,'migration:v14'
+                   FROM task_bindings b JOIN s3_orders o ON o.tenant_id=b.tenant_id
+                     AND o.service_id=b.service_id AND o.integration_id=b.integration_id
+                     AND o.order_id='async-order'
+                   WHERE b.service_id='orders-async-demo'"""
+            )
+            connection.execute("PRAGMA user_version = 14")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -1375,9 +1400,16 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
         connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_update")
         connection.execute("DROP TRIGGER IF EXISTS trg_s2_handoff_receipt_no_delete")
         connection.execute("DROP TRIGGER IF EXISTS s3_diagnoses_no_delete")
+        connection.execute("DROP TRIGGER IF EXISTS s3_task_resources_immutable_update")
+        connection.execute("DROP TRIGGER IF EXISTS s3_task_resources_immutable_delete")
+        connection.execute("DROP TRIGGER IF EXISTS s3_handoff_receipt_immutable_update")
+        connection.execute("DROP TRIGGER IF EXISTS s3_handoff_receipt_immutable_delete")
         for table in (
+            "s3_handoff_receipts",
+            "s3_handoff_queue_entries",
             "s3_model_contexts",
             "s3_diagnoses",
+            "s3_task_resources",
             "s3_http_observations",
             "s3_receivers",
             "s3_deliveries",
@@ -1532,6 +1564,13 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
                 (tenant_id, "demo-order", "CONFIRMED"),
             )
     initialize(path)
+    # Give the local S3 workbench two distinct, tenant-owned resources to choose
+    # from. These read-only demo rows are prepared outside the Agent runtime.
+    from opspilot.domain.s3 import prepare_s3_fixture
+
+    for tenant_id in ("tenant-a", "tenant-b"):
+        prepare_s3_fixture(path, "PROCESSING", tenant_id=tenant_id, order_id="async-order")
+        prepare_s3_fixture(path, "PROCESSING", tenant_id=tenant_id, order_id="async-order-2")
 
 
 def get_service_info(path: str | Path, tenant_id: str, service_id: str) -> dict[str, object]:

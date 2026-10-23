@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -15,8 +15,11 @@ const messages = ref<MessageItem[]>([]);
 const taskId = ref('');
 const investigationUpdates = ref<InvestigationUpdateAssessment[]>([]);
 const investigationKind = ref<'AUTH_INCIDENT' | 'ASYNC_CALLBACK'>('AUTH_INCIDENT');
+const s3OrderResources = ref<S3OrderResource[]>([]);
+const selectedS3OrderId = ref('');
 const inspector = ref<Inspector | null>(null);
 const taskOutcome = ref<TaskOutcome | null>(null);
+const s3HandoffOutcome = ref<Record<string, unknown> | null>(null);
 const taskMemoryContext = ref<TaskMemoryContext | null>(null);
 const taskSemanticContext = ref<SemanticMemoryContext | null>(null);
 const memoryCandidates = ref<MemoryRecord[]>([]);
@@ -133,7 +136,10 @@ async function login(): Promise<void> {
     sessionStorage.setItem('opspilot.csrf', result.csrf_token);
     password.value = '';
     if (result.role === 'APPROVER') await loadPendingApprovals();
-    else await loadSessions();
+    else {
+      await loadSessions();
+      await loadS3OrderResources();
+    }
     notice.value = '已通过本地可信身份登录。';
   } catch (error) {
     errorMessage.value = explainError(error);
@@ -147,7 +153,10 @@ async function restoreLogin(): Promise<void> {
     user.value = await api.me();
     if (!csrf.value) notice.value = '登录已恢复；请重新登录一次以继续发送或创建会话。';
     if (user.value.role === 'APPROVER') await loadPendingApprovals();
-    else await loadSessions();
+    else {
+      await loadSessions();
+      await loadS3OrderResources();
+    }
   } catch {
     user.value = null;
   }
@@ -168,6 +177,10 @@ async function logout(): Promise<void> {
   messages.value = [];
   inspector.value = null;
   taskOutcome.value = null;
+  s3HandoffOutcome.value = null;
+  s3HandoffOutcome.value = null;
+  s3OrderResources.value = [];
+  selectedS3OrderId.value = '';
   taskMemoryContext.value = null;
   taskSemanticContext.value = null;
   memoryCandidates.value = [];
@@ -184,6 +197,20 @@ async function loadSessions(): Promise<void> {
   sessions.value = response.items;
   if (sessions.value.length > 0 && !sessions.value.some((item) => item.session_id === sessionId.value)) {
     await selectSession(sessions.value[0].session_id);
+  }
+}
+
+async function loadS3OrderResources(): Promise<void> {
+  if (user.value?.role !== 'SUPPORT') return;
+  try {
+    s3OrderResources.value = (await api.s3OrderResources()).items;
+    if (!s3OrderResources.value.some((item) => item.order_id === selectedS3OrderId.value)) {
+      selectedS3OrderId.value = s3OrderResources.value[0]?.order_id ?? '';
+    }
+  } catch (error) {
+    s3OrderResources.value = [];
+    selectedS3OrderId.value = '';
+    errorMessage.value = explainError(error);
   }
 }
 
@@ -335,6 +362,7 @@ async function selectSession(value: string): Promise<void> {
   messages.value = [];
   inspector.value = null;
   taskOutcome.value = null;
+  s3HandoffOutcome.value = null;
   sessionEvents.value = [];
   chunks.value = [];
   activeChatRun.value = null;
@@ -385,11 +413,17 @@ async function refreshInspector(): Promise<void> {
     inspector.value = await api.inspector(taskId.value);
     if (user.value?.role === 'SUPPORT') {
       investigationUpdates.value = (await api.investigationUpdates(taskId.value)).items;
-      const [handoffOutcome, taskOutcomeResult] = await Promise.all([
-        api.handoff(taskId.value), api.taskOutcome(taskId.value),
-      ]);
-      taskOutcome.value = ['NO_PLAN', 'NO_S2_DIAGNOSIS'].includes(String(handoffOutcome.business_outcome))
-        ? taskOutcomeResult : handoffOutcome;
+      if (String(inspector.value.task.service_id ?? '') === 'orders-async-demo') {
+        s3HandoffOutcome.value = await api.s3Handoff(taskId.value);
+        taskOutcome.value = null;
+      } else {
+        s3HandoffOutcome.value = null;
+        const [handoffOutcome, taskOutcomeResult] = await Promise.all([
+          api.handoff(taskId.value), api.taskOutcome(taskId.value),
+        ]);
+        taskOutcome.value = ['NO_PLAN', 'NO_S2_DIAGNOSIS'].includes(String(handoffOutcome.business_outcome))
+          ? taskOutcomeResult : handoffOutcome;
+      }
       taskMemoryContext.value = await api.taskMemories(taskId.value);
       taskSemanticContext.value = await api.taskSemanticMemories(taskId.value);
     }
@@ -443,11 +477,18 @@ async function createSemanticCandidate(): Promise<void> {
 async function createDemoTask(): Promise<void> {
   const symptom = initialSymptom.value.trim();
   if (!sessionId.value || !csrf.value || !symptom) return;
+  if (investigationKind.value === 'ASYNC_CALLBACK' && !selectedS3OrderId.value) {
+    errorMessage.value = '当前身份没有可选的已注册订单资源；请先核实 TaskBinding 范围。';
+    return;
+  }
   busy.value = true;
   errorMessage.value = '';
-  notice.value = investigationKind.value === 'ASYNC_CALLBACK' ? '正在启动订单异步回调只读调查；订单、投递与接收处理将分别核实。' : '正在通过固定 S1 orders-demo / integration-a 绑定启动调查；故障描述作为未验证用户输入记录。';
+  notice.value = investigationKind.value === 'ASYNC_CALLBACK'
+    ? `已确认预注册订单 ${selectedS3OrderId.value}；正在核实订单、投递与接收状态。`
+    : '正在通过固定 S1 orders-demo / integration-a 绑定启动调查；故障描述作为未验证用户输入记录。';
   try {
-    const created = await api.createTask(sessionId.value, symptom, csrf.value, investigationKind.value);
+    const created = await api.createTask(sessionId.value, symptom, csrf.value, investigationKind.value,
+      investigationKind.value === 'ASYNC_CALLBACK' ? selectedS3OrderId.value : undefined);
     initialSymptom.value = '';
     showTaskForm.value = false;
     taskId.value = created.task_id;
@@ -582,6 +623,104 @@ function stableHandoffOperationId(task: string, draftId: string, digest: string,
     expected_control_revision: revision,
   }));
   return operationId;
+}
+
+function stableS3HandoffOperationId(task: string, receiptId: string, digest: string, revision: number): string {
+  const storageKey = `opspilot.m4-03.s3-handoff.${task}.${receiptId}`;
+  const stored = window.localStorage.getItem(storageKey);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored) as Record<string, unknown>;
+      if (parsed.diagnosis_digest === digest && parsed.expected_control_revision === revision
+        && typeof parsed.operation_id === 'string' && parsed.operation_id.length > 0) {
+        return parsed.operation_id;
+      }
+    } catch {
+      // Replace malformed local metadata; it contains no credentials or session token.
+    }
+  }
+  const operationId = crypto.randomUUID();
+  window.localStorage.setItem(storageKey, JSON.stringify({
+    operation_id: operationId, diagnosis_digest: digest, expected_control_revision: revision,
+  }));
+  return operationId;
+}
+
+async function submitS3Handoff(): Promise<void> {
+  const selectedTask = taskId.value;
+  if (!selectedTask || !csrf.value || busy.value || user.value?.role !== 'SUPPORT') return;
+  busy.value = true;
+  errorMessage.value = '';
+  notice.value = '';
+  try {
+    const displayed = await api.s3Handoff(selectedTask);
+    s3HandoffOutcome.value = displayed;
+    const diagnosis = displayed.diagnosis_receipt as Record<string, unknown> | null | undefined;
+    const receiptId = String(diagnosis?.receipt_id ?? '');
+    const digest = String(diagnosis?.diagnosis_digest ?? '');
+    const revision = Number(diagnosis?.control_revision);
+    if (displayed.business_outcome !== 'HANDOFF_READY' || displayed.currentness !== 'CURRENT'
+      || !displayed.handoff_allowed || !receiptId || !/^[0-9a-f]{64}$/.test(digest)
+      || !Number.isInteger(revision) || revision < 0) {
+      errorMessage.value = '当前诊断没有可提交的有效处理方向；请刷新并查看最新可信事实。';
+      return;
+    }
+    const direction = String(displayed.handling_direction ?? '');
+    const confirmed = window.confirm(
+      `确认将订单 ${String(diagnosis?.order_id ?? selectedS3OrderId.value)} 的处理请求交给本地回调运维队列？\n\n`
+      + `方向：${readableS3Direction(direction)}\n诊断回执：${receiptId}\n\n`
+      + '接收只表示 HANDOFF_ACCEPTED；不代表订单恢复或回调已完成。',
+    );
+    if (!confirmed) return;
+
+    // Revalidate the exact diagnosis and TaskControl revision after the user confirms.
+    const current = await api.s3Handoff(selectedTask);
+    const currentDiagnosis = current.diagnosis_receipt as Record<string, unknown> | null | undefined;
+    if (current.business_outcome !== 'HANDOFF_READY' || current.currentness !== 'CURRENT'
+      || String(currentDiagnosis?.receipt_id ?? '') !== receiptId
+      || String(currentDiagnosis?.diagnosis_digest ?? '') !== digest
+      || Number(currentDiagnosis?.control_revision) !== revision
+      || current.handling_direction !== direction) {
+      s3HandoffOutcome.value = current;
+      errorMessage.value = '确认期间 Task、诊断或控制版本已变化；请重新查看当前结果。';
+      return;
+    }
+    const operationId = stableS3HandoffOperationId(selectedTask, receiptId, digest, revision);
+    await api.submitS3Handoff(selectedTask, {
+      operation_id: operationId,
+      diagnosis_receipt_id: receiptId,
+      diagnosis_digest: digest,
+      expected_control_revision: revision,
+    }, csrf.value);
+    s3HandoffOutcome.value = await api.s3Handoff(selectedTask);
+    notice.value = `处理请求已由本地队列接收。HandoffReceipt ${String((s3HandoffOutcome.value.handoff_receipt as Record<string, unknown> | null)?.receipt_id ?? '')}；当前状态 HANDOFF_ACCEPTED，业务尚未恢复。`;
+    await refreshInspector();
+  } catch (error) {
+    errorMessage.value = explainError(error);
+    try {
+      const reconciled = await api.s3Handoff(selectedTask);
+      s3HandoffOutcome.value = reconciled;
+      if (reconciled.business_outcome === 'HANDOFF_ACCEPTED' && reconciled.handoff_receipt) {
+        errorMessage.value = '';
+        notice.value = `提交结果已从 Domain 回查：本地队列已接收，HandoffReceipt ${String((reconciled.handoff_receipt as Record<string, unknown>).receipt_id)}。`;
+      }
+    } catch {
+      // Stable operation ID remains in localStorage for the next reconciliation attempt.
+    }
+  } finally {
+    busy.value = false;
+  }
+}
+
+function readableS3Direction(value: unknown): string {
+  return ({
+    WAIT_FOR_ORDER_COMPLETION: '等待订单完成后再核实回调',
+    WAIT_FOR_SCHEDULED_RETRY: '等待已安排的投递重试',
+    CONTACT_CALLBACK_OPERATOR: '请求回调运维人员调查重试已耗尽的投递',
+    WAIT_FOR_RECEIVER_PROCESSING: '等待接收方在 SLA 内处理队列事件',
+    CONTACT_RECEIVER_OPERATOR: '请求接收方运维人员核实超时队列事件',
+    EVIDENCE_INSUFFICIENT: '补充可信证据后再确定方向',
+  } as Record<string, string>)[String(value)] ?? String(value ?? '尚未形成方向');
 }
 
 async function submitHandoff(): Promise<void> {
@@ -1054,12 +1193,19 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="demo-notice"><span class="notice-icon">i</span><span>业务调查使用服务端可信资源绑定。用户描述和关键更正只提供调查线索，真实状态来自当前 MCP Evidence。S3 只做诊断，不重发回调。</span></div>
+        <div class="demo-notice"><span class="notice-icon">i</span><span>业务调查使用服务端可信资源绑定。用户描述和关键更正只提供调查线索，真实状态来自当前 MCP Evidence。S3 可把经你确认的人工处理请求交给本地队列；队列接收不表示订单恢复，也不会自动重发回调。</span></div>
         <form v-if="showTaskForm && canCreateTask" class="task-input-card" data-testid="new-task-form" @submit.prevent="createDemoTask">
-          <div><span class="eyebrow">NEW INVESTIGATION</span><h2>描述实际故障</h2><p>请写下你观察到的现象。状态码未确认时可以明确说明；资源仍由服务端绑定。</p></div>
-          <label>调查场景 <select v-model="investigationKind" data-testid="investigation-kind" :disabled="busy || !csrf"><option value="AUTH_INCIDENT">订单 API 认证与权限</option><option value="ASYNC_CALLBACK">订单 200 但下游未收到回调（只读）</option></select></label>
-          <textarea v-model="initialSymptom" data-testid="initial-symptom-input" rows="3" maxlength="20000" placeholder="例如：昨晚凭证轮换后订单 API 一直提示未认证，请核实当前情况。" :disabled="busy || !csrf"></textarea>
-          <div class="task-input-actions"><span>输入会以未验证用户来源加入 Investigator 上下文。</span><button class="primary-button" type="submit" :disabled="!initialSymptom.trim() || busy || !csrf">启动调查 <span>→</span></button></div>
+          <div><span class="eyebrow">NEW INVESTIGATION</span><h2>描述实际故障</h2><p>请写下你观察到的现象。状态码未确认时可以明确说明；业务对象从当前租户已登记资源中选择。</p></div>
+          <label>调查场景 <select v-model="investigationKind" data-testid="investigation-kind" :disabled="busy || !csrf" @change="investigationKind === 'ASYNC_CALLBACK' && loadS3OrderResources()"><option value="AUTH_INCIDENT">订单 API 认证与权限</option><option value="ASYNC_CALLBACK">订单回调未送达或接收方未处理（S3）</option></select></label>
+          <label v-if="investigationKind === 'ASYNC_CALLBACK'" class="s3-order-selector">确认调查订单
+            <select v-model="selectedS3OrderId" data-testid="s3-order-resource" :disabled="busy || !csrf || !s3OrderResources.length">
+              <option v-for="resource in s3OrderResources" :key="resource.order_id" :value="resource.order_id">{{ resource.order_id }} · {{ resource.order_status }} · 合同 v{{ resource.contract_version }}</option>
+            </select>
+            <small v-if="selectedS3OrderId">当前租户预注册并授权的订单 {{ selectedS3OrderId }}；TaskBinding 将在创建时固定此选择。</small>
+            <small v-else>当前身份没有可选择的预注册订单。</small>
+          </label>
+          <textarea v-model="initialSymptom" data-testid="initial-symptom-input" rows="3" maxlength="20000" :placeholder="investigationKind === 'ASYNC_CALLBACK' ? '例如：订单接口返回 200，但下游没有收到异步回调，请核实状态。' : '例如：昨晚凭证轮换后订单 API 一直提示未认证，请核实当前情况。'" :disabled="busy || !csrf"></textarea>
+          <div class="task-input-actions"><span>输入会以未验证用户来源加入 Investigator 上下文。</span><button class="primary-button" type="submit" :disabled="!initialSymptom.trim() || busy || !csrf || (investigationKind === 'ASYNC_CALLBACK' && !selectedS3OrderId)">{{ investigationKind === 'ASYNC_CALLBACK' ? '确认订单并启动调查' : '启动调查' }} <span>→</span></button></div>
         </form>
 
         <div class="conversation-scroll" data-testid="conversation" aria-live="polite">
@@ -1198,6 +1344,15 @@ onBeforeUnmount(() => {
             <div v-if="taskOutcome.frozen_report" class="outcome-row">冻结报告 <code>{{ String(taskOutcome.frozen_report.report_ref) }}</code><span>v{{ String(taskOutcome.frozen_report.report_version) }}</span></div>
             <div v-if="taskOutcome.delivery" class="outcome-row">DELIVER <code>{{ String(taskOutcome.delivery.delivery_id) }}</code><span>工单条目 {{ String(taskOutcome.delivery.ticket_entry_id) }}</span></div>
             <div v-if="taskOutcome.local_report" class="outcome-row">拒绝报告 <code>{{ String(taskOutcome.local_report.report_ref) }}</code><span>{{ String(taskOutcome.local_report.outcome) }}</span></div>
+          </div>
+          <div v-if="s3HandoffOutcome" class="inspector-section outcome-section s3-handoff-section" data-testid="s3-handoff-outcome">
+            <div class="section-heading"><h3>S3 处理方向与交接</h3><span class="status-badge" :class="statusTone(s3HandoffOutcome.business_outcome)">{{ String(s3HandoffOutcome.business_outcome) }}</span></div>
+            <div class="outcome-message warm-outcome">{{ readableS3Direction(s3HandoffOutcome.handling_direction) }}。当前结果来自本 Task 的订单、投递事件和接收方事实。</div>
+            <div v-if="s3HandoffOutcome.diagnosis_receipt" class="outcome-row"><span>诊断回执</span><code>{{ String((s3HandoffOutcome.diagnosis_receipt as Record<string, unknown>).receipt_id) }}</code><span>当前性 {{ String(s3HandoffOutcome.currentness) }} · 订单 {{ String((s3HandoffOutcome.diagnosis_receipt as Record<string, unknown>).order_id ?? selectedS3OrderId) }}</span></div>
+            <div v-if="s3HandoffOutcome.business_outcome === 'HANDOFF_READY' && s3HandoffOutcome.currentness === 'CURRENT'" class="outcome-message warm-outcome">可信事实表明当前问题需要人工处理。提交前会再次核对诊断回执、Task 控制版本和处理方向。</div>
+            <button v-if="canCreateTask && s3HandoffOutcome.business_outcome === 'HANDOFF_READY' && s3HandoffOutcome.currentness === 'CURRENT'" class="primary-button" type="button" data-testid="submit-s3-handoff" :disabled="busy || !csrf" @click="submitS3Handoff">确认交给回调运维队列</button>
+            <div v-if="s3HandoffOutcome.business_outcome === 'HANDOFF_ACCEPTED' && s3HandoffOutcome.handoff_receipt" class="outcome-row good-outcome" data-testid="s3-handoff-receipt"><span>HANDOFF_ACCEPTED · HandoffReceipt</span><code>{{ String((s3HandoffOutcome.handoff_receipt as Record<string, unknown>).receipt_id) }}</code><span>Queue Entry {{ String((s3HandoffOutcome.queue_entry as Record<string, unknown> | null)?.entry_id ?? '') }} · {{ readableStatus((s3HandoffOutcome.queue_entry as Record<string, unknown> | null)?.queue_status ?? 'PENDING_REVIEW') }}</span></div>
+            <div v-if="s3HandoffOutcome.business_outcome === 'HANDOFF_ACCEPTED'" class="outcome-message warm-outcome">本地处理队列已持久接收。此回执只证明 HANDOFF_ACCEPTED；订单未因此恢复，回调也未因此完成或重发。</div>
           </div>
           <div v-if="taskMemoryContext" class="inspector-section memory-section" data-testid="task-memory-context">
             <div class="section-heading"><h3>跨 Task 案例经验</h3><span class="read-only-label">仅历史方法提示</span></div>

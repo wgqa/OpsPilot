@@ -1,1 +1,1 @@
-HTTP 200 on an order read means the request succeeded, not that the order completed. Callback is emitted only after COMPLETED. A PROCESSING order does not prove a callback failure. Query current order state before drawing a root cause.
+Protocol v1. HTTP 200 on an order read means the request succeeded, not that the order completed. Callback is emitted only after COMPLETED. A PROCESSING order does not prove a callback failure. Query current order state before drawing a root cause. Use the same bound order version when correlating its callback event.

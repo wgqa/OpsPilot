@@ -6,6 +6,7 @@ import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from opspilot.domain.database import authorize_business_request, connect, initialize
 
@@ -28,7 +29,10 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         from opspilot.domain.s3 import ROUTE as S3_ROUTE, SERVICE as S3_SERVICE, order_http_payload
-        if self.path not in {"/api/orders/demo-order", S3_ROUTE}:
+        parsed = urlsplit(self.path)
+        request_path = parsed.path
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        if request_path not in {"/api/orders/demo-order", S3_ROUTE}:
             self._respond(404, {"error": "NOT_FOUND"})
             return
 
@@ -40,8 +44,8 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
         decision = authorize_business_request(
             db_path,
             tenant_id=tenant_id,
-            service_id=S3_SERVICE if self.path == S3_ROUTE else "orders-demo",
-            route=self.path,
+            service_id=S3_SERVICE if request_path == S3_ROUTE else "orders-demo",
+            route=request_path,
             integration_id=integration_id,
             authorization=authorization,
             request_id=request_id,
@@ -64,8 +68,13 @@ class DemoAPIHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        if self.path == S3_ROUTE:
-            payload = order_http_payload(db_path, tenant_id, integration_id, request_id, authn_event_id)
+        if request_path == S3_ROUTE:
+            requested = query.get("order_id", ["async-order"])
+            order_id = requested[0] if len(requested) == 1 else ""
+            if not order_id or len(order_id) > 100:
+                self._respond(404, {"error": "ORDER_NOT_FOUND"})
+                return
+            payload = order_http_payload(db_path, tenant_id, integration_id, request_id, authn_event_id, order_id)
             self._respond(200 if payload else 404, payload or {"error": "ORDER_NOT_FOUND"})
             return
         try:

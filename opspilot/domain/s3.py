@@ -6,11 +6,12 @@ of order, delivery or receiver state is exposed to the model or Web caller.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -27,7 +28,7 @@ PROBLEM = "async_callback"
 POLICY = "s3-callback-evidence-v1"
 FACT_TO_TOOL = {"s3_order": "get_order_status", "s3_delivery": "get_callback_delivery", "s3_receiver": "get_receiver_processing"}
 SOURCES = {"s3_order": "http:loopback-async-orders", "s3_delivery": "sqlite:s3_deliveries", "s3_receiver": "sqlite:s3_receivers"}
-OUTCOMES = {"ORDER_PROCESSING", "CALLBACK_DELIVERY_FAILED", "RECEIVER_PROCESSING_UNCONFIRMED"}
+OUTCOMES = {"ORDER_PROCESSING", "CALLBACK_DELIVERY_FAILED", "RECEIVER_PROCESSING_UNCONFIRMED", "RECEIVER_PROCESSED"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS s3_orders (
@@ -41,11 +42,14 @@ CREATE TABLE IF NOT EXISTS s3_deliveries (
  event_id TEXT NOT NULL, order_version INTEGER NOT NULL, version INTEGER NOT NULL,
  status TEXT NOT NULL CHECK(status IN ('NOT_DUE','FAILED','ACKNOWLEDGED')),
  receiver_http_status INTEGER, transport_request_id TEXT, response_digest TEXT,
+ failure_code TEXT, attempt_count INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL DEFAULT 3,
+ retry_state TEXT, retry_at TEXT, transport_response_json TEXT NOT NULL DEFAULT '{}',
  PRIMARY KEY(tenant_id,service_id,order_id));
 CREATE TABLE IF NOT EXISTS s3_receivers (
  tenant_id TEXT NOT NULL, service_id TEXT NOT NULL, order_id TEXT NOT NULL,
  event_id TEXT NOT NULL, delivery_version INTEGER NOT NULL, version INTEGER NOT NULL,
  status TEXT NOT NULL CHECK(status IN ('NOT_RECEIVED','QUEUED','PROCESSED')),
+ accepted_at TEXT, processing_sla_seconds INTEGER,
  PRIMARY KEY(tenant_id,service_id,order_id));
 CREATE TABLE IF NOT EXISTS s3_http_observations (
  request_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, service_id TEXT NOT NULL,
@@ -61,6 +65,17 @@ CREATE TABLE IF NOT EXISTS s3_diagnoses (
 CREATE TABLE IF NOT EXISTS s3_model_contexts (
  call_id TEXT PRIMARY KEY,
  task_id TEXT NOT NULL, run_id TEXT NOT NULL, messages_json TEXT NOT NULL, tools_json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS s3_task_resources (
+ task_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, service_id TEXT NOT NULL,
+ integration_id TEXT NOT NULL, order_id TEXT NOT NULL, confirmed_by TEXT NOT NULL,
+ confirmed_at TEXT NOT NULL, selection_digest TEXT NOT NULL,
+ FOREIGN KEY(task_id,tenant_id) REFERENCES task_bindings(task_id,tenant_id) ON DELETE CASCADE,
+ FOREIGN KEY(tenant_id,service_id,order_id) REFERENCES s3_orders(tenant_id,service_id,order_id),
+ FOREIGN KEY(tenant_id,integration_id) REFERENCES integrations(tenant_id,integration_id));
+CREATE TRIGGER IF NOT EXISTS s3_task_resources_immutable_update BEFORE UPDATE ON s3_task_resources
+ BEGIN SELECT RAISE(ABORT,'S3 task resource binding is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS s3_task_resources_immutable_delete BEFORE DELETE ON s3_task_resources
+ BEGIN SELECT RAISE(ABORT,'S3 task resource binding is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS s3_diagnoses_immutable_update BEFORE UPDATE ON s3_diagnoses
  BEGIN SELECT RAISE(ABORT,'S3 diagnosis is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS s3_diagnoses_no_delete BEFORE DELETE ON s3_diagnoses
@@ -71,25 +86,123 @@ CREATE TRIGGER IF NOT EXISTS s3_diagnoses_no_delete BEFORE DELETE ON s3_diagnose
 def get_s3_binding(connection: sqlite3.Connection, task_id: str) -> dict[str, object]:
     row = connection.execute(
         """SELECT b.*, s.route, i.credential_ref, i.config_version, p.principal_version,
-                  p.status AS principal_status, a.policy_version, a.accepted_credential_ref
+                  p.status AS principal_status, a.policy_version, a.accepted_credential_ref,
+                  r.order_id,r.confirmed_by AS resource_confirmed_by,
+                  r.confirmed_at AS resource_confirmed_at,r.selection_digest,
+                  o.contract_version
            FROM task_bindings b JOIN services s ON s.tenant_id=b.tenant_id AND s.service_id=b.service_id
            AND s.integration_id=b.integration_id JOIN integrations i ON i.tenant_id=b.tenant_id
            AND i.integration_id=b.integration_id AND i.principal_id=b.principal_id
            JOIN principals p ON p.tenant_id=b.tenant_id AND p.principal_id=b.principal_id
            JOIN auth_policies a ON a.tenant_id=b.tenant_id AND a.service_id=b.service_id
+           JOIN s3_task_resources r ON r.task_id=b.task_id AND r.tenant_id=b.tenant_id
+             AND r.service_id=b.service_id AND r.integration_id=b.integration_id
+           JOIN s3_orders o ON o.tenant_id=r.tenant_id AND o.service_id=r.service_id
+             AND o.integration_id=r.integration_id AND o.order_id=r.order_id
            WHERE b.task_id=? AND b.service_id=? AND s.route=?""", (task_id, SERVICE, ROUTE),
     ).fetchone()
     if row is None:
         raise ScopeDenied("S3_RESOURCE_OUTSIDE_TASK_BINDING")
     order = connection.execute("SELECT 1 FROM s3_orders WHERE tenant_id=? AND service_id=? AND integration_id=? AND order_id=?",
-                               (row["tenant_id"], SERVICE, row["integration_id"], ORDER)).fetchone()
+                               (row["tenant_id"], SERVICE, row["integration_id"], row["order_id"])).fetchone()
     if order is None:
         raise ScopeDenied("S3_RESOURCE_OUTSIDE_TASK_BINDING")
     return dict(row)
 
 
+def list_s3_order_resources(path: str | Path, identity) -> list[dict[str, object]]:
+    """List registered S3 resources currently readable by this trusted SUPPORT actor."""
+    if getattr(identity, "role", None) != "SUPPORT":
+        raise ScopeDenied("S3_RESOURCE_SELECTION_REQUIRES_SUPPORT_OWNER")
+    with connect(path) as connection:
+        operator = connection.execute(
+            "SELECT 1 FROM trusted_operators WHERE tenant_id=? AND actor_id=? AND role='SUPPORT'",
+            (identity.tenant_id, identity.actor_id),
+        ).fetchone()
+        if operator is None:
+            raise ScopeDenied("S3_RESOURCE_SELECTION_REQUIRES_SUPPORT_OWNER")
+        rows = connection.execute(
+            """SELECT o.order_id,o.status,o.version AS order_version,o.contract_version,
+                      i.integration_id,i.principal_id,i.credential_ref,p.status AS principal_status,
+                      a.accepted_credential_ref,r.required_scopes_json,g.granted_scopes_json
+               FROM s3_orders o JOIN services s ON s.tenant_id=o.tenant_id AND s.service_id=o.service_id
+               JOIN integrations i ON i.tenant_id=o.tenant_id AND i.integration_id=o.integration_id
+                 AND i.integration_id=s.integration_id
+               JOIN principals p ON p.tenant_id=i.tenant_id AND p.principal_id=i.principal_id
+               JOIN auth_policies a ON a.tenant_id=s.tenant_id AND a.service_id=s.service_id
+               JOIN route_scope_policies r ON r.tenant_id=s.tenant_id AND r.service_id=s.service_id AND r.route=s.route
+               JOIN principal_scope_grants g ON g.tenant_id=i.tenant_id AND g.principal_id=i.principal_id
+               WHERE o.tenant_id=? AND o.service_id=? AND s.route=? AND p.status='ENABLED'
+                 AND a.accepted_credential_ref=i.credential_ref
+               ORDER BY o.order_id""",
+            (identity.tenant_id, SERVICE, ROUTE),
+        ).fetchall()
+        result: list[dict[str, object]] = []
+        for row in rows:
+            try:
+                required = set(json.loads(str(row["required_scopes_json"])))
+                granted = set(json.loads(str(row["granted_scopes_json"])))
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not required <= granted:
+                continue
+            result.append({
+                "order_id": str(row["order_id"]), "order_status": str(row["status"]),
+                "order_version": int(row["order_version"]),
+                "contract_version": int(row["contract_version"]),
+                "service_id": SERVICE, "integration_id": str(row["integration_id"]),
+                "route": ROUTE, "principal_id": str(row["principal_id"]),
+                "selection_status": "REGISTERED_AND_READ_AUTHORIZED",
+            })
+        return result
+
+
+def bind_s3_order_in_transaction(
+    connection: sqlite3.Connection, *, task_id: str, tenant_id: str, service_id: str,
+    integration_id: str, order_id: str, actor_id: str, confirmed_at: str,
+) -> dict[str, object]:
+    """Persist the owner's confirmed directory selection with the TaskBinding transaction."""
+    if service_id != SERVICE or not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", order_id):
+        raise ScopeDenied("S3_ORDER_NOT_REGISTERED")
+    row = connection.execute(
+        """SELECT b.task_id,b.tenant_id,b.integration_id,b.principal_id,o.contract_version,
+                  i.credential_ref,a.accepted_credential_ref,p.status,r.required_scopes_json,g.granted_scopes_json
+           FROM task_bindings b JOIN s3_orders o ON o.tenant_id=b.tenant_id AND o.service_id=b.service_id
+             AND o.integration_id=b.integration_id AND o.order_id=?
+           JOIN integrations i ON i.tenant_id=b.tenant_id AND i.integration_id=b.integration_id
+           JOIN principals p ON p.tenant_id=b.tenant_id AND p.principal_id=b.principal_id
+           JOIN auth_policies a ON a.tenant_id=b.tenant_id AND a.service_id=b.service_id
+           JOIN services s ON s.tenant_id=b.tenant_id AND s.service_id=b.service_id AND s.route=?
+           JOIN route_scope_policies r ON r.tenant_id=s.tenant_id AND r.service_id=s.service_id AND r.route=s.route
+           JOIN principal_scope_grants g ON g.tenant_id=b.tenant_id AND g.principal_id=b.principal_id
+           JOIN trusted_operators actor ON actor.tenant_id=b.tenant_id AND actor.actor_id=? AND actor.role='SUPPORT'
+           WHERE b.task_id=? AND b.tenant_id=? AND b.service_id=? AND b.integration_id=? AND p.status='ENABLED'
+             AND a.accepted_credential_ref=i.credential_ref""",
+        (order_id, ROUTE, actor_id, task_id, tenant_id, service_id, integration_id),
+    ).fetchone()
+    if row is None:
+        raise ScopeDenied("S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED")
+    try:
+        if not set(json.loads(str(row["required_scopes_json"]))) <= set(json.loads(str(row["granted_scopes_json"]))):
+            raise ScopeDenied("S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED")
+    except (json.JSONDecodeError, TypeError) as error:
+        raise ScopeDenied("S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED") from error
+    selection = {
+        "tenant_id": tenant_id, "task_id": task_id, "service_id": service_id,
+        "integration_id": integration_id, "order_id": order_id, "confirmed_by": actor_id,
+        "confirmed_at": confirmed_at, "contract_version": int(row["contract_version"]),
+    }
+    connection.execute(
+        """INSERT INTO s3_task_resources
+           (task_id,tenant_id,service_id,integration_id,order_id,confirmed_by,confirmed_at,selection_digest)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (task_id, tenant_id, service_id, integration_id, order_id, actor_id, confirmed_at, digest_json(selection)),
+    )
+    return selection
+
+
 def _snapshot(connection, binding):
-    key = (binding["tenant_id"], SERVICE, ORDER)
+    key = (binding["tenant_id"], SERVICE, binding["order_id"])
     order = dict(connection.execute("SELECT * FROM s3_orders WHERE tenant_id=? AND service_id=? AND order_id=?", key).fetchone())
     delivery = dict(connection.execute("SELECT * FROM s3_deliveries WHERE tenant_id=? AND service_id=? AND order_id=?", key).fetchone())
     receiver = dict(connection.execute("SELECT * FROM s3_receivers WHERE tenant_id=? AND service_id=? AND order_id=?", key).fetchone())
@@ -100,10 +213,35 @@ def _snapshot(connection, binding):
     return order, delivery, receiver, versions
 
 
-def prepare_s3_fixture(path: str | Path, state: str, *, tenant_id: str = "tenant-a") -> dict[str, object]:
+def prepare_s3_fixture(
+    path: str | Path, state: str, *, tenant_id: str = "tenant-a", order_id: str = ORDER,
+    contract_version: int = 1, failure_code: str = "TEMPORARY_UNAVAILABLE",
+    attempt_count: int | None = None, max_attempts: int = 3, retry_state: str | None = None,
+    retry_after_seconds: int = 60, queue_age_seconds: int = 60,
+    processing_sla_seconds: int = 300,
+) -> dict[str, object]:
     """Explicit test setup, NOT a registered tool/API. Performs a real receiver POST."""
     if state not in {"PROCESSING", "DELIVERY_FAILED", "DELIVERED_PENDING"}:
         raise ValueError("Unknown S3 test state")
+    if not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", order_id):
+        raise ValueError("S3 fixture order id is invalid")
+    if contract_version not in {1, 2} or not 1 <= max_attempts <= 10:
+        raise ValueError("S3 fixture contract/retry bounds are invalid")
+    actual_attempts = attempt_count if attempt_count is not None else (1 if state == "DELIVERY_FAILED" else 0)
+    if isinstance(actual_attempts, bool) or not 0 <= actual_attempts <= max_attempts:
+        raise ValueError("S3 fixture attempt count is invalid")
+    if not 0 <= retry_after_seconds <= 86_400 or not 0 <= queue_age_seconds <= 86_400:
+        raise ValueError("S3 fixture retry/queue bounds are invalid")
+    if not 30 <= processing_sla_seconds <= 86_400:
+        raise ValueError("S3 processing SLA is outside the fixture range")
+    actual_retry_state = retry_state or (
+        "SCHEDULED" if state == "DELIVERY_FAILED" and actual_attempts < max_attempts
+        else "EXHAUSTED" if state == "DELIVERY_FAILED" else "NOT_APPLICABLE"
+    )
+    if actual_retry_state not in {"SCHEDULED", "EXHAUSTED", "NOT_APPLICABLE"}:
+        raise ValueError("S3 retry state is invalid")
+    retry_at = (datetime.now(timezone.utc) + timedelta(seconds=retry_after_seconds)).isoformat().replace("+00:00", "Z") if actual_retry_state == "SCHEDULED" else None
+    accepted_at = (datetime.now(timezone.utc) - timedelta(seconds=queue_age_seconds)).isoformat().replace("+00:00", "Z") if state == "DELIVERED_PENDING" else None
     initialize(path)
     suffix = "a" if tenant_id == "tenant-a" else "b"
     integration = f"async-integration-{suffix}"
@@ -116,8 +254,17 @@ def prepare_s3_fixture(path: str | Path, state: str, *, tenant_id: str = "tenant
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 code = 503 if state == "DELIVERY_FAILED" else 202
-                result = {"event_id": body["event_id"], "request_id": body["request_id"],
-                          "receiver_state": "UNAVAILABLE" if code == 503 else "QUEUED"}
+                result = {
+                    "event_id": body["event_id"], "order_id": body["order_id"],
+                    "request_id": body["request_id"],
+                    "receiver_state": "UNAVAILABLE" if code == 503 else "QUEUED",
+                    "failure_code": failure_code if code == 503 else None,
+                    "attempt_count": actual_attempts, "max_attempts": max_attempts,
+                    "retry_state": actual_retry_state if code == 503 else "NOT_APPLICABLE",
+                    "retry_at": retry_at if code == 503 else None,
+                    "accepted_at": accepted_at if code == 202 else None,
+                    "processing_sla_seconds": processing_sla_seconds if code == 202 else None,
+                }
                 raw = canonical_json(result).encode()
                 self.send_response(code)
                 self.send_header("Content-Type", "application/json")
@@ -132,7 +279,7 @@ def prepare_s3_fixture(path: str | Path, state: str, *, tenant_id: str = "tenant
         thread.start()
         try:
             response = httpx.post(f"http://127.0.0.1:{server.server_port}/callback",
-                                  json={"event_id": event_id, "order_id": ORDER, "request_id": transport_id}, timeout=5)
+                                  json={"event_id": event_id, "order_id": order_id, "request_id": transport_id}, timeout=5)
             status, response_body = response.status_code, response.json()
         finally:
             server.shutdown()
@@ -146,24 +293,39 @@ def prepare_s3_fixture(path: str | Path, state: str, *, tenant_id: str = "tenant
         c.execute("INSERT OR IGNORE INTO auth_policies VALUES(?,?,?,1)", (tenant_id, SERVICE, "cred-v2"))
         c.execute("INSERT OR IGNORE INTO principal_scope_grants (tenant_id,principal_id,granted_scopes_json,grant_version) VALUES(?,?,?,1)", (tenant_id,f"async-principal-{suffix}",canonical_json(["orders.async.read"])))
         c.execute("INSERT OR IGNORE INTO route_scope_policies (tenant_id,service_id,route,required_scopes_json,scope_policy_version) VALUES(?,?,?,?,1)", (tenant_id,SERVICE,ROUTE,canonical_json(["orders.async.read"])))
-        previous = c.execute("SELECT version FROM s3_orders WHERE tenant_id=? AND service_id=? AND order_id=?", (tenant_id,SERVICE,ORDER)).fetchone()
+        previous = c.execute("SELECT version FROM s3_orders WHERE tenant_id=? AND service_id=? AND order_id=?", (tenant_id,SERVICE,order_id)).fetchone()
         version = int(previous[0]) + 1 if previous else 1
-        c.execute("INSERT OR REPLACE INTO s3_orders VALUES(?,?,?,?,?,?,1)", (tenant_id,SERVICE,integration,ORDER,"PROCESSING" if state == "PROCESSING" else "COMPLETED",version))
-        c.execute("INSERT OR REPLACE INTO s3_deliveries VALUES(?,?,?,?,?,?,?,?,?,?)", (tenant_id,SERVICE,ORDER,event_id,version,version,
-                  "NOT_DUE" if status is None else "FAILED" if status == 503 else "ACKNOWLEDGED",status,transport_id if status else None,
-                  digest_json(response_body) if response_body else None))
-        c.execute("INSERT OR REPLACE INTO s3_receivers VALUES(?,?,?,?,?,?,?)", (tenant_id,SERVICE,ORDER,event_id,version,version,"QUEUED" if status == 202 else "NOT_RECEIVED"))
+        c.execute("""INSERT OR REPLACE INTO s3_orders
+                     (tenant_id,service_id,integration_id,order_id,status,version,contract_version)
+                     VALUES(?,?,?,?,?,?,?)""",
+                  (tenant_id,SERVICE,integration,order_id,"PROCESSING" if state == "PROCESSING" else "COMPLETED",version,contract_version))
+        body_value = response_body or {}
+        c.execute("""INSERT OR REPLACE INTO s3_deliveries
+                     (tenant_id,service_id,order_id,event_id,order_version,version,status,receiver_http_status,
+                      transport_request_id,response_digest,failure_code,attempt_count,max_attempts,retry_state,retry_at,transport_response_json)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (tenant_id,SERVICE,order_id,event_id,version,version,
+                   "NOT_DUE" if status is None else "FAILED" if status == 503 else "ACKNOWLEDGED",status,
+                   transport_id if status else None,digest_json(body_value) if status else None,
+                   body_value.get("failure_code"),body_value.get("attempt_count",0),body_value.get("max_attempts",max_attempts),
+                   body_value.get("retry_state"),body_value.get("retry_at"),canonical_json(body_value)))
+        c.execute("""INSERT OR REPLACE INTO s3_receivers
+                     (tenant_id,service_id,order_id,event_id,delivery_version,version,status,accepted_at,processing_sla_seconds)
+                     VALUES(?,?,?,?,?,?,?,?,?)""",
+                  (tenant_id,SERVICE,order_id,event_id,version,version,"QUEUED" if status == 202 else "NOT_RECEIVED",
+                   body_value.get("accepted_at"),body_value.get("processing_sla_seconds")))
     return {"preparation_only": True, "agent_actions": [], "state": state, "order_version": version,
+            "order_id": order_id, "contract_version": contract_version,
             "receiver_http_status": status, "transport_trace": transport_trace}
 
 
-def order_http_payload(path, tenant_id, integration_id, request_id, authn_event_id):
+def order_http_payload(path, tenant_id, integration_id, request_id, authn_event_id, order_id: str = ORDER):
     with connect(path) as c:
         row = c.execute("SELECT * FROM s3_orders WHERE tenant_id=? AND service_id=? AND integration_id=? AND order_id=?",
-                        (tenant_id,SERVICE,integration_id,ORDER)).fetchone()
+                        (tenant_id,SERVICE,integration_id,order_id)).fetchone()
         if row is None:
             return None
-        payload = {"order_id": ORDER, "status": row["status"], "order_version": row["version"],
+        payload = {"order_id": order_id, "status": row["status"], "order_version": row["version"],
                    "contract_version": row["contract_version"], "request_id": request_id, "authn_event_id": authn_event_id}
         principal = c.execute("SELECT principal_id FROM integrations WHERE tenant_id=? AND integration_id=?", (tenant_id,integration_id)).fetchone()[0]
         c.execute("INSERT INTO s3_http_observations VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -177,12 +339,18 @@ def get_order_status_fact(path, task_id, api_url):
         binding = get_s3_binding(c, task_id)
         _, _, _, before = _snapshot(c, binding)
     secret = get_credential_secret(path, str(binding["tenant_id"]), str(binding["credential_ref"]))
-    response = httpx.get(f"{api_url}{ROUTE}", headers={"X-Integration-ID": str(binding["integration_id"]), "Authorization": f"Bearer {secret}"}, timeout=5)
+    from urllib.parse import urlencode
+    order_id = str(binding["order_id"])
+    response = httpx.get(
+        f"{api_url}{ROUTE}?{urlencode({'order_id': order_id})}",
+        headers={"X-Integration-ID": str(binding["integration_id"]), "Authorization": f"Bearer {secret}"},
+        timeout=5,
+    )
     body = response.json()
     with connect(path) as c:
         binding = get_s3_binding(c, task_id)
         _, _, _, after = _snapshot(c, binding)
-    return _fact(binding, fact_type="s3_order", resource_id=f"{SERVICE}:{ORDER}", data_source=SOURCES["s3_order"],
+    return _fact(binding, fact_type="s3_order", resource_id=f"{SERVICE}:{order_id}", data_source=SOURCES["s3_order"],
                  observed_versions=after, facts={"http_status": response.status_code, "body": body,
                  "versions_before": before, "versions_after": after}, original_result_ref=f"s3-http://{body.get('request_id')}")
 
@@ -192,7 +360,7 @@ def _table_fact(path, task_id, fact_type):
         binding = get_s3_binding(c, task_id)
         order, delivery, receiver, versions = _snapshot(c, binding)
     record = delivery if fact_type == "s3_delivery" else receiver
-    return _fact(binding, fact_type=fact_type, resource_id=f"{SERVICE}:{ORDER}", data_source=SOURCES[fact_type],
+    return _fact(binding, fact_type=fact_type, resource_id=f"{SERVICE}:{binding['order_id']}", data_source=SOURCES[fact_type],
                  observed_versions=versions, facts=record, original_result_ref=f"s3://{record['event_id']}/v{record['version']}")
 
 
@@ -227,7 +395,7 @@ def current_s3_evidence(connection, task_id, evidence_ids=None, *, historical=Fa
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(e["fetched_at"].replace("Z","+00:00"))).total_seconds()
             observation = connection.execute("SELECT 1 FROM d2_tool_observations WHERE task_id=? AND evidence_id=? AND tool_name=? AND status='OK'", (task_id,e["evidence_id"],FACT_TO_TOOL[fact_type])).fetchone()
             if (e["tenant_id"] != binding["tenant_id"] or e["principal_id"] != binding["principal_id"]
-                or e["resource_id"] != f"{SERVICE}:{ORDER}" or e["data_source"] != SOURCES[fact_type]
+                or e["resource_id"] != f"{SERVICE}:{binding['order_id']}" or e["data_source"] != SOURCES[fact_type]
                 or e["trust_class"] != "untrusted_tool_observation" or e["digest"] != digest_json(payload) or not observation):
                 reason = "S3_FACT_ORIGIN_INVALID"
             elif not historical and (age > 300 or age < -30):
@@ -240,12 +408,12 @@ def current_s3_evidence(connection, task_id, evidence_ids=None, *, historical=Fa
                 http = connection.execute("SELECT h.* FROM s3_http_observations h JOIN auth_events a ON a.event_id=h.authn_event_id WHERE h.request_id=? AND h.tenant_id=? AND h.service_id=? AND h.integration_id=? AND h.principal_id=? AND h.route=? AND a.result_code='AUTH_ACCEPTED'", (body.get("request_id"),binding["tenant_id"],SERVICE,binding["integration_id"],binding["principal_id"],ROUTE)).fetchone()
                 if (http is None or facts.get("http_status") != 200 or http["body_digest"] != digest_json(body)
                     or facts.get("versions_before") != versions or facts.get("versions_after") != versions
-                    or body.get("order_id") != ORDER or body.get("order_version") != versions.get("order_version")
+                    or http["route"] != ROUTE or body.get("order_id") != binding["order_id"] or body.get("order_version") != versions.get("order_version")
                     or (not historical and body.get("status") != order["status"])):
                     reason = "S3_HTTP_OBSERVATION_INVALID"
             elif not historical and facts != (delivery if fact_type == "s3_delivery" else receiver):
                 reason = "S3_CURRENT_FACT_MISMATCH"
-            elif fact_type in {"s3_delivery", "s3_receiver"} and (facts.get("tenant_id") != binding["tenant_id"] or facts.get("service_id") != SERVICE or facts.get("order_id") != ORDER):
+            elif fact_type in {"s3_delivery", "s3_receiver"} and (facts.get("tenant_id") != binding["tenant_id"] or facts.get("service_id") != SERVICE or facts.get("order_id") != binding["order_id"]):
                 reason = "S3_CORRELATION_INVALID"
             if reason is None:
                 current.append({**e, "facts": facts, "observed_versions": versions})
@@ -259,6 +427,8 @@ def current_s3_evidence(connection, task_id, evidence_ids=None, *, historical=Fa
 def _gate_from_evidence(evidence):
     by_type = {e["fact_type"]: e for e in evidence}
     outcome = None
+    direction = "EVIDENCE_INSUFFICIENT"
+    handoff_allowed = False
     needed = ["s3_order"]
     order = by_type.get("s3_order")
     used = []
@@ -270,19 +440,75 @@ def _gate_from_evidence(evidence):
             needed = ["s3_delivery"]
             delivery = by_type.get("s3_delivery")
             if delivery and delivery["facts"]["order_version"] == order["facts"]["body"]["order_version"]:
-                used.append(delivery)
                 d = delivery["facts"]
-                if d["status"] == "FAILED" and d["receiver_http_status"] == 503 and d["transport_request_id"] and d["response_digest"]:
-                    outcome = "CALLBACK_DELIVERY_FAILED"
-                elif d["status"] == "ACKNOWLEDGED" and d["receiver_http_status"] == 202:
+                correlated = False
+                try:
+                    response = json.loads(str(d.get("transport_response_json", "{}")))
+                    correlated = (
+                        isinstance(response, dict)
+                        and bool(d.get("response_digest"))
+                        and digest_json(response) == str(d["response_digest"])
+                        and response.get("event_id") == d.get("event_id")
+                        and response.get("order_id") == d.get("order_id")
+                        and response.get("request_id") == d.get("transport_request_id")
+                        and bool(d.get("transport_request_id"))
+                    )
+                except (KeyError, TypeError, ValueError):
+                    response, correlated = {}, False
+                if d.get("status") == "FAILED" and d.get("receiver_http_status") == 503:
+                    attempts, maximum = d.get("attempt_count"), d.get("max_attempts")
+                    reason_valid = (
+                        correlated and bool(d.get("failure_code"))
+                        and response.get("failure_code") == d.get("failure_code")
+                        and type(attempts) is int and type(maximum) is int
+                        and 1 <= attempts <= maximum
+                        and response.get("attempt_count") == attempts
+                        and response.get("max_attempts") == maximum
+                        and response.get("receiver_state") == "UNAVAILABLE"
+                        and response.get("retry_state") == d.get("retry_state")
+                        and response.get("retry_at") == d.get("retry_at")
+                    )
+                    if reason_valid and attempts < maximum and d.get("retry_state") == "SCHEDULED" and d.get("retry_at"):
+                        used.extend([order, delivery])
+                        outcome, direction = "CALLBACK_DELIVERY_FAILED", "WAIT_FOR_SCHEDULED_RETRY"
+                    elif reason_valid and attempts == maximum and d.get("retry_state") == "EXHAUSTED" and not d.get("retry_at"):
+                        used.extend([order, delivery])
+                        outcome, direction, handoff_allowed = "CALLBACK_DELIVERY_FAILED", "CONTACT_CALLBACK_OPERATOR", True
+                elif d.get("status") == "ACKNOWLEDGED" and d.get("receiver_http_status") == 202:
                     needed = ["s3_receiver"]
                     receiver = by_type.get("s3_receiver")
-                    if receiver and receiver["facts"]["event_id"] == d["event_id"] and receiver["facts"]["delivery_version"] == d["version"]:
-                        used.append(receiver)
-                        if receiver["facts"]["status"] == "QUEUED":
+                    if receiver and receiver["facts"].get("event_id") == d.get("event_id") and receiver["facts"].get("delivery_version") == d.get("version"):
+                        try:
+                            response = json.loads(str(d.get("transport_response_json", "{}")))
+                            accepted_text = str(receiver["facts"].get("accepted_at", ""))
+                            accepted = datetime.fromisoformat(accepted_text.replace("Z", "+00:00"))
+                            age = max(0, int((datetime.now(timezone.utc) - accepted.astimezone(timezone.utc)).total_seconds()))
+                            sla = receiver["facts"].get("processing_sla_seconds")
+                            delivery_valid = (
+                                correlated and response.get("receiver_state") == "QUEUED"
+                                and response.get("accepted_at") == accepted_text
+                                and response.get("processing_sla_seconds") == sla
+                                and type(sla) is int and sla > 0
+                                and type(age) is int and age >= 0
+                            )
+                        except (TypeError, ValueError, KeyError):
+                            response, age, sla, delivery_valid = {}, None, None, False
+                        if delivery_valid and receiver["facts"].get("status") == "QUEUED":
+                            used.extend([order, delivery, receiver])
                             outcome = "RECEIVER_PROCESSING_UNCONFIRMED"
+                            if age > sla:
+                                direction, handoff_allowed = "CONTACT_RECEIVER_OPERATOR", True
+                            else:
+                                direction = "WAIT_FOR_RECEIVER_PROCESSING"
+                        elif delivery_valid and receiver["facts"].get("status") == "PROCESSED":
+                            used.extend([order, delivery, receiver])
+                            outcome, direction = "RECEIVER_PROCESSED", "NO_FURTHER_ACTION"
+    if order and order["facts"]["body"].get("status") == "PROCESSING":
+        outcome = "ORDER_PROCESSING"
+        direction = "WAIT_FOR_ORDER_COMPLETION"
     return {"decision": "DIAGNOSED" if outcome else "NEED_MORE", "outcome": outcome,
             "reason_code": outcome or "S3_CURRENT_FACTS_REQUIRED", "required_facts": [] if outcome else needed,
+            "handling_direction": direction, "handoff_allowed": handoff_allowed,
             "checked_fact_ids": [x["evidence_id"] for x in used], "recovered": False, "side_effects": []}
 
 
@@ -315,9 +541,10 @@ def persist_s3_diagnosis(path, task_id, run_id, evidence_ids, summary="", *, sto
                 "recovered": False, "business_writes": 0}
         ref = f"s3-diagnosis-{uuid.uuid4()}"
         c.execute("INSERT INTO s3_diagnoses VALUES(?,?,?,?,?,?,?,?,?,?,?)", (ref,b["tenant_id"],task_id,run_id,revision,POLICY,gate["outcome"],canonical_json(gate["checked_fact_ids"]),canonical_json(body),digest_json(body),utc_now()))
-        c.execute("UPDATE task_bindings SET status=? WHERE task_id=?", ("NO_ACTION" if gate["decision"] == "DIAGNOSED" else "INCONCLUSIVE",task_id))
+        task_status = "WAITING_HANDOFF" if gate["decision"] == "DIAGNOSED" else "INCONCLUSIVE"
+        c.execute("UPDATE task_bindings SET status=? WHERE task_id=? AND status NOT IN ('ABORTED','COMPLETED')", (task_status,task_id))
         session_id = c.execute("SELECT session_id FROM task_runs WHERE run_id=?", (run_id,)).fetchone()[0]
-        _insert_outbox(c,str(b["tenant_id"]),task_id,str(session_id),"S3_DIAGNOSIS",ref,"S3_DIAGNOSIS_FROZEN",{"receipt_id":ref,"business_outcome":gate["outcome"],"run_id":run_id,"recovered":False})
+        _insert_outbox(c,str(b["tenant_id"]),task_id,str(session_id),"S3_DIAGNOSIS",ref,"S3_DIAGNOSIS_FROZEN",{"receipt_id":ref,"business_outcome":gate["outcome"],"handling_direction":gate.get("handling_direction"),"handoff_allowed":gate.get("handoff_allowed",False),"run_id":run_id,"recovered":False})
         return dict(c.execute("SELECT * FROM s3_diagnoses WHERE receipt_id=?", (ref,)).fetchone())
 
 
@@ -338,6 +565,8 @@ def s3_outcome_in_transaction(c, task_id):
         narrative_current = current and not narrative_exclusions
         return {"receipt_id":row["receipt_id"],"outcome":row["outcome"] if current else "INCONCLUSIVE",
                 "currentness":"CURRENT" if current else "INVALIDATED_BY_CURRENT_FACTS", "recovered":False,
+                "handling_direction":body.get("gate",{}).get("handling_direction") if current else "EVIDENCE_INSUFFICIENT",
+                "handoff_allowed":bool(body.get("gate",{}).get("handoff_allowed",False)) if current else False,
                 "explanation":body.get("model_summary_untrusted","") if narrative_current else "",
                 "explanation_currentness":"CURRENT" if narrative_current else "SOURCE_INVALIDATED",
                 "explanation_excluded_sources":narrative_exclusions,

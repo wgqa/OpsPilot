@@ -151,6 +151,25 @@ export interface TaskOutcome {
   ticket_entry_count?: number;
 }
 
+export interface S3OrderResource {
+  order_id: string;
+  order_status: string;
+  order_version: number;
+  contract_version: number;
+  service_id: string;
+  integration_id: string;
+  route: string;
+  principal_id: string;
+  selection_status: string;
+}
+
+export interface S3HandoffRequest {
+  operation_id: string;
+  diagnosis_receipt_id: string;
+  diagnosis_digest: string;
+  expected_control_revision: number;
+}
+
 export interface MemoryRecord extends Record<string, unknown> {
   memory_id: string;
   problem_type: string;
@@ -281,10 +300,14 @@ export const api = {
       },
     );
   },
-  createTask(sessionId: string, initialMessage: string, csrf: string, investigationKind: 'AUTH_INCIDENT' | 'ASYNC_CALLBACK' = 'AUTH_INCIDENT') {
+  s3OrderResources() { return request<{ items: S3OrderResource[] }>('/api/s3/order-resources'); },
+  createTask(
+    sessionId: string, initialMessage: string, csrf: string,
+    investigationKind: 'AUTH_INCIDENT' | 'ASYNC_CALLBACK' = 'AUTH_INCIDENT', s3OrderId?: string,
+  ) {
     return request<{ task_id: string; run_id: string; status: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
       method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': crypto.randomUUID() },
-      body: JSON.stringify({ initial_message: initialMessage, investigation_kind: investigationKind }),
+      body: JSON.stringify({ initial_message: initialMessage, investigation_kind: investigationKind, ...(s3OrderId ? { s3_order_id: s3OrderId } : {}) }),
     });
   },
   runs(taskId: string) { return request<{ items: RunItem[] }>(`/api/tasks/${encodeURIComponent(taskId)}/runs`); },
@@ -308,6 +331,13 @@ export const api = {
   outcome(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/outcome`); },
   handoff(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/handoff`); },
   taskOutcome(taskId: string) { return request<TaskOutcome>(`/api/tasks/${encodeURIComponent(taskId)}/outcome`); },
+  s3Handoff(taskId: string) { return request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/s3-handoff`); },
+  submitS3Handoff(taskId: string, payload: S3HandoffRequest, csrf: string) {
+    return request<Record<string, unknown>>(`/api/tasks/${encodeURIComponent(taskId)}/s3-handoff/submit`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': payload.operation_id },
+      body: JSON.stringify(payload),
+    });
+  },
   taskMemories(taskId: string) {
     return request<TaskMemoryContext>(`/api/tasks/${encodeURIComponent(taskId)}/memories`);
   },

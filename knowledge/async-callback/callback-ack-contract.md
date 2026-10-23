@@ -1,1 +1,1 @@
-A callback FAILED with actual receiver HTTP 503 is a transport failure. ACKNOWLEDGED with HTTP 202 means only accepted into the receiver queue. Verify the same event receiver processing state; QUEUED is not PROCESSED. Never resend automatically.
+Protocol v1. A callback FAILED with actual receiver HTTP 503 is a transport failure. ACKNOWLEDGED with HTTP 202 means only accepted into the receiver queue. Verify the same event receiver processing state; QUEUED is not PROCESSED. Never resend automatically.

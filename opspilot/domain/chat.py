@@ -111,6 +111,30 @@ def _current_task_state(connection: sqlite3.Connection, task_id: str) -> dict[st
         outcome = s3_outcome_in_transaction(connection, task_id)
         if outcome:
             result["s3_outcome"] = {k:outcome[k] for k in ("receipt_id","outcome","currentness","recovered","gate","explanation","explanation_currentness","explanation_excluded_sources")}
+        handoff = connection.execute(
+            """SELECT r.receipt_id,r.accepted_by_actor_id,r.accepted_at,r.handoff_kind,
+                      q.entry_id,q.order_id,q.handling_direction,q.receiver_queue_id,q.queue_status
+               FROM s3_handoff_receipts r JOIN s3_handoff_queue_entries q
+                 ON q.entry_id=r.entry_id AND q.tenant_id=r.tenant_id AND q.task_id=r.task_id
+               WHERE r.tenant_id=? AND r.task_id=?""",
+            (binding["tenant_id"], task_id),
+        ).fetchone()
+        if handoff is not None:
+            result["s3_handoff"] = {
+                "business_outcome": "HANDOFF_ACCEPTED",
+                "currentness": "HISTORICALLY_ACCEPTED",
+                "receipt_id": str(handoff["receipt_id"]),
+                "accepted_by_actor_id": str(handoff["accepted_by_actor_id"]),
+                "accepted_at": str(handoff["accepted_at"]),
+                "handoff_kind": str(handoff["handoff_kind"]),
+                "queue_entry_id": str(handoff["entry_id"]),
+                "order_id": str(handoff["order_id"]),
+                "handling_direction": str(handoff["handling_direction"]),
+                "receiver_queue_id": str(handoff["receiver_queue_id"]),
+                "queue_status": str(handoff["queue_status"]),
+                "callback_resent": False,
+                "order_recovered": False,
+            }
     return result
 
 
@@ -1103,6 +1127,7 @@ def _prepare_context(
         "For S2, a HANDOFF_READY draft is not submitted; only the Web confirmation button can submit it, never chat text. "
         "If trusted state says SCOPE_ESCALATED, explain that the local queue received the request and it awaits human review; "
         "Scope is still not authorized, the API is not restored, and the user should not submit it again."
+        "For S3, a persisted s3_handoff with business_outcome HANDOFF_ACCEPTED proves only that the local human queue accepted the request; it does not prove the order or callback recovered. If that receipt is present, never deny its existence."
     )
     task_state_message = {
         "role": "system",

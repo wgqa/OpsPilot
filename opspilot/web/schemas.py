@@ -21,6 +21,7 @@ class CreateSessionRequest(StrictModel):
 class CreateTaskRequest(StrictModel):
     initial_message: str = Field(min_length=1, max_length=20_000)
     investigation_kind: Literal["AUTH_INCIDENT", "ASYNC_CALLBACK"] = "AUTH_INCIDENT"
+    s3_order_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class MessageRequest(StrictModel):
@@ -56,6 +57,13 @@ class S2HandoffSubmitRequest(StrictModel):
     draft_digest: str = Field(min_length=64, max_length=64)
     expected_control_revision: int = Field(ge=0)
     handoff_kind: Literal["SCOPE_REVIEW"]
+
+
+class S3HandoffSubmitRequest(StrictModel):
+    operation_id: str = Field(min_length=1, max_length=200)
+    diagnosis_receipt_id: str = Field(min_length=1, max_length=200)
+    diagnosis_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_control_revision: int = Field(ge=0)
 
 
 class MemoryCommandRequest(StrictModel):

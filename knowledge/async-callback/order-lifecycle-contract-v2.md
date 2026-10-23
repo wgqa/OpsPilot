@@ -1,0 +1,1 @@
+Protocol v2. HTTP 200 confirms only that the bound order read succeeded. Callback creation follows the terminal COMPLETED transition, but event publication can be asynchronous. Correlate the event's order version to the current bound order and inspect a delivery attempt before attributing a missing callback to transport failure. Do not treat PROCESSING as a callback incident.

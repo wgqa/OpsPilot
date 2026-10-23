@@ -154,7 +154,7 @@ def test_diagnosis_outbox_idempotence_and_no_business_authority(tmp_path):
     with connect(db) as c:
         assert c.execute("SELECT COUNT(*) FROM s3_diagnoses").fetchone()[0] == 1
         assert c.execute("SELECT COUNT(*) FROM domain_outbox WHERE event_kind='S3_DIAGNOSIS_FROZEN'").fetchone()[0] == 1
-        assert c.execute("SELECT status FROM task_bindings WHERE task_id=?",(task["task_id"],)).fetchone()[0] == "NO_ACTION"
+        assert c.execute("SELECT status FROM task_bindings WHERE task_id=?",(task["task_id"],)).fetchone()[0] == "WAITING_HANDOFF"
         for table in ("d3_plans","d3_action_intents","d3_action_ledgers","s2_handoff_receipts"):
             assert c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         with pytest.raises(__import__('sqlite3').IntegrityError):
@@ -204,7 +204,7 @@ def test_s3_web_owner_cross_tenant_and_resource_body_permissions(tmp_path):
     with TestClient(app,raise_server_exceptions=False) as client:
         headers=_login(client)
         session=client.post("/api/sessions",headers=headers).json()["session_id"]
-        body={"initial_message":"订单200没有回调","investigation_kind":"ASYNC_CALLBACK"}
+        body={"initial_message":"订单200没有回调","investigation_kind":"ASYNC_CALLBACK","s3_order_id":"async-order"}
         accepted=client.post(f"/api/sessions/{session}/tasks",headers={**headers,"Idempotency-Key":"s3-web"},json=body)
         assert accepted.status_code == 202
         task_id=accepted.json()["task_id"]
@@ -235,7 +235,7 @@ def test_s3_chat_currentness_invalidates_previous_facts(tmp_path):
     with connect(db) as c:
         state=_current_task_state(c,task["task_id"])
         assert _current_evidence(c,task["task_id"],state)
-    prepare_s3_fixture(db,"PROCESSING")
+    prepare_s3_fixture(db,"DELIVERY_FAILED")
     with connect(db) as c:
         state=_current_task_state(c,task["task_id"])
         excluded=[]
@@ -374,11 +374,11 @@ def test_revoked_memory_invalidates_frozen_model_explanation_not_current_facts(t
     db,source,_,_=completed_readonly_case(tmp_path)
     memory=create_memory_candidate(db,source["task_id"],"support-a")
     confirm_memory(db,memory["memory_id"],"approver-a")
-    prepare_s3_fixture(db,"PROCESSING")
+    prepare_s3_fixture(db,"DELIVERY_FAILED", attempt_count=3, retry_state="EXHAUSTED")
     target=new_task(db,"订单还没有回调，请核实","explanation-target")
     claim_task_run(db,trusted_identity(db,"support-a"),target["run_id"])
-    order,_,_=facts(db,target)
-    ids=[observe(db,target,"get_order_status",order)]
+    order,delivery,_=facts(db,target)
+    ids=[observe(db,target,"get_order_status",order),observe(db,target,"get_callback_delivery",delivery)]
     class ExplanationModel:
         async def ainvoke(self,_messages):
             return AIMessage(content="unit-test historical-method-dependent explanation",id="unit-explanation")
@@ -387,7 +387,7 @@ def test_revoked_memory_invalidates_frozen_model_explanation_not_current_facts(t
     assert get_s3_outcome(db,target["task_id"])["explanation"]
     revoke_memory(db,memory["memory_id"],"approver-a")
     after=get_s3_outcome(db,target["task_id"])
-    assert after["outcome"] == "ORDER_PROCESSING"
+    assert after["outcome"] == "CALLBACK_DELIVERY_FAILED"
     assert after["explanation"] == ""
     assert after["explanation_currentness"] == "SOURCE_INVALIDATED"
 
@@ -403,7 +403,7 @@ def test_expired_knowledge_invalidates_frozen_explanation_not_current_facts(tmp_
     directory=tmp_path/"knowledge-copy"
     shutil.copytree(s3_assets.DIRECTORY,directory)
     monkeypatch.setattr(s3_assets,"DIRECTORY",directory)
-    doc=s3_assets.search_knowledge("processing lifecycle")[0]
+    doc=s3_assets.search_knowledge("order callback processing lifecycle")[0]
     db,task,_=prepared(tmp_path,"PROCESSING")
     claim_task_run(db,trusted_identity(db,"support-a"),task["run_id"])
     order,_,_=facts(db,task)

@@ -31,7 +31,7 @@ def build_s3_server(db_path, task_id, api_url):
             raise ValueError("A bounded investigation reason is required")
         try:
             with connect(db_path) as c:
-                get_s3_binding(c, task_id)
+                return get_s3_binding(c, task_id)
         except ScopeDenied:
             raise ToolError("S3_RESOURCE_OUTSIDE_TASK_BINDING") from None
 
@@ -56,13 +56,18 @@ def build_s3_server(db_path, task_id, api_url):
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def search_callback_knowledge(query: Query, reason: Reason, ctx: Context) -> dict[str, object]:
         """Retrieve one relevant active versioned integration contract by a short query; method only, not live facts."""
-        validate(reason,ctx,{"query","reason"})
-        return {"documents":search_knowledge(query), "reason":reason}
+        binding = validate(reason,ctx,{"query","reason"})
+        version = int(binding["contract_version"])
+        return {"documents":search_knowledge(query, contract_version=version),
+                "contract_version":version,"ranking_method":"bm25-lite-v1","reason":reason}
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def load_callback_skill(name: Literal["order-lifecycle-triage", "callback-delivery-triage"], reason: Reason, ctx: Context) -> dict[str, object]:
         """Load one method when useful: order-lifecycle-triage or callback-delivery-triage. Does not change authority."""
-        validate(reason,ctx,{"name","reason"})
-        return {"skill":load_s3_skill(name), "reason":reason}
+        binding = validate(reason,ctx,{"name","reason"})
+        skill = load_s3_skill(name)
+        if int(binding["contract_version"]) not in skill.get("contract_versions", []):
+            raise ToolError("S3_SKILL_NOT_APPLICABLE_TO_BOUND_CONTRACT")
+        return {"skill":skill, "selection_reason":f"bound contract v{binding['contract_version']}; {reason}", "reason":reason}
 
     return server
