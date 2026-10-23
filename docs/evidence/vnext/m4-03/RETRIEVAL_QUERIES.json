@@ -1,0 +1,66 @@
+{
+  "release": "m4-03-retrieval-v1",
+  "frozen_before_retrieval_implementation": true,
+  "judgment_method": "manual exact protocol applicability; 2=directly answers, 1=useful context, 0=not applicable",
+  "queries": [
+    {
+      "query_id": "KQ-01",
+      "query": "订单 HTTP 200 但仍在 PROCESSING，回调什么时候才会发送？",
+      "relevant_documents": {"order-lifecycle-contract": 2, "order-lifecycle-contract-v2": 2},
+      "purpose": "same wording across protocol versions"
+    },
+    {
+      "query_id": "KQ-02",
+      "query": "HTTP 503 临时不可用，第一次失败后何时重试？",
+      "relevant_documents": {"callback-retry-contract": 2, "callback-retry-contract-v2": 1},
+      "purpose": "versioned retry and error handling"
+    },
+    {
+      "query_id": "KQ-03",
+      "query": "503 回调失败，达到最大次数并且 retry exhausted 后怎么处理？",
+      "relevant_documents": {"callback-retry-contract": 2, "callback-retry-contract-v2": 2},
+      "purpose": "retry exhaustion semantics"
+    },
+    {
+      "query_id": "KQ-04",
+      "query": "接收方返回 HTTP 202 只证明入队吗，什么时候算处理完成？",
+      "relevant_documents": {"callback-ack-contract": 2, "receiver-ack-contract-v2": 2},
+      "purpose": "acknowledgement versus receiver completion"
+    },
+    {
+      "query_id": "KQ-05",
+      "query": "receiver queue age 超过 processing SLA，接收确认协议 v2 怎么办？",
+      "relevant_documents": {"receiver-ack-contract-v2": 2, "callback-ack-contract": 1},
+      "purpose": "receiver queue/SLA and contract version"
+    },
+    {
+      "query_id": "KQ-06",
+      "query": "订单已经 COMPLETED，但 callback delivery 的 event id 不匹配怎么办？",
+      "relevant_documents": {"callback-retry-contract": 1, "callback-retry-contract-v2": 2, "order-lifecycle-contract-v2": 1},
+      "purpose": "event correlation and protocol version"
+    },
+    {
+      "query_id": "KQ-07",
+      "query": "receiver 收到 202 后仍排队，禁止把 accepted 当 processed。",
+      "relevant_documents": {"callback-ack-contract": 2, "receiver-ack-contract-v2": 2},
+      "purpose": "conflicting claim resistance"
+    },
+    {
+      "query_id": "KQ-08",
+      "query": "API authentication credential rotation and scope policy version",
+      "relevant_documents": {},
+      "purpose": "negative out-of-domain query must return no applicable S3 document"
+    }
+  ],
+  "ranking": {
+    "lexical_v1": "unique term substring overlap with deterministic document id tie break",
+    "bm25_lite_v1": "token-frequency BM25 with k1=1.2 and b=0.75; query token multiplicity preserved",
+    "primary_metrics": ["Recall@1", "MRR", "nDCG@1"],
+    "cost_metrics": ["local elapsed milliseconds", "candidate documents scored", "no external embedding/token cost"]
+  },
+  "rules": [
+    "Run all frozen queries against the version-filtered candidate set.",
+    "Do not tune asset text, tokenizer, ranking parameters, labels or prompt after seeing holdout outcomes.",
+    "Empty result is valid and must never be treated as missing live Evidence."
+  ]
+}
