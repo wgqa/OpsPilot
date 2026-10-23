@@ -3,6 +3,8 @@
 **状态：** ACCEPTANCE_CANDIDATE
 **冻结基线：** bd58c66003c4e7fea660967c7a6a30aebcd63cd7
 **候选分支：** codex/m4-ttl-fix-01
+**源码提交：** 00be81c53f090fd8934aa645ac2b16c59c9a7c78
+**证据包提交：** fb09352b8d62f1179f52e367ba27d750664b3e87
 **验收人：** 主 Agent
 
 ## 结果
