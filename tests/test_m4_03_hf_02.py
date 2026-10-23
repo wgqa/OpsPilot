@@ -217,6 +217,13 @@ def test_scope_revocation_audits_task_run_inspector_context_chunks_and_messages(
     # investigator Run cannot be used as a second fact-reading route.
     assert context.status_code != 200
     assert chunks.status_code != 200
+    _trace({
+        "case": "HF02-01-additional-read-surface-audit", "task_id": str(task["task_id"]),
+        "support_task_status": task_view.status_code, "run_status": run_view.status_code,
+        "inspector_status": inspector.status_code, "messages_status": messages.status_code,
+        "run_context_status": context.status_code, "run_chunks_status": chunks.status_code,
+        "handoff_receipt_exposed": False, "normal_owner_message_retained": True,
+    })
 
 
 @pytest.mark.parametrize(("table", "column", "where", "params"), [
@@ -284,9 +291,18 @@ def test_fractional_scope_policy_version_fails_closed_across_read_surfaces(tmp_p
             assert response.status_code != 200
             assert "async-order-2" not in response.text
     else:
-        server = build_s3_server(db, str(task["task_id"]), "http://127.0.0.1:1")
-        with pytest.raises(ToolError):
-            _call_s3_tool(server, "get_order_status", {"reason": "validate strict scope version"})
+        from opspilot.domain.api import make_server
+        api = make_server(db, "tenant-a", "127.0.0.1", 0)
+        thread = threading.Thread(target=api.serve_forever, daemon=True)
+        thread.start()
+        try:
+            server = build_s3_server(db, str(task["task_id"]), f"http://127.0.0.1:{api.server_port}")
+            with pytest.raises(ToolError):
+                _call_s3_tool(server, "get_order_status", {"reason": "validate strict scope version"})
+        finally:
+            api.shutdown()
+            thread.join(timeout=5)
+            api.server_close()
 
 
 def _set_accepted_at(db: Path, accepted_at: str) -> None:
