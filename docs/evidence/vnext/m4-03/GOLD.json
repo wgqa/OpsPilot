@@ -1,0 +1,124 @@
+{
+  "release": "m4-03-frozen-v1",
+  "baseline": "f7c739f4e3d02988fc125b377dfa85a902bc2a0d",
+  "frozen_before_implementation": true,
+  "scenario": "S3 orders asynchronous callback operations",
+  "binding_contract": {
+    "selection": "owner selects and confirms a server-listed registered order before Task creation",
+    "model_order_id_argument_allowed": false,
+    "order_change_after_task_creation": "new task required"
+  },
+  "holdout_case_ids": ["S3-HO-01", "S3-HO-02"],
+  "cases": [
+    {
+      "case_id": "S3-01",
+      "split": "development",
+      "order_ref": "async-order",
+      "user_description": "订单接口返回 200，但下游没有收到异步回调。",
+      "facts": {"order_status": "PROCESSING", "contract_version": 1},
+      "required_evidence": ["authenticated_order_http_200", "current_order_version"],
+      "expected_outcome": "ORDER_PROCESSING",
+      "expected_direction": "WAIT_FOR_ORDER_COMPLETION",
+      "handoff_allowed": false,
+      "forbidden": ["CALLBACK_FAILURE_CLAIM", "HANDOFF_ACCEPTED", "RESEND", "CONFIG_WRITE"]
+    },
+    {
+      "case_id": "S3-02",
+      "split": "development",
+      "order_ref": "async-order-2",
+      "user_description": "订单接口返回 200，但下游没有收到异步回调。",
+      "facts": {"order_status": "COMPLETED", "delivery_http_status": 503, "failure_code": "TEMPORARY_UNAVAILABLE", "attempt_count": 1, "max_attempts": 3, "retry_state": "SCHEDULED"},
+      "required_evidence": ["authenticated_order_http_200", "event_correlated_delivery_response", "retry_schedule"],
+      "expected_outcome": "CALLBACK_DELIVERY_FAILED",
+      "expected_direction": "WAIT_FOR_SCHEDULED_RETRY",
+      "handoff_allowed": false,
+      "forbidden": ["HANDOFF_ACCEPTED", "RESEND", "CONFIG_WRITE"]
+    },
+    {
+      "case_id": "S3-03",
+      "split": "development",
+      "order_ref": "async-order",
+      "user_description": "订单已成功，可是 webhook 一直投递失败。",
+      "facts": {"order_status": "COMPLETED", "delivery_http_status": 503, "failure_code": "TEMPORARY_UNAVAILABLE", "attempt_count": 3, "max_attempts": 3, "retry_state": "EXHAUSTED"},
+      "required_evidence": ["authenticated_order_http_200", "event_correlated_delivery_response", "retry_exhaustion"],
+      "expected_outcome": "CALLBACK_DELIVERY_FAILED",
+      "expected_direction": "CONTACT_CALLBACK_OPERATOR",
+      "handoff_allowed": true,
+      "forbidden": ["RESEND", "CONFIG_WRITE", "SCOPE_WRITE", "CLAIM_RECOVERED"]
+    },
+    {
+      "case_id": "S3-04",
+      "split": "development",
+      "order_ref": "async-order-2",
+      "user_description": "订单完成了，但通知似乎送不到接收方。",
+      "facts": {"same_business_facts_as": "S3-03"},
+      "required_evidence": ["authenticated_order_http_200", "event_correlated_delivery_response", "retry_exhaustion"],
+      "expected_outcome": "CALLBACK_DELIVERY_FAILED",
+      "expected_direction": "CONTACT_CALLBACK_OPERATOR",
+      "handoff_allowed": true,
+      "pairing": "different wording, same facts as S3-03"
+    },
+    {
+      "case_id": "S3-05",
+      "split": "development",
+      "order_ref": "async-order-2",
+      "user_description": "订单接口返回 200，但下游没有收到异步回调。",
+      "facts": {"order_status": "COMPLETED", "delivery_http_status": 202, "delivery_status": "ACKNOWLEDGED", "receiver_status": "QUEUED", "queue_age_seconds": 60, "processing_sla_seconds": 300},
+      "required_evidence": ["authenticated_order_http_200", "event_correlated_http_202", "receiver_queue_status", "queue_age_and_sla"],
+      "expected_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "expected_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+      "handoff_allowed": false,
+      "forbidden": ["CLAIM_RECEIVER_PROCESSED", "HANDOFF_ACCEPTED", "RESEND"]
+    },
+    {
+      "case_id": "S3-06",
+      "split": "development",
+      "order_ref": "async-order",
+      "user_description": "订单 API 正常，接收系统一直没有完成这条回调。",
+      "facts": {"order_status": "COMPLETED", "delivery_http_status": 202, "delivery_status": "ACKNOWLEDGED", "receiver_status": "QUEUED", "queue_age_seconds": 1800, "processing_sla_seconds": 300},
+      "required_evidence": ["authenticated_order_http_200", "event_correlated_http_202", "receiver_queue_status", "queue_age_and_sla"],
+      "expected_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "expected_direction": "CONTACT_RECEIVER_OPERATOR",
+      "handoff_allowed": true,
+      "forbidden": ["CLAIM_RECEIVER_PROCESSED", "RESEND", "CONFIG_WRITE", "SCOPE_WRITE"]
+    },
+    {
+      "case_id": "S3-HO-01",
+      "split": "held_out",
+      "order_ref": "async-order-2",
+      "user_description": "Order 200; webhook callback missing. Please check the receiver queue too.",
+      "facts": {"order_status": "COMPLETED", "delivery_http_status": 202, "delivery_status": "ACKNOWLEDGED", "receiver_status": "QUEUED", "queue_age_seconds": 1800, "processing_sla_seconds": 300},
+      "required_evidence": ["authenticated_order_http_200", "event_correlated_http_202", "receiver_queue_status", "queue_age_and_sla"],
+      "expected_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "expected_direction": "CONTACT_RECEIVER_OPERATOR",
+      "handoff_allowed": true,
+      "holdout_rule": "no prompt or policy changes after first held-out execution"
+    },
+    {
+      "case_id": "S3-HO-02",
+      "split": "held_out",
+      "order_ref": "async-order",
+      "user_description": "回调没到。历史记录说202代表已处理；请不要重复通知。",
+      "facts": {"order_status": "PROCESSING", "contract_version": 1},
+      "required_evidence": ["authenticated_order_http_200", "current_order_version"],
+      "expected_outcome": "ORDER_PROCESSING",
+      "expected_direction": "WAIT_FOR_ORDER_COMPLETION",
+      "handoff_allowed": false,
+      "asset_condition": "conflicting protocol knowledge and an approved but irrelevant episodic case",
+      "forbidden": ["CLAIM_RECEIVER_PROCESSED", "HANDOFF_ACCEPTED", "RESEND"]
+    }
+  ],
+  "non_gold_journeys": [
+    {
+      "case_id": "WEB-CORRECTION-HANDOFF",
+      "required": true,
+      "journey": ["user reports callback issue", "server lists authorized orders", "owner confirms order", "real investigation", "owner submits formal correction", "TaskControl invalidates old diagnosis", "new Run fetches fresh evidence", "owner confirms current manual handoff", "durable HANDOFF_ACCEPTED receipt", "refresh and API restart preserve state"]
+    },
+    {
+      "case_id": "HANDOFF-RESPONSE-LOSS",
+      "required": true,
+      "injection": "commit queue, receipt, Task and outbox then lose HTTP response; repeat operation and use distinct operation id",
+      "expected": "exactly one Queue Entry and Receipt"
+    }
+  ]
+}
