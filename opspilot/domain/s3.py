@@ -31,6 +31,13 @@ SOURCES = {"s3_order": "http:loopback-async-orders", "s3_delivery": "sqlite:s3_d
 OUTCOMES = {"ORDER_PROCESSING", "CALLBACK_DELIVERY_FAILED", "RECEIVER_PROCESSING_UNCONFIRMED", "RECEIVER_PROCESSED"}
 
 
+def _strict_positive_version(value: object) -> int:
+    """Accept only an actual positive integer authorization version."""
+    if type(value) is not int or value < 1:
+        raise ValueError("authorization version must be a positive integer")
+    return value
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -113,7 +120,7 @@ def _authorized_s3_scope(
         required = json.loads(str(row["required_scopes_json"]))
         granted = json.loads(str(row["granted_scopes_json"]))
         versions = {
-            key: int(row[key]) for key in (
+            key: _strict_positive_version(row[key]) for key in (
                 "scope_policy_version", "grant_version", "principal_version", "policy_version", "config_version",
             )
         }

@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from opspilot.domain.database import connect, initialize
-from opspilot.domain.events import list_session_events, project_outbox, reconcile_legacy_action_events
+from opspilot.domain.events import list_session_event_page, project_outbox, reconcile_legacy_action_events
 from opspilot.domain.task_control import (
     TaskControlError,
     TrustedIdentity,
@@ -648,13 +648,33 @@ def create_app(
                    ORDER BY sequence LIMIT ?""",
                 (session_id, context.identity.tenant_id, after_seq, limit),
             ).fetchall()
-        items = []
-        for row in rows:
-            item = {key: row[key] for key in row.keys()}
-            if str(row["role"]) == "ASSISTANT" or str(row["input_kind"]) == "CHAT_READONLY":
-                item["application_state"] = None
-                item["applied_run_id"] = None
-            items.append(item)
+            items = []
+            for row in rows:
+                item = {key: row[key] for key in row.keys()}
+                if str(row["role"]) == "ASSISTANT" or str(row["input_kind"]) == "CHAT_READONLY":
+                    item["application_state"] = None
+                    item["applied_run_id"] = None
+                if str(row["role"]) == "ASSISTANT" and row["task_id"]:
+                    task = connection.execute(
+                        "SELECT actor_id,service_id FROM task_bindings WHERE tenant_id=? AND task_id=?",
+                        (context.identity.tenant_id, str(row["task_id"])),
+                    ).fetchone()
+                    if task is not None and str(task["service_id"]) == "orders-async-demo":
+                        authorized = (
+                            context.identity.role == "SUPPORT"
+                            and str(task["actor_id"]) == context.identity.actor_id
+                        )
+                        if authorized:
+                            from opspilot.domain.d2 import ScopeDenied
+                            from opspilot.domain.s3 import get_s3_binding
+
+                            try:
+                                get_s3_binding(connection, str(row["task_id"]))
+                            except ScopeDenied:
+                                authorized = False
+                        if not authorized:
+                            item["body"] = "[S3 受限历史回答已隐藏：当前授权不可用]"
+                items.append(item)
         return {"items": items}
 
     @app.post("/api/tasks/{task_id}/investigation-updates/proposals")
@@ -1030,9 +1050,10 @@ def create_app(
     ) -> dict[str, Any]:
         cursor = event_cursor(after, last_event_id)
         project_outbox(str(resolved_db))
-        events = list_session_events(str(resolved_db), session_id, context.identity,
-                                     after_seq=cursor, limit=limit)
-        return {"items": events, "after": cursor, "cursor_source": "Last-Event-ID" if last_event_id is not None else "after"}
+        page = list_session_event_page(str(resolved_db), session_id, context.identity,
+                                       after_seq=cursor, limit=limit)
+        return {"items": page["items"], "after": cursor, "next_after": page["next_after"],
+                "cursor_source": "Last-Event-ID" if last_event_id is not None else "after"}
 
     @app.get("/api/sessions/{session_id}/events")
     async def event_stream(
@@ -1055,15 +1076,17 @@ def create_app(
                 except TaskControlError:
                     break
                 project_outbox(str(resolved_db))
-                events = list_session_events(str(resolved_db), session_id, context.identity,
-                                             after_seq=cursor, limit=100)
+                page = list_session_event_page(str(resolved_db), session_id, context.identity,
+                                               after_seq=cursor, limit=100)
+                events = page["items"]
                 if events:
                     for event in events:
-                        cursor = int(event["event_seq"])
                         data = json.dumps(event["payload"], ensure_ascii=False, sort_keys=True)
-                        yield f"id: {cursor}\nevent: {event['event_kind']}\ndata: {data}\n\n"
+                        yield f"id: {event['event_seq']}\nevent: {event['event_kind']}\ndata: {data}\n\n"
+                    cursor = int(page["next_after"])
                     last_heartbeat = time.monotonic()
                     continue
+                cursor = int(page["next_after"])
                 if time.monotonic() - last_heartbeat >= heartbeat:
                     yield ": heartbeat\n\n"
                     last_heartbeat = time.monotonic()

@@ -2077,17 +2077,40 @@ def fail_chat_attempt(path: str | Path, worker_id: str, attempt_id: str, error_c
         return {"status": status, "run_id": str(attempt["run_id"]), "error_class": error_class[:100], "attempt_count": attempt_count}
 
 
+def _authorize_s3_chat_read(connection: sqlite3.Connection, identity: TrustedIdentity, task_id: str | None) -> None:
+    if not task_id:
+        return
+    task = connection.execute(
+        "SELECT actor_id,service_id FROM task_bindings WHERE tenant_id=? AND task_id=?",
+        (identity.tenant_id, task_id),
+    ).fetchone()
+    if task is None:
+        raise TaskControlError("TASK_RUN_SCOPE_DENIED")
+    if str(task["service_id"]) != "orders-async-demo":
+        return
+    if identity.role != "SUPPORT" or str(task["actor_id"]) != identity.actor_id:
+        raise TaskControlError("S3_SCOPE_AUTHORIZATION_DENIED")
+    from opspilot.domain.d2 import ScopeDenied
+    from opspilot.domain.s3 import get_s3_binding
+
+    try:
+        get_s3_binding(connection, task_id)
+    except ScopeDenied as error:
+        raise TaskControlError("S3_SCOPE_AUTHORIZATION_DENIED") from error
+
+
 def get_chat_chunks(path: str | Path, identity: TrustedIdentity, run_id: str, *, after_seq: int = 0, limit: int = 500) -> list[dict[str, Any]]:
     with connect(path) as connection:
         _verify_identity(connection, identity)
         run = connection.execute(
-            """SELECT r.session_id, r.tenant_id FROM task_runs r JOIN sessions s
+            """SELECT r.session_id, r.tenant_id, r.task_id FROM task_runs r JOIN sessions s
                ON s.session_id = r.session_id AND s.tenant_id = r.tenant_id
                WHERE r.run_id = ? AND r.tenant_id = ? AND s.owner_id = ? AND r.kind = 'CHAT_READONLY'""",
             (run_id, identity.tenant_id, identity.actor_id),
         ).fetchone()
         if run is None:
             raise TaskControlError("TASK_RUN_SCOPE_DENIED")
+        _authorize_s3_chat_read(connection, identity, str(run["task_id"]) if run["task_id"] else None)
         rows = connection.execute(
             """SELECT c.chunk_id, c.chunk_seq, c.body, c.body_digest, c.created_at, c.attempt_id
                FROM chat_answer_chunks c JOIN chat_attempts a ON a.attempt_id = c.attempt_id
@@ -2101,13 +2124,14 @@ def get_chat_manifest(path: str | Path, identity: TrustedIdentity, run_id: str) 
     with connect(path) as connection:
         _verify_identity(connection, identity)
         owner = connection.execute(
-            """SELECT s.owner_id FROM task_runs r JOIN sessions s
+            """SELECT s.owner_id,r.task_id FROM task_runs r JOIN sessions s
                ON s.session_id = r.session_id AND s.tenant_id = r.tenant_id
                WHERE r.run_id = ? AND r.tenant_id = ? AND r.kind = 'CHAT_READONLY'""",
             (run_id, identity.tenant_id),
         ).fetchone()
         if owner is None or str(owner["owner_id"]) != identity.actor_id:
             raise TaskControlError("TASK_RUN_SCOPE_DENIED")
+        _authorize_s3_chat_read(connection, identity, str(owner["task_id"]) if owner["task_id"] else None)
         rows = connection.execute(
             """SELECT a.attempt_id, a.attempt_no, a.model_id, a.status, a.provider_response_id,
                       a.input_tokens, a.output_tokens, a.total_tokens, a.error_class, a.created_at,

@@ -173,10 +173,19 @@ def reconcile_legacy_action_events(path: str) -> dict[str, int]:
     return {"action_events_reconciled": inserted, **projected}
 
 
-def list_session_events(path: str, session_id: str, identity: Any, *, after_seq: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+def list_session_event_page(
+    path: str, session_id: str, identity: Any, *, after_seq: int = 0, limit: int = 100,
+) -> dict[str, Any]:
+    """Read an owner-scoped event page, filtering S3 events by current authorization.
+
+    Hidden S3 events remain in the immutable event log. ``next_after`` advances
+    over filtered rows so history/SSE clients do not repeatedly scan them.
+    """
     from opspilot.domain.database import connect
+    from opspilot.domain.d2 import ScopeDenied
     from opspilot.domain.task_control import _verify_identity
 
+    page_limit = max(1, min(limit, 500))
     with connect(path) as connection:
         _verify_identity(connection, identity)
         session = connection.execute(
@@ -187,14 +196,58 @@ def list_session_events(path: str, session_id: str, identity: Any, *, after_seq:
             from opspilot.domain.task_control import TaskControlError
 
             raise TaskControlError("SESSION_SCOPE_DENIED")
-        rows = connection.execute(
-            """SELECT event_seq, event_id, source_kind, source_id, event_kind, tenant_id,
-                      session_id, task_id, run_id, happened_at, payload_json
-               FROM session_events WHERE session_id = ? AND tenant_id = ? AND event_seq > ?
-               ORDER BY event_seq LIMIT ?""",
-            (session_id, identity.tenant_id, max(0, after_seq), max(1, min(limit, 500))),
-        ).fetchall()
-    return [
-        {**{key: row[key] for key in row.keys()}, "payload": json.loads(str(row["payload_json"]))}
-        for row in rows
-    ]
+        cursor = max(0, after_seq)
+        scanned_after = cursor
+        items: list[dict[str, Any]] = []
+        s3_visibility: dict[str, bool] = {}
+        while len(items) < page_limit:
+            rows = connection.execute(
+                """SELECT event_seq, event_id, source_kind, source_id, event_kind, tenant_id,
+                          session_id, task_id, run_id, happened_at, payload_json
+                   FROM session_events WHERE session_id = ? AND tenant_id = ? AND event_seq > ?
+                   ORDER BY event_seq LIMIT 500""",
+                (session_id, identity.tenant_id, scanned_after),
+            ).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                scanned_after = int(row["event_seq"])
+                visible = True
+                if str(row["event_kind"]) in {"S3_DIAGNOSIS_FROZEN", "S3_HANDOFF_ACCEPTED"}:
+                    task_id = str(row["task_id"] or "")
+                    visible = s3_visibility.get(task_id, False)
+                    if task_id and task_id not in s3_visibility:
+                        visible = False
+                        if getattr(identity, "role", None) == "SUPPORT":
+                            task = connection.execute(
+                                "SELECT actor_id,service_id FROM task_bindings WHERE tenant_id=? AND task_id=?",
+                                (identity.tenant_id, task_id),
+                            ).fetchone()
+                            if (
+                                task is not None
+                                and str(task["service_id"]) == "orders-async-demo"
+                                and str(task["actor_id"]) == str(identity.actor_id)
+                            ):
+                                try:
+                                    from opspilot.domain.s3 import get_s3_binding
+
+                                    get_s3_binding(connection, task_id)
+                                    visible = True
+                                except ScopeDenied:
+                                    visible = False
+                        s3_visibility[task_id] = visible
+                if visible:
+                    items.append({
+                        **{key: row[key] for key in row.keys()},
+                        "payload": json.loads(str(row["payload_json"])),
+                    })
+                    if len(items) >= page_limit:
+                        break
+            if len(items) >= page_limit or len(rows) < 500:
+                break
+    return {"items": items, "next_after": scanned_after}
+
+
+def list_session_events(path: str, session_id: str, identity: Any, *, after_seq: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+    """Compatibility list API; callers needing filtered-page cursors use page API."""
+    return list_session_event_page(path, session_id, identity, after_seq=after_seq, limit=limit)["items"]
