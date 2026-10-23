@@ -127,6 +127,7 @@ def test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff(tmp_p
             f"/api/sessions/{task['session_id']}/events/history", headers=approver_headers,
         ).status_code in (403, 404)
 
+        support_headers = _login(client, "support-a")
         inspector = client.get(f"/api/tasks/{task['task_id']}/inspector", headers=support_headers)
         assert inspector.status_code == 200
         inspector_json = json.dumps(inspector.json(), ensure_ascii=False)
