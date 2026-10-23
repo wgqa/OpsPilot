@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable
 
 from opspilot.domain.database import connect
-from opspilot.domain.d2 import canonical_json, digest_json
+from opspilot.domain.d2 import ScopeDenied, canonical_json, digest_json
 from opspilot.domain.task_control import (
     TaskControlError,
     TrustedIdentity,
@@ -140,6 +140,11 @@ def submit_s3_handoff(
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         binding = _require_support_owner(connection, identity, task_id)
+        from opspilot.domain.s3 import get_s3_binding, s3_outcome_in_transaction
+        try:
+            s3_binding = get_s3_binding(connection, task_id)
+        except ScopeDenied as error:
+            raise TaskControlError("S3_SCOPE_AUTHORIZATION_DENIED") from error
         target_ref = f"{task_id}:{S3_HANDOFF_KIND}"
         prior = _find_idempotent_command(
             connection, identity, operation_id, "S3_HANDOFF_SUBMIT", target_ref, request_digest,
@@ -175,9 +180,6 @@ def submit_s3_handoff(
         ).fetchone()
         if active is not None:
             raise TaskControlError("TASK_RUN_BUSY")
-        from opspilot.domain.s3 import get_s3_binding, s3_outcome_in_transaction
-
-        s3_binding = get_s3_binding(connection, task_id)
         current = s3_outcome_in_transaction(connection, task_id)
         if (
             current is None or current["currentness"] != "CURRENT"
@@ -280,14 +282,52 @@ def submit_s3_handoff(
     return accepted
 
 
-def get_s3_handoff_outcome(path: str | Path, task_id: str) -> dict[str, object] | None:
+def get_s3_handoff_outcome(
+    path: str | Path, task_id: str, identity: TrustedIdentity,
+) -> dict[str, object] | None:
+    """Read current owner state or a receipt-only same-tenant APPROVER audit view."""
     with connect(path) as connection:
-        binding = connection.execute("SELECT tenant_id FROM task_bindings WHERE task_id=?", (task_id,)).fetchone()
+        binding = connection.execute(
+            "SELECT tenant_id,actor_id,service_id FROM task_bindings WHERE task_id=? AND tenant_id=?",
+            (task_id, identity.tenant_id),
+        ).fetchone()
         if binding is None:
-            return None
+            raise ScopeDenied("TASK_SCOPE_DENIED")
+        trusted = connection.execute(
+            "SELECT 1 FROM trusted_operators WHERE tenant_id=? AND actor_id=? AND role=?",
+            (identity.tenant_id, identity.actor_id, identity.role),
+        ).fetchone()
+        if trusted is None:
+            raise ScopeDenied("TASK_SCOPE_DENIED")
         receipt = _load_receipt(connection, str(binding["tenant_id"]), task_id)
+        if identity.role == "APPROVER":
+            if receipt is None:
+                raise ScopeDenied("S3_HISTORICAL_AUDIT_RECEIPT_REQUIRED")
+            return {
+                "business_outcome": "HANDOFF_ACCEPTED", "currentness": "HISTORICALLY_ACCEPTED",
+                "status": "ACCEPTED", "task_id": task_id, "submitted": True,
+                "handoff_receipt": {
+                    "receipt_id": str(receipt["receipt_id"]), "entry_id": str(receipt["entry_id"]),
+                    "receipt_digest": str(receipt["receipt_digest"]),
+                    "diagnosis_receipt_id": str(receipt["diagnosis_receipt_id"]),
+                    "diagnosis_digest": str(receipt["diagnosis_digest"]),
+                    "accepted_by_actor_id": str(receipt["accepted_by_actor_id"]),
+                    "accepted_at": str(receipt["accepted_at"]),
+                    "control_revision": int(receipt["control_revision"]),
+                },
+                "queue_entry": {
+                    "entry_id": str(receipt["entry_id"]), "queue_status": str(receipt["queue_status"]),
+                    "received_at": str(receipt["received_at"]), "review_due_at": str(receipt["review_due_at"]),
+                    "payload_digest": str(receipt["payload_digest"]),
+                },
+                "recovered": False, "callback_resent": False, "order_recovered": False,
+            }
+        if identity.role != "SUPPORT" or str(binding["actor_id"]) != identity.actor_id:
+            raise ScopeDenied("TASK_SCOPE_DENIED")
+        from opspilot.domain.s3 import get_s3_binding
+        get_s3_binding(connection, task_id)
         if receipt is None:
-            from opspilot.domain.s3 import get_s3_binding, s3_outcome_in_transaction
+            from opspilot.domain.s3 import s3_outcome_in_transaction
             current = s3_outcome_in_transaction(connection, task_id)
             if current is not None:
                 diagnosis = connection.execute(

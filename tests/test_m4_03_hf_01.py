@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -148,7 +149,8 @@ def test_scope_revocation_invalidates_diagnosis_and_blocks_new_handoff(tmp_path:
         ).fetchone()[0] == 0
 
 
-def test_scope_revocation_denies_real_mcp_tool_call_and_web_resource_read(tmp_path: Path):
+@pytest.mark.parametrize("tool_name", ["get_order_status", "get_callback_delivery", "get_receiver_processing"])
+def test_scope_revocation_denies_real_mcp_tool_call_and_web_resource_read(tmp_path: Path, tool_name: str):
     from fastapi.testclient import TestClient
     from mcp.server.mcpserver.exceptions import ToolError
     from opspilot.domain.database import reset_fixture
@@ -173,7 +175,7 @@ def test_scope_revocation_denies_real_mcp_tool_call_and_web_resource_read(tmp_pa
 
     server = build_s3_server(db, str(task["task_id"]), "http://127.0.0.1:1")
     with pytest.raises(ToolError):
-        asyncio.run(server.call_tool("get_callback_delivery", {"reason": "verify current authorization"}))
+        asyncio.run(server.call_tool(tool_name, {"reason": "verify current authorization"}))
 
     app = create_app(db_path=db, start_worker=False, credentials=PASSWORDS, expected_origin="http://testserver")
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -181,6 +183,8 @@ def test_scope_revocation_denies_real_mcp_tool_call_and_web_resource_read(tmp_pa
         response = client.get("/api/s3/order-resources", headers=headers)
         assert response.status_code == 403
         assert "async-order-2" not in response.text
+        task_view = client.get(f"/api/tasks/{task['task_id']}/s3-handoff", headers=headers)
+        assert task_view.status_code == 403
 
 
 @pytest.mark.parametrize("version_source", ["grant", "policy"])
@@ -202,14 +206,22 @@ def test_scope_restore_requires_new_evidence_versions(tmp_path: Path, version_so
                 "UPDATE route_scope_policies SET scope_policy_version=scope_policy_version+1 "
                 "WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND route='/api/async-orders/async-order'"
             )
-        stale = evaluate_s3_gate(db, str(task["task_id"]), evidence_ids)
-        assert stale["decision"] != "DIAGNOSED"
-        connection.execute(
-            "UPDATE principal_scope_grants SET granted_scopes_json='[\"orders.async.read\"]', grant_version=grant_version+1 "
-            "WHERE tenant_id='tenant-a' AND principal_id=?", (principal,),
-        )
+    stale = evaluate_s3_gate(db, str(task["task_id"]), evidence_ids)
+    with connect(db) as connection:
+        if version_source == "grant":
+            connection.execute(
+                "UPDATE principal_scope_grants SET granted_scopes_json='[\"orders.async.read\"]', grant_version=grant_version+1 "
+                "WHERE tenant_id='tenant-a' AND principal_id=?", (principal,),
+            )
+        else:
+            connection.execute(
+                "UPDATE route_scope_policies SET required_scopes_json='[\"orders.async.read\"]', scope_policy_version=scope_policy_version+1 "
+                "WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND route='/api/async-orders/async-order'"
+            )
+    with connect(db) as connection:
         restored = evaluate_s3_gate(db, str(task["task_id"]), evidence_ids)
-        assert restored["decision"] != "DIAGNOSED"
+    assert stale["decision"] != "DIAGNOSED"
+    assert restored["decision"] != "DIAGNOSED"
 
 
 @pytest.mark.parametrize("mutation", ["disabled_principal", "credential_mismatch", "missing_policy", "missing_grant"])
@@ -228,7 +240,8 @@ def test_s3_binding_fails_closed_for_all_current_authorization_inputs(tmp_path: 
             )
         elif mutation == "credential_mismatch":
             connection.execute(
-                "UPDATE auth_policies SET accepted_credential_ref='cred-v2',policy_version=policy_version+1 "
+                "UPDATE auth_policies SET accepted_credential_ref=CASE accepted_credential_ref "
+                "WHEN 'cred-v1' THEN 'cred-v2' ELSE 'cred-v1' END,policy_version=policy_version+1 "
                 "WHERE tenant_id='tenant-a' AND service_id=?", (binding["service_id"],),
             )
         elif mutation == "missing_policy":
@@ -268,6 +281,9 @@ def test_historical_receipt_is_approver_read_only_after_scope_revocation(tmp_pat
     from opspilot.domain.d2 import ScopeDenied
     with pytest.raises(ScopeDenied):
         get_s3_handoff_outcome(db, str(task["task_id"]), identity)
+    from opspilot.domain.task_control import TaskControlError
+    with pytest.raises(TaskControlError):
+        submit_s3_handoff(db, identity, **request)
     from fastapi.testclient import TestClient
     from opspilot.web.app import create_app
     from test_m4_01_dialogue_updates import PASSWORDS, _login
@@ -306,6 +322,26 @@ def test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl(tmp_path: P
             return current if tz is not None else current.replace(tzinfo=None)
 
     monkeypatch.setattr(s3, "datetime", FrozenDateTime)
+    accepted_at = (clock["now"] - timedelta(seconds=299)).isoformat().replace("+00:00", "Z")
+    from opspilot.domain.d2 import canonical_json, digest_json
+    with connect(db) as connection:
+        receiver = connection.execute(
+            "SELECT event_id FROM s3_receivers WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='async-order-2'"
+        ).fetchone()
+        connection.execute(
+            "UPDATE s3_receivers SET accepted_at=? WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='async-order-2'",
+            (accepted_at,),
+        )
+        delivery = connection.execute(
+            "SELECT transport_response_json FROM s3_deliveries WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='async-order-2'"
+        ).fetchone()
+        response = json.loads(str(delivery["transport_response_json"]))
+        response["accepted_at"] = accepted_at
+        response["event_id"] = str(receiver["event_id"])
+        connection.execute(
+            "UPDATE s3_deliveries SET transport_response_json=?,response_digest=? WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='async-order-2'",
+            (canonical_json(response), digest_json(response)),
+        )
     diagnosis, evidence_ids = _diagnose(db, identity, task, state="DELIVERED_PENDING")
     assert diagnosis["outcome"] == "RECEIVER_PROCESSING_UNCONFIRMED"
     assert get_s3_outcome(db, str(task["task_id"]))["handling_direction"] == "WAIT_FOR_RECEIVER_PROCESSING"
@@ -316,6 +352,31 @@ def test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl(tmp_path: P
     stale = get_s3_outcome(db, str(task["task_id"]))
     assert stale["currentness"] == "INVALIDATED_BY_CURRENT_FACTS"
     assert stale["handoff_allowed"] is False
+    assert stale["gate"]["reason_code"] == "S3_SLA_EXPIRED"
+    with connect(db) as connection:
+        old_row = connection.execute(
+            "SELECT body_json,digest FROM s3_diagnoses WHERE receipt_id=?", (diagnosis["receipt_id"],)
+        ).fetchone()
+        assert old_row["body_json"] == diagnosis["body_json"]
+        assert old_row["digest"] == diagnosis["digest"]
+        from opspilot.domain.chat import _current_task_state
+        chat_state = _current_task_state(connection, str(task["task_id"]))
+        assert chat_state["s3_outcome"]["currentness"] == "INVALIDATED_BY_CURRENT_FACTS"
+        assert chat_state["s3_outcome"]["outcome"] == "INCONCLUSIVE"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM s3_handoff_queue_entries WHERE task_id=?", (task["task_id"],)
+        ).fetchone()[0] == 0
+    from fastapi.testclient import TestClient
+    from opspilot.web.app import create_app
+    from test_m4_01_dialogue_updates import PASSWORDS, _login
+    app = create_app(db_path=db, start_worker=False, credentials=PASSWORDS, expected_origin="http://testserver")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get(
+            f"/api/tasks/{task['task_id']}/s3-handoff", headers=_login(client, "support-a"),
+        )
+        assert response.status_code == 200
+        assert response.json()["business_outcome"] == "INCONCLUSIVE"
+        assert response.json()["handoff_allowed"] is False
     assert evaluate_s3_gate(db, str(task["task_id"]), evidence_ids)["handling_direction"] == "CONTACT_RECEIVER_OPERATOR"
     with pytest.raises(TaskControlError):
         submit_s3_handoff(
@@ -347,7 +408,7 @@ def test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl(tmp_path: P
     assert current["handling_direction"] == "CONTACT_RECEIVER_OPERATOR"
     assert current["handoff_allowed"] is True
     new_request = _handoff_request(db, task, refreshed)
-    accepted_handoff = s3.submit_s3_handoff(db, identity, **new_request)
+    accepted_handoff = submit_s3_handoff(db, identity, **new_request)
     assert accepted_handoff["business_outcome"] == "HANDOFF_ACCEPTED"
     assert accepted_handoff["handling_direction"] == "CONTACT_RECEIVER_OPERATOR"
 

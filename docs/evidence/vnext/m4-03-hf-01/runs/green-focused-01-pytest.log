@@ -1,0 +1,176 @@
+...FF.F...F....                                                          [100%]
+================================== FAILURES ===================================
+__________ test_scope_restore_requires_new_evidence_versions[grant] ___________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/green-focused-tmp/test_scope_restore_requires_ne0')
+version_source = 'grant'
+
+    @pytest.mark.parametrize("version_source", ["grant", "policy"])
+    def test_scope_restore_requires_new_evidence_versions(tmp_path: Path, version_source: str):
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import evaluate_s3_gate
+    
+        db, identity, task = _prepared_task(tmp_path, "DELIVERY_FAILED", "async-order-2")
+        _, evidence_ids = _diagnose(db, identity, task)
+        with connect(db) as connection:
+            principal = connection.execute("SELECT principal_id FROM task_bindings WHERE task_id=?", (task["task_id"],)).fetchone()[0]
+            if version_source == "grant":
+                connection.execute(
+                    "UPDATE principal_scope_grants SET grant_version=grant_version+1 "
+                    "WHERE tenant_id='tenant-a' AND principal_id=?", (principal,),
+                )
+            else:
+                connection.execute(
+                    "UPDATE route_scope_policies SET scope_policy_version=scope_policy_version+1 "
+                    "WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND route='/api/async-orders/async-order'"
+                )
+            stale = evaluate_s3_gate(db, str(task["task_id"]), evidence_ids)
+>           assert stale["decision"] != "DIAGNOSED"
+E           AssertionError: assert 'DIAGNOSED' != 'DIAGNOSED'
+
+tests\test_m4_03_hf_01.py:206: AssertionError
+__________ test_scope_restore_requires_new_evidence_versions[policy] __________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/green-focused-tmp/test_scope_restore_requires_ne1')
+version_source = 'policy'
+
+    @pytest.mark.parametrize("version_source", ["grant", "policy"])
+    def test_scope_restore_requires_new_evidence_versions(tmp_path: Path, version_source: str):
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import evaluate_s3_gate
+    
+        db, identity, task = _prepared_task(tmp_path, "DELIVERY_FAILED", "async-order-2")
+        _, evidence_ids = _diagnose(db, identity, task)
+        with connect(db) as connection:
+            principal = connection.execute("SELECT principal_id FROM task_bindings WHERE task_id=?", (task["task_id"],)).fetchone()[0]
+            if version_source == "grant":
+                connection.execute(
+                    "UPDATE principal_scope_grants SET grant_version=grant_version+1 "
+                    "WHERE tenant_id='tenant-a' AND principal_id=?", (principal,),
+                )
+            else:
+                connection.execute(
+                    "UPDATE route_scope_policies SET scope_policy_version=scope_policy_version+1 "
+                    "WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND route='/api/async-orders/async-order'"
+                )
+            stale = evaluate_s3_gate(db, str(task["task_id"]), evidence_ids)
+>           assert stale["decision"] != "DIAGNOSED"
+E           AssertionError: assert 'DIAGNOSED' != 'DIAGNOSED'
+
+tests\test_m4_03_hf_01.py:206: AssertionError
+_ test_s3_binding_fails_closed_for_all_current_authorization_inputs[credential_mismatch] _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/green-focused-tmp/test_s3_binding_fails_closed_f1')
+mutation = 'credential_mismatch'
+
+    @pytest.mark.parametrize("mutation", ["disabled_principal", "credential_mismatch", "missing_policy", "missing_grant"])
+    def test_s3_binding_fails_closed_for_all_current_authorization_inputs(tmp_path: Path, mutation: str):
+        from opspilot.domain.database import connect
+        from opspilot.domain.d2 import ScopeDenied
+        from opspilot.domain.s3 import get_s3_binding
+    
+        db, _, task = _prepared_task(tmp_path, "DELIVERY_FAILED", f"auth-{mutation}")
+        with connect(db) as connection:
+            binding = get_s3_binding(connection, str(task["task_id"]))
+            if mutation == "disabled_principal":
+                connection.execute(
+                    "UPDATE principals SET status='DISABLED',principal_version=principal_version+1 "
+                    "WHERE tenant_id='tenant-a' AND principal_id=?", (binding["principal_id"],),
+                )
+            elif mutation == "credential_mismatch":
+                connection.execute(
+                    "UPDATE auth_policies SET accepted_credential_ref='cred-v2',policy_version=policy_version+1 "
+                    "WHERE tenant_id='tenant-a' AND service_id=?", (binding["service_id"],),
+                )
+            elif mutation == "missing_policy":
+                connection.execute(
+                    "DELETE FROM route_scope_policies WHERE tenant_id='tenant-a' AND service_id=? AND route=?",
+                    (binding["service_id"], binding["route"]),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM principal_scope_grants WHERE tenant_id='tenant-a' AND principal_id=?",
+                    (binding["principal_id"],),
+                )
+>           with pytest.raises(ScopeDenied):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE ScopeDenied
+
+tests\test_m4_03_hf_01.py:244: Failed
+______ test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl _______
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/green-focused-tmp/test_receiver_sla_invalidates_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002AFCA0BD810>
+
+    def test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl(tmp_path: Path, monkeypatch):
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import evaluate_s3_gate, get_s3_outcome
+        from opspilot.domain.s3_handoff import submit_s3_handoff
+        from opspilot.domain.task_control import TaskControlError
+        import opspilot.domain.s3 as s3
+    
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERED_PENDING", "async-order-2", queue_age_seconds=299,
+            processing_sla_seconds=300,
+        )
+        clock = {"now": datetime.now(timezone.utc)}
+    
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                current = clock["now"]
+                return current if tz is not None else current.replace(tzinfo=None)
+    
+        monkeypatch.setattr(s3, "datetime", FrozenDateTime)
+        diagnosis, evidence_ids = _diagnose(db, identity, task, state="DELIVERED_PENDING")
+        assert diagnosis["outcome"] == "RECEIVER_PROCESSING_UNCONFIRMED"
+        assert get_s3_outcome(db, str(task["task_id"]))["handling_direction"] == "WAIT_FOR_RECEIVER_PROCESSING"
+    
+        with connect(db) as connection:
+            revision = int(connection.execute("SELECT control_revision FROM task_controls WHERE task_id=?", (task["task_id"],)).fetchone()[0])
+        clock["now"] += timedelta(seconds=2)
+        stale = get_s3_outcome(db, str(task["task_id"]))
+        assert stale["currentness"] == "INVALIDATED_BY_CURRENT_FACTS"
+        assert stale["handoff_allowed"] is False
+        assert evaluate_s3_gate(db, str(task["task_id"]), evidence_ids)["handling_direction"] == "CONTACT_RECEIVER_OPERATOR"
+        with pytest.raises(TaskControlError):
+            submit_s3_handoff(
+                db, identity, task_id=str(task["task_id"]), operation_id="hf01-expired-diagnosis",
+                diagnosis_receipt_id=str(diagnosis["receipt_id"]),
+                diagnosis_digest=str(diagnosis["digest"]), expected_control_revision=revision,
+            )
+    
+        from opspilot.domain.task_control import admit_task_message, apply_pending_critical_inputs, claim_task_run, finish_task_run
+        accepted = admit_task_message(
+            db, identity, session_id=str(task["session_id"]), task_id=str(task["task_id"]),
+            input_kind="CORRECT_TASK_INPUT", body="�밴��ǰ���շ� SLA ���µ��顣",
+            idempotency_key="hf01-sla-refresh", expected_control_revision=revision,
+        )
+        run_id = str(accepted["run_id"])
+        claim_task_run(db, identity, run_id)
+        apply_pending_critical_inputs(db, identity, run_id)
+        order, delivery, receiver = _facts(db, task)
+        fresh_ids = [
+            _record_fresh(db, task, "get_order_status", order),
+            _record_fresh(db, task, "get_callback_delivery", delivery),
+            _record_fresh(db, task, "get_receiver_processing", receiver),
+        ]
+        refreshed = s3.persist_s3_diagnosis(db, str(task["task_id"]), run_id, fresh_ids)
+        finish_task_run(db, identity, run_id, "SUCCEEDED")
+        assert refreshed["outcome"] == "RECEIVER_PROCESSING_UNCONFIRMED"
+        current = get_s3_outcome(db, str(task["task_id"]))
+        assert current["currentness"] == "CURRENT"
+        assert current["handling_direction"] == "CONTACT_RECEIVER_OPERATOR"
+        assert current["handoff_allowed"] is True
+        new_request = _handoff_request(db, task, refreshed)
+>       accepted_handoff = s3.submit_s3_handoff(db, identity, **new_request)
+                           ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'opspilot.domain.s3' has no attribute 'submit_s3_handoff'
+
+tests\test_m4_03_hf_01.py:350: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_03_hf_01.py::test_scope_restore_requires_new_evidence_versions[grant]
+FAILED tests/test_m4_03_hf_01.py::test_scope_restore_requires_new_evidence_versions[policy]
+FAILED tests/test_m4_03_hf_01.py::test_s3_binding_fails_closed_for_all_current_authorization_inputs[credential_mismatch]
+FAILED tests/test_m4_03_hf_01.py::test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl
+4 failed, 11 passed in 28.40s

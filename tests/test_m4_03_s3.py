@@ -207,7 +207,7 @@ def test_confirmed_s3_handoff_is_atomic_idempotent_and_separate_from_s2_scope(tm
     ids = [_evidence(db, task, "get_order_status", order), _evidence(db, task, "get_callback_delivery", delivery)]
     diagnosis = persist_s3_diagnosis(db, str(task["task_id"]), str(task["run_id"]), ids)
     finish_task_run(db, identity, str(task["run_id"]), "SUCCEEDED")
-    before = get_s3_handoff_outcome(db, str(task["task_id"]))
+    before = get_s3_handoff_outcome(db, str(task["task_id"]), identity)
     assert before["business_outcome"] == "HANDOFF_READY"
     assert before["handoff_allowed"] is True
     assert before["diagnosis_receipt"]["handoff_allowed"] is True
@@ -222,7 +222,7 @@ def test_confirmed_s3_handoff_is_atomic_idempotent_and_separate_from_s2_scope(tm
     replay = submit_s3_handoff(db, identity, **request)
     assert first["business_outcome"] == "HANDOFF_ACCEPTED"
     assert replay["receipt_id"] == first["receipt_id"] and replay["replayed"] is True
-    persisted = get_s3_handoff_outcome(db, str(task["task_id"]))
+    persisted = get_s3_handoff_outcome(db, str(task["task_id"]), identity)
     assert persisted["handoff_receipt"]["receipt_id"] == first["receipt_id"]
     from opspilot.domain.chat import _current_task_state
     with connect(db) as connection:
@@ -283,7 +283,7 @@ def test_s3_handoff_rollback_and_response_loss_reconcile_once(tmp_path: Path, mo
     monkeypatch.setattr(handoff, "_FAILPOINT", lose_response)
     with pytest.raises(TimeoutError, match="lost HTTP response"):
         submit_s3_handoff(db, identity, **request)
-    persisted = get_s3_handoff_outcome(db, str(task["task_id"]))
+    persisted = get_s3_handoff_outcome(db, str(task["task_id"]), identity)
     assert persisted["business_outcome"] == "HANDOFF_ACCEPTED"
     receipt_id = persisted["handoff_receipt"]["receipt_id"]
 

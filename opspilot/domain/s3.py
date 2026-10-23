@@ -30,6 +30,10 @@ FACT_TO_TOOL = {"s3_order": "get_order_status", "s3_delivery": "get_callback_del
 SOURCES = {"s3_order": "http:loopback-async-orders", "s3_delivery": "sqlite:s3_deliveries", "s3_receiver": "sqlite:s3_receivers"}
 OUTCOMES = {"ORDER_PROCESSING", "CALLBACK_DELIVERY_FAILED", "RECEIVER_PROCESSING_UNCONFIRMED", "RECEIVER_PROCESSED"}
 
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS s3_orders (
  tenant_id TEXT NOT NULL, service_id TEXT NOT NULL, integration_id TEXT NOT NULL,
@@ -83,6 +87,62 @@ CREATE TRIGGER IF NOT EXISTS s3_diagnoses_no_delete BEFORE DELETE ON s3_diagnose
 """
 
 
+def _authorized_s3_scope(
+    connection: sqlite3.Connection, *, tenant_id: str, service_id: str,
+    integration_id: str, principal_id: str, route: str, credential_ref: str,
+) -> dict[str, object]:
+    """Resolve and validate the current authorization contract for the bound route."""
+    row = connection.execute(
+        """SELECT i.credential_ref, i.config_version, p.status AS principal_status,
+                  p.principal_version, a.accepted_credential_ref, a.policy_version,
+                  r.required_scopes_json, r.scope_policy_version,
+                  g.granted_scopes_json, g.grant_version
+           FROM services s
+           JOIN integrations i ON i.tenant_id=s.tenant_id AND i.integration_id=s.integration_id
+           JOIN principals p ON p.tenant_id=i.tenant_id AND p.principal_id=i.principal_id
+           JOIN auth_policies a ON a.tenant_id=s.tenant_id AND a.service_id=s.service_id
+           JOIN route_scope_policies r ON r.tenant_id=s.tenant_id AND r.service_id=s.service_id AND r.route=s.route
+           JOIN principal_scope_grants g ON g.tenant_id=p.tenant_id AND g.principal_id=p.principal_id
+           WHERE s.tenant_id=? AND s.service_id=? AND s.integration_id=? AND s.route=?
+             AND i.principal_id=?""",
+        (tenant_id, service_id, integration_id, route, principal_id),
+    ).fetchone()
+    if row is None:
+        raise ScopeDenied("S3_SCOPE_AUTHORIZATION_DENIED")
+    try:
+        required = json.loads(str(row["required_scopes_json"]))
+        granted = json.loads(str(row["granted_scopes_json"]))
+        versions = {
+            key: int(row[key]) for key in (
+                "scope_policy_version", "grant_version", "principal_version", "policy_version", "config_version",
+            )
+        }
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise ScopeDenied("S3_SCOPE_AUTHORIZATION_DENIED") from error
+    if (
+        not isinstance(required, list) or not isinstance(granted, list)
+        or any(not isinstance(scope, str) or not scope for scope in [*required, *granted])
+        or any(version < 1 for version in versions.values())
+        or str(row["principal_status"]) != "ENABLED"
+        or str(row["credential_ref"]) != credential_ref
+        or str(row["accepted_credential_ref"]) != credential_ref
+        or not set(required) <= set(granted)
+    ):
+        raise ScopeDenied("S3_SCOPE_AUTHORIZATION_DENIED")
+    return {
+        "credential_ref": str(row["credential_ref"]),
+        "config_version": versions["config_version"],
+        "principal_status": str(row["principal_status"]),
+        "principal_version": versions["principal_version"],
+        "accepted_credential_ref": str(row["accepted_credential_ref"]),
+        "policy_version": versions["policy_version"],
+        "scope_policy_version": versions["scope_policy_version"],
+        "grant_version": versions["grant_version"],
+        "required_scopes": sorted(set(required)),
+        "granted_scopes": sorted(set(granted)),
+    }
+
+
 def get_s3_binding(connection: sqlite3.Connection, task_id: str) -> dict[str, object]:
     row = connection.execute(
         """SELECT b.*, s.route, i.credential_ref, i.config_version, p.principal_version,
@@ -107,7 +167,16 @@ def get_s3_binding(connection: sqlite3.Connection, task_id: str) -> dict[str, ob
                                (row["tenant_id"], SERVICE, row["integration_id"], row["order_id"])).fetchone()
     if order is None:
         raise ScopeDenied("S3_RESOURCE_OUTSIDE_TASK_BINDING")
-    return dict(row)
+    binding = dict(row)
+    authorization = _authorized_s3_scope(
+        connection, tenant_id=str(binding["tenant_id"]), service_id=str(binding["service_id"]),
+        integration_id=str(binding["integration_id"]), principal_id=str(binding["principal_id"]),
+        route=str(binding["route"]), credential_ref=str(binding["credential_ref"]),
+    )
+    binding.update({key: authorization[key] for key in (
+        "scope_policy_version", "grant_version", "required_scopes", "granted_scopes",
+    )})
+    return binding
 
 
 def list_s3_order_resources(path: str | Path, identity) -> list[dict[str, object]]:
@@ -121,31 +190,30 @@ def list_s3_order_resources(path: str | Path, identity) -> list[dict[str, object
         ).fetchone()
         if operator is None:
             raise ScopeDenied("S3_RESOURCE_SELECTION_REQUIRES_SUPPORT_OWNER")
+        service = connection.execute(
+            """SELECT s.service_id,s.route,s.integration_id,i.principal_id,i.credential_ref
+               FROM services s JOIN integrations i ON i.tenant_id=s.tenant_id AND i.integration_id=s.integration_id
+               WHERE s.tenant_id=? AND s.service_id=? AND s.route=?""",
+            (identity.tenant_id, SERVICE, ROUTE),
+        ).fetchone()
+        if service is None:
+            raise ScopeDenied("S3_SCOPE_AUTHORIZATION_DENIED")
+        _authorized_s3_scope(
+            connection, tenant_id=identity.tenant_id, service_id=str(service["service_id"]),
+            integration_id=str(service["integration_id"]), principal_id=str(service["principal_id"]),
+            route=str(service["route"]), credential_ref=str(service["credential_ref"]),
+        )
         rows = connection.execute(
             """SELECT o.order_id,o.status,o.version AS order_version,o.contract_version,
-                      i.integration_id,i.principal_id,i.credential_ref,p.status AS principal_status,
-                      a.accepted_credential_ref,r.required_scopes_json,g.granted_scopes_json
+                      i.integration_id,i.principal_id
                FROM s3_orders o JOIN services s ON s.tenant_id=o.tenant_id AND s.service_id=o.service_id
                JOIN integrations i ON i.tenant_id=o.tenant_id AND i.integration_id=o.integration_id
                  AND i.integration_id=s.integration_id
-               JOIN principals p ON p.tenant_id=i.tenant_id AND p.principal_id=i.principal_id
-               JOIN auth_policies a ON a.tenant_id=s.tenant_id AND a.service_id=s.service_id
-               JOIN route_scope_policies r ON r.tenant_id=s.tenant_id AND r.service_id=s.service_id AND r.route=s.route
-               JOIN principal_scope_grants g ON g.tenant_id=i.tenant_id AND g.principal_id=i.principal_id
-               WHERE o.tenant_id=? AND o.service_id=? AND s.route=? AND p.status='ENABLED'
-                 AND a.accepted_credential_ref=i.credential_ref
-               ORDER BY o.order_id""",
+               WHERE o.tenant_id=? AND o.service_id=? AND s.route=? ORDER BY o.order_id""",
             (identity.tenant_id, SERVICE, ROUTE),
         ).fetchall()
         result: list[dict[str, object]] = []
         for row in rows:
-            try:
-                required = set(json.loads(str(row["required_scopes_json"])))
-                granted = set(json.loads(str(row["granted_scopes_json"])))
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if not required <= granted:
-                continue
             result.append({
                 "order_id": str(row["order_id"]), "order_status": str(row["status"]),
                 "order_version": int(row["order_version"]),
@@ -166,27 +234,23 @@ def bind_s3_order_in_transaction(
         raise ScopeDenied("S3_ORDER_NOT_REGISTERED")
     row = connection.execute(
         """SELECT b.task_id,b.tenant_id,b.integration_id,b.principal_id,o.contract_version,
-                  i.credential_ref,a.accepted_credential_ref,p.status,r.required_scopes_json,g.granted_scopes_json
+                  i.credential_ref,s.route
            FROM task_bindings b JOIN s3_orders o ON o.tenant_id=b.tenant_id AND o.service_id=b.service_id
              AND o.integration_id=b.integration_id AND o.order_id=?
            JOIN integrations i ON i.tenant_id=b.tenant_id AND i.integration_id=b.integration_id
-           JOIN principals p ON p.tenant_id=b.tenant_id AND p.principal_id=b.principal_id
-           JOIN auth_policies a ON a.tenant_id=b.tenant_id AND a.service_id=b.service_id
-           JOIN services s ON s.tenant_id=b.tenant_id AND s.service_id=b.service_id AND s.route=?
-           JOIN route_scope_policies r ON r.tenant_id=s.tenant_id AND r.service_id=s.service_id AND r.route=s.route
-           JOIN principal_scope_grants g ON g.tenant_id=b.tenant_id AND g.principal_id=b.principal_id
+           JOIN services s ON s.tenant_id=b.tenant_id AND s.service_id=b.service_id
+             AND s.integration_id=b.integration_id AND s.route=?
            JOIN trusted_operators actor ON actor.tenant_id=b.tenant_id AND actor.actor_id=? AND actor.role='SUPPORT'
-           WHERE b.task_id=? AND b.tenant_id=? AND b.service_id=? AND b.integration_id=? AND p.status='ENABLED'
-             AND a.accepted_credential_ref=i.credential_ref""",
+           WHERE b.task_id=? AND b.tenant_id=? AND b.service_id=? AND b.integration_id=?""",
         (order_id, ROUTE, actor_id, task_id, tenant_id, service_id, integration_id),
     ).fetchone()
     if row is None:
         raise ScopeDenied("S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED")
-    try:
-        if not set(json.loads(str(row["required_scopes_json"]))) <= set(json.loads(str(row["granted_scopes_json"]))):
-            raise ScopeDenied("S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED")
-    except (json.JSONDecodeError, TypeError) as error:
-        raise ScopeDenied("S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED") from error
+    _authorized_s3_scope(
+        connection, tenant_id=tenant_id, service_id=service_id, integration_id=integration_id,
+        principal_id=str(row["principal_id"]), route=str(row["route"]),
+        credential_ref=str(row["credential_ref"]),
+    )
     selection = {
         "tenant_id": tenant_id, "task_id": task_id, "service_id": service_id,
         "integration_id": integration_id, "order_id": order_id, "confirmed_by": actor_id,
@@ -209,7 +273,9 @@ def _snapshot(connection, binding):
     versions = {"order_version": order["version"], "delivery_version": delivery["version"],
                 "receiver_version": receiver["version"], "contract_version": order["contract_version"],
                 "config_version": binding["config_version"], "principal_version": binding["principal_version"],
-                "policy_version": binding["policy_version"]}
+                "policy_version": binding["policy_version"],
+                "scope_policy_version": binding["scope_policy_version"],
+                "grant_version": binding["grant_version"]}
     return order, delivery, receiver, versions
 
 
@@ -374,9 +440,18 @@ def get_receiver_processing_fact(path, task_id):
 
 def current_s3_evidence(connection, task_id, evidence_ids=None, *, historical=False):
     """Revalidate actual rows/HTTP observations, not just the model's typed envelope."""
-    binding = get_s3_binding(connection, task_id)
-    order, delivery, receiver, current_versions = _snapshot(connection, binding)
     rows = connection.execute("SELECT * FROM d2_evidence WHERE task_id=? ORDER BY fetched_at,rowid", (task_id,)).fetchall()
+    try:
+        binding = get_s3_binding(connection, task_id)
+    except ScopeDenied:
+        excluded = [
+            {"source_id": str(row["evidence_id"]), "reason": "S3_AUTHORIZATION_UNAVAILABLE"}
+            for row in rows if evidence_ids is None or str(row["evidence_id"]) in evidence_ids
+        ]
+        if not excluded:
+            excluded.append({"source_id": str(task_id), "reason": "S3_AUTHORIZATION_UNAVAILABLE"})
+        return [], excluded
+    order, delivery, receiver, current_versions = _snapshot(connection, binding)
     current, excluded = [], []
     for row in rows:
         e = dict(row)
@@ -392,7 +467,7 @@ def current_s3_evidence(connection, task_id, evidence_ids=None, *, historical=Fa
                        "resource_id": e["resource_id"], "principal_id": e["principal_id"],
                        "data_source": e["data_source"], "observed_versions": versions,
                        "facts": facts, "trust_class": e["trust_class"]}
-            age = (datetime.now(timezone.utc) - datetime.fromisoformat(e["fetched_at"].replace("Z","+00:00"))).total_seconds()
+            age = (_now() - datetime.fromisoformat(e["fetched_at"].replace("Z","+00:00"))).total_seconds()
             observation = connection.execute("SELECT 1 FROM d2_tool_observations WHERE task_id=? AND evidence_id=? AND tool_name=? AND status='OK'", (task_id,e["evidence_id"],FACT_TO_TOOL[fact_type])).fetchone()
             if (e["tenant_id"] != binding["tenant_id"] or e["principal_id"] != binding["principal_id"]
                 or e["resource_id"] != f"{SERVICE}:{binding['order_id']}" or e["data_source"] != SOURCES[fact_type]
@@ -405,7 +480,19 @@ def current_s3_evidence(connection, task_id, evidence_ids=None, *, historical=Fa
                 reason = "S3_CURRENT_VERSION_MISMATCH"
             elif fact_type == "s3_order":
                 body = facts.get("body", {})
-                http = connection.execute("SELECT h.* FROM s3_http_observations h JOIN auth_events a ON a.event_id=h.authn_event_id WHERE h.request_id=? AND h.tenant_id=? AND h.service_id=? AND h.integration_id=? AND h.principal_id=? AND h.route=? AND a.result_code='AUTH_ACCEPTED'", (body.get("request_id"),binding["tenant_id"],SERVICE,binding["integration_id"],binding["principal_id"],ROUTE)).fetchone()
+                http = connection.execute(
+                    """SELECT h.* FROM s3_http_observations h
+                       JOIN auth_events a ON a.event_id=h.authn_event_id
+                       JOIN authz_events z ON z.request_id=h.request_id AND z.authn_event_id=h.authn_event_id
+                       WHERE h.request_id=? AND h.tenant_id=? AND h.service_id=?
+                         AND h.integration_id=? AND h.principal_id=? AND h.route=?
+                         AND a.result_code='AUTH_ACCEPTED' AND z.outcome='ALLOW'
+                         AND z.reason_code='SCOPE_GRANTED' AND z.resource_binding_valid=1
+                         AND z.credential_policy_version=? AND z.scope_policy_version=? AND z.grant_version=?""",
+                    (body.get("request_id"),binding["tenant_id"],SERVICE,binding["integration_id"],
+                     binding["principal_id"],ROUTE,current_versions["policy_version"],
+                     current_versions["scope_policy_version"],current_versions["grant_version"]),
+                ).fetchone()
                 if (http is None or facts.get("http_status") != 200 or http["body_digest"] != digest_json(body)
                     or facts.get("versions_before") != versions or facts.get("versions_after") != versions
                     or http["route"] != ROUTE or body.get("order_id") != binding["order_id"] or body.get("order_version") != versions.get("order_version")
@@ -430,6 +517,7 @@ def _gate_from_evidence(evidence):
     direction = "EVIDENCE_INSUFFICIENT"
     handoff_allowed = False
     needed = ["s3_order"]
+    valid_until = None
     order = by_type.get("s3_order")
     used = []
     if order:
@@ -482,8 +570,13 @@ def _gate_from_evidence(evidence):
                             response = json.loads(str(d.get("transport_response_json", "{}")))
                             accepted_text = str(receiver["facts"].get("accepted_at", ""))
                             accepted = datetime.fromisoformat(accepted_text.replace("Z", "+00:00"))
-                            age = max(0, int((datetime.now(timezone.utc) - accepted.astimezone(timezone.utc)).total_seconds()))
                             sla = receiver["facts"].get("processing_sla_seconds")
+                            deadline = accepted.astimezone(timezone.utc) + timedelta(seconds=sla) if type(sla) is int and sla > 0 else None
+                            now = _now()
+                            if now.tzinfo is None:
+                                now = now.replace(tzinfo=timezone.utc)
+                            expired = deadline is not None and now >= deadline
+                            age = max(0, int((now - accepted.astimezone(timezone.utc)).total_seconds()))
                             delivery_valid = (
                                 correlated and response.get("receiver_state") == "QUEUED"
                                 and response.get("accepted_at") == accepted_text
@@ -496,7 +589,8 @@ def _gate_from_evidence(evidence):
                         if delivery_valid and receiver["facts"].get("status") == "QUEUED":
                             used.extend([order, delivery, receiver])
                             outcome = "RECEIVER_PROCESSING_UNCONFIRMED"
-                            if age > sla:
+                            valid_until = deadline.isoformat().replace("+00:00", "Z")
+                            if expired:
                                 direction, handoff_allowed = "CONTACT_RECEIVER_OPERATOR", True
                             else:
                                 direction = "WAIT_FOR_RECEIVER_PROCESSING"
@@ -509,7 +603,8 @@ def _gate_from_evidence(evidence):
     return {"decision": "DIAGNOSED" if outcome else "NEED_MORE", "outcome": outcome,
             "reason_code": outcome or "S3_CURRENT_FACTS_REQUIRED", "required_facts": [] if outcome else needed,
             "handling_direction": direction, "handoff_allowed": handoff_allowed,
-            "checked_fact_ids": [x["evidence_id"] for x in used], "recovered": False, "side_effects": []}
+            "checked_fact_ids": [x["evidence_id"] for x in used], "valid_until": valid_until,
+            "recovered": False, "side_effects": []}
 
 
 def evaluate_s3_gate(path, task_id, evidence_ids=None):
@@ -560,17 +655,44 @@ def s3_outcome_in_transaction(c, task_id):
         body = json.loads(row["body_json"])
         evidence, excluded = current_s3_evidence(c, task_id, json.loads(row["evidence_ids_json"]))
         rev = c.execute("SELECT control_revision FROM task_controls WHERE task_id=?", (task_id,)).fetchone()[0]
-        current = not excluded and rev == row["control_revision"] and digest_json(body) == row["digest"]
-        narrative_exclusions = _explanation_exclusions(c, task_id, body) if current else [{"source_id":row["receipt_id"],"reason":"S3_CURRENT_FACTS_INVALIDATED"}]
+        authorization_unavailable = any(item.get("reason") == "S3_AUTHORIZATION_UNAVAILABLE" for item in excluded)
+        frozen_gate = body.get("gate", {})
+        current_gate = _gate_from_evidence(evidence) if not excluded else {}
+        gate_matches = True
+        if frozen_gate.get("decision") == "DIAGNOSED":
+            gate_matches = current_gate.get("decision") == "DIAGNOSED" and all(
+                current_gate.get(key) == frozen_gate.get(key)
+                for key in ("outcome", "handling_direction", "handoff_allowed", "checked_fact_ids", "valid_until")
+            )
+        sla_expired = (
+            frozen_gate.get("handling_direction") == "WAIT_FOR_RECEIVER_PROCESSING"
+            and current_gate.get("handling_direction") == "CONTACT_RECEIVER_OPERATOR"
+            and frozen_gate.get("valid_until") == current_gate.get("valid_until")
+        )
+        current = (not excluded and gate_matches and rev == row["control_revision"]
+                   and digest_json(body) == row["digest"])
+        invalidation_reason = (
+            "S3_AUTHORIZATION_UNAVAILABLE" if authorization_unavailable
+            else "S3_SLA_EXPIRED" if sla_expired
+            else "S3_CURRENT_FACTS_INVALIDATED"
+        )
+        if authorization_unavailable:
+            narrative_exclusions = [{"source_id": row["receipt_id"], "reason": invalidation_reason}]
+        else:
+            narrative_exclusions = _explanation_exclusions(c, task_id, body) if current else [{"source_id":row["receipt_id"],"reason":invalidation_reason}]
         narrative_current = current and not narrative_exclusions
-        return {"receipt_id":row["receipt_id"],"outcome":row["outcome"] if current else "INCONCLUSIVE",
+        invalid_sources = excluded or ([{"source_id": row["receipt_id"], "reason": invalidation_reason}] if not current else [])
+        result = {"receipt_id":row["receipt_id"],"outcome":row["outcome"] if current else "INCONCLUSIVE",
                 "currentness":"CURRENT" if current else "INVALIDATED_BY_CURRENT_FACTS", "recovered":False,
                 "handling_direction":body.get("gate",{}).get("handling_direction") if current else "EVIDENCE_INSUFFICIENT",
                 "handoff_allowed":bool(body.get("gate",{}).get("handoff_allowed",False)) if current else False,
                 "explanation":body.get("model_summary_untrusted","") if narrative_current else "",
                 "explanation_currentness":"CURRENT" if narrative_current else "SOURCE_INVALIDATED",
                 "explanation_excluded_sources":narrative_exclusions,
-                "gate":body["gate"] if current else {"decision":"INCONCLUSIVE","reason_code":"S3_SOURCE_INVALIDATED","excluded_sources":excluded},"body":body}
+                "gate":body["gate"] if current else {"decision":"INCONCLUSIVE","reason_code":invalidation_reason,"excluded_sources":invalid_sources}}
+        if not authorization_unavailable:
+            result["body"] = body
+        return result
 
 
 def _explanation_exclusions(c, task_id, body):

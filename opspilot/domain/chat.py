@@ -107,18 +107,26 @@ def _current_task_state(connection: sqlite3.Connection, task_id: str) -> dict[st
         "action_counts": [{key: row[key] for key in row.keys()} for row in action_counts],
     }
     if binding["service_id"] == "orders-async-demo":
-        from opspilot.domain.s3 import s3_outcome_in_transaction
+        from opspilot.domain.d2 import ScopeDenied
+        from opspilot.domain.s3 import get_s3_binding, s3_outcome_in_transaction
         outcome = s3_outcome_in_transaction(connection, task_id)
         if outcome:
             result["s3_outcome"] = {k:outcome[k] for k in ("receipt_id","outcome","currentness","recovered","gate","explanation","explanation_currentness","explanation_excluded_sources")}
-        handoff = connection.execute(
-            """SELECT r.receipt_id,r.accepted_by_actor_id,r.accepted_at,r.handoff_kind,
-                      q.entry_id,q.order_id,q.handling_direction,q.receiver_queue_id,q.queue_status
-               FROM s3_handoff_receipts r JOIN s3_handoff_queue_entries q
-                 ON q.entry_id=r.entry_id AND q.tenant_id=r.tenant_id AND q.task_id=r.task_id
-               WHERE r.tenant_id=? AND r.task_id=?""",
-            (binding["tenant_id"], task_id),
-        ).fetchone()
+        try:
+            get_s3_binding(connection, task_id)
+            authorized = True
+        except ScopeDenied:
+            authorized = False
+        handoff = None
+        if authorized:
+            handoff = connection.execute(
+                """SELECT r.receipt_id,r.accepted_by_actor_id,r.accepted_at,r.handoff_kind,
+                          q.entry_id,q.order_id,q.handling_direction,q.receiver_queue_id,q.queue_status
+                   FROM s3_handoff_receipts r JOIN s3_handoff_queue_entries q
+                     ON q.entry_id=r.entry_id AND q.tenant_id=r.tenant_id AND q.task_id=r.task_id
+                   WHERE r.tenant_id=? AND r.task_id=?""",
+                (binding["tenant_id"], task_id),
+            ).fetchone()
         if handoff is not None:
             result["s3_handoff"] = {
                 "business_outcome": "HANDOFF_ACCEPTED",

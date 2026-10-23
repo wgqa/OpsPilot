@@ -63,6 +63,8 @@ _STATUS_BY_CODE = {
     "CSRF_REJECTED": 403,
     "TASK_OWNER_REQUIRED": 403,
     "S3_RESOURCE_SELECTION_REQUIRES_SUPPORT_OWNER": 403,
+    "S3_SCOPE_AUTHORIZATION_DENIED": 403,
+    "S3_HISTORICAL_AUDIT_RECEIPT_REQUIRED": 403,
     "S3_ORDER_NOT_REGISTERED": 422,
     "S3_RESOURCE_SELECTION_REQUIRED": 422,
     "S3_DIAGNOSIS_NOT_HANDOFF_READY": 409,
@@ -550,10 +552,13 @@ def create_app(
     async def get_s3_handoff_route(
         task_id: str, context: AuthContext = Depends(current_user)
     ) -> dict[str, Any]:
-        require_task_reader(context.identity, task_id)
+        from opspilot.domain.d2 import ScopeDenied
         from opspilot.domain.s3_handoff import get_s3_handoff_outcome
 
-        result = get_s3_handoff_outcome(resolved_db, task_id)
+        try:
+            result = get_s3_handoff_outcome(resolved_db, task_id, context.identity)
+        except ScopeDenied as error:
+            raise TaskControlError(str(error)) from error
         return result or {"business_outcome": "NO_DIAGNOSIS", "submitted": False}
 
     @app.post("/api/tasks/{task_id}/s3-handoff/submit")
@@ -567,7 +572,6 @@ def create_app(
         if key != body.operation_id:
             raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
         from opspilot.domain.s3_handoff import submit_s3_handoff
-
         result = submit_s3_handoff(
             resolved_db, context.identity, task_id=task_id,
             operation_id=body.operation_id,

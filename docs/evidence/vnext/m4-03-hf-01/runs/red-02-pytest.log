@@ -1,0 +1,156 @@
+FFFFF                                                                    [100%]
+================================== FAILURES ===================================
+_____ test_current_s3_binding_uses_same_versioned_authorization_snapshot ______
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/red-01-tmp/test_current_s3_binding_uses_s0')
+
+    def test_current_s3_binding_uses_same_versioned_authorization_snapshot(tmp_path: Path):
+        from opspilot.domain.database import connect
+        from opspilot.domain.d2 import ScopeDenied
+        from opspilot.domain.s3 import get_s3_binding
+    
+        db, _, task = _prepared_task(tmp_path, "DELIVERY_FAILED", "async-order-2")
+        with connect(db) as connection:
+            binding = get_s3_binding(connection, str(task["task_id"]))
+>           assert type(binding["scope_policy_version"]) is int
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'scope_policy_version'
+
+tests\test_m4_03_hf_01.py:55: KeyError
+_____ test_scope_revocation_invalidates_diagnosis_and_blocks_new_handoff ______
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/red-01-tmp/test_scope_revocation_invalida0')
+
+    def test_scope_revocation_invalidates_diagnosis_and_blocks_new_handoff(tmp_path: Path):
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import get_s3_outcome
+        from opspilot.domain.s3_handoff import submit_s3_handoff
+        from opspilot.domain.task_control import TaskControlError
+    
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERY_FAILED", "async-order-2", attempt_count=3,
+            max_attempts=3, retry_state="EXHAUSTED",
+        )
+        diagnosis, _ = _diagnose(db, identity, task)
+        with connect(db) as connection:
+            revision = int(connection.execute(
+                "SELECT control_revision FROM task_controls WHERE task_id=?", (task["task_id"],)
+            ).fetchone()[0])
+        _revoke_scope(db, task)
+    
+        outcome = get_s3_outcome(db, str(task["task_id"]))
+>       assert outcome["currentness"] == "INVALIDATED_BY_CURRENT_FACTS"
+E       AssertionError: assert 'CURRENT' == 'INVALIDATED_BY_CURRENT_FACTS'
+E         
+E         - INVALIDATED_BY_CURRENT_FACTS
+E         + CURRENT
+
+tests\test_m4_03_hf_01.py:83: AssertionError
+____ test_scope_revocation_denies_real_mcp_tool_call_and_web_resource_read ____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/red-01-tmp/test_scope_revocation_denies_r0')
+
+    def test_scope_revocation_denies_real_mcp_tool_call_and_web_resource_read(tmp_path: Path):
+        from fastapi.testclient import TestClient
+        from mcp.server.mcpserver.exceptions import ToolError
+        from opspilot.domain.database import reset_fixture
+        # The MCP server calls the same Domain binding check as the HTTP/Domain read.
+        from opspilot.domain.s3 import get_s3_binding, prepare_s3_fixture
+        from opspilot.domain.s3_mcp import build_s3_server
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+        from test_m4_01_dialogue_updates import PASSWORDS, _login
+    
+        db = tmp_path / "hf01-revoked-http-mcp.sqlite3"
+        reset_fixture(db, "S1_POS")
+        prepare_s3_fixture(db, "DELIVERY_FAILED", order_id="async-order-2")
+        from test_m4_03_s3 import _task
+        _, task = _task(db, "async-order-2")
+        with connect(db) as connection:
+            binding = get_s3_binding(connection, str(task["task_id"]))
+            connection.execute(
+                "UPDATE principal_scope_grants SET granted_scopes_json='[]', grant_version=grant_version+1 "
+                "WHERE tenant_id='tenant-a' AND principal_id=?", (binding["principal_id"],),
+            )
+    
+        server = build_s3_server(db, str(task["task_id"]), "http://127.0.0.1:1")
+        with pytest.raises(ToolError):
+            asyncio.run(server.call_tool("get_callback_delivery", {"reason": "verify current authorization"}))
+    
+        app = create_app(db_path=db, start_worker=False, credentials=PASSWORDS, expected_origin="http://testserver")
+        with TestClient(app, raise_server_exceptions=False) as client:
+            headers = _login(client, "support-a")
+            response = client.get("/api/s3/order-resources", headers=headers)
+>           assert response.status_code == 403
+E           assert 200 == 403
+E            +  where 200 = <Response [200 OK]>.status_code
+
+tests\test_m4_03_hf_01.py:132: AssertionError
+______________ test_scope_restore_requires_new_evidence_versions ______________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/red-01-tmp/test_scope_restore_requires_ne0')
+
+    def test_scope_restore_requires_new_evidence_versions(tmp_path: Path):
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import evaluate_s3_gate
+    
+        db, identity, task = _prepared_task(tmp_path, "DELIVERY_FAILED", "async-order-2")
+        _, evidence_ids = _diagnose(db, identity, task)
+        with connect(db) as connection:
+            principal = connection.execute("SELECT principal_id FROM task_bindings WHERE task_id=?", (task["task_id"],)).fetchone()[0]
+            connection.execute(
+                "UPDATE principal_scope_grants SET grant_version=grant_version+1 "
+                "WHERE tenant_id='tenant-a' AND principal_id=?", (principal,),
+            )
+            stale = evaluate_s3_gate(db, str(task["task_id"]), evidence_ids)
+>           assert stale["decision"] != "DIAGNOSED"
+E           AssertionError: assert 'DIAGNOSED' != 'DIAGNOSED'
+
+tests\test_m4_03_hf_01.py:149: AssertionError
+______ test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl _______
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-01/runs/red-01-tmp/test_receiver_sla_invalidates_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000232BA997820>
+
+    def test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl(tmp_path: Path, monkeypatch):
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import evaluate_s3_gate, get_s3_outcome
+        from opspilot.domain.s3_handoff import submit_s3_handoff
+        from opspilot.domain.task_control import TaskControlError
+        import opspilot.domain.s3 as s3
+    
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERED_PENDING", "async-order-2", queue_age_seconds=299,
+            processing_sla_seconds=300,
+        )
+        clock = {"now": datetime.now(timezone.utc)}
+    
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                current = clock["now"]
+                return current if tz is not None else current.replace(tzinfo=None)
+    
+        monkeypatch.setattr(s3, "datetime", FrozenDateTime)
+        diagnosis, evidence_ids = _diagnose(db, identity, task, state="DELIVERED_PENDING")
+        assert diagnosis["outcome"] == "RECEIVER_PROCESSING_UNCONFIRMED"
+        assert get_s3_outcome(db, str(task["task_id"]))["handling_direction"] == "WAIT_FOR_RECEIVER_PROCESSING"
+    
+        with connect(db) as connection:
+            revision = int(connection.execute("SELECT control_revision FROM task_controls WHERE task_id=?", (task["task_id"],)).fetchone()[0])
+        clock["now"] += timedelta(seconds=2)
+        stale = get_s3_outcome(db, str(task["task_id"]))
+>       assert stale["currentness"] == "INVALIDATED_BY_CURRENT_FACTS"
+E       AssertionError: assert 'CURRENT' == 'INVALIDATED_BY_CURRENT_FACTS'
+E         
+E         - INVALIDATED_BY_CURRENT_FACTS
+E         + CURRENT
+
+tests\test_m4_03_hf_01.py:186: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_03_hf_01.py::test_current_s3_binding_uses_same_versioned_authorization_snapshot
+FAILED tests/test_m4_03_hf_01.py::test_scope_revocation_invalidates_diagnosis_and_blocks_new_handoff
+FAILED tests/test_m4_03_hf_01.py::test_scope_revocation_denies_real_mcp_tool_call_and_web_resource_read
+FAILED tests/test_m4_03_hf_01.py::test_scope_restore_requires_new_evidence_versions
+FAILED tests/test_m4_03_hf_01.py::test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl
+5 failed in 9.36s
