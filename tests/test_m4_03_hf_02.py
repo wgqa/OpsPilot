@@ -60,6 +60,17 @@ def _event_app(db: Path):
                       expected_origin="http://testserver")
 
 
+def _call_s3_tool(server, name: str, args: dict[str, object]):
+    from mcp.server.mcpserver.context import Context
+    from mcp.types import CallToolRequestParams
+
+    context = Context(
+        mcp_server=server,
+        input_params=CallToolRequestParams(name=name, arguments=args),
+    )
+    return asyncio.run(server.call_tool(name, args, context))
+
+
 def test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff(tmp_path: Path):
     from fastapi.testclient import TestClient
     from opspilot.domain.database import connect
@@ -178,6 +189,36 @@ def test_revoked_support_sse_uses_same_s3_event_filter(tmp_path: Path, monkeypat
     })
 
 
+def test_scope_revocation_audits_task_run_inspector_context_chunks_and_messages(tmp_path: Path):
+    from fastapi.testclient import TestClient
+    from test_m4_01_dialogue_updates import _login
+
+    db, _, task, accepted = _accepted_case(tmp_path)
+    _revoke_scope(db, task)
+    with TestClient(_event_app(db), raise_server_exceptions=False) as client:
+        support = _login(client, "support-a")
+        task_view = client.get(f"/api/tasks/{task['task_id']}", headers=support)
+        run_view = client.get(f"/api/runs/{task['run_id']}", headers=support)
+        inspector = client.get(f"/api/tasks/{task['task_id']}/inspector", headers=support)
+        messages = client.get(f"/api/sessions/{task['session_id']}/messages", headers=support)
+        context = client.get(f"/api/runs/{task['run_id']}/context", headers=support)
+        chunks = client.get(f"/api/runs/{task['run_id']}/chunks", headers=support)
+    assert task_view.status_code == 200 and run_view.status_code == 200
+    assert inspector.status_code == 200 and messages.status_code == 200
+    for response in (task_view, run_view, inspector, messages, context, chunks):
+        assert accepted["receipt_id"] not in response.text
+        assert accepted["queue_entry_id"] not in response.text
+        assert "HANDOFF_ACCEPTED" not in response.text
+    assert "async-order-2" not in task_view.text
+    assert "async-order-2" not in run_view.text
+    assert "async-order-2" not in inspector.text
+    assert any("订单接口返回" in item["body"] for item in messages.json()["items"])
+    # Run Context and chat chunks only accept CHAT_READONLY Runs; this S3
+    # investigator Run cannot be used as a second fact-reading route.
+    assert context.status_code != 200
+    assert chunks.status_code != 200
+
+
 @pytest.mark.parametrize(("table", "column", "where", "params"), [
     ("route_scope_policies", "scope_policy_version", "tenant_id=? AND service_id=? AND route=?",
      ("tenant-a", "orders-async-demo", "/api/async-orders/async-order")),
@@ -245,7 +286,7 @@ def test_fractional_scope_policy_version_fails_closed_across_read_surfaces(tmp_p
     else:
         server = build_s3_server(db, str(task["task_id"]), "http://127.0.0.1:1")
         with pytest.raises(ToolError):
-            asyncio.run(server.call_tool("get_order_status", {"reason": "validate strict scope version"}))
+            _call_s3_tool(server, "get_order_status", {"reason": "validate strict scope version"})
 
 
 def _set_accepted_at(db: Path, accepted_at: str) -> None:
@@ -361,8 +402,6 @@ def test_sla_expiry_at_exact_deadline_keeps_evidence_but_invalidates_immutable_w
 def _run_mcp_facts(db: Path, identity, task: dict[str, object], run_id: str, server) -> list[str]:
     from opspilot.domain.d2 import digest_json, finish_attempt, record_tool_observation, reserve_attempt
     from opspilot.domain.investigation_context import load_investigation_context
-    from mcp.server.mcpserver.context import Context
-    from mcp.types import CallToolRequestParams
 
     evidence_ids: list[str] = []
     for tool in ("get_order_status", "get_callback_delivery", "get_receiver_processing"):
@@ -377,11 +416,7 @@ def _run_mcp_facts(db: Path, identity, task: dict[str, object], run_id: str, ser
         # MCPServer.call_tool() is the real in-process server path; provide the
         # same request params that _handle_call_tool() normally attaches so the
         # server can enforce its raw argument allowlist.
-        context = Context(
-            mcp_server=server,
-            input_params=CallToolRequestParams(name=tool, arguments=args),
-        )
-        result = asyncio.run(server.call_tool(tool, args, context))
+        result = _call_s3_tool(server, tool, args)
         assert not result.is_error
         value = result.structured_content
         if value is None:
