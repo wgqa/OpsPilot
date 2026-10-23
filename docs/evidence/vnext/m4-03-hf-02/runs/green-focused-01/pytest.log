@@ -1,0 +1,138 @@
+F.................FFF..F                                                 [100%]
+================================== FAILURES ===================================
+___ test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff ____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-02/runs/green-focused-01/pytest-tmp/test_revoked_support_event_his0')
+
+    def test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff(tmp_path: Path):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.events import list_session_events
+        from opspilot.domain.task_control import trusted_identity
+        from test_m4_01_dialogue_updates import _login
+    
+        db, identity, task, accepted = _accepted_case(tmp_path)
+        with connect(db) as connection:
+            before = list_session_events(db, str(task["session_id"]), identity)
+        visible_kinds = {str(item["event_kind"]) for item in before}
+        assert "S3_DIAGNOSIS_FROZEN" in visible_kinds
+        assert "S3_HANDOFF_ACCEPTED" in visible_kinds
+        accepted_seq = max(int(item["event_seq"]) for item in before
+                           if item["event_kind"] == "S3_HANDOFF_ACCEPTED")
+        note_seq = int(_add_normal_event(db, task))
+        _revoke_scope(db, task)
+    
+        with TestClient(_event_app(db), raise_server_exceptions=False) as client:
+            support_headers = _login(client, "support-a")
+            response = client.get(
+                f"/api/sessions/{task['session_id']}/events/history", headers=support_headers,
+            )
+            assert response.status_code == 200
+            payload = response.json()
+            events = payload["items"]
+            kinds = {item["event_kind"] for item in events}
+            assert "S3_DIAGNOSIS_FROZEN" not in kinds, f"revoked S3 diagnosis leaked: {events!r}"
+            assert "S3_HANDOFF_ACCEPTED" not in kinds, f"revoked S3 receipt leaked: {events!r}"
+            serialized = json.dumps(events, ensure_ascii=False)
+            assert accepted["receipt_id"] not in serialized
+            assert accepted["queue_entry_id"] not in serialized
+            assert "async-order-2" not in serialized
+            assert "HANDOFF_ACCEPTED" not in serialized
+            assert "NORMAL_SESSION_NOTE" in kinds
+            assert int(payload["next_after"]) >= note_seq > accepted_seq
+    
+            resumed = client.get(
+                f"/api/sessions/{task['session_id']}/events/history",
+                params={"after": 0}, headers={**support_headers, "Last-Event-ID": str(accepted_seq)},
+            )
+            assert resumed.status_code == 200
+            assert all(item["event_kind"] != "S3_HANDOFF_ACCEPTED" for item in resumed.json()["items"])
+            assert "NORMAL_SESSION_NOTE" in {item["event_kind"] for item in resumed.json()["items"]}
+    
+            owner_handoff = client.get(f"/api/tasks/{task['task_id']}/s3-handoff", headers=support_headers)
+            assert owner_handoff.status_code == 403
+            approver_headers = _login(client, "approver-a")
+            audit = client.get(f"/api/tasks/{task['task_id']}/s3-handoff", headers=approver_headers)
+            assert audit.status_code == 200
+            assert audit.json()["handoff_receipt"]["receipt_id"] == accepted["receipt_id"]
+            assert "diagnosis_receipt" not in audit.json()
+>           assert client.get(
+                f"/api/sessions/{task['session_id']}/events/history", headers=approver_headers,
+            ).status_code == 403
+E           AssertionError: assert 404 == 403
+E            +  where 404 = <Response [404 Not Found]>.status_code
+E            +    where <Response [404 Not Found]> = get('/api/sessions/session-bcbbb8dc-6f87-4943-84f7-4b47ebcb09a2/events/history', headers={'Origin': 'http://testserver', 'X-CSRF-Token': 'JPlhTPcsfXfpVBtnwW-5L3id1TAHC7k78rfKq6ryZJI'})
+E            +      where get = <starlette.testclient.TestClient object at 0x000001F9B25BF620>.get
+
+tests\test_m4_03_hf_02.py:126: AssertionError
+_ test_fractional_scope_policy_version_fails_closed_across_read_surfaces[domain] _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-02/runs/green-focused-01/pytest-tmp/test_fractional_scope_policy_v0')
+surface = 'domain'
+
+    @pytest.mark.parametrize("surface", ["domain", "web", "mcp"])
+    def test_fractional_scope_policy_version_fails_closed_across_read_surfaces(tmp_path: Path, surface: str):
+        from fastapi.testclient import TestClient
+>       from mcp.server.mcpserver.exceptions import ToolError
+E       ModuleNotFoundError: No module named 'mcp'
+
+tests\test_m4_03_hf_02.py:330: ModuleNotFoundError
+_ test_fractional_scope_policy_version_fails_closed_across_read_surfaces[web] _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-02/runs/green-focused-01/pytest-tmp/test_fractional_scope_policy_v1')
+surface = 'web'
+
+    @pytest.mark.parametrize("surface", ["domain", "web", "mcp"])
+    def test_fractional_scope_policy_version_fails_closed_across_read_surfaces(tmp_path: Path, surface: str):
+        from fastapi.testclient import TestClient
+>       from mcp.server.mcpserver.exceptions import ToolError
+E       ModuleNotFoundError: No module named 'mcp'
+
+tests\test_m4_03_hf_02.py:330: ModuleNotFoundError
+_ test_fractional_scope_policy_version_fails_closed_across_read_surfaces[mcp] _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-02/runs/green-focused-01/pytest-tmp/test_fractional_scope_policy_v2')
+surface = 'mcp'
+
+    @pytest.mark.parametrize("surface", ["domain", "web", "mcp"])
+    def test_fractional_scope_policy_version_fails_closed_across_read_surfaces(tmp_path: Path, surface: str):
+        from fastapi.testclient import TestClient
+>       from mcp.server.mcpserver.exceptions import ToolError
+E       ModuleNotFoundError: No module named 'mcp'
+
+tests\test_m4_03_hf_02.py:330: ModuleNotFoundError
+___ test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff ____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/docs/evidence/vnext/m4-03-hf-02/runs/green-focused-01/pytest-tmp/test_sla_recovery_uses_fresh_r0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F9B2DEA140>
+
+    def test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff(tmp_path: Path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.api import make_server
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import get_s3_outcome, persist_s3_diagnosis
+        from opspilot.domain.s3_handoff import submit_s3_handoff
+>       from opspilot.domain.s3_mcp import build_s3_server
+
+tests\test_m4_03_hf_02.py:534: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    from __future__ import annotations
+    
+>   from mcp.server import MCPServer
+E   ModuleNotFoundError: No module named 'mcp'
+
+opspilot\domain\s3_mcp.py:3: ModuleNotFoundError
+============================== warnings summary ===============================
+tests/test_m4_03_hf_02.py::test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_m4_03_hf_02.py::test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff
+FAILED tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[domain]
+FAILED tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[web]
+FAILED tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[mcp]
+FAILED tests/test_m4_03_hf_02.py::test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff
+5 failed, 19 passed, 1 warning in 20.60s

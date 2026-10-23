@@ -1,0 +1,121 @@
+{
+  "task": "OpsPilot vNext M4-03-HF-02",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "baseline": {
+    "requested": "afe3c03a756e2a60e454e0057484017448942d40",
+    "actual_head_at_start": "afe3c03a756e2a60e454e0057484017448942d40",
+    "origin_main_at_start": "afe3c03a756e2a60e454e0057484017448942d40"
+  },
+  "commits": {
+    "freeze": "80c5995dfda10166fb2cc75ff34efdbddfd855bb",
+    "freeze_supplements": [
+      "256d1d3a3bb8fa3fa9fbdb0fb9cabe2c59354c4c",
+      "e40bd09e36dc2e47b26fbc1f65633521da773eca",
+      "243965cd77f36cba7d0c604e8b1d475440006be1",
+      "0ebc022695ccf857dc26d46a6946676ed046dc72",
+      "cbfbece5c98e27df585b607809badb4e3869be62",
+      "a0436bbf150e4ed2c912114048c54da4cfc4f264",
+      "36bfb057fd8d78a4b8c2edb73e29acc86d661f5a"
+    ],
+    "implementation": "029e7399f83e1f03c8ae6c6e5afccf38256c8cff"
+  },
+  "environment": {
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "mcp": "2.3.0",
+    "fastapi": "0.137.1",
+    "dependency_files_changed": false,
+    "paid_model_calls": 0
+  },
+  "runs": [
+    {
+      "name": "initial RED with MCP harness defect",
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_03_hf_02.py --basetemp docs/evidence/vnext/m4-03-hf-02/runs/red-basetemp -q",
+      "exit_code": 1,
+      "result": "19 failed, 3 passed; direct in-process MCP context missing",
+      "log": "runs/red-01-pytest.log"
+    },
+    {
+      "name": "final frozen baseline RED after MCP harness repair",
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_03_hf_02.py --basetemp docs/evidence/vnext/m4-03-hf-02/runs/red-final-basetemp -q",
+      "exit_code": 1,
+      "result": "18 failed, 4 passed; baseline authorization and history-read defects reproduced",
+      "log": "runs/red-04-final-baseline.log"
+    },
+    {
+      "name": "MCP harness verification",
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[mcp] --basetemp docs/evidence/vnext/m4-03-hf-02/runs/red-verify-basetemp -q",
+      "exit_code": 0,
+      "result": "1 passed against live local HTTP and registered MCP Server; verified test path",
+      "log": "runs/red-03-harness-verification.log"
+    },
+    {
+      "name": "global Python environment attempt",
+      "command": "python -m pytest tests/test_m4_03_hf_02.py --basetemp docs/evidence/vnext/m4-03-hf-02/runs/green-focused-01/pytest-tmp -q",
+      "exit_code": 1,
+      "result": "19 passed, 5 failed; global Python lacks mcp and one existing ACL expectation was overly specific",
+      "log": "runs/green-focused-01/pytest.log"
+    },
+    {
+      "name": "project environment test-harness correction",
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_03_hf_02.py --basetemp docs/evidence/vnext/m4-03-hf-02/runs/green-focused-02/pytest-tmp -q",
+      "exit_code": 1,
+      "result": "23 passed, 1 failed; test client had switched its cookie to APPROVER before the remaining SUPPORT assertions",
+      "log": "runs/green-focused-02/pytest.log"
+    },
+    {
+      "name": "HF-02 focused GREEN",
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_03_hf_02.py --basetemp docs/evidence/vnext/m4-03-hf-02/runs/green-focused-03/pytest-tmp -q",
+      "exit_code": 0,
+      "result": "24 passed",
+      "log": "runs/green-focused-03/pytest.log"
+    },
+    {
+      "name": "HF-02 focused GREEN with actual trace capture",
+      "command": "$env:OPSPILOT_HF02_TRACE_PATH='docs/evidence/vnext/m4-03-hf-02/TRACE.jsonl'; .\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_03_hf_02.py --basetemp docs/evidence/vnext/m4-03-hf-02/runs/green-trace-01/pytest-tmp -q",
+      "exit_code": 0,
+      "result": "24 passed; TRACE.jsonl was written by the test observations",
+      "log": "runs/green-trace-01/pytest.log",
+      "trace": "TRACE.jsonl"
+    },
+    {
+      "name": "HF-01, M4-03 S3 and M4-02 S3 regression",
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-02/runs/regression-s3-01/pytest-tmp tests/test_m4_03_hf_01.py tests/test_m4_03_s3.py tests/test_m4_02_s3.py",
+      "exit_code": 0,
+      "result": "50 passed",
+      "log": "runs/regression-s3-01/pytest.log"
+    },
+    {
+      "name": "existing S1/S2 security regression",
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-02/runs/regression-security-01/pytest-tmp tests/test_d2_investigation.py tests/test_d3_actions.py tests/test_d4_recovery.py tests/test_m1_task_control.py tests/test_m1_hf_worker.py tests/test_m1_worker_recovery.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py tests/test_m2_03_handoff.py tests/test_m4_01_dialogue_update_safety.py",
+      "exit_code": 0,
+      "result": "104 passed",
+      "log": "runs/regression-security-01/pytest.log"
+    },
+    {
+      "name": "full pytest suite",
+      "command": ".\\.venv\\Scripts\\python.exe -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-02/runs/full-01/pytest-tmp",
+      "exit_code": 0,
+      "result": "316 passed in 296.27s",
+      "log": "runs/full-01/pytest.log"
+    }
+  ],
+  "scope_audit": {
+    "history_and_sse_filtered_by_current_s3_scope": true,
+    "chat_context_and_chunks_recheck_current_s3_scope": true,
+    "s3_bound_assistant_message_redacted_after_revocation": true,
+    "user_messages_preserved": true,
+    "approver_receipt_summary_read_only": true,
+    "other_equivalent_receipt_leak_found": false
+  },
+  "fresh_sla_trace": {
+    "initial_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+    "deadline_old_diagnosis": "INVALIDATED_BY_CURRENT_FACTS",
+    "new_direction": "CONTACT_RECEIVER_OPERATOR",
+    "http_status": 200,
+    "tools": ["get_order_status", "get_callback_delivery", "get_receiver_processing"],
+    "receipt_replay_same_id": true,
+    "queue_receipt_outbox_counts": [1, 1, 1]
+  },
+  "final_acceptance": "candidate_for_independent_main_agent_review"
+}

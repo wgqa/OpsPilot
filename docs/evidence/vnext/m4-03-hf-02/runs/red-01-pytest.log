@@ -1,0 +1,158 @@
+FFFFFFFFFFFFFFFFFF...F                                                   [100%]
+================================== FAILURES ===================================
+___ test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff ____
+tests\test_m4_03_hf_02.py:90: in test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff
+    assert "S3_DIAGNOSIS_FROZEN" not in kinds, f"revoked S3 diagnosis leaked: {events!r}"
+E   AssertionError: revoked S3 diagnosis leaked: [{'event_seq': 1, 'event_id': 'event-ab5ef84b-8f03-4b95-b3b9-b5bbd06b3ffe', 'source_kind': 'SESSION', 'source_id': 'session-b2761b1a-527e-4881-ae48-957a7a96e43c', 'event_kind': 'SESSION_CREATED', 'tenant_id': 'tenant-a', 'session_id': 'session-b2761b1a-527e-4881-ae48-957a7a96e43c', 'task_id': None, 'run_id': None, 'happened_at': '2026-10-23T13:40:50.786+00:00', 'payload_json': '{"status":"CREATED"}', 'payload': {'status': 'CREATED'}}, {'event_seq': 2, 'event_id': 'event-732e411c-062c-4c12-ac02-7c750745b820', 'source_kind': 'COMMAND', 'source_id': 'command-f876d8d1-446f-45a6-a2ed-77cb237a190a', 'event_kind': 'TASK_CREATED', 'tenant_id': 'tenant-a', 'session_id': 'session-b2761b1a-527e-4881-ae48-957a7a96e43c', 'task_id': 'task-6916a683-308a-455f-90f8-b01d9476ee2c', 'run_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151', 'happened_at': '2026-10-23T13:40:50.798+00:00', 'payload_json': '{"command_id":"command-f876d8d1-446f-45a6-a2ed-77cb237a190a","message_id":"message-b1d38db0-022f-41a2-ba44-64981ceae40b","run_id":"run-27e24c01-ce6c-4d71-92f3-5760a9c2e151","status":"QUEUED","task_id":"task-6916a683-308a-455f-90f8-b01d9476ee2c"}', 'payload': {'command_id': 'command-f876d8d1-446f-45a6-a2ed-77cb237a190a', 'message_id': 'message-b1d38db0-022f-41a2-ba44-64981ceae40b', 'run_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151', 'status': 'QUEUED', 'task_id': 'task-6916a683-308a-455f-90f8-b01d9476ee2c'}}, {'event_seq': 3, 'event_id': 'event-093adcdd-8e4d-4fa8-9bad-72ec5389c3bd', 'source_kind': 'COMMAND', 'source_id': 'command-f876d8d1-446f-45a6-a2ed-77cb237a190a', 'event_kind': 'MESSAGE_ACCEPTED', 'tenant_id': 'tenant-a', 'session_id': 'session-b2761b1a-527e-4881-ae48-957a7a96e43c', 'task_id': 'task-6916a683-308a-455f-90f8-b01d9476ee2c', 'run_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151', 'happened_at': '2026-10-23T13:40:50.798+00:00', 'payload_json': '{"application_state":"RECEIVED_NOT_APPLIED","command_id":"command-f876d8d1-446f-45a6-a2ed-77cb237a190a","input_kind":"CHAT_READONLY","message_id":"message-b1d38db0-022f-41a2-ba44-64981ceae40b","run_id":"run-27e24c01-ce6c-4d71-92f3-5760a9c2e151","sequence":1}', 'payload': {'application_state': 'RECEIVED_NOT_APPLIED', 'command_id': 'command-f876d8d1-446f-45a6-a2ed-77cb237a190a', 'input_kind': 'CHAT_READONLY', 'message_id': 'message-b1d38db0-022f-41a2-ba44-64981ceae40b', 'run_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151', 'sequence': 1}}, {'event_seq': 4, 'event_id': 'event-847e69fe-f1b6-48c8-bbc2-0a75cd41b1a7', 'source_kind': 'S3_DIAGNOSIS', 'source_id': 's3-diagnosis-fa689382-4c13-413b-815d-52ec656ffc1a', 'event_kind': 'S3_DIAGNOSIS_FROZEN', 'tenant_id': 'tenant-a', 'session_id': 'session-b2761b1a-527e-4881-ae48-957a7a96e43c', 'task_id': 'task-6916a683-308a-455f-90f8-b01d9476ee2c', 'run_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151', 'happened_at': '2026-10-23T13:40:51.770+00:00', 'payload_json': '{"business_outcome":"CALLBACK_DELIVERY_FAILED","receipt_id":"s3-diagnosis-fa689382-4c13-413b-815d-52ec656ffc1a","recovered":false,"run_id":"run-27e24c01-ce6c-4d71-92f3-5760a9c2e151"}', 'payload': {'business_outcome': 'CALLBACK_DELIVERY_FAILED', 'receipt_id': 's3-diagnosis-fa689382-4c13-413b-815d-52ec656ffc1a', 'recovered': False, 'run_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151'}}, {'event_seq': 5, 'event_id': 'event-f7db02b2-7e93-4e00-be90-1d5cc8226f8a', 'source_kind': 'RUN', 'source_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151', 'event_kind': 'RUN_STATUS_SUCCEEDED', 'tenant_id': 'tenant-a', 'session_id': 'session-b2761b1a-527e-4881-ae48-957a7a96e43c', 'task_id': 'task-6916a683-308a-455f-90f8-b01d9476ee2c', 'run_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151', 'happened_at': '2026-10-23T13:40:51.780+00:00', 'payload_json': '{"reason_code":null,"run_id":"run-27e24c01-ce6c-4d71-92f3-5760a9c2e151","run_status":"SUCCEEDED"}', 'payload': {'reason_code': None, 'run_id': 'run-27e24c01-ce6c-4d71-92f3-5760a9c2e151', 'run_status': 'SUCCEEDED'}}, {'event_seq': 6, 'event_id': 'event-e4e757d9-c2d0-42fe-8277-63fb525c43b5', 'source_kind': 'S3_HANDOFF_RECEIPT', 'source_id': 's3-handoff-bb45e120-0ac9-4064-8a47-8d92496721fd', 'event_kind': 'S3_HANDOFF_ACCEPTED', 'tenant_id': 'tenant-a', 'session_id': 'session-b2761b1a-527e-4881-ae48-957a7a96e43c', 'task_id': 'task-6916a683-308a-455f-90f8-b01d9476ee2c', 'run_id': None, 'happened_at': '2026-10-23T13:40:51.793+00:00', 'payload_json': '{"business_outcome":"HANDOFF_ACCEPTED","operation_id":"hf01-race-0a47c34a-9604-4178-a431-82b4f30bfe1e","queue_entry_id":"s3-queue-d0dcfedd-db01-4ad4-bff9-9ca5ca33cc1f","receipt_id":"s3-handoff-bb45e120-0ac9-4064-8a47-8d92496721fd","recovered":false,"scope_authorized":false,"status":"ACCEPTED","task_id":"task-6916a683-308a-455f-90f8-b01d9476ee2c","task_status":"COMPLETED"}', 'payload': {'business_outcome': 'HANDOFF_ACCEPTED', 'operation_id': 'hf01-race-0a47c34a-9604-4178-a431-82b4f30bfe1e', 'queue_entry_id': 's3-queue-d0dcfedd-db01-4ad4-bff9-9ca5ca33cc1f', 'receipt_id': 's3-handoff-bb45e120-0ac9-4064-8a47-8d92496721fd', 'recovered': False, 'scope_authorized': False, 'status': 'ACCEPTED', 'task_id': 'task-6916a683-308a-455f-90f8-b01d9476ee2c', 'task_status': 'COMPLETED'}}, {'event_seq': 7, 'event_id': 'event-4c2ad824-d281-4515-b71d-6e8967eb48e2', 'source_kind': 'HF02_TEST_NOTE', 'source_id': 'hf02-normal-f7dbbe67-4d88-4f80-b34d-b66ff99df355', 'event_kind': 'NORMAL_SESSION_NOTE', 'tenant_id': 'tenant-a', 'session_id': 'session-b2761b1a-527e-4881-ae48-957a7a96e43c', 'task_id': None, 'run_id': None, 'happened_at': '2026-10-23T13:40:51.804+00:00', 'payload_json': '{"status":"AVAILABLE"}', 'payload': {'status': 'AVAILABLE'}}]
+E   assert 'S3_DIAGNOSIS_FROZEN' not in {'MESSAGE_ACCEPTED', 'NORMAL_SESSION_NOTE', 'RUN_STATUS_SUCCEEDED', 'S3_DIAGNOSIS_FROZEN', 'S3_HANDOFF_ACCEPTED', 'SESSION_CREATED', ...}
+_____________ test_revoked_support_sse_uses_same_s3_event_filter ______________
+tests\test_m4_03_hf_02.py:167: in test_revoked_support_sse_uses_same_s3_event_filter
+    assert accepted["receipt_id"] not in body
+E   assert 's3-handoff-...461597362b12' not in 'id: 1\neven...ILABLE"}\n\n'
+E     
+E     's3-handoff-82ea04f...3-afb4-461597362b12' is contained here:
+E     ?           ^^
+E       ipt_id": "s3-handoff-82ea04f4-0b5a-49f3-afb4-461597362b12", "recovered": false, "scope_authorized": false, "status": "ACCEPTED", "task_id": "task-5c8196d7-b8b3-42b0-9352-e08b0f894f2a", "task_status": "COMPLETED"}
+E     ?           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       
+E       id: 7...
+E     
+E     ...Full output truncated (3 lines hidden), use '-vv' to show
+_ test_fractional_authorization_versions_fail_closed_in_domain[route_scope_policies-scope_policy_version-tenant_id=? AND service_id=? AND route=?-params0] _
+tests\test_m4_03_hf_02.py:204: in test_fractional_authorization_versions_fail_closed_in_domain
+    with pytest.raises(ScopeDenied):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScopeDenied
+_ test_fractional_authorization_versions_fail_closed_in_domain[principal_scope_grants-grant_version-tenant_id=? AND principal_id=?-params1] _
+tests\test_m4_03_hf_02.py:204: in test_fractional_authorization_versions_fail_closed_in_domain
+    with pytest.raises(ScopeDenied):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScopeDenied
+_ test_fractional_authorization_versions_fail_closed_in_domain[principals-principal_version-tenant_id=? AND principal_id=?-params2] _
+tests\test_m4_03_hf_02.py:204: in test_fractional_authorization_versions_fail_closed_in_domain
+    with pytest.raises(ScopeDenied):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScopeDenied
+_ test_fractional_authorization_versions_fail_closed_in_domain[auth_policies-policy_version-tenant_id=? AND service_id=?-params3] _
+tests\test_m4_03_hf_02.py:204: in test_fractional_authorization_versions_fail_closed_in_domain
+    with pytest.raises(ScopeDenied):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScopeDenied
+_ test_fractional_authorization_versions_fail_closed_in_domain[integrations-config_version-tenant_id=? AND integration_id=?-params4] _
+tests\test_m4_03_hf_02.py:204: in test_fractional_authorization_versions_fail_closed_in_domain
+    with pytest.raises(ScopeDenied):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScopeDenied
+_______________ test_s3_positive_version_parser_is_strict[True] _______________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+______________ test_s3_positive_version_parser_is_strict[False] _______________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+_______________ test_s3_positive_version_parser_is_strict[1.0] ________________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+_______________ test_s3_positive_version_parser_is_strict[1.5] ________________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+________________ test_s3_positive_version_parser_is_strict[1] _________________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+_______________ test_s3_positive_version_parser_is_strict[bad] ________________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+_______________ test_s3_positive_version_parser_is_strict[None] _______________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+________________ test_s3_positive_version_parser_is_strict[0] _________________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+________________ test_s3_positive_version_parser_is_strict[-1] ________________
+tests\test_m4_03_hf_02.py:210: in test_s3_positive_version_parser_is_strict
+    from opspilot.domain.s3 import _strict_positive_version
+E   ImportError: cannot import name '_strict_positive_version' from 'opspilot.domain.s3' (D:\ѧϰ\agent����Ŀ\opspilot\domain\s3.py)
+_ test_fractional_scope_policy_version_fails_closed_across_read_surfaces[domain] _
+tests\test_m4_03_hf_02.py:236: in test_fractional_scope_policy_version_fails_closed_across_read_surfaces
+    with connect(db) as connection, pytest.raises(ScopeDenied):
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ScopeDenied
+_ test_fractional_scope_policy_version_fails_closed_across_read_surfaces[web] _
+tests\test_m4_03_hf_02.py:243: in test_fractional_scope_policy_version_fails_closed_across_read_surfaces
+    assert response.status_code != 200
+E   assert 200 != 200
+E    +  where 200 = <Response [200 OK]>.status_code
+___ test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff ____
+.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py:179: in run
+    result = await self.fn_metadata.call_fn(self.fn, self.is_async, validated, pass_directly)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\mcp\server\mcpserver\utilities\func_metadata.py:164: in call_fn
+    return await anyio.to_thread.run_sync(functools.partial(fn, **kwargs))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\anyio\to_thread.py:65: in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+.venv\Lib\site-packages\anyio\_backends\_asyncio.py:2706: in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+.venv\Lib\site-packages\anyio\_backends\_asyncio.py:1100: in run
+    result = context.run(func, *args)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\domain\s3_mcp.py:41: in get_order_status
+    validate(reason,ctx,{"reason"})
+opspilot\domain\s3_mcp.py:29: in validate
+    raise ToolError("S3_INVALID_ARGUMENTS")
+E   mcp.server.mcpserver.exceptions.ToolError: S3_INVALID_ARGUMENTS
+
+The above exception was the direct cause of the following exception:
+tests\test_m4_03_hf_02.py:441: in test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff
+    initial_ids = _run_mcp_facts(db, identity, task, str(task["run_id"]), initial_server)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_m4_03_hf_02.py:375: in _run_mcp_facts
+    result = asyncio.run(server.call_tool(tool, args))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\mcp\server\mcpserver\server.py:548: in call_tool
+    return await self._tool_manager.call_tool(name, arguments, context, convert_result=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\mcp\server\mcpserver\tools\tool_manager.py:87: in call_tool
+    return await tool.run(arguments, context, convert_result=convert_result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py:210: in run
+    raise ToolError(f"Error executing tool {self.name}: {exc}") from exc
+E   mcp.server.mcpserver.exceptions.ToolError: Error executing tool get_order_status: S3_INVALID_ARGUMENTS
+=========================== short test summary info ===========================
+FAILED tests/test_m4_03_hf_02.py::test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff
+FAILED tests/test_m4_03_hf_02.py::test_revoked_support_sse_uses_same_s3_event_filter
+FAILED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[route_scope_policies-scope_policy_version-tenant_id=? AND service_id=? AND route=?-params0]
+FAILED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[principal_scope_grants-grant_version-tenant_id=? AND principal_id=?-params1]
+FAILED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[principals-principal_version-tenant_id=? AND principal_id=?-params2]
+FAILED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[auth_policies-policy_version-tenant_id=? AND service_id=?-params3]
+FAILED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[integrations-config_version-tenant_id=? AND integration_id=?-params4]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[True]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[False]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[1.0]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[1.5]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[1]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[bad]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[None]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[0]
+FAILED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[-1]
+FAILED tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[domain]
+FAILED tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[web]
+FAILED tests/test_m4_03_hf_02.py::test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff
+19 failed, 3 passed in 22.58s
