@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "work_item": "M4-03-HF-01",
+  "baseline": "30b1b466fbdd2c58e36c90b510ba04f7ee6af3d0",
+  "frozen_acceptance_commit": "bc4adb4f456737fef49827e8bd073887fcf5a17e",
+  "implementation_commit": "e6aeab5e078f057b6afb6754deb217a973b153cd",
+  "branch": "main",
+  "runtime": {
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "model_calls": 0,
+    "mcp_transport": "in-process MCP Server call_tool",
+    "database": "SQLite"
+  },
+  "results": [
+    {
+      "name": "frozen_baseline_red",
+      "command": "python -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-01/runs/red-03-tmp tests/test_m4_03_hf_01.py",
+      "passed": 4,
+      "failed": 10,
+      "errors": 0,
+      "exit_code": 1,
+      "log": "runs/red-03-pytest.log"
+    },
+    {
+      "name": "frozen_baseline_red_supplement",
+      "command": "python -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-01/runs/red-03-tmp tests/test_m4_03_hf_01.py",
+      "passed": 4,
+      "failed": 11,
+      "errors": 0,
+      "exit_code": 1,
+      "log": "runs/red-04-pytest.log",
+      "note": "Includes a test setup failure for a credential value rejected by the credentials foreign key; this fixture issue is recorded and was corrected before final verification."
+    },
+    {
+      "name": "S3_M4-02_and_HF-01_final",
+      "command": "python -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-01/runs/s3-final-tmp tests/test_m4_03_hf_01.py tests/test_m4_03_s3.py tests/test_m4_02_s3.py",
+      "passed": 50,
+      "failed": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "log": "runs/s3-final-01-pytest.log"
+    },
+    {
+      "name": "S1_S2_security_regressions",
+      "command": "python -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-01/runs/s1-s2-security-tmp tests/test_d2_investigation.py tests/test_d3_actions.py tests/test_d4_recovery.py tests/test_m1_task_control.py tests/test_m1_hf_worker.py tests/test_m1_worker_recovery.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py tests/test_m2_03_handoff.py tests/test_m4_01_dialogue_update_safety.py",
+      "passed": 104,
+      "failed": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "log": "runs/s1-s2-security-01-pytest.log"
+    },
+    {
+      "name": "full_pytest_initial",
+      "command": "python -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-01/runs/full-pytest-tmp",
+      "passed": 291,
+      "failed": 1,
+      "errors": 0,
+      "exit_code": 1,
+      "log": "runs/full-01-pytest.log",
+      "failure": "SLA test fixture could cross the deadline during setup; no product assertion failed before the test's initial WAIT assertion."
+    },
+    {
+      "name": "full_pytest_final",
+      "command": "python -m pytest -q --basetemp docs/evidence/vnext/m4-03-hf-01/runs/full-pytest-rerun-tmp",
+      "passed": 292,
+      "failed": 0,
+      "errors": 0,
+      "exit_code": 0,
+      "log": "runs/full-02-pytest.log"
+    }
+  ],
+  "acceptance_candidate": true,
+  "main_agent_review": "pending"
+}
