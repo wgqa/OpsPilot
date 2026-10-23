@@ -1,0 +1,79 @@
+F
+================================== FAILURES ===================================
+______ test_three_current_factual_outcomes[PROCESSING-ORDER_PROCESSING] _______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-ttl-fix-01/artifacts/pytest-m4-ttl-fix-01-s3-domain-basetemp/test_three_current_factual_out0')
+state = 'PROCESSING', outcome = 'ORDER_PROCESSING'
+
+    @pytest.mark.parametrize("state,outcome", [
+        ("PROCESSING", "ORDER_PROCESSING"),
+        ("DELIVERY_FAILED", "CALLBACK_DELIVERY_FAILED"),
+        ("DELIVERED_PENDING", "RECEIVER_PROCESSING_UNCONFIRMED"),
+    ])
+    def test_three_current_factual_outcomes(tmp_path, state, outcome):
+        from opspilot.domain.s3 import evaluate_s3_gate
+        db, task, setup = prepared(tmp_path, state)
+        order, delivery, receiver = facts(db, task)
+>       ids = [observe(db, task, name, fact) for name, fact in zip(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            ("get_order_status", "get_callback_delivery", "get_receiver_processing"), (order, delivery, receiver),
+        )]
+
+tests\test_m4_02_s3.py:60: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_02_s3.py:31: in observe
+    return record_s3_observation(db, task, tool, result)["evidence_id"]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-ttl-fix-01/artifacts/pytest-m4-ttl-fix-01-s3-domain-basetemp/test_three_current_factual_out0/s3.sqlite3')
+task = {'status': 'ACCEPTED', 'command_id': 'command-12cc7a04-6c5a-4a25-8c10-d8912bdd0c1e', 'session_id': 'session-d922e522-0fe5-4f88-b2a6-9bb82848688f', 'task_id': 'task-0dfd1716-cebc-4fdb-9fe0-7480d8241d7d', ...}
+tool_name = 'get_order_status'
+result = {'tenant_id': 'tenant-a', 'task_id': 'task-0dfd1716-cebc-4fdb-9fe0-7480d8241d7d', 'fact_type': 's3_order', 'resource_id': 'orders-async-demo:async-order', ...}
+run_id = None, arguments = None
+
+    def record_s3_observation(db, task, tool_name, result, *, run_id=None, arguments=None):
+        """Persist a test fact with the same Task/Run/Attempt chain as production.
+    
+        S3 Gate tests use deterministic Domain fact providers in place of MCP transport,
+        while the TTL integration test exercises the actual HTTP and MCP path.
+        This helper only builds valid run-scoped persistence for those Domain tests.
+        """
+        from opspilot.domain.database import connect
+        from opspilot.domain.d2 import (
+            attempt_counts, digest_json, finish_attempt, record_tool_observation, reserve_attempt,
+        )
+        from opspilot.domain.investigation_context import load_investigation_context
+        from opspilot.domain.task_control import (
+            apply_pending_critical_inputs, claim_task_run, trusted_identity,
+        )
+    
+        task_id = str(task["task_id"])
+        selected_run = str(run_id or task["run_id"])
+        with connect(db) as connection:
+            run = connection.execute(
+                "SELECT status FROM task_runs WHERE run_id=? AND task_id=?", (selected_run, task_id),
+            ).fetchone()
+            binding = connection.execute(
+                "SELECT actor_id FROM task_bindings WHERE task_id=?", (task_id,),
+            ).fetchone()
+            control = connection.execute(
+                "SELECT pending_critical_message_seq FROM task_controls WHERE task_id=?", (task_id,),
+            ).fetchone()
+        if run is None or binding is None:
+            raise AssertionError("S3 test observation requires a persisted Task and Run.")
+        identity = trusted_identity(db, str(binding["actor_id"]))
+        if str(run["status"]) == "PENDING":
+            claim_task_run(db, identity, selected_run)
+            apply_pending_critical_inputs(db, identity, selected_run)
+        elif str(run["status"]) == "RUNNING" and control and control["pending_critical_message_seq"] is not None:
+            apply_pending_critical_inputs(db, identity, selected_run)
+        elif str(run["status"]) != "RUNNING":
+>           raise AssertionError(f"Cannot add an observation to Run in {run['status']} state.")
+E           AssertionError: Cannot add an observation to Run in QUEUED state.
+
+tests\s3_observation_support.py:45: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_02_s3.py::test_three_current_factual_outcomes[PROCESSING-ORDER_PROCESSING]
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 1.36s

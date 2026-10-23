@@ -1,0 +1,77 @@
+........................................................................ [ 22%]
+........................................................................ [ 45%]
+.........F.............................................................. [ 67%]
+........................................................................ [ 90%]
+...............................                                          [100%]
+================================== FAILURES ===================================
+______________ test_hf_b_stale_gate_stops_after_no_tool_progress ______________
+
+demo_db = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-ttl-fix-01/artifacts/pytest-m4-ttl-fix-01-full-basetemp/test_hf_b_stale_gate_stops_aft0/domain.sqlite3')
+live_api = 'http://127.0.0.1:59665'
+
+    def test_hf_b_stale_gate_stops_after_no_tool_progress(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        """A genuine Run and checkpoint must not spend its entire budget repeating a no-op."""
+        from opspilot.config import ROOT
+    
+        reset_fixture(demo_db, "S2_SCOPE_DENIED")
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        created = create_task_with_initial_run(
+            demo_db, identity, session_id=session_id, service_id="orders-demo",
+            integration_id="integration-a", ticket_id="HF01-STALE-NOOP",
+            initial_message="���鵱ǰ�󶨶��������Ȩ�����⡣",
+            idempotency_key="hf01-stale-noop",
+        )
+        task_id, run_id = str(created["task_id"]), str(created["run_id"])
+    
+        # Seed an actual loopback HTTP Probe observation against this queued Run,
+        # then make its timestamp stale. The subprocess uses a deterministic no-tool
+        # model adapter to isolate the no-progress routing rule.
+        probe = probe_endpoint_fact(demo_db, task_id, "orders-demo", "integration-a", live_api)
+        attempt_id, _ = reserve_attempt(
+            demo_db, task_id, "MCP", 6, call_id="hf01-stale-seed-call",
+            tool_call_id="hf01-stale-seed-tool", tool_name="probe_endpoint",
+            argument_digest="hf01-stale-seed-args",
+        )
+        finish_attempt(demo_db, attempt_id, "OK")
+        observation = record_tool_observation(
+            demo_db, task_id=task_id, call_id="hf01-stale-seed-call", attempt_id=attempt_id,
+            tool_call_id="hf01-stale-seed-tool", tool_name="probe_endpoint",
+            arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+            status="OK", result=probe,
+        )
+        with connect(demo_db) as connection:
+            connection.execute("UPDATE d2_attempts SET run_id = ? WHERE attempt_id = ?", (run_id, attempt_id))
+            connection.execute(
+                "UPDATE d2_tool_observations SET created_at = '2000-01-01T00:00:00+00:00' "
+                "WHERE evidence_id = ?", (observation["evidence_id"],),
+            )
+            scope_write_count_before = connection.execute(
+                "SELECT (SELECT COUNT(*) FROM principal_scope_grants) + "
+                "(SELECT COUNT(*) FROM route_scope_policies)"
+            ).fetchone()[0]
+    
+        checkpoint_path = demo_db.parent / "hf01-stale-noop-checkpoint.sqlite3"
+        process_log_dir = ROOT / ".runtime" / "m2-02-hf-01" / "process-recovery" / uuid.uuid4().hex
+        process_log_dir.mkdir(parents=True, exist_ok=False)
+        worker = ROOT / "tests" / "m2_02_hf_01_worker.py"
+        common = [
+            sys.executable, "-X", "utf8", str(worker), "--db", str(demo_db),
+            "--checkpoint-db", str(checkpoint_path), "--task-id", task_id, "--run-id", run_id,
+        ]
+        pause = subprocess.run(
+            [*common, "--phase", "pause"], cwd=ROOT, capture_output=True,
+            text=True, encoding="utf-8", timeout=120,
+        )
+        (process_log_dir / "worker-pause.stdout.txt").write_text(pause.stdout, encoding="utf-8")
+        (process_log_dir / "worker-pause.stderr.txt").write_text(pause.stderr, encoding="utf-8")
+>       assert pause.returncode == 73
+E       assert 1 == 73
+E        +  where 1 = CompletedProcess(args=['D:\\ѧϰ\\agent����Ŀ\\.venv\\Scripts\\python.exe', '-X', 'utf8', 'C:\\Users\\tu me manques\\AppDat..., {MODEL_NAME}.")\nRuntimeError: Missing required model configuration: OPSPILOT_MODEL_API_KEY, OPSPILOT_MODEL_NAME.\n').returncode
+
+tests\test_m2_02_hf_01.py:236: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_hf_01.py::test_hf_b_stale_gate_stops_after_no_tool_progress
+1 failed, 318 passed in 318.81s (0:05:18)

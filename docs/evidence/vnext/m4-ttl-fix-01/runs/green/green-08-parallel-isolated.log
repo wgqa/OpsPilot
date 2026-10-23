@@ -1,0 +1,32 @@
+F
+================================== FAILURES ===================================
+_ test_parallel_provider_proposals_are_recorded_but_only_one_is_dispatchable __
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-ttl-fix-01/artifacts/pytest-m4-ttl-fix-01-s3-parallel-isolated/test_parallel_provider_proposa0')
+
+    def test_parallel_provider_proposals_are_recorded_but_only_one_is_dispatchable(tmp_path):
+        import asyncio
+        from langchain_core.messages import AIMessage
+        from opspilot.domain.task_control import claim_task_run,trusted_identity
+        from opspilot.domain.database import connect
+        from opspilot.s3_investigation import S3Nodes
+        db,task,_=prepared(tmp_path)
+        claim_task_run(db,trusted_identity(db,"support-a"),task["run_id"])
+        class DeliberatelyParallelModel:
+            def bind_tools(self,*_args,**_kwargs): return self
+            async def ainvoke(self,_messages):
+                return AIMessage(content="unit test: two proposals",id="unit-test-only",tool_calls=[
+                    {"id":"unit-order","name":"get_order_status","args":{"reason":"check lifecycle"}},
+                    {"id":"unit-delivery","name":"get_callback_delivery","args":{"reason":"check event"}},
+                ])
+        nodes=S3Nodes(db,task["task_id"],task["run_id"],DeliberatelyParallelModel(),"unit-test-model",None,[])
+        result=asyncio.run(nodes.investigate({"evidence_ids":[],"diagnosis_draft":{}}))
+>       assert len(result["pending_call_refs"]) == 1
+E       assert 0 == 1
+E        +  where 0 = len([])
+
+tests\test_m4_02_s3.py:334: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_02_s3.py::test_parallel_provider_proposals_are_recorded_but_only_one_is_dispatchable
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 2.87s
