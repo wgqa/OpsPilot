@@ -1,0 +1,113 @@
+{
+  "task": "M4-PREFLIGHT-01",
+  "status": "RED_REPRODUCED_NO_PRODUCT_FIX",
+  "baseline": {
+    "head": "bd58c66003c4e7fea660967c7a6a30aebcd63cd7",
+    "origin_main": "bd58c66003c4e7fea660967c7a6a30aebcd63cd7",
+    "tracked_worktree_changes": 0,
+    "formal_business_source_changes": 0,
+    "commit_or_push": false
+  },
+  "environment": {
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "mcp": "2.3.0",
+    "fastapi": "0.137.1",
+    "httpx": "0.28.1",
+    "model_calls": 0,
+    "paid_provider_calls": 0
+  },
+  "runs": [
+    {
+      "id": "syntax-check",
+      "command": ".venv/Scripts/python.exe -m py_compile docs/evidence/vnext/m4-preflight-01/RED/test_evidence_ttl_repeated_mcp_fetch.py",
+      "exit_code": 0,
+      "result": "PASS"
+    },
+    {
+      "id": "red-01",
+      "command": "PYTHONPATH=<repo> OPSPILOT_PREFLIGHT_TRACE_PATH=docs/evidence/vnext/m4-preflight-01/runs/TRACE-red-01.jsonl .venv/Scripts/python.exe -m pytest docs/evidence/vnext/m4-preflight-01/RED/test_evidence_ttl_repeated_mcp_fetch.py -q -s --basetemp docs/evidence/vnext/m4-preflight-01/runs/pytest-basetemp-red-01",
+      "exit_code": 1,
+      "result": "RED_GATE_REPRODUCED_SNAPSHOT_QUERY_SUBSEQUENTLY_CORRECTED",
+      "log": "runs/red-01-pytest.log",
+      "trace": "runs/TRACE-red-01.jsonl",
+      "notes": "Gate failure was observed, but this first attempt's business snapshot query did not filter tenant/service and selected a different same-order fixture row. Preserve as an original run; do not use its unchanged-business assertion as proof."
+    },
+    {
+      "id": "red-02",
+      "command": "PYTHONPATH=<repo> OPSPILOT_PREFLIGHT_TRACE_PATH=docs/evidence/vnext/m4-preflight-01/runs/TRACE-red-02.jsonl .venv/Scripts/python.exe -m pytest docs/evidence/vnext/m4-preflight-01/RED/test_evidence_ttl_repeated_mcp_fetch.py -q -s --basetemp docs/evidence/vnext/m4-preflight-01/runs/pytest-basetemp-red-02",
+      "exit_code": 1,
+      "result": "STABLE_RED_REPRODUCTION",
+      "log": "runs/red-02-pytest.log",
+      "trace": "runs/TRACE-red-02.jsonl",
+      "task_id": "task-c9ee76eb-8203-496c-8597-49b6c49d67e8",
+      "first_run_id": "run-6ae1b9eb-7576-4a28-9001-a91b17663077",
+      "second_run_id": "run-a1c6ba1a-9857-4b8b-887b-4ab40b4c1d57",
+      "clock_advance_seconds": 301,
+      "ttl_seconds": 300,
+      "business_snapshot_unchanged": true,
+      "first_gate": {
+        "decision": "DIAGNOSED",
+        "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING"
+      },
+      "second_gate": {
+        "decision": "NEED_MORE",
+        "handling_direction": "EVIDENCE_INSUFFICIENT",
+        "required_facts": ["s3_delivery"],
+        "excluded_reason": "S3_EVIDENCE_EXPIRED"
+      },
+      "second_persisted_diagnosis": {
+        "receipt_id": "s3-diagnosis-c3f6ed1f-beb0-4ded-b155-5d7d475203cb",
+        "decision": "INCONCLUSIVE",
+        "reason_code": "S3_INSUFFICIENT_CURRENT_FACTS"
+      },
+      "mcp_observations": {
+        "attempts": 6,
+        "status_ok": 6,
+        "runs": 2,
+        "calls_per_run": 3
+      },
+      "http": {
+        "successful_probes": 2,
+        "status": 200,
+        "first_request_id": "1b227dc2a75c54e8",
+        "second_request_id": "cc347b72015a3bdc"
+      },
+      "evidence_reuse": {
+        "s3_order": false,
+        "s3_delivery": true,
+        "s3_receiver": true
+      }
+    },
+    {
+      "id": "s1-s2-spotchecks",
+      "command": ".venv/Scripts/python.exe -m pytest tests/test_d2_investigation.py::test_repeated_same_version_probe_ids_do_not_look_like_diagnostic_conflict tests/test_m2_02_s2_diagnosis.py::test_m2_02_latest_probe_supersedes_stale_probe_and_old_request_evidence tests/test_m2_02_s2_diagnosis.py::test_m2_02_s2_gate_keeps_401_404_and_stale_policy_distinct -q --basetemp docs/evidence/vnext/m4-preflight-01/runs/pytest-basetemp-scope-01",
+      "exit_code": 0,
+      "result": "PASS",
+      "passed": 3,
+      "failed": 0,
+      "log": "runs/s1-s2-spotchecks.log",
+      "notes": "Narrow regressions only; these do not dynamically exercise S1 static-fact TTL reuse or S2 same-Request-ID authorization-fact TTL reuse."
+    }
+  ],
+  "reproduction_trace": {
+    "first_observation_at_utc": "2026-10-23T15:40:42.000+00:00",
+    "second_observation_at_utc": "2026-10-23T15:45:43.000+00:00",
+    "versions": {
+      "config_version": 1,
+      "contract_version": 1,
+      "delivery_version": 2,
+      "grant_version": 1,
+      "order_version": 2,
+      "policy_version": 1,
+      "principal_version": 1,
+      "receiver_version": 2,
+      "scope_policy_version": 1
+    },
+    "evidence_ids": {
+      "s3_delivery": "evidence-f3350951-bc7c-4cd9-95eb-1ae47da00ac9",
+      "s3_receiver": "evidence-74aca6c0-5c13-4f1c-a100-91b996cb6b0a",
+      "second_run_s3_order": "evidence-cf7dd96b-318a-4881-a1c1-a64592e78a96"
+    }
+  }
+}
