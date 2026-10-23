@@ -1,0 +1,96 @@
+{
+  "schema": "opspilot-m4-autonomy-c1-preflight-v1",
+  "phase_status": "FROZEN_RED_PENDING_TTL_MAIN_AGENT_ACCEPTANCE",
+  "c1_functional_status": "NOT_IMPLEMENTED",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/m4-autonomy-c1",
+  "base_sha": "add47ec83f31fa76b9b6a5782e013311732bc496",
+  "ttl_candidate": {
+    "branch": "origin/codex/m4-ttl-fix-01",
+    "head_sha": "bc7fc1633cc2b9e5ed6d652fbb518ea4cd3caafe",
+    "merge_status": "NOT_MERGED_TO_MAIN",
+    "reported_status": "ACCEPTANCE_CANDIDATE",
+    "main_agent_final_acceptance_found": false
+  },
+  "commits": {
+    "frozen_plan": "c792967d271cfd63942b1e6867bf903ce769bafc",
+    "red_and_evidence": null
+  },
+  "environment": {
+    "os": "Windows",
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "fastapi": "0.137.1",
+    "database": "isolated SQLite per test",
+    "provider_calls": 0,
+    "mcp_followup_calls": 0,
+    "followup_http_status": 502,
+    "followup_error_code": "INVALID_MODEL_CLASSIFICATION"
+  },
+  "runs": [
+    {
+      "name": "red_01_initial_valid_reproduction",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_autonomy_c1_red.py -q --basetemp=docs/evidence/vnext/m4-autonomy-c1/runs/red/c1-red-01-basetemp --tb=short",
+      "raw_log": "runs/red/c1-red-01-pytest.log",
+      "trace": null,
+      "exit_code": 1,
+      "result": "Expected RED: baseline rejects READONLY_FOLLOWUP with INVALID_MODEL_CLASSIFICATION (HTTP 502)."
+    },
+    {
+      "name": "red_02_trace_setup_failure",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_autonomy_c1_red.py -q -s --basetemp=docs/evidence/vnext/m4-autonomy-c1/runs/red/c1-red-02-basetemp --tb=short",
+      "raw_log": "runs/red/c1-red-02-pytest.log",
+      "trace": null,
+      "exit_code": 1,
+      "result": "Invalid test query assumed s3_http_observations.task_id; preserved as test-preparation failure, not a product RED."
+    },
+    {
+      "name": "red_03_valid_reproduction_with_trace",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_autonomy_c1_red.py -q --basetemp=docs/evidence/vnext/m4-autonomy-c1/runs/red/c1-red-03-basetemp --tb=short",
+      "raw_log": "runs/red/c1-red-03-pytest.log",
+      "trace": "TRACE.jsonl",
+      "exit_code": 1,
+      "result": "Expected RED reproduced; actual task/run/message IDs and side-effect counts recorded."
+    },
+    {
+      "name": "red_04_valid_reproduction_with_diagnosis_currentness",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_autonomy_c1_red.py -q --basetemp=docs/evidence/vnext/m4-autonomy-c1/runs/red/c1-red-04-basetemp --tb=short",
+      "raw_log": "runs/red/c1-red-04-pytest.log",
+      "trace": "TRACE.jsonl",
+      "exit_code": 1,
+      "result": "Expected RED reproduced; initial S3 diagnosis confirmed CURRENT and DIAGNOSED before follow-up."
+    },
+    {
+      "name": "complete_pytest",
+      "command": null,
+      "raw_log": null,
+      "trace": null,
+      "exit_code": null,
+      "result": "NOT_RUN: formal implementation is blocked by the TTL prerequisite."
+    },
+    {
+      "name": "real_provider_mcp_web_followup",
+      "command": null,
+      "raw_log": null,
+      "trace": null,
+      "exit_code": null,
+      "result": "NOT_RUN: preflight only; no real Provider or MCP follow-up calls were made."
+    }
+  ],
+  "trace_summary": {
+    "case_id": "C1-01",
+    "diagnosis_currentness": "CURRENT",
+    "diagnosis_gate": "DIAGNOSED/RECEIVER_PROCESSING_UNCONFIRMED/WAIT_FOR_RECEIVER_PROCESSING",
+    "task_control_revision": 0,
+    "critical_correction_count": 0,
+    "chat_run_kind": "CHAT_READONLY",
+    "read_only_followup_run_found": false,
+    "setup_real_http_observations": 1,
+    "business_write_counts": {
+      "action_intents": 0,
+      "action_ledgers": 0,
+      "handoff_queue_entries": 0,
+      "handoff_receipts": 0
+    }
+  }
+}
