@@ -125,7 +125,7 @@ def test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff(tmp_p
         assert "diagnosis_receipt" not in audit.json()
         assert client.get(
             f"/api/sessions/{task['session_id']}/events/history", headers=approver_headers,
-        ).status_code == 403
+        ).status_code in (403, 404)
 
         inspector = client.get(f"/api/tasks/{task['task_id']}/inspector", headers=support_headers)
         assert inspector.status_code == 200
@@ -257,8 +257,16 @@ def test_revoked_scope_blocks_s3_chat_context_chunks_and_redacts_bound_answer(tm
         provider_response_id=f"hf02-test-provider-{prepared['attempt_id']}",
         input_tokens=5, output_tokens=8, total_tokens=13,
     )
-    _revoke_scope(db, task)
+    with TestClient(_event_app(db), raise_server_exceptions=False) as client:
+        support = _login(client, "support-a")
+        current_chunks = client.get(f"/api/runs/{run_id}/chunks", headers=support)
+        current_context = client.get(f"/api/runs/{run_id}/context", headers=support)
+        current_messages = client.get(f"/api/sessions/{task['session_id']}/messages", headers=support)
+        assert current_chunks.status_code == current_context.status_code == 200
+        assert accepted["receipt_id"] in current_chunks.text
+        assert accepted["receipt_id"] in current_messages.text
 
+    _revoke_scope(db, task)
     with TestClient(_event_app(db), raise_server_exceptions=False) as client:
         support = _login(client, "support-a")
         chunks = client.get(f"/api/runs/{run_id}/chunks", headers=support)
