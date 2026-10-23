@@ -226,6 +226,67 @@ def test_scope_revocation_audits_task_run_inspector_context_chunks_and_messages(
     })
 
 
+def test_revoked_scope_blocks_s3_chat_context_chunks_and_redacts_bound_answer(tmp_path: Path):
+    from fastapi.testclient import TestClient
+    from opspilot.domain.chat import (
+        complete_chat_attempt, persist_chat_chunk, prepare_chat_attempt,
+    )
+    from opspilot.domain.task_control import (
+        admit_task_message, claim_task_run, register_worker_owner, trusted_identity,
+    )
+    from test_m4_01_dialogue_updates import _login
+
+    db, identity, task, accepted = _accepted_case(tmp_path)
+    worker_id = "hf02-chat-worker"
+    register_worker_owner(db, worker_id, 84102)
+    message = admit_task_message(
+        db, identity, session_id=str(task["session_id"]), task_id=str(task["task_id"]),
+        input_kind="CHAT_READONLY", body="请复述当前 S3 交接结果。",
+        idempotency_key="hf02-bound-chat-answer",
+    )
+    run_id = str(message["run_id"])
+    claim_task_run(db, identity, run_id)
+    prepared = prepare_chat_attempt(db, run_id, worker_id, "hf02-test-model")
+    answer = (
+        f"HANDOFF_ACCEPTED receipt_id={accepted['receipt_id']} "
+        f"queue_entry_id={accepted['queue_entry_id']} order_id=async-order-2"
+    )
+    persist_chat_chunk(db, worker_id, str(prepared["attempt_id"]), 1, answer)
+    complete_chat_attempt(
+        db, worker_id, str(prepared["attempt_id"]), answer,
+        provider_response_id=f"hf02-test-provider-{prepared['attempt_id']}",
+        input_tokens=5, output_tokens=8, total_tokens=13,
+    )
+    _revoke_scope(db, task)
+
+    with TestClient(_event_app(db), raise_server_exceptions=False) as client:
+        support = _login(client, "support-a")
+        chunks = client.get(f"/api/runs/{run_id}/chunks", headers=support)
+        context = client.get(f"/api/runs/{run_id}/context", headers=support)
+        messages = client.get(f"/api/sessions/{task['session_id']}/messages", headers=support)
+    for response in (chunks, context, messages):
+        assert accepted["receipt_id"] not in response.text, response.text
+        assert accepted["queue_entry_id"] not in response.text, response.text
+        assert "HANDOFF_ACCEPTED" not in response.text, response.text
+        assert "async-order-2" not in response.text, response.text
+    assert chunks.status_code != 200
+    assert context.status_code != 200
+    assert messages.status_code == 200
+    items = messages.json()["items"]
+    assert any(item["role"] == "USER" and item["body"] == "请复述当前 S3 交接结果。" for item in items)
+    answer_row = next(item for item in items if item["role"] == "ASSISTANT")
+    assert "S3 受限历史回答已隐藏" in answer_row["body"]
+    _trace({
+        "case": "HF02-01-revoked-s3-chat-read-audit", "task_id": str(task["task_id"]),
+        "run_id": run_id, "attempt_id": str(prepared["attempt_id"]),
+        "receipt_id": accepted["receipt_id"], "queue_entry_id": accepted["queue_entry_id"],
+        "chunks_status_after_revocation": chunks.status_code,
+        "context_status_after_revocation": context.status_code,
+        "messages_status_after_revocation": messages.status_code,
+        "user_message_retained": True, "assistant_body_redacted": True,
+    })
+
+
 @pytest.mark.parametrize(("table", "column", "where", "params"), [
     ("route_scope_policies", "scope_policy_version", "tenant_id=? AND service_id=? AND route=?",
      ("tenant-a", "orders-async-demo", "/api/async-orders/async-order")),

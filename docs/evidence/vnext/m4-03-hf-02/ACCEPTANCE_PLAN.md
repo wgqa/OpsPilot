@@ -18,7 +18,7 @@
 
 - **HF02-01a / RED**：真实 S3 Task 产生诊断与已接受 Receipt 后撤销 Scope；历史事件不得暴露 `S3_DIAGNOSIS_FROZEN`、`S3_HANDOFF_ACCEPTED`、Receipt/Queue ID、订单号或业务结果。普通事件仍可读取，`Last-Event-ID` 可从隐藏事件之后继续。撤权前 owner 仍能读取相应事件。
 - **HF02-01b / RED**：SSE 对同一事件流执行相同过滤；撤权后不得发送诊断或交接内容，后续普通事件仍能送达。
-- **HF02-01c / audit**：Task Inspector、Task/Run 摘要、Run Context/Chunks、历史 Message 只按既有 owner/role 检查；S3 诊断和交接当前状态复用 Domain 当前性/授权检查。Inspector 不得泄露真实 handoff Receipt/Queue ID。Approver 只能从既有 S3 handoff 端点读取提交后不可变摘要，不可读诊断正文或执行提交。
+- **HF02-01c / audit**：Task Inspector、Task/Run 摘要、Run Context/Chunks、历史 Message 只按既有 owner/role 检查；S3 诊断和交接当前状态复用 Domain 当前性/授权检查。撤权后，绑定 S3 Task 的 CHAT_READONLY Run 不得通过 Context/Chunks 返回旧业务事实或回执；混合 Session 的普通用户消息保留，依赖 S3 状态的助手正文在读取响应中隐藏。Inspector 不得泄露真实 handoff Receipt/Queue ID。Approver 只能从既有 S3 handoff 端点读取提交后不可变摘要，不可读诊断正文或执行提交。
 - **HF02-02 / RED**：五个版本字段（Scope Policy、Grant、Principal、Auth Policy、Integration 配置）只接受 `type(value) is int and value > 0`。REAL `1.5` 在数据库路径必须 fail-closed；Python `bool`、float、字符串、`None`、零及负数不能通过版本解析。Domain、HTTP 资源目录与 MCP 查询不得因畸形版本放行。
 - **HF02-03 / RED/GREEN**：无模型的受控集成用例通过真实本地 HTTP 与 in-process MCP 完成 WAIT 诊断；推进确定性时钟到 SLA 边界，在旧 Evidence TTL 内拒绝旧诊断交接且无 Queue/Receipt/Outbox 增量；新 Run 实际调用当前绑定的 HTTP/MCP 事实，验证 Task/订单/Event/版本/观察关联，由 Gate 得到 CONTACT；owner 明确确认后只产生一份持久 Receipt，重复请求只回放。
 - **HF02-04 / RED/GREEN**：`now < deadline` 为 WAIT，`now == deadline` 与 `now > deadline` 为 CONTACT；旧 WAIT 在精确截止点立即失效，证据仍在 300 秒 TTL 内，原诊断字节/digest 不变。
