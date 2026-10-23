@@ -264,11 +264,13 @@ def test_revoked_scope_blocks_s3_chat_context_chunks_and_redacts_bound_answer(tm
         chunks = client.get(f"/api/runs/{run_id}/chunks", headers=support)
         context = client.get(f"/api/runs/{run_id}/context", headers=support)
         messages = client.get(f"/api/sessions/{task['session_id']}/messages", headers=support)
-    for response in (chunks, context, messages):
-        assert accepted["receipt_id"] not in response.text, response.text
-        assert accepted["queue_entry_id"] not in response.text, response.text
-        assert "HANDOFF_ACCEPTED" not in response.text, response.text
-        assert "async-order-2" not in response.text, response.text
+    exposed = {
+        name: [value for value in (
+            accepted["receipt_id"], accepted["queue_entry_id"], "HANDOFF_ACCEPTED", "async-order-2",
+        ) if value in response.text]
+        for name, response in (("chunks", chunks), ("context", context), ("messages", messages))
+    }
+    assert not any(exposed.values()), f"restricted S3 chat data remained readable: {exposed!r}"
     assert chunks.status_code != 200
     assert context.status_code != 200
     assert messages.status_code == 200
