@@ -1,0 +1,86 @@
+F
+================================== FAILURES ===================================
+_ test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-ttl-fix-01/docs/evidence/vnext/m4-ttl-fix-01/runs/red-before-fix/pytest-tmp-run-scope/test_ttl_01_04_real_mcp_refres0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023F7821CFC0>
+
+    def test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen(tmp_path: Path, monkeypatch):
+        """A new successful MCP/HTTP observation of unchanged facts must satisfy currentness."""
+        from opspilot.domain.api import make_server
+        from opspilot.domain.database import connect, reset_fixture
+        from opspilot.domain.s3 import (
+            current_s3_evidence, evaluate_s3_gate, get_s3_outcome,
+            persist_s3_diagnosis, prepare_s3_fixture,
+        )
+        from opspilot.domain.s3_mcp import build_s3_server
+        from opspilot.domain.task_control import (
+            admit_task_message,
+            apply_pending_critical_inputs,
+            claim_task_run,
+            create_session,
+            create_task_with_initial_run,
+            finish_task_run,
+            trusted_identity,
+        )
+        import opspilot.domain.d2 as d2
+        import opspilot.domain.s3 as s3
+    
+        db = tmp_path / "m4-preflight-01.sqlite3"
+        order_id = "async-order-2"
+        reset_fixture(db, "S1_POS")
+        prepare_s3_fixture(
+            db,
+            "DELIVERED_PENDING",
+            order_id=order_id,
+            queue_age_seconds=60,
+            processing_sla_seconds=3600,
+        )
+        identity = trusted_identity(db, "support-a")
+        session = create_session(db, identity)
+        task = create_task_with_initial_run(
+            db,
+            identity,
+            session_id=str(session["session_id"]),
+            service_id="orders-async-demo",
+            integration_id="async-integration-a",
+            ticket_id="M4-PREFLIGHT-01",
+            initial_message="�����ӿڷ��� 200��������û���յ��첽�ص���",
+            idempotency_key="m4-preflight-create-s3-task",
+            s3_order_id=order_id,
+        )
+        task_id, first_run_id = str(task["task_id"]), str(task["run_id"])
+    
+        clock = {"now": datetime.now(timezone.utc).replace(microsecond=0)}
+    
+        class ControlledDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                current = clock["now"]
+                return current if tz is not None else current.replace(tzinfo=None)
+    
+        # D2 stamps/validates Evidence through d2.datetime; S3 Gate TTL uses s3.datetime.
+        # Both must share the exact same controlled source to avoid a false skew failure.
+        monkeypatch.setattr(d2, "datetime", ControlledDateTime)
+        monkeypatch.setattr(s3, "datetime", ControlledDateTime)
+    
+        api = make_server(db, "tenant-a", "127.0.0.1", 0)
+        thread = threading.Thread(target=api.serve_forever, daemon=True)
+        thread.start()
+        try:
+            root = f"http://127.0.0.1:{api.server_port}"
+            mcp_server = build_s3_server(db, task_id, root)
+            before_business = _business_snapshot(db, order_id)
+    
+            claim_task_run(db, identity, first_run_id)
+            apply_pending_critical_inputs(db, identity, first_run_id)
+            first_records = _run_real_mcp_facts(db, task_id, first_run_id, mcp_server)
+            first_ids = [str(item["evidence_id"]) for item in first_records]
+>           first_gate = evaluate_s3_gate(db, task_id, first_ids, run_id=first_run_id)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: evaluate_s3_gate() got an unexpected keyword argument 'run_id'
+
+tests\test_m4_ttl_fix_01.py:211: TypeError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_ttl_fix_01.py::test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen
+1 failed in 2.80s
