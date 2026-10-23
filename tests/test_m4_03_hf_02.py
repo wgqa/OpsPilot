@@ -420,7 +420,9 @@ def test_sla_gate_exact_deadline_is_wait_before_contact_at_and_after(tmp_path: P
             return current if tz is not None else current.replace(tzinfo=None)
 
     clock = {"now": now}
+    import opspilot.domain.d2 as d2
     monkeypatch.setattr(s3, "datetime", FrozenDateTime)
+    monkeypatch.setattr(d2, "datetime", FrozenDateTime)
     for offset, expected in ((-1, "WAIT_FOR_RECEIVER_PROCESSING"),
                              (0, "CONTACT_RECEIVER_OPERATOR"),
                              (1, "CONTACT_RECEIVER_OPERATOR")):
@@ -442,13 +444,8 @@ def test_sla_gate_exact_deadline_is_wait_before_contact_at_and_after(tmp_path: P
 
 
 def _record_evidence(db: Path, task: dict[str, object], tool: str, result: dict[str, object]) -> str:
-    from opspilot.domain.d2 import record_tool_observation
-
-    call_id = f"hf02-boundary-{uuid4()}"
-    return str(record_tool_observation(
-        db, task_id=str(task["task_id"]), call_id=call_id, attempt_id=None,
-        tool_call_id=call_id, tool_name=tool, arguments={}, status="OK", result=result,
-    )["evidence_id"])
+    from s3_observation_support import record_s3_observation
+    return str(record_s3_observation(db, task, tool, result)["evidence_id"])
 
 
 def test_sla_expiry_at_exact_deadline_keeps_evidence_but_invalidates_immutable_wait(tmp_path: Path, monkeypatch):
@@ -468,7 +465,9 @@ def test_sla_expiry_at_exact_deadline_keeps_evidence_but_invalidates_immutable_w
             current = clock["now"]
             return current if tz is not None else current.replace(tzinfo=None)
 
+    import opspilot.domain.d2 as d2
     monkeypatch.setattr(s3, "datetime", FrozenDateTime)
+    monkeypatch.setattr(d2, "datetime", FrozenDateTime)
     accepted_at = (clock["now"] - timedelta(seconds=299)).isoformat().replace("+00:00", "Z")
     _set_accepted_at(db, accepted_at)
     diagnosis, evidence_ids = _diagnose(db, identity, task, state="DELIVERED_PENDING")
@@ -559,7 +558,9 @@ def test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff(tmp_p
             current = clock["now"]
             return current if tz is not None else current.replace(tzinfo=None)
 
+    import opspilot.domain.d2 as d2
     monkeypatch.setattr(s3, "datetime", FrozenDateTime)
+    monkeypatch.setattr(d2, "datetime", FrozenDateTime)
     accepted_at = (clock["now"] - timedelta(seconds=299)).isoformat().replace("+00:00", "Z")
     _set_accepted_at(db, accepted_at)
     api = make_server(db, "tenant-a", "127.0.0.1", 0)

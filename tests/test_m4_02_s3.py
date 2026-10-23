@@ -27,11 +27,8 @@ def prepared(tmp_path: Path, state: str = "DELIVERY_FAILED"):
 
 
 def observe(db, task, tool, result):
-    from opspilot.domain.d2 import record_tool_observation
-    return record_tool_observation(
-        db, task_id=task["task_id"], call_id="test-call", attempt_id=None,
-        tool_call_id=tool, tool_name=tool, arguments={}, status="OK", result=result,
-    )["evidence_id"]
+    from s3_observation_support import record_s3_observation
+    return record_s3_observation(db, task, tool, result)["evidence_id"]
 
 
 def facts(db, task):

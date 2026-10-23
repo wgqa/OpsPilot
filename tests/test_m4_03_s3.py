@@ -23,12 +23,8 @@ def _task(db: Path, order_id: str, *, text: str = "订单接口返回 200，但�
 
 
 def _evidence(db: Path, task: dict[str, object], tool: str, result: dict[str, object]) -> str:
-    from opspilot.domain.d2 import record_tool_observation
-
-    return str(record_tool_observation(
-        db, task_id=str(task["task_id"]), call_id=f"red-{tool}", attempt_id=None,
-        tool_call_id=f"red-{tool}", tool_name=tool, arguments={}, status="OK", result=result,
-    )["evidence_id"])
+    from s3_observation_support import record_s3_observation
+    return str(record_s3_observation(db, task, tool, result)["evidence_id"])
 
 
 def _facts(db: Path, task: dict[str, object]):

@@ -163,8 +163,36 @@ def _current_evidence(
     excluded_sources: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     if state.get("service_id") == "orders-async-demo":
-        from opspilot.domain.s3 import current_s3_evidence
-        items, excluded = current_s3_evidence(connection, task_id)
+        from opspilot.domain.s3 import current_s3_evidence, s3_outcome_in_transaction
+        diagnosis = connection.execute(
+            "SELECT * FROM s3_diagnoses WHERE task_id=? ORDER BY rowid DESC LIMIT 1", (task_id,)
+        ).fetchone()
+        if diagnosis is None:
+            if excluded_sources is not None:
+                excluded_sources.append({"source_id": task_id, "reason": "S3_NO_FROZEN_DIAGNOSIS"})
+            return []
+        outcome = s3_outcome_in_transaction(connection, task_id)
+        if not outcome or outcome.get("currentness") != "CURRENT":
+            if excluded_sources is not None:
+                reasons = outcome.get("gate", {}).get("excluded_sources", []) if outcome else []
+                excluded_sources.extend(reasons or [{
+                    "source_id": str(diagnosis["receipt_id"]), "reason": "S3_DIAGNOSIS_NOT_CURRENT",
+                }])
+            return []
+        body = json.loads(str(diagnosis["body_json"]))
+        ids = json.loads(str(diagnosis["evidence_ids_json"]))
+        pins = body.get("observation_pins") if isinstance(body.get("observation_pins"), dict) else None
+        if pins is None and isinstance(body.get("observations"), list):
+            pins = {
+                str(item["evidence_id"]): str(item["observation_id"])
+                for item in body["observations"]
+                if isinstance(item, dict) and item.get("evidence_id") and item.get("observation_id")
+            }
+        items, excluded = current_s3_evidence(
+            connection, task_id, ids, run_id=str(diagnosis["run_id"]),
+            observation_ids=pins,
+            observed_before=str(diagnosis["created_at"]) if pins is None else None,
+        )
         if excluded_sources is not None:
             excluded_sources.extend(excluded)
         return [{"evidence_id":e["evidence_id"],"fact_type":e["fact_type"],"fetched_at":e["fetched_at"],
@@ -2371,9 +2399,14 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
             gate["decision"] = "INCONCLUSIVE"
             gate["reason_code"] = s2_outcome.get("reason_code")
     if binding["service_id"] == "orders-async-demo":
-        from opspilot.domain.s3 import get_s3_outcome, evaluate_s3_gate
+        from opspilot.domain.s3 import get_s3_outcome
         s3_outcome = get_s3_outcome(path, task_id)
-        gate = s3_outcome["gate"] if s3_outcome else evaluate_s3_gate(path, task_id)
+        gate = s3_outcome["gate"] if s3_outcome else {
+            "decision": "INCONCLUSIVE",
+            "reason_code": "S3_NO_FROZEN_DIAGNOSIS",
+            "checked_fact_ids": [],
+            "excluded_sources": [{"source_id": task_id, "reason": "S3_NO_FROZEN_DIAGNOSIS"}],
+        }
     return {
         "task": {key: binding[key] for key in ("task_id", "tenant_id", "service_id", "integration_id", "principal_id", "ticket_id", "status")},
         "trusted_state": trusted_state,

@@ -228,10 +228,16 @@ def test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen
                 (first_observation_ids[0],),
             ).fetchone()[0])
         observation_time = datetime.fromisoformat(first_observation_at.replace("Z", "+00:00"))
+        boundary_results = []
         for age, expected in ((299, "DIAGNOSED"), (300, "DIAGNOSED"), (301, "NEED_MORE")):
             clock["now"] = observation_time + timedelta(seconds=age)
             boundary = evaluate_s3_gate(db, task_id, first_ids, run_id=first_run_id)
             assert boundary["decision"] == expected, json.dumps(boundary, ensure_ascii=False)
+            boundary_results.append({
+                "age_seconds": age,
+                "decision": boundary["decision"],
+                "excluded_sources": boundary["excluded_sources"],
+            })
         clock["now"] = observation_time + timedelta(seconds=301)
         assert _business_snapshot(db, order_id) == before_business == first_snapshot
         assert _business_snapshot(db, order_id) == before_business == first_snapshot
@@ -326,11 +332,21 @@ def test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen
             "first_evidence_fetched_at": original_fetched_at,
             "first_gate": first_gate,
             "first_diagnosis_id": first_diagnosis["receipt_id"],
+            "first_diagnosis_digest": first_diagnosis["digest"],
+            "ttl_boundary_results": boundary_results,
             "second_records": second_records,
             "second_observation_ids": second_observation_ids,
             "second_evidence_rows": second_evidence,
             "second_gate": second_gate,
             "second_diagnosis_id": second_diagnosis["receipt_id"],
+            "run_a_recheck_after_run_b": {
+                "current_evidence_ids": [item["evidence_id"] for item in old_current],
+                "excluded_sources": old_excluded,
+                "wrong_run_pins_excluded_sources": wrong_run_excluded,
+                "evidence_rows_unchanged": after_evidence_rows == original_evidence_rows,
+                "diagnosis_body_unchanged": stored_first_diagnosis["body_json"] == first_diagnosis["body_json"],
+                "diagnosis_digest_unchanged": stored_first_diagnosis["digest"] == first_diagnosis["digest"],
+            },
             "evidence_ids_reused_by_fact_type": {
                 str(item["fact_type"]): {
                     "first": first_records[index]["evidence_id"],
@@ -346,8 +362,8 @@ def test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen
             "all_mcp_observations": call_observations,
             "http_observations": [dict(row) for row in http_rows],
         }
-        _trace({"event": "red_repro_summary", **trace})
-        print("M4_PREFLIGHT_TRACE=" + json.dumps(trace, ensure_ascii=False, sort_keys=True), flush=True)
+        _trace({"event": "run_scoped_refresh_summary", **trace})
+        print("M4_TTL_FIX_TRACE=" + json.dumps(trace, ensure_ascii=False, sort_keys=True), flush=True)
 
         # Successful fresh Run B reads of unchanged facts must be current, while the
         # exact expired observations frozen by Diagnosis A remain expired.
