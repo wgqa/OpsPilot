@@ -10,7 +10,7 @@
 - Branch：`codex/m4-autonomy-c1`（隔离 worktree）
 - Base SHA：`add47ec83f31fa76b9b6a5782e013311732bc496`
 - 计划冻结提交：`c792967d271cfd63942b1e6867bf903ce769bafc`
-- RED/证据提交：待提交
+- RED/证据提交：`452feb57c7edf99a6830b32f2b068b9da070ff6e`
 - Diff 范围：仅 C1 冻结验收文档、RED 测试与运行证据；不含业务源码或 Gold 变更。
 - `PROJECT_NORTH_STAR.md`：已从 Base SHA 读取；blob `1f737712c7a36ceb34433ac09c3fbba3c3305542`。
 - `AGENTS.md`：已从 Base SHA 读取；blob `30319000ed0054007e9b7b6b46bf98b1493c8179`。
