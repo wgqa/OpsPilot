@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "baseline": "main@f7c739f4e3d02988fc125b377dfa85a902bc2a0d",
+  "browser": "Microsoft Edge real browser",
+  "api_origin": "http://127.0.0.1:61745",
+  "ui_origin": "http://127.0.0.1:61746",
+  "domain_db": ".runtime\\m4-03\\web\\web-20261023T101521Z\\domain.sqlite3",
+  "checkpoint_db": ".runtime\\m4-03\\web\\web-20261023T101521Z\\checkpoints.sqlite3",
+  "task_id": "task-50ba3bd0-d26f-4a52-8318-e2f137bee8f6",
+  "session_id": "session-88b5e2a7-84ac-4f87-9449-c7de21a8aa96",
+  "selected_order": "async-order-2",
+  "first_run_outcome": "ORDER_PROCESSING",
+  "correction_run": "run-2de277c8-226d-4929-85b7-baccf04452cc",
+  "corrected_outcome": "CALLBACK_DELIVERY_FAILED",
+  "handoff_business_outcome": "HANDOFF_ACCEPTED",
+  "receipt_id": "s3-handoff-7809c635-d2d9-4884-a169-18fb2e972b0f",
+  "duplicate_browser_confirmation_replayed": true,
+  "api_process_restart": {
+    "old_launcher_pid": 29540,
+    "new_launcher_pid": 8868,
+    "old_server_pid": 29524,
+    "new_server_pid": 33832
+  },
+  "followup_run": "run-4180ea04-8349-4c35-b18a-e05bde236e39",
+  "followup_answer": "✳\nOpsPilot\n2026/10/23 18:16:17\n不能这样理解。**`HANDOFF_ACCEPTED` 只证明本地人工队列已接受这次转交请求，不证明订单或回调已经恢复，也不证明回调已经重发。**\n\n持久回执显示：\n\n- 回执 ID：`s3-handoff-7809c635-d2d9-4884-a169-18fb2e972b0f`\n- 业务结果：`HANDOFF_ACCEPTED`\n- 接收队列：`local-async-callback-operations`\n- 队列记录：`s3-queue-1cb34884-0713-42ed-b941-b762464bce5c`\n- 队列状态：`PENDING_REVIEW`\n- 处理方向：`CONTACT_CALLBACK_OPERATOR`\n- `order_recovered=false`\n- `callback_resent=false`\n- 受理时间：`2026-10-23T10:15:52.205497Z`\n\n因此，当前处理状态是：**人工队列已受理，仍等待人工复核；没有回调重发或恢复证据。**\n\n当前服务端事实也支持这一点：\n\n- 订单 `async-order-2`（`order_version` 3）查询返回 **HTTP 200**，状态为 **COMPLETED**（证据 `evidence-e38a185e-9ec0-49ee-a91d-6a277c15d069`）。这只说明订单侧状态，不等同于下游回调成功。\n- 回调投递事件 `event-00340d0b-72b2-4763-b192-b72b635130c4` 显示：尝试次数 **3/3**、接收方 **HTTP 503**、`TEMPORARY_UNAVAILABLE`、`retry_state=EXHAUSTED`、状态 **FAILED**（证据 `evidence-dedcfa66-75d3-405b-a1b1-8771702e7c9c`）。\n\n结论：**`CALLBACK_DELIVERY_FAILED` 仍是当前结论，`recovered=false`；`HANDOFF_ACCEPTED` 是人工队列受理回执，不是恢复或投递成功回执。不要重发，也不要把该回执表述为“已经恢复”。**",
+  "handoff_records": {
+    "queue_entries": 1,
+    "receipts": 1,
+    "commands": 1,
+    "outbox_events": 1,
+    "task_status": "COMPLETED"
+  },
+  "agent_did_not_write_order_or_security_configuration": true,
+  "evidence_dir": "docs\\evidence\\vnext\\m4-03\\runs\\web-20261023T101521Z"
+}

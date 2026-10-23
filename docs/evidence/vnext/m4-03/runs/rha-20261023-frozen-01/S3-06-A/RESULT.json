@@ -1,0 +1,158 @@
+{
+  "case_id": "S3-06",
+  "split": "development",
+  "strategy": "A",
+  "order_ref": "async-order",
+  "user_description": "订单 API 正常，接收系统一直没有完成这条回调。",
+  "expected_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+  "actual_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+  "expected_direction": "CONTACT_RECEIVER_OPERATOR",
+  "actual_direction": "CONTACT_RECEIVER_OPERATOR",
+  "correct_outcome": true,
+  "correct_direction": true,
+  "current_diagnosis": true,
+  "required_evidence_types": [
+    "s3_delivery",
+    "s3_order",
+    "s3_receiver"
+  ],
+  "observed_evidence_types": [
+    "s3_delivery",
+    "s3_order",
+    "s3_receiver"
+  ],
+  "required_evidence_present": true,
+  "handoff_required_by_gold": true,
+  "handoff_eligible": true,
+  "durable_handoff_receipt": false,
+  "model_calls": 5,
+  "tool_calls": [
+    {
+      "name": "load_callback_skill",
+      "status": "OK"
+    },
+    {
+      "name": "get_order_status",
+      "status": "OK"
+    },
+    {
+      "name": "get_callback_delivery",
+      "status": "OK"
+    },
+    {
+      "name": "get_receiver_processing",
+      "status": "OK"
+    }
+  ],
+  "first_tool": "load_callback_skill",
+  "invalid_or_failed_tools": 0,
+  "total_tokens": 12267,
+  "latency_seconds": 20.351,
+  "binding_matches_gold": true,
+  "no_business_mutation": true,
+  "s2_and_d3_write_counts_zero": true,
+  "run_result": {
+    "task_id": "task-8e0d0c8d-391b-46f2-bebe-96a7677c883d",
+    "thread_id": "opspilot-0b1dd755-3b22-4002-a4a8-7a0075e7c5ac",
+    "graph_state": {
+      "task_binding_id": "task-8e0d0c8d-391b-46f2-bebe-96a7677c883d",
+      "stage": "complete",
+      "scope_clarification_required": false,
+      "unbound_resource_lookup_required": false,
+      "last_investigation_action": "MCP_PROGRESS",
+      "budget": {
+        "MODEL": 5,
+        "MCP": 4
+      },
+      "diagnosis_draft": {
+        "latest_model_summary": "I have the order lifecycle (COMPLETED at v2) and the delivery fact (transport ACK / HTTP 202, receiver_state `QUEUED`, 0 attempts). What's still missing is whether the receiver actually finished processing that event — an ACK is not completion. So I'll read the receiver processing state next.",
+        "s3_skill_ref": {
+          "name": "order-lifecycle-triage",
+          "version": "1.0.0",
+          "digest": "0698f5d68751a76487923ceba96b1e2de9a9d5add8e393c54de0dd469299624a"
+        }
+      },
+      "evidence_ids": [
+        "evidence-6ac43baf-c38a-4b51-9d20-5ec96f36c224",
+        "evidence-68d99fa1-c6a1-462d-af55-b472810b12b5",
+        "evidence-90909810-aa0a-4260-9a14-d04279077566"
+      ],
+      "tool_observations": [
+        {
+          "observation_id": "observation-3d90cb0e-0320-4046-9db5-7a160fb73500",
+          "task_id": "task-8e0d0c8d-391b-46f2-bebe-96a7677c883d",
+          "call_id": "call-37587bbf-b475-4ad3-9bd5-36beafd8e307",
+          "attempt_id": "attempt-e36a7f16-ad40-4be6-b0e8-2d29ba97757a",
+          "tool_call_id": "call_00_D5ukqL0qyJVcHf2l4dbt1964",
+          "tool_name": "load_callback_skill",
+          "argument_digest": "fe792bc80ae78e537c8b1e85a4be4a6dff3b3eca34f886706fcc5bb65a5a4d13",
+          "status": "OK",
+          "progress_added": true,
+          "error_class": null,
+          "result_digest": "cbab12830cf6c36eddd2363825e9b20044ac8a44f4f4cf0b609dfd39054182bb",
+          "evidence_id": null
+        },
+        {
+          "observation_id": "observation-ba3b89f7-33f8-4719-8d66-4b325e25c5e3",
+          "evidence_id": "evidence-6ac43baf-c38a-4b51-9d20-5ec96f36c224",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_order_status",
+          "tool_call_id": "call_00_RR01fkIf9RUJfZ7Vavex7060",
+          "call_id": "call-43315133-6583-4067-9765-f60cb93930da",
+          "attempt_id": "attempt-7ff69b59-22be-4b7e-840b-d2ab5fd43daa",
+          "result_digest": "3b480f1dee524ecd24b67bba2fa298468865dec87beb20565f5d372a695ecdf2",
+          "error_class": null
+        },
+        {
+          "observation_id": "observation-6325cc07-317f-47a8-9669-704a557f874f",
+          "evidence_id": "evidence-68d99fa1-c6a1-462d-af55-b472810b12b5",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_callback_delivery",
+          "tool_call_id": "call_00_veOTZpAEh6QIxwfQBBhR9869",
+          "call_id": "call-9a623b0c-1269-49b7-b9d9-0c814600a02f",
+          "attempt_id": "attempt-1dd12f5e-a86e-4de6-9d11-caa912206381",
+          "result_digest": "bb67d8959c01979c432abb2767137ede4d32302e49aa7633824e6c3269c80a00",
+          "error_class": null
+        },
+        {
+          "observation_id": "observation-f28c55be-52c2-4d15-b5f1-156e82ad4d08",
+          "evidence_id": "evidence-90909810-aa0a-4260-9a14-d04279077566",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_receiver_processing",
+          "tool_call_id": "call_00_Lv5UWGKy1EupFyKwkR285276",
+          "call_id": "call-6a08da6b-85db-4103-bbea-43b2d8285db4",
+          "attempt_id": "attempt-16b0391c-db84-4f25-8d44-0bf25b15593d",
+          "result_digest": "7b10c6bce37ed60cfe937fec573361c6927980e074093d4c8185d82390d0dce1",
+          "error_class": null
+        }
+      ],
+      "pending_call_refs": [],
+      "policy_tool_call": {},
+      "gate_decision": {
+        "checked_fact_ids": [
+          "evidence-6ac43baf-c38a-4b51-9d20-5ec96f36c224",
+          "evidence-6ac43baf-c38a-4b51-9d20-5ec96f36c224",
+          "evidence-68d99fa1-c6a1-462d-af55-b472810b12b5",
+          "evidence-90909810-aa0a-4260-9a14-d04279077566"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+        "handoff_allowed": true,
+        "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "report_ref": "s3-diagnosis-0081d79f-04ce-496a-888f-a7556125c11f",
+      "critical_input_messages": []
+    },
+    "next_nodes": []
+  },
+  "failure": null
+}

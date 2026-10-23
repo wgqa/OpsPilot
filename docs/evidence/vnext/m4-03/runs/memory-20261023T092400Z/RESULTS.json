@@ -1,0 +1,624 @@
+{
+  "status": "PASS",
+  "release": "memory-20261023T092400Z",
+  "provider": "deepseek-flash",
+  "source_task_id": "task-03e74333-6e13-4046-8ee8-f53d42dba640",
+  "source_outcome": "CALLBACK_DELIVERY_FAILED",
+  "target_task_on": "task-2772a7f9-9adf-4a20-b29a-238fcfc80c42",
+  "target_task_after_revoke": "task-af43a547-3843-4e9e-a41a-be769580c1e9",
+  "target_task_current_conflict": "task-52e438ca-1722-4c00-a995-f88f282dde43",
+  "target_task_unrelated_case": "task-8e4a6e21-44cf-4b7e-b38d-47be496b8dcb",
+  "memory_id": "episodic-1030d506-5e94-4034-8e7d-5c413025ad0b",
+  "memory_state_after_revoke": "REVOKED",
+  "different_source_and_target_tasks": true,
+  "memory_selected_in_real_provider_context": true,
+  "revoked_memory_excluded_from_later_provider_context": true,
+  "conflicting_memory_removed_after_current_evidence": true,
+  "unrelated_memory_excluded_in_real_provider_context": true,
+  "revoke_exclusion_reasons": [
+    "MEMORY_REVOKED"
+  ],
+  "memory_on": {
+    "outcome": {
+      "receipt_id": "s3-diagnosis-c0f3a102-518b-40e1-a2bf-2e5d993eda09",
+      "outcome": "CALLBACK_DELIVERY_FAILED",
+      "currentness": "CURRENT",
+      "recovered": false,
+      "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+      "handoff_allowed": true,
+      "explanation": "可信 Gate 结论固定为 `CALLBACK_DELIVERY_FAILED`，不是回调恢复或重发成功。当前订单 `async-order-2`（版本 2）经 HTTP 200 返回 `COMPLETED`，但这只证明订单读取成功，不等于下游接收或处理完成。当前投递事件 `event-4b27468a...` 为 `FAILED`：3/3 次尝试已耗尽，receiver HTTP 503、状态 `UNAVAILABLE`，且 `accepted_at` 为空。因此用户所说“HTTP 200 但下游没收到回调”应校正为：订单已完成，而回调投递在接收端不可用后失败。历史情景与 Skill 仅是诊断方法提示，不能作为本次原因、授权、恢复或重发证明；后续应按 Gate 方向联系回调运维。",
+      "explanation_currentness": "CURRENT",
+      "explanation_excluded_sources": [],
+      "gate": {
+        "checked_fact_ids": [
+          "evidence-2af24056-b5ce-412b-b10a-7d7a368e77f4",
+          "evidence-2af24056-b5ce-412b-b10a-7d7a368e77f4",
+          "evidence-9d494442-cdad-4cab-8a61-c2e5b2dc348c"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+        "handoff_allowed": true,
+        "outcome": "CALLBACK_DELIVERY_FAILED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "CALLBACK_DELIVERY_FAILED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "body": {
+        "business_writes": 0,
+        "control_revision": 0,
+        "evidence": [
+          {
+            "digest": "1f63b98ed1511d1bf5a16cfcd534626418e5e1eadc6a50d95ea86cb5a76fe64f",
+            "fact_type": "s3_order",
+            "facts": {
+              "body": {
+                "authn_event_id": 2,
+                "contract_version": 1,
+                "order_id": "async-order-2",
+                "order_version": 2,
+                "request_id": "865488d0a1c73f38",
+                "status": "COMPLETED"
+              },
+              "http_status": 200,
+              "versions_after": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2
+              },
+              "versions_before": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2
+              }
+            },
+            "id": "evidence-2af24056-b5ce-412b-b10a-7d7a368e77f4",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 2,
+              "order_version": 2,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 2
+            }
+          },
+          {
+            "digest": "a943e59d6416d9621cdfc27a2470ee09c89f4ff46b72da45da30c4d739980a88",
+            "fact_type": "s3_delivery",
+            "facts": {
+              "attempt_count": 3,
+              "event_id": "event-4b27468a-218d-43cb-9621-39b3a489b8a6",
+              "failure_code": "TEMPORARY_UNAVAILABLE",
+              "max_attempts": 3,
+              "order_id": "async-order-2",
+              "order_version": 2,
+              "receiver_http_status": 503,
+              "response_digest": "c82fb162f3654181bc2fd7df374b16f7552900ff08bebacdffb850c08467fde2",
+              "retry_at": null,
+              "retry_state": "EXHAUSTED",
+              "service_id": "orders-async-demo",
+              "status": "FAILED",
+              "tenant_id": "tenant-a",
+              "transport_request_id": "transport-756c1dd6-875c-4b75-9ab3-13f278e10983",
+              "transport_response_json": "{\"accepted_at\":null,\"attempt_count\":3,\"event_id\":\"event-4b27468a-218d-43cb-9621-39b3a489b8a6\",\"failure_code\":\"TEMPORARY_UNAVAILABLE\",\"max_attempts\":3,\"order_id\":\"async-order-2\",\"processing_sla_seconds\":null,\"receiver_state\":\"UNAVAILABLE\",\"request_id\":\"transport-756c1dd6-875c-4b75-9ab3-13f278e10983\",\"retry_at\":null,\"retry_state\":\"EXHAUSTED\"}",
+              "version": 2
+            },
+            "id": "evidence-9d494442-cdad-4cab-8a61-c2e5b2dc348c",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 2,
+              "order_version": 2,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 2
+            }
+          }
+        ],
+        "explanation_call_id": "call-2203fac0-5842-40bb-9806-86c2d2c3c2a9",
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-2af24056-b5ce-412b-b10a-7d7a368e77f4",
+            "evidence-2af24056-b5ce-412b-b10a-7d7a368e77f4",
+            "evidence-9d494442-cdad-4cab-8a61-c2e5b2dc348c"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+          "handoff_allowed": true,
+          "outcome": "CALLBACK_DELIVERY_FAILED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "CALLBACK_DELIVERY_FAILED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": []
+        },
+        "model_summary_untrusted": "可信 Gate 结论固定为 `CALLBACK_DELIVERY_FAILED`，不是回调恢复或重发成功。当前订单 `async-order-2`（版本 2）经 HTTP 200 返回 `COMPLETED`，但这只证明订单读取成功，不等于下游接收或处理完成。当前投递事件 `event-4b27468a...` 为 `FAILED`：3/3 次尝试已耗尽，receiver HTTP 503、状态 `UNAVAILABLE`，且 `accepted_at` 为空。因此用户所说“HTTP 200 但下游没收到回调”应校正为：订单已完成，而回调投递在接收端不可用后失败。历史情景与 Skill 仅是诊断方法提示，不能作为本次原因、授权、恢复或重发证明；后续应按 Gate 方向联系回调运维。",
+        "recovered": false,
+        "run_id": "run-1beda82d-8fa8-40c3-bb96-d5051f66eeec",
+        "schema": "s3-callback-evidence-v1",
+        "task_id": "task-2772a7f9-9adf-4a20-b29a-238fcfc80c42"
+      }
+    },
+    "tools": [
+      "get_order_status",
+      "get_callback_delivery"
+    ],
+    "tokens": 8141,
+    "elapsed_seconds": 9.321,
+    "failure": null
+  },
+  "current_fact_conflict": {
+    "outcome": {
+      "receipt_id": "s3-diagnosis-83d26408-1428-43e8-aec7-05ac570752b8",
+      "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "currentness": "CURRENT",
+      "recovered": false,
+      "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+      "handoff_allowed": true,
+      "explanation": "当前订单 async-order-2（order_version=3）为 COMPLETED（HTTP 200），回调事件 event-6dcc…（version=3）为 ACKNOWLEDGED，receiver_http_status=202，attempt_count=0。接收方记录为 QUEUED（accepted_at=2026-10-23T09:09:13.876777Z，processing_sla_seconds=300），说明已接收并排队。因此 HTTP 200/202 只表示订单接口接受和接收方接收确认，不等于接收方处理完成。固定 Gate 结论为 RECEIVER_PROCESSING_UNCONFIRMED，纠正“下游没有收到”的原始说法；历史 CALLBACK_DELIVERY_FAILED 与当前 delivery_status、attempt_count、retry_state 冲突，应排除。处理方向是联系接收方运营核实，未授权写操作或回调重发。",
+      "explanation_currentness": "CURRENT",
+      "explanation_excluded_sources": [],
+      "gate": {
+        "checked_fact_ids": [
+          "evidence-8ba25420-9548-4e70-8355-e9b415d0feae",
+          "evidence-8ba25420-9548-4e70-8355-e9b415d0feae",
+          "evidence-6862f047-d20c-4dba-94a8-31e5be6c40d9",
+          "evidence-31e12589-4a56-4cc7-81e8-abfed94cd08b"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+        "handoff_allowed": true,
+        "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "body": {
+        "business_writes": 0,
+        "control_revision": 0,
+        "evidence": [
+          {
+            "digest": "64e1bb85b0563ca69e84bfdafe16cf46a06860ce005a31466f1c8e1908625d39",
+            "fact_type": "s3_order",
+            "facts": {
+              "body": {
+                "authn_event_id": 3,
+                "contract_version": 1,
+                "order_id": "async-order-2",
+                "order_version": 3,
+                "request_id": "37039cc521eff124",
+                "status": "COMPLETED"
+              },
+              "http_status": 200,
+              "versions_after": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 3,
+                "order_version": 3,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 3
+              },
+              "versions_before": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 3,
+                "order_version": 3,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 3
+              }
+            },
+            "id": "evidence-8ba25420-9548-4e70-8355-e9b415d0feae",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 3,
+              "order_version": 3,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 3
+            }
+          },
+          {
+            "digest": "db64aa138a4176916a70b71f119498e70a3bc16c02ca4d970d159ccfb2102df2",
+            "fact_type": "s3_delivery",
+            "facts": {
+              "attempt_count": 0,
+              "event_id": "event-6dcc6e19-d77a-47e7-a4a7-96c9fc6c2111",
+              "failure_code": null,
+              "max_attempts": 3,
+              "order_id": "async-order-2",
+              "order_version": 3,
+              "receiver_http_status": 202,
+              "response_digest": "eef8acc2ea61d8e5bf13856d9d7f2c85a733a251c95fd316e0c9e74f3a99b122",
+              "retry_at": null,
+              "retry_state": "NOT_APPLICABLE",
+              "service_id": "orders-async-demo",
+              "status": "ACKNOWLEDGED",
+              "tenant_id": "tenant-a",
+              "transport_request_id": "transport-88d1ebfc-d007-4874-b37f-61b7f91b634f",
+              "transport_response_json": "{\"accepted_at\":\"2026-10-23T09:09:13.876777Z\",\"attempt_count\":0,\"event_id\":\"event-6dcc6e19-d77a-47e7-a4a7-96c9fc6c2111\",\"failure_code\":null,\"max_attempts\":3,\"order_id\":\"async-order-2\",\"processing_sla_seconds\":300,\"receiver_state\":\"QUEUED\",\"request_id\":\"transport-88d1ebfc-d007-4874-b37f-61b7f91b634f\",\"retry_at\":null,\"retry_state\":\"NOT_APPLICABLE\"}",
+              "version": 3
+            },
+            "id": "evidence-6862f047-d20c-4dba-94a8-31e5be6c40d9",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 3,
+              "order_version": 3,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 3
+            }
+          },
+          {
+            "digest": "031e2184ac2be171b7bb7cbdf338a701df0b048a30068f08a2fd90b04e6de1cc",
+            "fact_type": "s3_receiver",
+            "facts": {
+              "accepted_at": "2026-10-23T09:09:13.876777Z",
+              "delivery_version": 3,
+              "event_id": "event-6dcc6e19-d77a-47e7-a4a7-96c9fc6c2111",
+              "order_id": "async-order-2",
+              "processing_sla_seconds": 300,
+              "service_id": "orders-async-demo",
+              "status": "QUEUED",
+              "tenant_id": "tenant-a",
+              "version": 3
+            },
+            "id": "evidence-31e12589-4a56-4cc7-81e8-abfed94cd08b",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 3,
+              "order_version": 3,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 3
+            }
+          }
+        ],
+        "explanation_call_id": "call-2bf0a437-60a4-41ac-b723-02467846a3ca",
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-8ba25420-9548-4e70-8355-e9b415d0feae",
+            "evidence-8ba25420-9548-4e70-8355-e9b415d0feae",
+            "evidence-6862f047-d20c-4dba-94a8-31e5be6c40d9",
+            "evidence-31e12589-4a56-4cc7-81e8-abfed94cd08b"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+          "handoff_allowed": true,
+          "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": []
+        },
+        "model_summary_untrusted": "当前订单 async-order-2（order_version=3）为 COMPLETED（HTTP 200），回调事件 event-6dcc…（version=3）为 ACKNOWLEDGED，receiver_http_status=202，attempt_count=0。接收方记录为 QUEUED（accepted_at=2026-10-23T09:09:13.876777Z，processing_sla_seconds=300），说明已接收并排队。因此 HTTP 200/202 只表示订单接口接受和接收方接收确认，不等于接收方处理完成。固定 Gate 结论为 RECEIVER_PROCESSING_UNCONFIRMED，纠正“下游没有收到”的原始说法；历史 CALLBACK_DELIVERY_FAILED 与当前 delivery_status、attempt_count、retry_state 冲突，应排除。处理方向是联系接收方运营核实，未授权写操作或回调重发。",
+        "recovered": false,
+        "run_id": "run-39e6df9d-2045-477d-9b1d-dc92bfdc939f",
+        "schema": "s3-callback-evidence-v1",
+        "task_id": "task-52e438ca-1722-4c00-a995-f88f282dde43"
+      }
+    },
+    "tools": [
+      "get_order_status",
+      "get_callback_delivery",
+      "get_receiver_processing"
+    ],
+    "selected_memory_contexts": 2,
+    "conflict_exclusions": [
+      {
+        "reason": "CURRENT_EVIDENCE_CONFLICTS_WITH_MEMORY",
+        "relevance": {
+          "conflicting_fields": [
+            "delivery_status",
+            "attempt_count",
+            "retry_state"
+          ],
+          "matched_fields": [
+            "order_status",
+            "max_attempts"
+          ],
+          "reason": "CURRENT_EVIDENCE_CONFLICTS_WITH_MEMORY",
+          "score": 0.0,
+          "threshold": 0.08
+        },
+        "source_id": "episodic-1030d506-5e94-4034-8e7d-5c413025ad0b",
+        "source_type": "EPISODIC_MEMORY",
+        "version": 2
+      },
+      {
+        "reason": "CURRENT_EVIDENCE_CONFLICTS_WITH_MEMORY",
+        "relevance": {
+          "conflicting_fields": [
+            "delivery_status",
+            "attempt_count",
+            "retry_state"
+          ],
+          "current_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "historical_outcome": "CALLBACK_DELIVERY_FAILED",
+          "matched_fields": [
+            "order_status",
+            "max_attempts"
+          ],
+          "reason": "CURRENT_EVIDENCE_CONFLICTS_WITH_MEMORY",
+          "score": 0.0,
+          "threshold": 0.08
+        },
+        "source_id": "episodic-1030d506-5e94-4034-8e7d-5c413025ad0b",
+        "source_type": "EPISODIC_MEMORY",
+        "version": 2
+      }
+    ],
+    "tokens": 11258,
+    "elapsed_seconds": 16.609,
+    "failure": null
+  },
+  "unrelated_case": {
+    "outcome": {
+      "receipt_id": "s3-diagnosis-bc5d501f-80e1-4258-8eeb-a2fbee9166e3",
+      "outcome": "INCONCLUSIVE",
+      "currentness": "CURRENT",
+      "recovered": false,
+      "handling_direction": "EVIDENCE_INSUFFICIENT",
+      "handoff_allowed": false,
+      "explanation": "",
+      "explanation_currentness": "CURRENT",
+      "explanation_excluded_sources": [],
+      "gate": {
+        "checked_fact_ids": [],
+        "decision": "INCONCLUSIVE",
+        "excluded_sources": [],
+        "handling_direction": "EVIDENCE_INSUFFICIENT",
+        "handoff_allowed": false,
+        "outcome": "INCONCLUSIVE",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "MODEL_NO_TOOL",
+        "recovered": false,
+        "required_facts": [
+          "s3_order"
+        ],
+        "side_effects": []
+      },
+      "body": {
+        "business_writes": 0,
+        "control_revision": 0,
+        "evidence": [],
+        "explanation_call_id": null,
+        "gate": {
+          "checked_fact_ids": [],
+          "decision": "INCONCLUSIVE",
+          "excluded_sources": [],
+          "handling_direction": "EVIDENCE_INSUFFICIENT",
+          "handoff_allowed": false,
+          "outcome": "INCONCLUSIVE",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "MODEL_NO_TOOL",
+          "recovered": false,
+          "required_facts": [
+            "s3_order"
+          ],
+          "side_effects": []
+        },
+        "model_summary_untrusted": "",
+        "recovered": false,
+        "run_id": "run-02f58f2c-9e96-4b97-bb4f-e5436197ab4a",
+        "schema": "s3-callback-evidence-v1",
+        "task_id": "task-8e4a6e21-44cf-4b7e-b38d-47be496b8dcb"
+      }
+    },
+    "tools": [],
+    "memory_exclusions": [
+      {
+        "reason": "MEMORY_IRRELEVANT_TO_CURRENT_CASE",
+        "relevance": {
+          "conflicting_fields": [],
+          "matched_fields": [],
+          "matched_terms": [],
+          "reason": "MEMORY_IRRELEVANT_TO_CURRENT_CASE",
+          "score": 0.0,
+          "threshold": 0.08
+        },
+        "source_id": "episodic-1030d506-5e94-4034-8e7d-5c413025ad0b",
+        "source_type": "EPISODIC_MEMORY",
+        "version": 2
+      }
+    ],
+    "tokens": 1959,
+    "elapsed_seconds": 4.264,
+    "failure": null
+  },
+  "after_revoke": {
+    "outcome": {
+      "receipt_id": "s3-diagnosis-61119b39-2848-47f2-a51b-29c62ec21fb6",
+      "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "currentness": "CURRENT",
+      "recovered": false,
+      "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+      "handoff_allowed": true,
+      "explanation": "当前订单 async-order-2 的 order_version=3、status=COMPLETED，订单读取的 HTTP 200 只证明查询成功。对应事件 event-6dcc6e19… 为 ACKNOWLEDGED、receiver_http_status=202，且 transport_response 显示 receiver_state=QUEUED、attempt_count=0。接收方记录同为 QUEUED，accepted_at=2026-10-23T09:09:13.876777Z，说明 202/ACKNOWLEDGED 仅是投递接受或入队，不等于接收方处理完成。因此 Trusted Gate 判定为 RECEIVER_PROCESSING_UNCONFIRMED，处置方向是联系接收方运营。现有事实不支持“下游没有收到”的原始说法，也不能据此声称恢复或重发回调。",
+      "explanation_currentness": "CURRENT",
+      "explanation_excluded_sources": [],
+      "gate": {
+        "checked_fact_ids": [
+          "evidence-516742ce-c2be-46cf-a6ef-b3e6c46a3fcf",
+          "evidence-516742ce-c2be-46cf-a6ef-b3e6c46a3fcf",
+          "evidence-2f8de23d-ba9c-4b0d-9771-d47b15b6e9b6",
+          "evidence-324618b5-a2eb-47cd-90da-400727cf95b4"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+        "handoff_allowed": true,
+        "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "body": {
+        "business_writes": 0,
+        "control_revision": 0,
+        "evidence": [
+          {
+            "digest": "7558e9d1de857ccdf51e01ff83226577bdcd67092d2f1e506b9b43b14a778dc0",
+            "fact_type": "s3_order",
+            "facts": {
+              "body": {
+                "authn_event_id": 4,
+                "contract_version": 1,
+                "order_id": "async-order-2",
+                "order_version": 3,
+                "request_id": "02d8524ac6370da2",
+                "status": "COMPLETED"
+              },
+              "http_status": 200,
+              "versions_after": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 3,
+                "order_version": 3,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 3
+              },
+              "versions_before": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 3,
+                "order_version": 3,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 3
+              }
+            },
+            "id": "evidence-516742ce-c2be-46cf-a6ef-b3e6c46a3fcf",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 3,
+              "order_version": 3,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 3
+            }
+          },
+          {
+            "digest": "db4cf44cff273fc773acd9ae7e19b1fb3531f5fe1c7ea1ec355f3a06011d8dbb",
+            "fact_type": "s3_delivery",
+            "facts": {
+              "attempt_count": 0,
+              "event_id": "event-6dcc6e19-d77a-47e7-a4a7-96c9fc6c2111",
+              "failure_code": null,
+              "max_attempts": 3,
+              "order_id": "async-order-2",
+              "order_version": 3,
+              "receiver_http_status": 202,
+              "response_digest": "eef8acc2ea61d8e5bf13856d9d7f2c85a733a251c95fd316e0c9e74f3a99b122",
+              "retry_at": null,
+              "retry_state": "NOT_APPLICABLE",
+              "service_id": "orders-async-demo",
+              "status": "ACKNOWLEDGED",
+              "tenant_id": "tenant-a",
+              "transport_request_id": "transport-88d1ebfc-d007-4874-b37f-61b7f91b634f",
+              "transport_response_json": "{\"accepted_at\":\"2026-10-23T09:09:13.876777Z\",\"attempt_count\":0,\"event_id\":\"event-6dcc6e19-d77a-47e7-a4a7-96c9fc6c2111\",\"failure_code\":null,\"max_attempts\":3,\"order_id\":\"async-order-2\",\"processing_sla_seconds\":300,\"receiver_state\":\"QUEUED\",\"request_id\":\"transport-88d1ebfc-d007-4874-b37f-61b7f91b634f\",\"retry_at\":null,\"retry_state\":\"NOT_APPLICABLE\"}",
+              "version": 3
+            },
+            "id": "evidence-2f8de23d-ba9c-4b0d-9771-d47b15b6e9b6",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 3,
+              "order_version": 3,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 3
+            }
+          },
+          {
+            "digest": "23eea3923d55d4da05474d0ea957fd5b9b4fd0e76e345e2d9dab7690eed6cc05",
+            "fact_type": "s3_receiver",
+            "facts": {
+              "accepted_at": "2026-10-23T09:09:13.876777Z",
+              "delivery_version": 3,
+              "event_id": "event-6dcc6e19-d77a-47e7-a4a7-96c9fc6c2111",
+              "order_id": "async-order-2",
+              "processing_sla_seconds": 300,
+              "service_id": "orders-async-demo",
+              "status": "QUEUED",
+              "tenant_id": "tenant-a",
+              "version": 3
+            },
+            "id": "evidence-324618b5-a2eb-47cd-90da-400727cf95b4",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 3,
+              "order_version": 3,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 3
+            }
+          }
+        ],
+        "explanation_call_id": "call-f8f0955e-8e17-481c-820c-1b3775d517ce",
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-516742ce-c2be-46cf-a6ef-b3e6c46a3fcf",
+            "evidence-516742ce-c2be-46cf-a6ef-b3e6c46a3fcf",
+            "evidence-2f8de23d-ba9c-4b0d-9771-d47b15b6e9b6",
+            "evidence-324618b5-a2eb-47cd-90da-400727cf95b4"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+          "handoff_allowed": true,
+          "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": []
+        },
+        "model_summary_untrusted": "当前订单 async-order-2 的 order_version=3、status=COMPLETED，订单读取的 HTTP 200 只证明查询成功。对应事件 event-6dcc6e19… 为 ACKNOWLEDGED、receiver_http_status=202，且 transport_response 显示 receiver_state=QUEUED、attempt_count=0。接收方记录同为 QUEUED，accepted_at=2026-10-23T09:09:13.876777Z，说明 202/ACKNOWLEDGED 仅是投递接受或入队，不等于接收方处理完成。因此 Trusted Gate 判定为 RECEIVER_PROCESSING_UNCONFIRMED，处置方向是联系接收方运营。现有事实不支持“下游没有收到”的原始说法，也不能据此声称恢复或重发回调。",
+        "recovered": false,
+        "run_id": "run-2db85f9e-974c-4917-a280-5d1db0377c29",
+        "schema": "s3-callback-evidence-v1",
+        "task_id": "task-af43a547-3843-4e9e-a41a-be769580c1e9"
+      }
+    },
+    "tools": [
+      "load_callback_skill",
+      "get_order_status",
+      "get_callback_delivery",
+      "get_receiver_processing"
+    ],
+    "tokens": 11806,
+    "elapsed_seconds": 14.608,
+    "failure": null
+  },
+  "provider_requests": 13,
+  "provider_requests_max": 30,
+  "no_agent_business_write": true,
+  "evidence_dir": "docs\\evidence\\vnext\\m4-03\\runs\\memory-20261023T092400Z"
+}

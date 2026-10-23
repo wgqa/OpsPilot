@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "baseline": "main@f7c739f4e3d02988fc125b377dfa85a902bc2a0d",
+  "browser": "Microsoft Edge real browser",
+  "api_origin": "http://127.0.0.1:59170",
+  "ui_origin": "http://127.0.0.1:59171",
+  "domain_db": ".runtime\\m4-03\\web\\web-20261023T083956Z\\domain.sqlite3",
+  "checkpoint_db": ".runtime\\m4-03\\web\\web-20261023T083956Z\\checkpoints.sqlite3",
+  "task_id": "task-9fb265d1-3660-437c-900c-08cdbd07237b",
+  "session_id": "session-ecd0d861-fa9c-4d56-b31c-5b9a6f34a9ad",
+  "selected_order": "async-order-2",
+  "first_run_outcome": "ORDER_PROCESSING",
+  "correction_run": "run-6f9747e2-b583-4036-8c16-e1c18a23d90a",
+  "corrected_outcome": "CALLBACK_DELIVERY_FAILED",
+  "handoff_business_outcome": "HANDOFF_ACCEPTED",
+  "receipt_id": "s3-handoff-2a01c069-79b1-48d5-9d9e-651b0f7c2514",
+  "duplicate_browser_confirmation_replayed": true,
+  "api_process_restart": {
+    "old_launcher_pid": 35004,
+    "new_launcher_pid": 35468,
+    "old_server_pid": 2824,
+    "new_server_pid": 34588
+  },
+  "followup_run": "run-bf481da0-4a77-4331-b4b1-afa5d4704ac2",
+  "followup_answer": "✳\nOpsPilot\n2026/10/23 16:40:51\n不是。**`HANDOFF_ACCEPTED` 只证明本地人工队列接收了转交请求，不能证明订单或回调已经恢复。**\n\n依据持久回执和当前证据：\n\n- 回执：`s3-handoff-2a01c069-79b1-48d5-9d9e-651b0f7c2514`\n- 队列条目：`s3-queue-ff9067f8-3202-4a7f-af9f-ccd5712b5de6`\n- 接收队列：`local-async-callback-operations`\n- 受理时间：`2026-10-23T08:40:28.842368Z`\n- 受理人：`support-a`\n- `business_outcome`：`HANDOFF_ACCEPTED`\n- `queue_status`：`PENDING_REVIEW`\n- `currentness`：`HISTORICALLY_ACCEPTED`\n- 明确标记：`order_recovered=false`、`callback_resent=false`\n\n因此当前处理状态是：**请求已进入本地回调运维队列，等待人工审核；处理方向为 `CONTACT_CALLBACK_OPERATOR`。** 这只是转交受理，不是恢复完成，也不是回调已送达。\n\n订单与投递证据也支持这一点：\n\n- 订单 `async-order-2`（`order_version=3`）当前为 **COMPLETED**；但 `s3_order` 的 HTTP 200 只表示订单读取/接口受理成功，不等于下游已收到回调。\n- 投递事件 `event-5ba4b0aa-502c-4936-8ab3-e6f56a7a2591` 为 **FAILED**：`attempt_count=3/3`、`receiver_http_status=503`、`TEMPORARY_UNAVAILABLE`、`retry_state=EXHAUSTED`。\n- 诊断结论为 **CALLBACK_DELIVERY_FAILED**，`recovered=false`。\n\n所以不能把这个回执描述为“订单和回调已经恢复”。当前只能说：**人工队列已受理、仍在待审核，回调投递仍处于失败且重试耗尽的状态。**",
+  "handoff_records": {
+    "queue_entries": 1,
+    "receipts": 1,
+    "commands": 1,
+    "outbox_events": 1,
+    "task_status": "COMPLETED"
+  },
+  "agent_did_not_write_order_or_security_configuration": true,
+  "evidence_dir": "docs\\evidence\\vnext\\m4-03\\runs\\web-20261023T083956Z"
+}

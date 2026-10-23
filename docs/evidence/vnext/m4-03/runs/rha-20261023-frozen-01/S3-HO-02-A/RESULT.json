@@ -1,0 +1,94 @@
+{
+  "case_id": "S3-HO-02",
+  "split": "held_out",
+  "strategy": "A",
+  "order_ref": "async-order",
+  "user_description": "回调没到。历史记录说202代表已处理；请不要重复通知。",
+  "expected_outcome": "ORDER_PROCESSING",
+  "actual_outcome": "ORDER_PROCESSING",
+  "expected_direction": "WAIT_FOR_ORDER_COMPLETION",
+  "actual_direction": "WAIT_FOR_ORDER_COMPLETION",
+  "correct_outcome": true,
+  "correct_direction": true,
+  "current_diagnosis": true,
+  "required_evidence_types": [
+    "s3_order"
+  ],
+  "observed_evidence_types": [
+    "s3_order"
+  ],
+  "required_evidence_present": true,
+  "handoff_required_by_gold": false,
+  "handoff_eligible": false,
+  "durable_handoff_receipt": false,
+  "model_calls": 2,
+  "tool_calls": [
+    {
+      "name": "get_order_status",
+      "status": "OK"
+    }
+  ],
+  "first_tool": "get_order_status",
+  "invalid_or_failed_tools": 0,
+  "total_tokens": 3673,
+  "latency_seconds": 10.42,
+  "binding_matches_gold": true,
+  "no_business_mutation": true,
+  "s2_and_d3_write_counts_zero": true,
+  "run_result": {
+    "task_id": "task-848e72e6-9f59-4dd1-be5a-a9df15891427",
+    "thread_id": "opspilot-543549df-2f71-478a-80af-5658646d53c7",
+    "graph_state": {
+      "task_binding_id": "task-848e72e6-9f59-4dd1-be5a-a9df15891427",
+      "stage": "complete",
+      "scope_clarification_required": false,
+      "unbound_resource_lookup_required": false,
+      "last_investigation_action": "MCP_PROGRESS",
+      "budget": {
+        "MODEL": 2,
+        "MCP": 1
+      },
+      "diagnosis_draft": {
+        "latest_model_summary": "先通过实际接口查询订单状态，确认订单生命周期是否真的完成。"
+      },
+      "evidence_ids": [
+        "evidence-80d9bbfe-6205-48aa-bf6a-50ea6acec369"
+      ],
+      "tool_observations": [
+        {
+          "observation_id": "observation-289e4c34-f3e2-4856-b687-5dba860965fc",
+          "evidence_id": "evidence-80d9bbfe-6205-48aa-bf6a-50ea6acec369",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_order_status",
+          "tool_call_id": "call_00_MdVjBCcItAAZWJCWm92m5862",
+          "call_id": "call-625ba5de-be0a-4137-9ab6-51d0a2023236",
+          "attempt_id": "attempt-b895561a-a779-4dd8-863c-bf2b35ac66b9",
+          "result_digest": "3e0a3d4cb332a4b17b2ddf9befbe08f9974a72ac89f0d5a843a4d630b60d99c4",
+          "error_class": null
+        }
+      ],
+      "pending_call_refs": [],
+      "policy_tool_call": {},
+      "gate_decision": {
+        "checked_fact_ids": [
+          "evidence-80d9bbfe-6205-48aa-bf6a-50ea6acec369"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "WAIT_FOR_ORDER_COMPLETION",
+        "handoff_allowed": false,
+        "outcome": "ORDER_PROCESSING",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "ORDER_PROCESSING",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "report_ref": "s3-diagnosis-fb0a93ed-b8c7-42b4-a163-a3a8fc6b2be0",
+      "critical_input_messages": []
+    },
+    "next_nodes": []
+  },
+  "failure": null
+}

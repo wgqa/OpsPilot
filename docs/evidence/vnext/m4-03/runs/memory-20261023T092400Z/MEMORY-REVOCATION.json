@@ -1,0 +1,125 @@
+{
+  "memory_id": "episodic-1030d506-5e94-4034-8e7d-5c413025ad0b",
+  "tenant_id": "tenant-a",
+  "project_id": "service:orders-async-demo",
+  "type": "EPISODIC",
+  "problem_type": "async_callback",
+  "summary": "历史异步订单诊断：/api/async-orders/async-order 的可信结论为 CALLBACK_DELIVERY_FAILED；仅诊断，未重发回调，未证明恢复。",
+  "source_task_id": "task-03e74333-6e13-4046-8ee8-f53d42dba640",
+  "source_report_ref": null,
+  "source_verification_id": null,
+  "source_outcome": "DIAGNOSED",
+  "schema_version": "opspilot-case-memory-v1",
+  "content_digest": "322b0d82d47f6a82c973b737538116ba0596b28a8c2729eb024ee96a3410e2af",
+  "state": "REVOKED",
+  "version": 3,
+  "confirmed_by": "approver-a",
+  "confirmed_at": "2026-10-23T09:24:04.488+00:00",
+  "revoked_by": "approver-a",
+  "revoked_at": "2026-10-23T09:24:35.748+00:00",
+  "expires_at": "2026-11-22T09:24:04.476+00:00",
+  "created_at": "2026-10-23T09:24:04.476+00:00",
+  "source_evidence_ids": [
+    "evidence-527ecd75-a5f9-44b7-8702-795cc3061ed1",
+    "evidence-527ecd75-a5f9-44b7-8702-795cc3061ed1",
+    "evidence-a056ad3c-dd8d-47a7-a524-77c7e2b174b0"
+  ],
+  "applicability_constraints": {
+    "problem_type": "async_callback",
+    "required_current_checks": [
+      "s3_order",
+      "s3_delivery"
+    ],
+    "service_id": "orders-async-demo",
+    "source_outcome": "DIAGNOSED"
+  },
+  "source_refs": [
+    {
+      "digest_or_version": "8424cacdacd41df1ae3e457602b7a1db5330d35caa0242ca0d182ecc9bfd7874",
+      "id": "s3-diagnosis-1a53f6e0-2007-4e1e-970c-754aee80d512",
+      "kind": "S3_DIAGNOSIS"
+    },
+    {
+      "digest_or_version": "cc86d380afd38837bf09343a9e61f5ef909adb29b1b0b8670aedd7cf79e74acd",
+      "id": "evidence-527ecd75-a5f9-44b7-8702-795cc3061ed1",
+      "kind": "EVIDENCE"
+    },
+    {
+      "digest_or_version": "59ba35b43a1366897b2caa0b6660cbbe1298e27b7d545cf9194ab2e42382995e",
+      "id": "evidence-a056ad3c-dd8d-47a7-a524-77c7e2b174b0",
+      "kind": "EVIDENCE"
+    }
+  ],
+  "experience": {
+    "case_specific_facts": {
+      "observed_facts": [
+        {
+          "body": {
+            "authn_event_id": 1,
+            "contract_version": 1,
+            "order_id": "async-order",
+            "order_version": 2,
+            "request_id": "f3445abeae6fa265",
+            "status": "COMPLETED"
+          },
+          "http_status": 200,
+          "versions_after": {
+            "config_version": 1,
+            "contract_version": 1,
+            "delivery_version": 2,
+            "order_version": 2,
+            "policy_version": 1,
+            "principal_version": 1,
+            "receiver_version": 2
+          },
+          "versions_before": {
+            "config_version": 1,
+            "contract_version": 1,
+            "delivery_version": 2,
+            "order_version": 2,
+            "policy_version": 1,
+            "principal_version": 1,
+            "receiver_version": 2
+          }
+        },
+        {
+          "attempt_count": 3,
+          "event_id": "event-926646d6-153f-46a2-a502-06f915df8b78",
+          "failure_code": "TEMPORARY_UNAVAILABLE",
+          "max_attempts": 3,
+          "order_id": "async-order",
+          "order_version": 2,
+          "receiver_http_status": 503,
+          "response_digest": "08b0e4e44ea7ca9e7d58242b13783dbfa0a6cc10af14893f5e244a9891cd062a",
+          "retry_at": null,
+          "retry_state": "EXHAUSTED",
+          "service_id": "orders-async-demo",
+          "status": "FAILED",
+          "tenant_id": "tenant-a",
+          "transport_request_id": "transport-d580f2b7-8c64-4833-b48b-7a38d8137fbd",
+          "transport_response_json": "{\"accepted_at\":null,\"attempt_count\":3,\"event_id\":\"event-926646d6-153f-46a2-a502-06f915df8b78\",\"failure_code\":\"TEMPORARY_UNAVAILABLE\",\"max_attempts\":3,\"order_id\":\"async-order\",\"processing_sla_seconds\":null,\"receiver_state\":\"UNAVAILABLE\",\"request_id\":\"transport-d580f2b7-8c64-4833-b48b-7a38d8137fbd\",\"retry_at\":null,\"retry_state\":\"EXHAUSTED\"}",
+          "version": 2
+        }
+      ],
+      "outcome": "CALLBACK_DELIVERY_FAILED",
+      "required_current_checks": [
+        "s3_order",
+        "s3_delivery"
+      ],
+      "route": "/api/async-orders/async-order"
+    },
+    "investigation_guidance": [
+      "HTTP 200 only proves an order read; establish current lifecycle before calling a missing callback a fault.",
+      "For a completed order, correlate delivery event and version; a 202 acknowledgement requires receiver processing verification.",
+      "Historical outcome is not the target task's cause. Retrieve the applicable current contract or delivery Skill if uncertain."
+    ],
+    "limitations": [
+      "Historical method only; no authorization, resend or recovery proof."
+    ],
+    "required_current_checks": [
+      "s3_order",
+      "s3_delivery"
+    ],
+    "source_authority": "HISTORICAL_METHOD_HINT_ONLY"
+  }
+}

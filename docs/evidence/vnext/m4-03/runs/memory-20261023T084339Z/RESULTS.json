@@ -1,0 +1,303 @@
+{
+  "status": "PASS",
+  "release": "memory-20261023T084339Z",
+  "provider": "deepseek-flash",
+  "source_task_id": "task-b7f5f267-d59b-4e67-bb2c-35d2fbdaabd2",
+  "source_outcome": "CALLBACK_DELIVERY_FAILED",
+  "target_task_on": "task-099d528f-14cc-4a7f-ac92-71655764dd0a",
+  "target_task_after_revoke": "task-21ae26d4-1d18-4be0-93a5-bbdd755c1d20",
+  "memory_id": "episodic-79e8a5a3-8fc8-443e-a06c-30f0d49b4a90",
+  "memory_state_after_revoke": "REVOKED",
+  "different_source_and_target_tasks": true,
+  "memory_selected_in_real_provider_context": true,
+  "revoked_memory_excluded_from_later_provider_context": true,
+  "revoke_exclusion_reasons": [
+    "MEMORY_REVOKED"
+  ],
+  "memory_on": {
+    "outcome": {
+      "receipt_id": "s3-diagnosis-01f9a868-6c3c-4b98-915d-1e7324e04a8a",
+      "outcome": "CALLBACK_DELIVERY_FAILED",
+      "currentness": "CURRENT",
+      "recovered": false,
+      "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+      "handoff_allowed": true,
+      "explanation": "只读核验显示订单 `async-order-2`（`order_version=2`）为 `COMPLETED`，订单读取返回 HTTP 200；这仅证明订单查询/HTTP 接受成功，不等于下游 receiver 已完成处理。当前回调事件 `event-40a961ae-d411-4373-875f-50a20f13ce75` 为 `FAILED`，`receiver_http_status=503`、`failure_code=TEMPORARY_UNAVAILABLE`、`attempt_count=3/3`、`retry_state=EXHAUSTED`。因此可信 Gate 结论固定为 `CALLBACK_DELIVERY_FAILED`（`recovered=false`），支持“下游未收到回调”的症状，但纠正“HTTP 200 即回调送达”的理解。历史 episodic 仅作方法提示，不能替代当前事实；当前事实也未证明重发或恢复。处理方向为 `CONTACT_CALLBACK_OPERATOR`，本次只读调查不授权写入。",
+      "explanation_currentness": "CURRENT",
+      "explanation_excluded_sources": [],
+      "gate": {
+        "checked_fact_ids": [
+          "evidence-1c9f6cc5-5335-4545-97d6-ffcb95fc68d1",
+          "evidence-1c9f6cc5-5335-4545-97d6-ffcb95fc68d1",
+          "evidence-8ab887b6-97d8-4ca2-96f4-0ab059a70618"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+        "handoff_allowed": true,
+        "outcome": "CALLBACK_DELIVERY_FAILED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "CALLBACK_DELIVERY_FAILED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "body": {
+        "business_writes": 0,
+        "control_revision": 0,
+        "evidence": [
+          {
+            "digest": "6c523e2857dafb09ece569819484c2d912e733b8f7cafae6b1ca96c6222acd0c",
+            "fact_type": "s3_order",
+            "facts": {
+              "body": {
+                "authn_event_id": 2,
+                "contract_version": 1,
+                "order_id": "async-order-2",
+                "order_version": 2,
+                "request_id": "6cc764d55130d1e2",
+                "status": "COMPLETED"
+              },
+              "http_status": 200,
+              "versions_after": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2
+              },
+              "versions_before": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2
+              }
+            },
+            "id": "evidence-1c9f6cc5-5335-4545-97d6-ffcb95fc68d1",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 2,
+              "order_version": 2,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 2
+            }
+          },
+          {
+            "digest": "5ef6a574b6364c6a71ae7643b776b2ec4185818333d1708c30ffd00409a66ea5",
+            "fact_type": "s3_delivery",
+            "facts": {
+              "attempt_count": 3,
+              "event_id": "event-40a961ae-d411-4373-875f-50a20f13ce75",
+              "failure_code": "TEMPORARY_UNAVAILABLE",
+              "max_attempts": 3,
+              "order_id": "async-order-2",
+              "order_version": 2,
+              "receiver_http_status": 503,
+              "response_digest": "354ff98a43fd85b532c53180d4e98c67af9c30d56b94e7d1ea5eef76a7a9cd76",
+              "retry_at": null,
+              "retry_state": "EXHAUSTED",
+              "service_id": "orders-async-demo",
+              "status": "FAILED",
+              "tenant_id": "tenant-a",
+              "transport_request_id": "transport-8b1d2eb7-fd09-465b-99a6-0f0dd3c111b6",
+              "transport_response_json": "{\"accepted_at\":null,\"attempt_count\":3,\"event_id\":\"event-40a961ae-d411-4373-875f-50a20f13ce75\",\"failure_code\":\"TEMPORARY_UNAVAILABLE\",\"max_attempts\":3,\"order_id\":\"async-order-2\",\"processing_sla_seconds\":null,\"receiver_state\":\"UNAVAILABLE\",\"request_id\":\"transport-8b1d2eb7-fd09-465b-99a6-0f0dd3c111b6\",\"retry_at\":null,\"retry_state\":\"EXHAUSTED\"}",
+              "version": 2
+            },
+            "id": "evidence-8ab887b6-97d8-4ca2-96f4-0ab059a70618",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 2,
+              "order_version": 2,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 2
+            }
+          }
+        ],
+        "explanation_call_id": "call-b60ba7d7-ead1-4c90-aef7-5675e9524028",
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-1c9f6cc5-5335-4545-97d6-ffcb95fc68d1",
+            "evidence-1c9f6cc5-5335-4545-97d6-ffcb95fc68d1",
+            "evidence-8ab887b6-97d8-4ca2-96f4-0ab059a70618"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+          "handoff_allowed": true,
+          "outcome": "CALLBACK_DELIVERY_FAILED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "CALLBACK_DELIVERY_FAILED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": []
+        },
+        "model_summary_untrusted": "只读核验显示订单 `async-order-2`（`order_version=2`）为 `COMPLETED`，订单读取返回 HTTP 200；这仅证明订单查询/HTTP 接受成功，不等于下游 receiver 已完成处理。当前回调事件 `event-40a961ae-d411-4373-875f-50a20f13ce75` 为 `FAILED`，`receiver_http_status=503`、`failure_code=TEMPORARY_UNAVAILABLE`、`attempt_count=3/3`、`retry_state=EXHAUSTED`。因此可信 Gate 结论固定为 `CALLBACK_DELIVERY_FAILED`（`recovered=false`），支持“下游未收到回调”的症状，但纠正“HTTP 200 即回调送达”的理解。历史 episodic 仅作方法提示，不能替代当前事实；当前事实也未证明重发或恢复。处理方向为 `CONTACT_CALLBACK_OPERATOR`，本次只读调查不授权写入。",
+        "recovered": false,
+        "run_id": "run-16eef61e-ca07-4f40-bf2c-c11722dcdaa4",
+        "schema": "s3-callback-evidence-v1",
+        "task_id": "task-099d528f-14cc-4a7f-ac92-71655764dd0a"
+      }
+    },
+    "tools": [
+      "get_order_status",
+      "get_callback_delivery"
+    ],
+    "tokens": 8567,
+    "elapsed_seconds": 10.613,
+    "failure": null
+  },
+  "after_revoke": {
+    "outcome": {
+      "receipt_id": "s3-diagnosis-409781aa-c33f-4b01-b16b-296bba766f02",
+      "outcome": "CALLBACK_DELIVERY_FAILED",
+      "currentness": "CURRENT",
+      "recovered": false,
+      "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+      "handoff_allowed": true,
+      "explanation": "当前订单事实：async-order-2（order_version=2）状态为 COMPLETED，订单接口返回 HTTP 200，request_id=20c016b359b99f70，authn_event_id=3。  \n回调事件 event-40a961ae-d411-4373-875f-50a20f13ce75 对同一订单记录 status=FAILED、attempt_count=3/max_attempts=3、failure_code=TEMPORARY_UNAVAILABLE、receiver_http_status=503、retry_state=EXHAUSTED、receiver_state=UNAVAILABLE。  \nHTTP 200 只表示订单侧响应成功，不等于接收方完成回调；现有事件表明回调投递在三次尝试后耗尽并失败。  \n因此原“下游没有收到回调”应细化为接收方不可用导致投递失败；可信 Gate 结论为 CALLBACK_DELIVERY_FAILED（recovered=false），处置方向是联系回调运维，不重发、不声称恢复。  \n历史建议若与此冲突，应以当前订单/事件和 Gate 结论为准；Memory/Knowledge/Skill 仅作方法参考。",
+      "explanation_currentness": "CURRENT",
+      "explanation_excluded_sources": [],
+      "gate": {
+        "checked_fact_ids": [
+          "evidence-534450f7-46df-45cd-ad70-07d07270d1fc",
+          "evidence-534450f7-46df-45cd-ad70-07d07270d1fc",
+          "evidence-14ea9566-153e-449f-a2a4-4fe7cc22b11e"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+        "handoff_allowed": true,
+        "outcome": "CALLBACK_DELIVERY_FAILED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "CALLBACK_DELIVERY_FAILED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "body": {
+        "business_writes": 0,
+        "control_revision": 0,
+        "evidence": [
+          {
+            "digest": "d5b963c46b59279b1ef78b0db4d8700653addf54b7143bf59e53d91cee7f26e3",
+            "fact_type": "s3_order",
+            "facts": {
+              "body": {
+                "authn_event_id": 3,
+                "contract_version": 1,
+                "order_id": "async-order-2",
+                "order_version": 2,
+                "request_id": "20c016b359b99f70",
+                "status": "COMPLETED"
+              },
+              "http_status": 200,
+              "versions_after": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2
+              },
+              "versions_before": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2
+              }
+            },
+            "id": "evidence-534450f7-46df-45cd-ad70-07d07270d1fc",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 2,
+              "order_version": 2,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 2
+            }
+          },
+          {
+            "digest": "7997cbfadd95b157f334abb819bfe8abc9850624f1050af98d63e9866f53a0b5",
+            "fact_type": "s3_delivery",
+            "facts": {
+              "attempt_count": 3,
+              "event_id": "event-40a961ae-d411-4373-875f-50a20f13ce75",
+              "failure_code": "TEMPORARY_UNAVAILABLE",
+              "max_attempts": 3,
+              "order_id": "async-order-2",
+              "order_version": 2,
+              "receiver_http_status": 503,
+              "response_digest": "354ff98a43fd85b532c53180d4e98c67af9c30d56b94e7d1ea5eef76a7a9cd76",
+              "retry_at": null,
+              "retry_state": "EXHAUSTED",
+              "service_id": "orders-async-demo",
+              "status": "FAILED",
+              "tenant_id": "tenant-a",
+              "transport_request_id": "transport-8b1d2eb7-fd09-465b-99a6-0f0dd3c111b6",
+              "transport_response_json": "{\"accepted_at\":null,\"attempt_count\":3,\"event_id\":\"event-40a961ae-d411-4373-875f-50a20f13ce75\",\"failure_code\":\"TEMPORARY_UNAVAILABLE\",\"max_attempts\":3,\"order_id\":\"async-order-2\",\"processing_sla_seconds\":null,\"receiver_state\":\"UNAVAILABLE\",\"request_id\":\"transport-8b1d2eb7-fd09-465b-99a6-0f0dd3c111b6\",\"retry_at\":null,\"retry_state\":\"EXHAUSTED\"}",
+              "version": 2
+            },
+            "id": "evidence-14ea9566-153e-449f-a2a4-4fe7cc22b11e",
+            "versions": {
+              "config_version": 1,
+              "contract_version": 1,
+              "delivery_version": 2,
+              "order_version": 2,
+              "policy_version": 1,
+              "principal_version": 1,
+              "receiver_version": 2
+            }
+          }
+        ],
+        "explanation_call_id": "call-d96455ae-130a-46fe-88cf-eac1a47c95fe",
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-534450f7-46df-45cd-ad70-07d07270d1fc",
+            "evidence-534450f7-46df-45cd-ad70-07d07270d1fc",
+            "evidence-14ea9566-153e-449f-a2a4-4fe7cc22b11e"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+          "handoff_allowed": true,
+          "outcome": "CALLBACK_DELIVERY_FAILED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "CALLBACK_DELIVERY_FAILED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": []
+        },
+        "model_summary_untrusted": "当前订单事实：async-order-2（order_version=2）状态为 COMPLETED，订单接口返回 HTTP 200，request_id=20c016b359b99f70，authn_event_id=3。  \n回调事件 event-40a961ae-d411-4373-875f-50a20f13ce75 对同一订单记录 status=FAILED、attempt_count=3/max_attempts=3、failure_code=TEMPORARY_UNAVAILABLE、receiver_http_status=503、retry_state=EXHAUSTED、receiver_state=UNAVAILABLE。  \nHTTP 200 只表示订单侧响应成功，不等于接收方完成回调；现有事件表明回调投递在三次尝试后耗尽并失败。  \n因此原“下游没有收到回调”应细化为接收方不可用导致投递失败；可信 Gate 结论为 CALLBACK_DELIVERY_FAILED（recovered=false），处置方向是联系回调运维，不重发、不声称恢复。  \n历史建议若与此冲突，应以当前订单/事件和 Gate 结论为准；Memory/Knowledge/Skill 仅作方法参考。",
+        "recovered": false,
+        "run_id": "run-9d7eb139-744b-4996-9ad1-780f62ac251f",
+        "schema": "s3-callback-evidence-v1",
+        "task_id": "task-21ae26d4-1d18-4be0-93a5-bbdd755c1d20"
+      }
+    },
+    "tools": [
+      "get_order_status",
+      "get_callback_delivery"
+    ],
+    "tokens": 6719,
+    "elapsed_seconds": 14.61,
+    "failure": null
+  },
+  "provider_requests": 6,
+  "provider_requests_max": 30,
+  "no_agent_business_write": true,
+  "evidence_dir": "docs\\evidence\\vnext\\m4-03\\runs\\memory-20261023T084339Z"
+}

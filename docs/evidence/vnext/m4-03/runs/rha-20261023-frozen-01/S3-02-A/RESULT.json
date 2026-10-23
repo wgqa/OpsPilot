@@ -1,0 +1,115 @@
+{
+  "case_id": "S3-02",
+  "split": "development",
+  "strategy": "A",
+  "order_ref": "async-order-2",
+  "user_description": "订单接口返回 200，但下游没有收到异步回调。",
+  "expected_outcome": "CALLBACK_DELIVERY_FAILED",
+  "actual_outcome": "CALLBACK_DELIVERY_FAILED",
+  "expected_direction": "WAIT_FOR_SCHEDULED_RETRY",
+  "actual_direction": "WAIT_FOR_SCHEDULED_RETRY",
+  "correct_outcome": true,
+  "correct_direction": true,
+  "current_diagnosis": true,
+  "required_evidence_types": [
+    "s3_delivery",
+    "s3_order"
+  ],
+  "observed_evidence_types": [
+    "s3_delivery",
+    "s3_order"
+  ],
+  "required_evidence_present": true,
+  "handoff_required_by_gold": false,
+  "handoff_eligible": false,
+  "durable_handoff_receipt": false,
+  "model_calls": 3,
+  "tool_calls": [
+    {
+      "name": "get_order_status",
+      "status": "OK"
+    },
+    {
+      "name": "get_callback_delivery",
+      "status": "OK"
+    }
+  ],
+  "first_tool": "get_order_status",
+  "invalid_or_failed_tools": 0,
+  "total_tokens": 7095,
+  "latency_seconds": 16.957,
+  "binding_matches_gold": true,
+  "no_business_mutation": true,
+  "s2_and_d3_write_counts_zero": true,
+  "run_result": {
+    "task_id": "task-7808a93f-7c71-4d0f-8d9a-c681a51cdf3e",
+    "thread_id": "opspilot-f424e9ca-5b00-4d4b-be0a-10e291f08836",
+    "graph_state": {
+      "task_binding_id": "task-7808a93f-7c71-4d0f-8d9a-c681a51cdf3e",
+      "stage": "complete",
+      "scope_clarification_required": false,
+      "unbound_resource_lookup_required": false,
+      "last_investigation_action": "MCP_PROGRESS",
+      "budget": {
+        "MODEL": 3,
+        "MCP": 2
+      },
+      "diagnosis_draft": {
+        "latest_model_summary": ""
+      },
+      "evidence_ids": [
+        "evidence-447be838-9635-42ce-8974-1d980d5e667b",
+        "evidence-daf8494c-c382-43a3-8ab2-ab7b1f0c5614"
+      ],
+      "tool_observations": [
+        {
+          "observation_id": "observation-94b424b3-4774-4ccf-83c9-19e642d53295",
+          "evidence_id": "evidence-447be838-9635-42ce-8974-1d980d5e667b",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_order_status",
+          "tool_call_id": "call_00_xKkUTvGPXhpvuwPnes6N3297",
+          "call_id": "call-fe7cc4e1-f772-4ff1-b3a7-fff5d5bb50a2",
+          "attempt_id": "attempt-b3d9f232-25e4-44a1-93e2-65b13a1011a6",
+          "result_digest": "5dfb683575c2c79d87e628489c8d8d8612c67431301ee4ae21d37ca6f9cf0523",
+          "error_class": null
+        },
+        {
+          "observation_id": "observation-6f8d5b54-98ed-4525-a473-fc39dbc14635",
+          "evidence_id": "evidence-daf8494c-c382-43a3-8ab2-ab7b1f0c5614",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_callback_delivery",
+          "tool_call_id": "call_00_3k8oSdWcPXb7fPkZlISR4034",
+          "call_id": "call-5c6e32ba-d84e-4454-bb92-bc1006dd43fc",
+          "attempt_id": "attempt-d0e3a61f-eb90-4bf0-aaef-0dfea1a95e34",
+          "result_digest": "d453a8ec8be1eba6cb1b47404a4917901812e045cfe7a773462753714697035f",
+          "error_class": null
+        }
+      ],
+      "pending_call_refs": [],
+      "policy_tool_call": {},
+      "gate_decision": {
+        "checked_fact_ids": [
+          "evidence-447be838-9635-42ce-8974-1d980d5e667b",
+          "evidence-447be838-9635-42ce-8974-1d980d5e667b",
+          "evidence-daf8494c-c382-43a3-8ab2-ab7b1f0c5614"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "WAIT_FOR_SCHEDULED_RETRY",
+        "handoff_allowed": false,
+        "outcome": "CALLBACK_DELIVERY_FAILED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "CALLBACK_DELIVERY_FAILED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "report_ref": "s3-diagnosis-018a3fff-9f43-4cf0-b333-d7faa176fb9c",
+      "critical_input_messages": []
+    },
+    "next_nodes": []
+  },
+  "failure": null
+}

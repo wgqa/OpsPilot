@@ -1,0 +1,119 @@
+{
+  "case_id": "S3-04",
+  "split": "development",
+  "strategy": "H",
+  "order_ref": "async-order-2",
+  "user_description": "订单完成了，但通知似乎送不到接收方。",
+  "expected_outcome": "CALLBACK_DELIVERY_FAILED",
+  "actual_outcome": "CALLBACK_DELIVERY_FAILED",
+  "expected_direction": "CONTACT_CALLBACK_OPERATOR",
+  "actual_direction": "CONTACT_CALLBACK_OPERATOR",
+  "correct_outcome": true,
+  "correct_direction": true,
+  "current_diagnosis": true,
+  "required_evidence_types": [
+    "s3_delivery",
+    "s3_order"
+  ],
+  "observed_evidence_types": [
+    "s3_delivery",
+    "s3_order"
+  ],
+  "required_evidence_present": true,
+  "handoff_required_by_gold": true,
+  "handoff_eligible": true,
+  "durable_handoff_receipt": false,
+  "model_calls": 1,
+  "tool_calls": [
+    {
+      "name": "get_order_status",
+      "status": "OK"
+    },
+    {
+      "name": "get_callback_delivery",
+      "status": "OK"
+    }
+  ],
+  "first_tool": "get_order_status",
+  "invalid_or_failed_tools": 0,
+  "total_tokens": 928,
+  "latency_seconds": 5.196,
+  "binding_matches_gold": true,
+  "no_business_mutation": true,
+  "s2_and_d3_write_counts_zero": true,
+  "run_result": {
+    "task_id": "task-b970312e-d6f8-4e04-9993-0ee359d4c011",
+    "thread_id": "opspilot-9f8a0c59-1db8-4dd5-935b-75d2ac208c4a",
+    "graph_state": {
+      "task_binding_id": "task-b970312e-d6f8-4e04-9993-0ee359d4c011",
+      "stage": "complete",
+      "scope_clarification_required": false,
+      "unbound_resource_lookup_required": false,
+      "last_investigation_action": "MCP_PROGRESS",
+      "budget": {
+        "MODEL": 1,
+        "MCP": 2
+      },
+      "diagnosis_draft": {
+        "s3_normalized": {
+          "symptom": "Order completed but notification seems unable to reach receiver.",
+          "focus": "order",
+          "uncertainty": "high"
+        }
+      },
+      "evidence_ids": [
+        "evidence-10718ec0-9a2e-412e-8cb8-6b5234f2102c",
+        "evidence-8fb49539-ab4a-44e3-a30e-6101e3ded009"
+      ],
+      "tool_observations": [
+        {
+          "observation_id": "observation-017903cd-a63d-422b-8f41-5ac62dbf8f82",
+          "evidence_id": "evidence-10718ec0-9a2e-412e-8cb8-6b5234f2102c",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_order_status",
+          "tool_call_id": "policy-tool-93de9550-22c1-4199-95a6-8b8ca5b3522b",
+          "call_id": "policy-a613e573-0b5e-42f0-a26c-7931a9c6ccf1",
+          "attempt_id": "attempt-1a8aaf22-56a9-4255-8fe8-7132bb7ac7ab",
+          "result_digest": "c179bc55f3e3c48599e80dface50535417a1a6d1663eb5b9dd2f4c207260220d",
+          "error_class": null
+        },
+        {
+          "observation_id": "observation-17d53212-0c86-435a-b085-f4b5feae4f08",
+          "evidence_id": "evidence-8fb49539-ab4a-44e3-a30e-6101e3ded009",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_callback_delivery",
+          "tool_call_id": "policy-tool-80f4ebbd-c8a4-4f6e-a295-f5660b539240",
+          "call_id": "policy-5aa2282c-1649-4919-bd00-74743d556069",
+          "attempt_id": "attempt-7cc3bd14-c71f-49e9-b4eb-7a9eea0a4855",
+          "result_digest": "159177769d1f1795ed5fcd38175f62df94015c7aa90e04f1818391492edd5d3f",
+          "error_class": null
+        }
+      ],
+      "pending_call_refs": [],
+      "policy_tool_call": {},
+      "gate_decision": {
+        "checked_fact_ids": [
+          "evidence-10718ec0-9a2e-412e-8cb8-6b5234f2102c",
+          "evidence-10718ec0-9a2e-412e-8cb8-6b5234f2102c",
+          "evidence-8fb49539-ab4a-44e3-a30e-6101e3ded009"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+        "handoff_allowed": true,
+        "outcome": "CALLBACK_DELIVERY_FAILED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "CALLBACK_DELIVERY_FAILED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "report_ref": "s3-diagnosis-182db120-d127-4746-a7f2-e89fe1f999f5",
+      "critical_input_messages": []
+    },
+    "next_nodes": []
+  },
+  "failure": null
+}

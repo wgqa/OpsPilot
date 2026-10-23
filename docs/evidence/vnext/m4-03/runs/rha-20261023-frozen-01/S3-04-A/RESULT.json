@@ -1,0 +1,115 @@
+{
+  "case_id": "S3-04",
+  "split": "development",
+  "strategy": "A",
+  "order_ref": "async-order-2",
+  "user_description": "订单完成了，但通知似乎送不到接收方。",
+  "expected_outcome": "CALLBACK_DELIVERY_FAILED",
+  "actual_outcome": "CALLBACK_DELIVERY_FAILED",
+  "expected_direction": "CONTACT_CALLBACK_OPERATOR",
+  "actual_direction": "CONTACT_CALLBACK_OPERATOR",
+  "correct_outcome": true,
+  "correct_direction": true,
+  "current_diagnosis": true,
+  "required_evidence_types": [
+    "s3_delivery",
+    "s3_order"
+  ],
+  "observed_evidence_types": [
+    "s3_delivery",
+    "s3_order"
+  ],
+  "required_evidence_present": true,
+  "handoff_required_by_gold": true,
+  "handoff_eligible": true,
+  "durable_handoff_receipt": false,
+  "model_calls": 3,
+  "tool_calls": [
+    {
+      "name": "get_order_status",
+      "status": "OK"
+    },
+    {
+      "name": "get_callback_delivery",
+      "status": "OK"
+    }
+  ],
+  "first_tool": "get_order_status",
+  "invalid_or_failed_tools": 0,
+  "total_tokens": 5960,
+  "latency_seconds": 11.917,
+  "binding_matches_gold": true,
+  "no_business_mutation": true,
+  "s2_and_d3_write_counts_zero": true,
+  "run_result": {
+    "task_id": "task-d51427e6-050b-480e-b689-d9a21ed1cc33",
+    "thread_id": "opspilot-2f1c26f0-a2d6-416f-bce5-050c8a553ab9",
+    "graph_state": {
+      "task_binding_id": "task-d51427e6-050b-480e-b689-d9a21ed1cc33",
+      "stage": "complete",
+      "scope_clarification_required": false,
+      "unbound_resource_lookup_required": false,
+      "last_investigation_action": "MCP_PROGRESS",
+      "budget": {
+        "MODEL": 3,
+        "MCP": 2
+      },
+      "diagnosis_draft": {
+        "latest_model_summary": "Order lifecycle is already established as COMPLETED (body status COMPLETED at order_version 2), so the remaining uncertainty is whether the callback event was actually delivered or failed at transport. I'll read the delivery record next."
+      },
+      "evidence_ids": [
+        "evidence-482841ab-4eb3-4e1a-a554-dafc19ba83bb",
+        "evidence-79c27b90-762d-47f1-b3d2-678c9d379e76"
+      ],
+      "tool_observations": [
+        {
+          "observation_id": "observation-2ec334d8-c18b-47da-ae96-a80e5e0f02c1",
+          "evidence_id": "evidence-482841ab-4eb3-4e1a-a554-dafc19ba83bb",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_order_status",
+          "tool_call_id": "call_00_xgibw14nlHYaGiHUuoUV2415",
+          "call_id": "call-3ba6d6b0-8c90-40cc-9102-08547e31fc5b",
+          "attempt_id": "attempt-cd9e110e-4ad7-4f17-b275-bd86dbfe521d",
+          "result_digest": "5cd451d0440c3722c1a8a4d88f559dd1b61894ebcead253fb6ea5dd9b6753265",
+          "error_class": null
+        },
+        {
+          "observation_id": "observation-3c8180c1-3e7a-46b5-84bf-96cdcfb3a17f",
+          "evidence_id": "evidence-79c27b90-762d-47f1-b3d2-678c9d379e76",
+          "progress_added": true,
+          "status": "OK",
+          "tool_name": "get_callback_delivery",
+          "tool_call_id": "call_00_q5sGUKGQkyVIXQe2I8T02831",
+          "call_id": "call-1b15ccd2-8988-48e6-9b42-641cf56c5dd8",
+          "attempt_id": "attempt-59b1bd19-4feb-40bc-9518-90941f625d49",
+          "result_digest": "4215e3ed7e1176894c5a0d77bf52480674394a3461292aeea455d952bcbdac0b",
+          "error_class": null
+        }
+      ],
+      "pending_call_refs": [],
+      "policy_tool_call": {},
+      "gate_decision": {
+        "checked_fact_ids": [
+          "evidence-482841ab-4eb3-4e1a-a554-dafc19ba83bb",
+          "evidence-482841ab-4eb3-4e1a-a554-dafc19ba83bb",
+          "evidence-79c27b90-762d-47f1-b3d2-678c9d379e76"
+        ],
+        "decision": "DIAGNOSED",
+        "excluded_sources": [],
+        "handling_direction": "CONTACT_CALLBACK_OPERATOR",
+        "handoff_allowed": true,
+        "outcome": "CALLBACK_DELIVERY_FAILED",
+        "policy": "s3-callback-evidence-v1",
+        "reason_code": "CALLBACK_DELIVERY_FAILED",
+        "recovered": false,
+        "required_facts": [],
+        "side_effects": []
+      },
+      "report_ref": "s3-diagnosis-bd2cdb40-4ef2-4b19-8bfc-5667c1d69e86",
+      "critical_input_messages": []
+    },
+    "next_nodes": []
+  },
+  "failure": null
+}

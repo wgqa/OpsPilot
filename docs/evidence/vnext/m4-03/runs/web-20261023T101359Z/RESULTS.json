@@ -1,0 +1,35 @@
+{
+  "status": "PASS",
+  "baseline": "main@f7c739f4e3d02988fc125b377dfa85a902bc2a0d",
+  "browser": "Microsoft Edge real browser",
+  "api_origin": "http://127.0.0.1:51256",
+  "ui_origin": "http://127.0.0.1:51257",
+  "domain_db": ".runtime\\m4-03\\web\\web-20261023T101359Z\\domain.sqlite3",
+  "checkpoint_db": ".runtime\\m4-03\\web\\web-20261023T101359Z\\checkpoints.sqlite3",
+  "task_id": "task-dcc5667a-bbb1-4c9c-a563-b1142162ad67",
+  "session_id": "session-3f0bb7c1-5d60-4e03-958c-2ffcba575db9",
+  "selected_order": "async-order-2",
+  "first_run_outcome": "ORDER_PROCESSING",
+  "correction_run": "run-bab66bb9-16f2-4a93-a239-2a1d2e373163",
+  "corrected_outcome": "CALLBACK_DELIVERY_FAILED",
+  "handoff_business_outcome": "HANDOFF_ACCEPTED",
+  "receipt_id": "s3-handoff-949d072b-f0ef-4f7a-bab7-f5b96b4457e0",
+  "duplicate_browser_confirmation_replayed": true,
+  "api_process_restart": {
+    "old_launcher_pid": 27868,
+    "new_launcher_pid": 26928,
+    "old_server_pid": 23556,
+    "new_server_pid": 22340
+  },
+  "followup_run": "run-0d188628-9db9-411b-a384-974891d22427",
+  "followup_answer": "✳\nOpsPilot\n2026/10/23 18:14:56\n不能。`HANDOFF_ACCEPTED` 只证明**本地人工队列已受理这次交接请求**，不证明订单链路或回调投递已经恢复。\n\n### 持久回执显示的状态\n- `receipt_id`：`s3-handoff-949d072b-f0ef-4f7a-bab7-f5b96b4457e0`\n- `business_outcome`：`HANDOFF_ACCEPTED`\n- `queue_status`：`PENDING_REVIEW`\n- `receiver_queue_id`：`local-async-callback-operations`\n- `accepted_at`：`2026-10-23T10:14:28.009023Z`\n- `accepted_by_actor_id`：`support-a`\n- `handling_direction`：`CONTACT_CALLBACK_OPERATOR`\n- `currentness`：`HISTORICALLY_ACCEPTED`\n- `callback_resent`：`false`\n- `order_recovered`：`false`\n\n因此，当前处理状态是：**交接请求已进入本地人工回调运维队列，等待人工审核/联系回调操作员处理**；没有证据表明已经恢复或重发。\n\n### 当前服务端事实\n- 订单 `async-order-2`，`order_version=3`，状态为 `COMPLETED`，订单侧 `http_status=200`，`request_id=5ea0f82136754594`。证据：`evidence-365a6f29-5862-4a4f-8b9b-600c43a37180`。\n- 回调 `event-a60c9f98-3f32-4467-90c7-8560ae80e4db` 在相同版本上 `attempt_count=3`、`max_attempts=3`、`receiver_http_status=503`、`failure_code=TEMPORARY_UNAVAILABLE`、`retry_state=EXHAUSTED`、`status=FAILED`，接收方为 `UNAVAILABLE`。证据：`evidence-35b84677-7467-42cd-b06e-226559581220`。\n- 受信诊断结论为 `CALLBACK_DELIVERY_FAILED`，`recovered=false`，处理方向仍为 `CONTACT_CALLBACK_OPERATOR`；诊断回执：`s3-diagnosis-2b10c26a-2629-4ad2-a573-3a1fe8f42512`。\n\n所以：**订单侧记录为已完成，但回调投递失败且重试已耗尽；HANDOFF_ACCEPTED 回执不代表订单和回调已经恢复。** HTTP 200 只是订单侧的返回/接受，不等于下游回调投递成功。",
+  "handoff_records": {
+    "queue_entries": 1,
+    "receipts": 1,
+    "commands": 1,
+    "outbox_events": 1,
+    "task_status": "COMPLETED"
+  },
+  "agent_did_not_write_order_or_security_configuration": true,
+  "evidence_dir": "docs\\evidence\\vnext\\m4-03\\runs\\web-20261023T101359Z"
+}
