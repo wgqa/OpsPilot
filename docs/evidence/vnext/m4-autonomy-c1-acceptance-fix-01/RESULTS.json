@@ -1,0 +1,120 @@
+{
+  "schema": "opspilot-m4-autonomy-c1-acceptance-fix-01-results-v1",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/m4-autonomy-c1",
+  "base_sha": "dddcacfea08c657c70888749dc96a1115b595d0d",
+  "main_sha": "77ea80e87e538f0f1fae8118ef231ec622601755",
+  "north_star_blob": "1f737712c7a36ceb34433ac09c3fbba3c3305542",
+  "agents_blob": "30319000ed0054007e9b7b6b46bf98b1493c8179",
+  "commits": {
+    "acceptance_freeze": "1edabde",
+    "red_tests_and_evidence": "a31ae47",
+    "implementation": "8f0036f1023f25104004905ab534a7d44e5a60a4",
+    "evidence_bundle": "see delivery commit SHA in handoff; omitted here to avoid self-reference"
+  },
+  "implementation_scope": {
+    "source_files": ["opspilot/s3_investigation.py"],
+    "test_files": ["tests/test_m4_autonomy_c1_acceptance_fix_01.py"],
+    "changed_behavior": "readonly_followup always persists through the read-only result path; remaining MODEL budget only gates optional explanation generation",
+    "business_diagnosis_persistence_on_readonly_followup": false
+  },
+  "environment": {
+    "python": "3.12.14",
+    "pytest": "9.1.1",
+    "fastapi": "0.137.1",
+    "langgraph": "1.2.16",
+    "langgraph_checkpoint": "4.3.0",
+    "langchain_core": "1.7.0",
+    "langchain_openai": "1.7.2",
+    "mcp": "2.3.0",
+    "uvicorn": "0.49.0",
+    "requirements_lock_sha256": "59658b2a1412f580237fd3a20d88163aea3579e89f6499a768796b6aaca67ae8"
+  },
+  "runs": [
+    {
+      "id": "red-01",
+      "command": "python -m pytest -q -s --basetemp $TEMP/opspilot-c1-fix-red-01 tests/test_m4_autonomy_c1_acceptance_fix_01.py",
+      "exit_code": 2,
+      "summary": "collection failed because system Python lacked langchain_core; environment preparation failure, not product RED",
+      "log": "runs/red-01.log"
+    },
+    {
+      "id": "red-02",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s --basetemp $TEMP/opspilot-c1-fix-red-02 tests/test_m4_autonomy_c1_acceptance_fix_01.py",
+      "exit_code": 1,
+      "summary": "valid RED reproduction; 1 expected budget-boundary failure and 1 direct-explanation pass",
+      "log": "runs/red-02.log"
+    },
+    {
+      "id": "red-03",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s --basetemp $TEMP/opspilot-c1-fix-red-03 tests/test_m4_autonomy_c1_acceptance_fix_01.py",
+      "exit_code": 1,
+      "summary": "valid RED rerun; raw output retained, trace extraction issue noted in FAILURES.md",
+      "log": "runs/red-03.log"
+    },
+    {
+      "id": "red-04",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s --basetemp $TEMP/opspilot-c1-fix-red-04 tests/test_m4_autonomy_c1_acceptance_fix_01.py",
+      "exit_code": 1,
+      "summary": "expected RED: 1 failed budget-exhaustion case, 1 passed direct-current-Knowledge explanation case",
+      "log": "runs/red-04.log"
+    },
+    {
+      "id": "green-01",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s --basetemp $TEMP/opspilot-c1-fix-green-01 tests/test_m4_autonomy_c1_acceptance_fix_01.py",
+      "exit_code": 0,
+      "summary": "2 passed; exhausted budget persists PARTIAL without provider call or business state changes; current Knowledge direct explanation remains available",
+      "log": "runs/green-01.log"
+    },
+    {
+      "id": "green-mcp-01",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s --basetemp $TEMP/opspilot-c1-fix-mcp-01 tests/test_m4_autonomy_c1_followup_red.py::test_follow_up_investigation_uses_real_mcp_and_persists_a_readonly_result",
+      "exit_code": 0,
+      "summary": "1 passed; real local MCP client/server, deterministic ScriptedModel, same-Run Knowledge observation and persisted sourced result",
+      "log": "runs/green-mcp-01.log",
+      "trace": "TRACE.jsonl"
+    },
+    {
+      "id": "targeted-regression-01",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s --basetemp $TEMP/opspilot-c1-fix-targeted-01 tests/test_m4_02_s3.py tests/test_m4_03_s3.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m1_task_control.py tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py tests/test_m4_autonomy_c1_followup_red.py",
+      "exit_code": 0,
+      "summary": "92 passed",
+      "log": "runs/targeted-regression-01.log"
+    },
+    {
+      "id": "full-pytest-01",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q -s --basetemp $TEMP/opspilot-c1-fix-full-01 --ignore=tests/test_m4_autonomy_c1_red.py",
+      "exit_code": 1,
+      "summary": "324 passed, 1 failed; M2-02-HF-01 recovery subprocess lacked model environment and stopped before fault injection",
+      "log": "runs/full-pytest-01.log"
+    },
+    {
+      "id": "targeted-env-01",
+      "command": ".venv\\Scripts\\python.exe -c load_local_environment(Path('D:\\学习\\agent新项目\\.env')); pytest.main(['tests/test_m2_02_hf_01.py::test_hf_b_stale_gate_stops_after_no_tool_progress'])",
+      "exit_code": 0,
+      "summary": "1 passed; secret values were not printed or stored",
+      "log": "runs/targeted-env-01.log"
+    },
+    {
+      "id": "full-pytest-02",
+      "command": ".venv\\Scripts\\python.exe -c load_local_environment(Path('D:\\学习\\agent新项目\\.env')); pytest.main(['-q','-s','--basetemp',$TEMP/opspilot-c1-fix-full-02,'--ignore=tests/test_m4_autonomy_c1_red.py'])",
+      "exit_code": 0,
+      "summary": "325 passed in 284.68 seconds",
+      "log": "runs/full-pytest-02.log"
+    }
+  ],
+  "provider_and_browser": {
+    "external_provider_calls_in_this_fix": 0,
+    "browser_e2e_rerun": false,
+    "mcp": "actual local MCP client/server integration with deterministic model substitute",
+    "historical_web_provider_mcp_evidence": "preserved under docs/evidence/vnext/m4-autonomy-c1/runs/rev1/web-e2e-04/"
+  },
+  "historical_failures_preserved": [
+    "C1 E2E-02",
+    "C1 E2E-03 ANSWERED product-quality sample",
+    "tests/test_m4_autonomy_c1_red.py frozen preimplementation RED"
+  ],
+  "not_authorized_or_not_run": ["C2", "C3", "C4", "fresh external Provider E2E", "fresh browser E2E"],
+  "acceptance_decision": "ACCEPTANCE_CANDIDATE_ONLY; main-agent independent review required"
+}
