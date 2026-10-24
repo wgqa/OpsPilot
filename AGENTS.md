@@ -6,6 +6,8 @@
 
 > **重要：** 任何开发 Agent 开始规划、编码、测试或提交前，必须先阅读仓库根目录 [PROJECT_NORTH_STAR.md](PROJECT_NORTH_STAR.md)，特别是 2026-10-22 修订的用户目标和 2026-10-24 加入的切片管理与评审协议。
 >
+> **OpsPilot 开发与评审 Skill：** 每次新的 OpsPilot 开发、测试、调试、提交会话开始时，必须实际读取 `.agents/skills/opspilot-slice-review/SKILL.md`，并按其中 A 节核对当前仓库 SHA、总纲、`AGENTS.md` 与阶段合同。正式规划、范围变更和主 Agent 验收时，另外执行 Skill 的 B/C 节。普通问答与小型进度更新不强制套六问长表。仅凭 Skill 自动发现或历史聊天记忆，不能声称已经实际读取；关键证据缺失时标记 `UNVERIFIED`。`PROJECT_NORTH_STAR.md` 第 8 节始终为权威准则，Skill 只组织执行流程。
+>
 > OpsPilot 当前的首要产品目标是：构建用户可感知的、能够通过连续自然语言对话正确推进真实业务任务的 Agent。工程可靠性、安全授权及 Domain 事务是不可突破的底线，而不是替代 Agent 智能体验的开发目标。
 >
 > **学习目标同样属于正式要求：** 项目服务于用户的大厂校招 Agent Engineering / AI 应用研发准备。Context Engineering、上下文分层与压缩、分层 Memory、Knowledge、Skills、MCP 等应形成“白皮书原理 → 业务需求 → 源码实现与取舍 → 实验/失败证据 → 面试表达”的实践链。不能只因当前 S1/S2 暂不需要就删除核心学习内容；可提出有界业务扩展或标注清楚的能力实验，实施前仍须阶段授权。
