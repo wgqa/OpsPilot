@@ -108,6 +108,8 @@ def classify_input(
         "conversation": prepared["conversation"],
         "current_user_message": prepared["source_message"],
         "task_input_before": prepared["prior_input_text"],
+        "prior_readonly_followups": prepared.get("prior_readonly_followups", []),
+        "prior_readonly_followup_exclusions": prepared.get("prior_readonly_followup_exclusions", []),
     }
     request_digest = _digest({
         "prompt_digest": PROMPT_DIGEST,
@@ -222,6 +224,15 @@ def reserve_assessment(
         ).fetchone()
         if source is None:
             raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+        from opspilot.domain.investigation_context import load_prior_readonly_followups
+
+        prior_readonly_followups, prior_followup_exclusions = load_prior_readonly_followups(
+            connection,
+            tenant_id=identity.tenant_id,
+            session_id=session_id,
+            task_id=task_id,
+            before_sequence=int(source["sequence"]),
+        )
         control = _control(connection, identity.tenant_id, task_id)
         existing = connection.execute(
             """SELECT * FROM investigation_update_assessments
@@ -230,6 +241,26 @@ def reserve_assessment(
         ).fetchone()
         if existing is not None and str(existing["status"]) != "FAILED":
             return _public_assessment(connection, existing)
+        source_chat = connection.execute(
+            """SELECT r.run_id,r.status,
+                      (SELECT COUNT(*) FROM chat_attempts a WHERE a.run_id=r.run_id) AS attempt_count
+               FROM task_runs r WHERE r.tenant_id=? AND r.task_id=? AND r.session_id=?
+                 AND r.source_message_id=? AND r.kind='CHAT_READONLY'""",
+            (identity.tenant_id, task_id, session_id, source_message_id),
+        ).fetchone()
+        if source_chat is None:
+            raise TaskControlError("UPDATE_CHAT_RUN_NOT_FOUND")
+        if str(source_chat["status"]) != "QUEUED" or int(source_chat["attempt_count"]) > 0:
+            if existing is not None:
+                return {**_public_assessment(connection, existing), "should_call_model": False,
+                        "fallback_reason": "CHAT_RUN_ALREADY_STARTED"}
+            return {"should_call_model": False, "fallback_reason": "CHAT_RUN_ALREADY_STARTED"}
+        connection.execute(
+            """UPDATE task_runs SET blocked_reason='UPDATE_CLASSIFICATION_PENDING'
+               WHERE run_id=? AND status='QUEUED' AND (blocked_reason IS NULL OR blocked_reason IN
+                 ('CLASSIFICATION_ROUTE_FALLBACK','CLASSIFICATION_ROUTE_TIMEOUT_FALLBACK'))""",
+            (str(source_chat["run_id"]),),
+        )
         now = _now()
         if existing is None:
             assessment_id = f"update-assessment-{uuid.uuid4()}"
@@ -294,6 +325,11 @@ def reserve_assessment(
             "task_id": task_id, "source_message_id": source_message_id,
             "source_digest": str(source["body_digest"]), "conversation_digest": conversation_digest,
             "expected_control_revision": int(control["control_revision"]),
+            "prior_readonly_followups": [
+                {"run_id": item["run_id"], "result_digest": item["result_digest"]}
+                for item in prior_readonly_followups
+            ],
+            "prior_readonly_followup_exclusions": prior_followup_exclusions,
         })
         connection.execute(
             """INSERT INTO investigation_update_attempts
@@ -312,6 +348,8 @@ def reserve_assessment(
             "expected_control_revision": int(control["control_revision"]),
             "prior_input_text": prior,
             "conversation": conversation,
+            "prior_readonly_followups": prior_readonly_followups,
+            "prior_readonly_followup_exclusions": prior_followup_exclusions,
             "input_digest": input_digest,
             "prompt_digest": PROMPT_DIGEST,
             "model_id": model_id,
@@ -358,8 +396,21 @@ def complete_assessment(
         ).fetchone()
         if source is None or str(source["body_digest"]) != str(row["source_digest"]):
             raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+        source_chat = connection.execute(
+            """SELECT r.run_id,r.status,r.blocked_reason,
+                      (SELECT COUNT(*) FROM chat_attempts a WHERE a.run_id=r.run_id) AS attempt_count
+               FROM task_runs r WHERE r.source_message_id=? AND r.task_id=? AND r.tenant_id=?
+                 AND r.kind='CHAT_READONLY'""",
+            (row["source_message_id"], row["task_id"], row["tenant_id"]),
+        ).fetchone()
+        route_already_started = (
+            source_chat is None or str(source_chat["status"]) != "QUEUED"
+            or int(source_chat["attempt_count"]) > 0
+        )
         if int(current["control_revision"]) != int(row["expected_control_revision"]):
             status = "STALE"
+        elif route_already_started:
+            status = "FAILED"
         normalized = {"intent": intent, "change_summary": summary.strip(), "readonly_action": readonly_action}
         response_digest = str(classification.get("response_digest") or _digest(normalized))
         connection.execute(
@@ -372,8 +423,9 @@ def complete_assessment(
         )
         connection.execute(
             """UPDATE investigation_update_assessments SET intent = ?, change_summary = ?,
-               follow_up_action = ?, status = ?, completed_at = ? WHERE assessment_id = ?""",
-            (intent, summary.strip(), readonly_action, status, now, assessment_id),
+               follow_up_action = ?, status = ?, failure_code = ?, completed_at = ? WHERE assessment_id = ?""",
+            (intent, summary.strip(), readonly_action, status,
+             "CHAT_ROUTE_ALREADY_STARTED" if route_already_started else None, now, assessment_id),
         )
         if status == "NO_UPDATE" and intent == "FOLLOW_UP" and readonly_action == "INVESTIGATE":
             from opspilot.domain.task_control import create_readonly_followup_run_in_transaction
@@ -391,10 +443,54 @@ def complete_assessment(
                 "UPDATE investigation_update_assessments SET investigation_run_id = ? WHERE assessment_id = ?",
                 (created["run_id"], assessment_id),
             )
+            _resolve_source_chat_route(connection, row, mode="INVESTIGATE", now=now)
+        elif status == "PENDING_CONFIRMATION":
+            _resolve_source_chat_route(connection, row, mode="CONFIRMATION", now=now)
+        elif status in {"NO_UPDATE", "STALE", "FAILED"}:
+            _resolve_source_chat_route(connection, row, mode="FALLBACK", now=now)
         refreshed = connection.execute(
             "SELECT * FROM investigation_update_assessments WHERE assessment_id = ?", (assessment_id,)
         ).fetchone()
         return _public_assessment(connection, refreshed)
+
+
+def _resolve_source_chat_route(
+    connection: sqlite3.Connection, assessment: sqlite3.Row, *, mode: str, now: str,
+) -> None:
+    chat = connection.execute(
+        """SELECT run_id,status,blocked_reason FROM task_runs
+           WHERE source_message_id=? AND task_id=? AND tenant_id=? AND kind='CHAT_READONLY'""",
+        (assessment["source_message_id"], assessment["task_id"], assessment["tenant_id"]),
+    ).fetchone()
+    if chat is None or str(chat["status"]) != "QUEUED":
+        return
+    run_id = str(chat["run_id"])
+    if mode == "INVESTIGATE":
+        status, reason = "BLOCKED", "FOLLOWUP_ROUTED_TO_INVESTIGATOR"
+        connection.execute(
+            """UPDATE task_runs SET status=?,blocked_reason=?,ended_at=?
+               WHERE run_id=? AND status='QUEUED'""",
+            (status, reason, now, run_id),
+        )
+    elif mode == "CONFIRMATION":
+        status, reason = "QUEUED", "UPDATE_CONFIRMATION_PENDING"
+        connection.execute(
+            "UPDATE task_runs SET blocked_reason=? WHERE run_id=? AND status='QUEUED'",
+            (reason, run_id),
+        )
+    else:
+        status, reason = "QUEUED", "CLASSIFICATION_ROUTE_FALLBACK"
+        connection.execute(
+            "UPDATE task_runs SET blocked_reason=NULL WHERE run_id=? AND status='QUEUED'",
+            (run_id,),
+        )
+    from opspilot.domain.task_control import _insert_outbox
+
+    _insert_outbox(
+        connection, str(assessment["tenant_id"]), str(assessment["task_id"]),
+        str(assessment["session_id"]), "RUN", run_id, "CHAT_ROUTE_RESOLVED",
+        {"run_id": run_id, "run_status": status, "reason_code": reason},
+    )
 
 
 def fail_assessment(
@@ -404,6 +500,10 @@ def fail_assessment(
     safe_code = error_code[:80]
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
+        assessment = connection.execute(
+            "SELECT * FROM investigation_update_assessments WHERE assessment_id=? AND status='ASSESSING'",
+            (assessment_id,),
+        ).fetchone()
         connection.execute(
             """UPDATE investigation_update_attempts SET status = 'FAILED', error_code = ?, completed_at = ?
                WHERE attempt_id = ? AND assessment_id = ? AND status = 'RESERVED'""",
@@ -414,6 +514,8 @@ def fail_assessment(
                WHERE assessment_id = ? AND status = 'ASSESSING'""",
             (safe_code, now, assessment_id),
         )
+        if assessment is not None:
+            _resolve_source_chat_route(connection, assessment, mode="FALLBACK", now=now)
 
 
 def _public_assessment(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
@@ -575,4 +677,5 @@ def cancel_assessment(
                WHERE assessment_id = ? AND status = 'PENDING_CONFIRMATION'""",
             (_now(), _now(), proposal_id),
         )
+        _resolve_source_chat_route(connection, row, mode="FALLBACK", now=_now())
         return {"status": "CANCELLED", "proposal_id": proposal_id, "replayed": False}

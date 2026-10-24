@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -15,8 +16,216 @@ class InvestigationContextInvalid(TaskControlError):
     """The persisted Run inputs no longer match the active TaskControl state."""
 
 
+MAX_PRIOR_READONLY_FOLLOWUPS = 3
+MAX_PRIOR_FOLLOWUP_ANSWER_CHARS = 1600
+MAX_PRIOR_FOLLOWUP_MESSAGE_CHARS = 600
+MAX_PRIOR_FOLLOWUP_SOURCE_REFS = 12
+
+
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _canonical(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def load_prior_readonly_followups(
+    connection: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    session_id: str,
+    task_id: str,
+    before_sequence: int,
+    limit: int = MAX_PRIOR_READONLY_FOLLOWUPS,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    """Load bounded, scoped prior C1 answers without inheriting their Evidence as current.
+
+    This shared assembler is used by Chat, the update classifier and Investigator.
+    Knowledge is revalidated against the task's current contract version and S3
+    authorization; business Evidence is verified only as a source of its original
+    Run and is always labeled historical.
+    """
+    bounded_limit = min(max(int(limit), 0), MAX_PRIOR_READONLY_FOLLOWUPS)
+    if bounded_limit == 0 or before_sequence <= 0:
+        return [], []
+    binding = connection.execute(
+        "SELECT service_id FROM task_bindings WHERE tenant_id=? AND task_id=?",
+        (tenant_id, task_id),
+    ).fetchone()
+    if binding is None or str(binding["service_id"]) != "orders-async-demo":
+        return [], []
+    rows = connection.execute(
+        """SELECT f.*,r.kind AS run_kind,r.status AS run_status,
+                  r.source_message_id AS run_source_message_id,
+                  r.consumed_message_seq AS run_consumed_message_seq,
+                  m.body AS source_message_body,m.body_digest AS actual_source_digest,
+                  m.sequence AS source_sequence,m.role AS source_role,
+                  m.input_kind AS source_input_kind,m.session_id AS source_session_id,
+                  m.tenant_id AS source_tenant_id
+           FROM c1_readonly_followup_runs f
+           JOIN task_runs r ON r.run_id=f.run_id AND r.task_id=f.task_id AND r.tenant_id=f.tenant_id
+           JOIN messages m ON m.message_id=f.source_message_id AND m.task_id=f.task_id
+             AND m.tenant_id=f.tenant_id AND m.session_id=f.session_id
+           WHERE f.tenant_id=? AND f.session_id=? AND f.task_id=? AND m.sequence<?
+             AND f.result_state IS NOT NULL AND f.answer_text IS NOT NULL
+             AND f.result_digest IS NOT NULL AND f.completed_at IS NOT NULL
+           ORDER BY m.sequence DESC,f.run_id DESC LIMIT ?""",
+        (tenant_id, session_id, task_id, int(before_sequence), bounded_limit),
+    ).fetchall()
+    if not rows:
+        return [], []
+
+    from opspilot.domain.s3 import get_s3_binding
+
+    try:
+        current_binding = get_s3_binding(connection, task_id)
+    except Exception:
+        return [], [{"source_id": str(row["run_id"]), "reason": "CURRENT_S3_AUTHORIZATION_UNAVAILABLE"}
+                    for row in rows]
+    from opspilot.domain.s3_assets import refresh_asset_refs
+
+    records: list[dict[str, Any]] = []
+    excluded: list[dict[str, str]] = []
+    for row in reversed(rows):
+        run_id = str(row["run_id"])
+        if (
+            str(row["run_kind"]) != "INVESTIGATE"
+            or str(row["run_status"]) != "SUCCEEDED"
+            or str(row["run_source_message_id"]) != str(row["source_message_id"])
+            or int(row["run_consumed_message_seq"]) != int(row["source_sequence"])
+            or int(row["source_sequence"]) >= int(before_sequence)
+            or str(row["source_role"]) != "USER"
+            or str(row["source_input_kind"]) != "CHAT_READONLY"
+            or str(row["source_session_id"]) != session_id
+            or str(row["source_tenant_id"]) != tenant_id
+            or str(row["source_digest"]) != str(row["actual_source_digest"])
+        ):
+            excluded.append({"source_id": run_id, "reason": "READONLY_FOLLOWUP_SCOPE_OR_RUN_INVALID"})
+            continue
+        refs_json = str(row["source_refs_json"])
+        result_json = str(row["result_json"])
+        try:
+            source_refs = json.loads(refs_json)
+            result_payload = json.loads(result_json)
+        except (TypeError, json.JSONDecodeError):
+            excluded.append({"source_id": run_id, "reason": "READONLY_FOLLOWUP_RESULT_MALFORMED"})
+            continue
+        if not isinstance(source_refs, list) or not isinstance(result_payload, dict):
+            excluded.append({"source_id": run_id, "reason": "READONLY_FOLLOWUP_RESULT_MALFORMED"})
+            continue
+        frozen_digest = _sha256(_canonical({
+            "run_id": run_id,
+            "result_state": str(row["result_state"]),
+            "answer_text": str(row["answer_text"]),
+            "source_refs_json": refs_json,
+            "result_json": result_json,
+            "reason_code": row["reason_code"],
+        }))
+        if frozen_digest != str(row["result_digest"]):
+            excluded.append({"source_id": run_id, "reason": "READONLY_FOLLOWUP_DIGEST_INVALID"})
+            continue
+
+        knowledge_refs: list[dict[str, Any]] = []
+        for ref in source_refs:
+            if isinstance(ref, dict) and ref.get("kind") == "KNOWLEDGE":
+                knowledge_refs.append({key: ref.get(key) for key in (
+                    "document_id", "version", "digest", "source", "valid_from",
+                )})
+        try:
+            current_knowledge, _, knowledge_exclusions = refresh_asset_refs(
+                {"s3_knowledge_refs": knowledge_refs},
+                contract_version=int(current_binding["contract_version"]),
+            )
+        except Exception:
+            current_knowledge, knowledge_exclusions = [], [
+                {"source_type": "KNOWLEDGE", "source_id": str(ref.get("document_id") or "unknown"),
+                 "reason": "CURRENT_KNOWLEDGE_UNAVAILABLE"}
+                for ref in knowledge_refs
+            ]
+        current_docs = {str(item["document_id"]): item for item in current_knowledge}
+        knowledge_reason = {
+            str(item.get("source_id")): str(item.get("reason") or "KNOWLEDGE_REMOVED_EXPIRED_OR_CHANGED")
+            for item in knowledge_exclusions if isinstance(item, dict)
+        }
+        resolved_refs: list[dict[str, Any]] = []
+        for ref in source_refs[:MAX_PRIOR_FOLLOWUP_SOURCE_REFS]:
+            if not isinstance(ref, dict):
+                resolved_refs.append({"kind": "UNKNOWN", "currentness": "INVALID_SOURCE_REFERENCE"})
+                continue
+            item = {key: value for key, value in ref.items()}
+            kind = str(ref.get("kind") or "UNKNOWN")
+            if kind == "KNOWLEDGE":
+                doc_id = str(ref.get("document_id") or "")
+                current_doc = current_docs.get(doc_id)
+                if current_doc and all(current_doc.get(key) == ref.get(key) for key in (
+                    "version", "digest", "source", "valid_from",
+                )):
+                    item["currentness"] = "CURRENT_APPLICABLE"
+                    item["source_authority"] = "VERSIONED_KNOWLEDGE_NOT_BUSINESS_EVIDENCE"
+                else:
+                    item["currentness"] = "HISTORICAL_SOURCE_STALE"
+                    item["reason"] = knowledge_reason.get(doc_id, "KNOWLEDGE_REMOVED_EXPIRED_OR_CHANGED")
+                    item["source_authority"] = "HISTORICAL_REFERENCE_ONLY"
+            elif kind == "EVIDENCE":
+                evidence_id = str(ref.get("evidence_id") or "")
+                observation = connection.execute(
+                    """SELECT o.observation_id,o.attempt_id,a.run_id AS origin_run_id
+                       FROM d2_tool_observations o
+                       JOIN d2_attempts a ON a.attempt_id=o.attempt_id AND a.task_id=o.task_id
+                       JOIN d2_evidence e ON e.evidence_id=o.evidence_id AND e.task_id=o.task_id
+                       JOIN task_runs r ON r.run_id=a.run_id AND r.task_id=a.task_id
+                       WHERE o.task_id=? AND o.evidence_id=? AND o.status='OK'
+                         AND a.kind='MCP' AND a.status='OK' AND r.tenant_id=?
+                         AND o.created_at<=? ORDER BY o.created_at DESC LIMIT 1""",
+                    (task_id, evidence_id, tenant_id, str(row["completed_at"])),
+                ).fetchone()
+                item["currentness"] = "HISTORICAL_RUN_ONLY" if observation is not None else "INVALID_SOURCE_RUN_ASSOCIATION"
+                item["reason"] = None if observation is not None else "EVIDENCE_NOT_OBSERVED_BY_SOURCE_RUN"
+                item["source_authority"] = "HISTORICAL_EVIDENCE_NOT_CURRENT"
+                if observation is not None:
+                    item["observation_id"] = str(observation["observation_id"])
+                    item["attempt_id"] = str(observation["attempt_id"])
+                    item["origin_run_id"] = str(observation["origin_run_id"])
+            elif kind == "USER_MESSAGE":
+                if (
+                    str(ref.get("message_id") or "") == str(row["source_message_id"])
+                    and str(ref.get("digest") or "") == str(row["actual_source_digest"])
+                ):
+                    item["currentness"] = "SOURCE_MESSAGE_VERIFIED"
+                    item["source_authority"] = "USER_INPUT_UNTRUSTED"
+                else:
+                    item["currentness"] = "INVALID_SOURCE_MESSAGE"
+            else:
+                item["currentness"] = "HISTORICAL_ONLY"
+                item["source_authority"] = "NON_AUTHORITATIVE_HISTORY"
+            resolved_refs.append(item)
+
+        gate = result_payload.get("gate") if isinstance(result_payload.get("gate"), dict) else {}
+        summary = {
+            "gate_decision": gate.get("decision"),
+            "gate_reason_code": gate.get("reason_code"),
+            "diagnosis_persisted": result_payload.get("diagnosis_persisted") is True,
+            "observation_ids": [str(value)[:200] for value in result_payload.get("observation_ids", [])[:12]]
+            if isinstance(result_payload.get("observation_ids"), list) else [],
+        }
+        records.append({
+            "run_id": run_id,
+            "source_message_id": str(row["source_message_id"]),
+            "source_message_digest": str(row["source_digest"]),
+            "source_sequence": int(row["source_sequence"]),
+            "source_message": str(row["source_message_body"])[:MAX_PRIOR_FOLLOWUP_MESSAGE_CHARS],
+            "result_state": str(row["result_state"]),
+            "answer_text": str(row["answer_text"])[:MAX_PRIOR_FOLLOWUP_ANSWER_CHARS],
+            "answer_truncated": len(str(row["answer_text"])) > MAX_PRIOR_FOLLOWUP_ANSWER_CHARS,
+            "result_digest": str(row["result_digest"]),
+            "reason_code": str(row["reason_code"]) if row["reason_code"] else None,
+            "result_summary": summary,
+            "source_refs": resolved_refs,
+            "completed_at": str(row["completed_at"]),
+            "source_authority": "HISTORICAL_RESULT_ONLY",
+        })
+    return records, excluded
 
 
 def _read_context(connection: sqlite3.Connection, task_id: str, run_id: str) -> dict[str, Any]:
@@ -164,6 +373,14 @@ def _read_context(connection: sqlite3.Connection, task_id: str, run_id: str) -> 
     if int(row["consumed_message_seq"]) < max(int(item["sequence"]) for item in selected):
         raise InvestigationContextInvalid("RUN_INPUT_NOT_CONSUMED")
 
+    prior_readonly_followups, prior_followup_exclusions = load_prior_readonly_followups(
+        connection,
+        tenant_id=str(row["tenant_id"]),
+        session_id=str(row["session_id"]),
+        task_id=task_id,
+        before_sequence=int(row["consumed_message_seq"]),
+    )
+
     refs = [
         {key: value for key, value in item.items() if key != "body"}
         for item in selected
@@ -181,6 +398,8 @@ def _read_context(connection: sqlite3.Connection, task_id: str, run_id: str) -> 
     return {
         "inputs": selected,
         "task_run_control": control,
+        "prior_readonly_followups": prior_readonly_followups,
+        "prior_readonly_followup_exclusions": prior_followup_exclusions,
         "trusted_binding": {
             "service_id": str(row["service_id"]),
             "integration_id": str(row["integration_id"]),

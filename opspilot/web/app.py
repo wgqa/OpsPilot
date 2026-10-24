@@ -625,6 +625,9 @@ def create_app(
             resolved_db, context.identity, session_id=session_id, task_id=body.task_id,
             input_kind=body.input_kind, body=body.body,
             idempotency_key=require_idempotency_key(idempotency_key),
+            defer_task_chat_until_classified=(
+                body.task_id is not None and body.input_kind == "CHAT_READONLY"
+            ),
         )
         answer_status = None
         if body.input_kind == "CHAT_READONLY":

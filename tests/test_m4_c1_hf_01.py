@@ -198,7 +198,11 @@ def test_hf01_prior_followup_is_a_bounded_chat_context_block_with_provenance(tmp
     assert prepared["prior_readonly_followup_refs"][0]["run_id"] == prior["run_id"]
 
 
-def test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evidence(tmp_path: Path) -> None:
+def test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evidence(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    import opspilot.investigator as investigator
+
     db = tmp_path / "hf03-investigator.sqlite3"
     reset_fixture(db, "S1_POS")
     session_id, task_id, _, _ = _diagnosed_task(db)
@@ -226,6 +230,19 @@ def test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evide
     assert old_evidence["currentness"] == "HISTORICAL_RUN_ONLY"
     assert not any(old_evidence["evidence_id"] == item.get("evidence_id")
                    for item in context.get("current_mcp_evidence", []))
+    monkeypatch.setattr(investigator, "load_applicable_skill", lambda _problem_type: None)
+    monkeypatch.setattr(investigator, "assert_task_skill_compatible", lambda *_args: None)
+    provenance: dict[str, object] = {}
+    prompt_messages = investigator._prompt_messages(
+        db, task_id, {"evidence_ids": [], "tool_observations": []},
+        context_metadata=provenance, run_id=run_id, memory_enabled=False,
+    )
+    investigator_prompt = str(prompt_messages[-1].content)
+    assert prior["result_digest"] in investigator_prompt
+    assert "HISTORICAL_RUN_ONLY" in investigator_prompt
+    assert provenance["prior_readonly_followups"]
+    assert provenance["prior_readonly_followups"][0]["source_refs"]
+    assert provenance["prior_readonly_followups"][0]["source_refs"][1]["currentness"] == "HISTORICAL_RUN_ONLY"
 
 
 def test_hf05_task_chat_run_is_not_worker_claimable_before_classification(tmp_path: Path, monkeypatch) -> None:
@@ -386,6 +403,7 @@ def test_hf04_followup_history_is_task_session_tenant_and_auth_scoped(tmp_path: 
     session_id, task_id, _, _ = _diagnosed_task(db)
     prior = _persist_previous_followup(db, session_id, task_id, suffix="isolation")
     identity = trusted_identity(db, "support-a")
+    other_session_id = str(create_session(db, identity)["session_id"])
     other_task = create_task_with_initial_run(
         db, identity, session_id=session_id, service_id="orders-demo", integration_id="integration-a",
         ticket_id="M4-C1-HF-01-OTHER-TASK", initial_message="另一个 Task 的独立调查。",
@@ -408,6 +426,10 @@ def test_hf04_followup_history_is_task_session_tenant_and_auth_scoped(tmp_path: 
         assert load_prior_readonly_followups(
             connection, tenant_id="tenant-a", session_id=session_id,
             task_id=str(other_task["task_id"]), before_sequence=end_sequence,
+        ) == ([], [])
+        assert load_prior_readonly_followups(
+            connection, tenant_id="tenant-a", session_id=other_session_id,
+            task_id=task_id, before_sequence=end_sequence,
         ) == ([], [])
         assert load_prior_readonly_followups(
             connection, tenant_id="tenant-b", session_id=session_id, task_id=task_id,
@@ -542,6 +564,65 @@ def test_hf05_failed_classification_releases_same_run_and_timeout_recovers_aband
     assert recovered is not None and recovered["run_id"] == second["run_id"]
     assert str(recovered["blocked_reason"] or "") == ""
     claim_task_run(db, trusted_identity(db, "support-a"), str(second["run_id"]))
+
+
+def test_hf05_late_investigate_classification_cannot_start_second_chain_after_timeout_fallback(tmp_path: Path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from opspilot.domain.chat import prepare_chat_attempt
+    from opspilot.domain.investigation_updates import complete_assessment
+    from opspilot.domain.task_control import next_worker_run, register_worker_owner
+
+    db = tmp_path / "hf05-late-classification.sqlite3"
+    reset_fixture(db, "S1_POS")
+    session_id, task_id, _, _ = _diagnosed_task(db)
+    message = _new_user_message(
+        db, session_id, task_id, body="现在接收方处理完成了吗？", suffix="hf05-late-classification",
+    )
+    identity = trusted_identity(db, "support-a")
+    assessment = reserve_assessment(
+        db, identity, task_id=task_id, source_message_id=str(message["message_id"]),
+        idempotency_key=str(message["message_id"]), model_id="hf05-late-classification-deterministic",
+    )["prepared"]
+
+    # The bounded fallback has already released and started the same Chat Run.
+    with connect(db) as connection:
+        connection.execute(
+            "UPDATE task_runs SET created_at=? WHERE run_id=?",
+            ((datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(), str(message["run_id"])),
+        )
+    assert next_worker_run(db)["run_id"] == message["run_id"]
+    claim_task_run(db, identity, str(message["run_id"]))
+    register_worker_owner(db, "hf05-late-worker", 4115)
+    prepared_chat = prepare_chat_attempt(
+        db, str(message["run_id"]), "hf05-late-worker", "hf05-late-no-provider-test",
+    )
+
+    with pytest.raises(TaskControlError, match="UPDATE_ASSESSMENT_NOT_ACTIVE"):
+        complete_assessment(
+            db,
+            identity=identity,
+            assessment_id=str(assessment["assessment_id"]),
+            attempt_id=str(assessment["attempt_id"]),
+            classification={"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "INVESTIGATE"},
+        )
+    with connect(db) as connection:
+        assessment_row = connection.execute(
+            "SELECT status,failure_code FROM investigation_update_assessments WHERE assessment_id=?",
+            (str(assessment["assessment_id"]),),
+        ).fetchone()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM chat_attempts WHERE run_id=?", (str(message["run_id"]),),
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM task_runs WHERE source_message_id=? AND kind='INVESTIGATE'",
+            (str(message["message_id"]),),
+        ).fetchone()[0] == 0
+        assert tuple(assessment_row) == ("FAILED", "CLASSIFICATION_ROUTE_TIMEOUT")
+        assert connection.execute(
+            "SELECT status FROM task_runs WHERE run_id=?", (str(message["run_id"]),),
+        ).fetchone()[0] == "RUNNING"
+    assert prepared_chat["attempt_id"]
 
 
 def test_hf05_critical_correction_confirmation_and_cancellation_keep_existing_flow(tmp_path: Path, monkeypatch) -> None:

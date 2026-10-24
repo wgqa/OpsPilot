@@ -533,12 +533,14 @@ async function sendMessage(): Promise<void> {
   if (!sessionId.value || !body || !csrf.value || busy.value) return;
   busy.value = true;
   let pendingMessageId: string | null = null;
+  let fallbackChatRunId: string | null = null;
   errorMessage.value = '';
   notice.value = '';
   chunks.value = [];
   lastChunkSeq.value = 0;
   try {
     const accepted = await api.send(sessionId.value, body, taskId.value || null, csrf.value);
+    fallbackChatRunId = taskId.value ? accepted.run_id : null;
     draft.value = '';
     if (taskId.value) {
       pendingMessageId = accepted.message_id;
@@ -574,7 +576,13 @@ async function sendMessage(): Promise<void> {
       await watchRun(accepted.run_id);
     }
   } catch (error) {
-    errorMessage.value = explainError(error);
+    if (fallbackChatRunId) {
+      notice.value = '调查意图判断暂不可用；系统将安全降级到同一消息的普通回答，不会重复调用 Chat。';
+      await watchRun(fallbackChatRunId);
+      await refreshInspector();
+    } else {
+      errorMessage.value = explainError(error);
+    }
   } finally {
     if (pendingMessageId) {
       const pending = new Set(pendingAssessmentMessageIds.value);
@@ -625,6 +633,10 @@ async function cancelInvestigationUpdate(proposal: InvestigationUpdateProposal):
     await api.cancelTaskUpdate(currentTask, proposal, csrf.value);
     await refreshInspector();
     notice.value = '已取消这条调查更新提议；Task 控制版本和业务调查状态未改变。';
+    const cancelledRunId = activeChatRun.value?.run_id;
+    if (cancelledRunId && activeChatRun.value?.source_message_id === proposal.source_message_id) {
+      await watchRun(cancelledRunId);
+    }
   } catch (error) {
     errorMessage.value = explainError(error);
     await refreshInspector();
@@ -982,6 +994,7 @@ function acceptEvent(item: EventItem): void {
     void loadChunks(runId);
   }
   if (item.event_kind.startsWith('RUN_STATUS_') || item.event_kind === 'CHAT_ANSWER_COMMITTED'
+    || item.event_kind === 'CHAT_ROUTE_RESOLVED'
     || ['PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED', 'REPORT_FROZEN', 'DELIVERY_COMMITTED', 'S3_DIAGNOSIS_FROZEN'].includes(item.event_kind)) {
     void refreshSessionMessagesOnly();
     if (taskId.value) void refreshInspector();
@@ -1012,6 +1025,7 @@ function connectEvents(): void {
     'CHAT_ANSWER_COMMITTED', 'CHAT_ATTEMPT_FAILED', 'RUN_RETRY_INTERRUPTED_RECOVERABLE', 'RUN_RETRY_BLOCKED',
     'PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED',
     'REPORT_FROZEN', 'DELIVERY_COMMITTED', 'S3_DIAGNOSIS_FROZEN',
+    'CHAT_ROUTE_RESOLVED',
   ]) source.addEventListener(name, listener);
   source.onerror = () => {
     source.close();

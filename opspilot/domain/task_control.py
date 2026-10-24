@@ -1086,6 +1086,7 @@ def admit_task_message(
     idempotency_key: str,
     expected_control_revision: int | None = None,
     update_proposal_id: str | None = None,
+    defer_task_chat_until_classified: bool = False,
 ) -> dict[str, object]:
     if input_kind not in {"CHAT_READONLY", "CORRECT_TASK_INPUT"}:
         raise ValueError("Unsupported task message kind.")
@@ -1103,6 +1104,8 @@ def admit_task_message(
         input_kind != "CORRECT_TASK_INPUT" or expected_control_revision is None
     ):
         raise TaskControlError("INVALID_UPDATE_PROPOSAL")
+    if defer_task_chat_until_classified and (task_id is None or input_kind != "CHAT_READONLY"):
+        raise TaskControlError("INVALID_CHAT_ROUTE_DEFERRAL")
     command_kind = input_kind
     target_ref = task_id or session_id
     request = {
@@ -1115,6 +1118,8 @@ def admit_task_message(
     if update_proposal_id is not None:
         request["expected_control_revision"] = expected_control_revision
         request["update_proposal_id"] = update_proposal_id
+    if defer_task_chat_until_classified:
+        request["defer_task_chat_until_classified"] = True
     request_digest = _digest(request)
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -1260,7 +1265,16 @@ def admit_task_message(
             (run_id, identity.tenant_id, task_id, session_id, command_id, message_id,
              run_kind, expected_revision, expected_revision, seq, now),
         )
+        if defer_task_chat_until_classified:
+            connection.execute(
+                "UPDATE task_runs SET blocked_reason='UPDATE_CLASSIFICATION_PENDING' WHERE run_id=? AND status='QUEUED'",
+                (run_id,),
+            )
         if update_proposal_id is not None:
+            proposal_source = connection.execute(
+                "SELECT source_message_id FROM investigation_update_assessments WHERE assessment_id=?",
+                (update_proposal_id,),
+            ).fetchone()
             updated = connection.execute(
                 """UPDATE investigation_update_assessments SET status = 'CONFIRMED',
                    correction_message_id = ?, investigation_run_id = ?, confirmed_at = ?, completed_at = ?
@@ -1271,6 +1285,26 @@ def admit_task_message(
             )
             if updated.rowcount != 1:
                 raise TaskControlError("UPDATE_PROPOSAL_ALREADY_RESOLVED")
+            if proposal_source is not None:
+                stale_chat_run = connection.execute(
+                    """SELECT run_id FROM task_runs WHERE source_message_id=? AND task_id=?
+                       AND tenant_id=? AND kind='CHAT_READONLY' AND status='QUEUED'
+                       AND blocked_reason IN ('UPDATE_CLASSIFICATION_PENDING','UPDATE_CONFIRMATION_PENDING')""",
+                    (str(proposal_source["source_message_id"]), task_id, identity.tenant_id),
+                ).fetchone()
+                stale_chat = connection.execute(
+                    """UPDATE task_runs SET status='BLOCKED',blocked_reason='CORRECTION_CONFIRMED',ended_at=?
+                       WHERE source_message_id=? AND kind='CHAT_READONLY' AND status='QUEUED'
+                         AND blocked_reason IN ('UPDATE_CLASSIFICATION_PENDING','UPDATE_CONFIRMATION_PENDING')""",
+                    (now, str(proposal_source["source_message_id"])),
+                )
+                if stale_chat.rowcount and stale_chat_run is not None:
+                    stale_chat_id = str(stale_chat_run["run_id"])
+                    _insert_outbox(
+                        connection, identity.tenant_id, task_id, session_id, "RUN", stale_chat_id,
+                        "RUN_STATUS_BLOCKED",
+                        {"run_id": stale_chat_id, "run_status": "BLOCKED", "reason_code": "CORRECTION_CONFIRMED"},
+                    )
         if input_kind == "CHAT_READONLY":
             connection.execute(
                 """INSERT INTO worker_retry_state (run_id, retry_count, max_retries, updated_at)
@@ -1552,10 +1586,72 @@ def abort_task(
     return result
 
 
+CHAT_CLASSIFICATION_ROUTE_TIMEOUT_SECONDS = 90
+
+
+def _release_stale_classification_routes(connection: sqlite3.Connection) -> None:
+    """Resolve abandoned task-chat routing while preserving confirmed user decisions."""
+    stale = connection.execute(
+        """SELECT r.run_id,r.tenant_id,r.task_id,r.session_id,a.assessment_id,
+                  a.status AS assessment_status,a.follow_up_action,a.investigation_run_id
+           FROM task_runs r LEFT JOIN investigation_update_assessments a
+             ON a.source_message_id=r.source_message_id AND a.task_id=r.task_id AND a.tenant_id=r.tenant_id
+           WHERE r.kind='CHAT_READONLY' AND r.task_id IS NOT NULL AND r.status='QUEUED'
+             AND r.blocked_reason='UPDATE_CLASSIFICATION_PENDING'
+             AND julianday('now') >= julianday(r.created_at, ?)""",
+        (f"+{CHAT_CLASSIFICATION_ROUTE_TIMEOUT_SECONDS} seconds",),
+    ).fetchall()
+    for row in stale:
+        run_id = str(row["run_id"])
+        assessment_status = str(row["assessment_status"] or "")
+        now = _utc_now()
+        if assessment_status == "ASSESSING":
+            connection.execute(
+                """UPDATE investigation_update_assessments SET status='FAILED',
+                   failure_code='CLASSIFICATION_ROUTE_TIMEOUT',completed_at=?
+                   WHERE assessment_id=? AND status='ASSESSING'""",
+                (now, str(row["assessment_id"])),
+            )
+            assessment_status = "FAILED"
+        if assessment_status == "PENDING_CONFIRMATION":
+            connection.execute(
+                "UPDATE task_runs SET blocked_reason='UPDATE_CONFIRMATION_PENDING' WHERE run_id=? AND status='QUEUED'",
+                (run_id,),
+            )
+            continue
+        if assessment_status == "CONFIRMED":
+            reason, status = "CORRECTION_CONFIRMED", "BLOCKED"
+        elif (
+            assessment_status == "NO_UPDATE"
+            and str(row["follow_up_action"] or "EXPLAIN") == "INVESTIGATE"
+            and row["investigation_run_id"]
+        ):
+            reason, status = "FOLLOWUP_ROUTED_TO_INVESTIGATOR", "BLOCKED"
+        else:
+            reason, status = "CLASSIFICATION_ROUTE_TIMEOUT_FALLBACK", "QUEUED"
+        if status == "BLOCKED":
+            connection.execute(
+                """UPDATE task_runs SET status='BLOCKED',blocked_reason=?,ended_at=?
+                   WHERE run_id=? AND status='QUEUED'""",
+                (reason, now, run_id),
+            )
+        else:
+            connection.execute(
+                "UPDATE task_runs SET blocked_reason=NULL WHERE run_id=? AND status='QUEUED'",
+                (run_id,),
+            )
+        _insert_outbox(
+            connection, str(row["tenant_id"]), str(row["task_id"]), str(row["session_id"]),
+            "RUN", run_id, "CHAT_ROUTE_RESOLVED",
+            {"run_id": run_id, "run_status": status, "reason_code": reason},
+        )
+
+
 def claim_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) -> dict[str, object]:
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         _verify_identity(connection, identity)
+        _release_stale_classification_routes(connection)
         run = connection.execute(
             "SELECT * FROM task_runs WHERE run_id = ? AND tenant_id = ?",
             (run_id, identity.tenant_id),
@@ -1571,6 +1667,10 @@ def claim_task_run(path: str | Path, identity: TrustedIdentity, run_id: str) -> 
         resumable_chat = str(run["kind"]) == "CHAT_READONLY" and str(run["status"]) == "INTERRUPTED_RECOVERABLE"
         if str(run["status"]) != "QUEUED" and not resumable_chat:
             raise TaskControlError("TASK_RUN_NOT_QUEUED")
+        if str(run["kind"]) == "CHAT_READONLY" and str(run["blocked_reason"] or "") in {
+            "UPDATE_CLASSIFICATION_PENDING", "UPDATE_CONFIRMATION_PENDING",
+        }:
+            raise TaskControlError("UPDATE_CLASSIFICATION_PENDING")
         if str(run["kind"]) != "CHAT_READONLY":
             if run["task_id"] is None:
                 raise TaskControlError("TASK_REQUIRED_FOR_BUSINESS_RUN")
@@ -2209,11 +2309,14 @@ def next_worker_run(path: str | Path, excluded_run_ids: tuple[str, ...] = ()) ->
     # governed by persisted backoff so a transient failure cannot be hidden by
     # a process-local set for the lifetime of the worker.
     with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _release_stale_classification_routes(connection)
         row = connection.execute(
             """SELECT r.* FROM task_runs AS r
                LEFT JOIN worker_retry_state AS w ON w.run_id = r.run_id
                WHERE r.kind IN ('CHAT_READONLY', 'INVESTIGATE', 'RESUME', 'APPROVAL_RESUME', 'RECONCILE')
                  AND r.status IN ('QUEUED', 'INTERRUPTED_RECOVERABLE')
+                 AND COALESCE(r.blocked_reason,'') NOT IN ('UPDATE_CLASSIFICATION_PENDING','UPDATE_CONFIRMATION_PENDING')
                  AND (w.run_id IS NULL OR (w.retry_count <= w.max_retries
                       AND (w.next_attempt_at IS NULL OR w.next_attempt_at <= CURRENT_TIMESTAMP)))
                  AND r.run_id NOT IN (SELECT value FROM json_each(?))
