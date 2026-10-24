@@ -104,10 +104,12 @@ def _call_provenance(db: Path, call_id: str) -> dict[str, object]:
     return value
 
 
-def _node(db: Path, task_id: str, run_id: str, model: CapturingModel) -> S3Nodes:
+def _node(
+    db: Path, task_id: str, run_id: str, model: CapturingModel, *, readonly_followup: bool = True,
+) -> S3Nodes:
     return S3Nodes(
         db, task_id, run_id, model, "c1-s3-wire-deterministic", None, [],
-        readonly_followup=True, memory_enabled=False,
+        readonly_followup=readonly_followup, memory_enabled=False,
     )
 
 
@@ -121,12 +123,13 @@ def test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance(tm
     )
     before = _business_snapshot(db, task_id)
     model = CapturingModel()
-    node = _node(db, task_id, run_id, model)
+    node = _node(db, task_id, run_id, model, readonly_followup=False)
+    explain_node = _node(db, task_id, run_id, model)
 
     state = {"evidence_ids": [], "diagnosis_draft": {}}
     call_id, _calls, _text = asyncio.run(node.model_call(state))
     explain_call_id, _explain_calls, _explain_text = asyncio.run(
-        node.model_call(state, explain=True),
+        explain_node.model_call(state, explain=True),
     )
 
     assert len(model.messages) == 2
@@ -136,6 +139,8 @@ def test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance(tm
     explain_history = explain_body["prior_readonly_followups"]
     assert len(history) == 1
     assert explain_history == history
+    assert "CURRENT_APPLICABLE" in str(model.messages[0][0].content)
+    assert "prior-Run Evidence" in str(model.messages[0][0].content)
     assert history[0]["run_id"] == prior["run_id"]
     assert history[0]["result_digest"] == prior["result_digest"]
     assert "receiver-ack-contract-v2" in history[0]["answer_text"]
