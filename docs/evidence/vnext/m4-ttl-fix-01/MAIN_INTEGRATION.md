@@ -1,12 +1,12 @@
 # M4-TTL-FIX-01 Main Integration Supplement
 
-**Status:** `ACCEPTANCE_CANDIDATE`  
-**Repository:** `wgqa/OpsPilot`  
-**Target:** `main`  
-**Main before integration:** `add47ec83f31fa76b9b6a5782e013311732bc496`  
-**TTL candidate:** `codex/m4-ttl-fix-01@bc7fc1633cc2b9e5ed6d652eac67d1866a1a85a5a`  
-**TTL merge commit:** `8bc6290a09cf3d36f5ca31ed078fc34a54e7e9f8`  
-**Integration fixes:** `153b3e7` and `6a197f5`  
+**Status:** `ACCEPTANCE_CANDIDATE`
+**Repository:** `wgqa/OpsPilot`
+**Target:** `main`
+**Main before integration:** `add47ec83f31fa76b9b6a5782e013311732bc496`
+**TTL candidate:** `codex/m4-ttl-fix-01@bc7fc1633cc2b9e5ed6d652fbb518ea4cd3caafe`
+**TTL merge commit:** `8bc6290a09cf3d36f5ca31ed078fc34a54e7e9f8`
+**Integration fixes:** `153b3e7` and `6a197f5`
 **Freshly tested integration commit:** `6a197f5e9473d838444b6a93b7b2e661c723f9f2`
 
 This supplement records the REV1 integration work. The original `REPORT.md`, `RESULTS.json`, frozen plan, RED materials, and their run logs remain unchanged. The TTL feature code is the reviewed candidate from `00be81c53f090fd8934aa645ac2b16c59c9a7c78`; its evidence bundle is `fb09352b8d62f1179f52e367ba27d750664b3e87`. The merge base with the reviewed main line was `bd58c66003c4e7fea660967c7a6a30aebcd63cd7`.
