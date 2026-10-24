@@ -352,12 +352,14 @@ class S3Nodes:
         summary, summary_call = "", None
         gate = evaluate_s3_gate(self.db,self.task,state.get("evidence_ids",[]),run_id=self.run)
         expected = gate.get("outcome")
-        if self.readonly_followup and attempt_counts(self.db,self.task)["MODEL"] < MAX_MODEL_CALLS:
-            try:
-                summary_call, _, summary = await self.model_call(state,explain=True)
-            except Exception:
-                # A follow-up remains visibly partial if no bounded explanation call succeeds.
-                summary = ""
+        # Read-only mode controls the result path; budget only controls optional prose.
+        if self.readonly_followup:
+            if attempt_counts(self.db,self.task)["MODEL"] < MAX_MODEL_CALLS:
+                try:
+                    summary_call, _, summary = await self.model_call(state,explain=True)
+                except Exception:
+                    # A follow-up remains visibly partial if no bounded explanation call succeeds.
+                    summary = ""
             from opspilot.domain.task_control import persist_readonly_followup_result, trusted_identity
 
             context = load_investigation_context(self.db, self.task, self.run)
