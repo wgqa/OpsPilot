@@ -1,0 +1,59 @@
+...............F
+================================== FAILURES ===================================
+______ test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl _______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-ttl-fix-01/artifacts/pytest-m4-ttl-fix-01-s3-hf-basetemp/test_receiver_sla_invalidates_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002025FDE0710>
+
+    def test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl(tmp_path: Path, monkeypatch):
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import evaluate_s3_gate, get_s3_outcome
+        from opspilot.domain.s3_handoff import submit_s3_handoff
+        from opspilot.domain.task_control import TaskControlError
+        import opspilot.domain.s3 as s3
+    
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERED_PENDING", "async-order-2", queue_age_seconds=299,
+            processing_sla_seconds=300,
+        )
+        clock = {"now": datetime.now(timezone.utc)}
+    
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                current = clock["now"]
+                return current if tz is not None else current.replace(tzinfo=None)
+    
+        monkeypatch.setattr(s3, "datetime", FrozenDateTime)
+        accepted_at = (clock["now"] - timedelta(seconds=299)).isoformat().replace("+00:00", "Z")
+        from opspilot.domain.d2 import canonical_json, digest_json
+        with connect(db) as connection:
+            receiver = connection.execute(
+                "SELECT event_id FROM s3_receivers WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='async-order-2'"
+            ).fetchone()
+            connection.execute(
+                "UPDATE s3_receivers SET accepted_at=? WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='async-order-2'",
+                (accepted_at,),
+            )
+            delivery = connection.execute(
+                "SELECT transport_response_json FROM s3_deliveries WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='async-order-2'"
+            ).fetchone()
+            response = json.loads(str(delivery["transport_response_json"]))
+            response["accepted_at"] = accepted_at
+            response["event_id"] = str(receiver["event_id"])
+            connection.execute(
+                "UPDATE s3_deliveries SET transport_response_json=?,response_digest=? WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='async-order-2'",
+                (canonical_json(response), digest_json(response)),
+            )
+        diagnosis, evidence_ids = _diagnose(db, identity, task, state="DELIVERED_PENDING")
+>       assert diagnosis["outcome"] == "RECEIVER_PROCESSING_UNCONFIRMED"
+E       AssertionError: assert 'INCONCLUSIVE' == 'RECEIVER_PRO...G_UNCONFIRMED'
+E         
+E         - RECEIVER_PROCESSING_UNCONFIRMED
+E         + INCONCLUSIVE
+
+tests\test_m4_03_hf_01.py:343: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_03_hf_01.py::test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 15 passed in 25.76s

@@ -1,0 +1,118 @@
+{
+  "schema": "opspilot-m4-ttl-rev1-main-integration-v1",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "target_branch": "main",
+  "main_before_integration": "add47ec83f31fa76b9b6a5782e013311732bc496",
+  "ttl_candidate_branch": "codex/m4-ttl-fix-01",
+  "ttl_candidate_sha": "bc7fc1633cc2b9e5ed6d652fbb518ea4cd3caafe",
+  "ttl_merge_base": "bd58c66003c4e7fea660967c7a6a30aebcd63cd7",
+  "ttl_feature_commit": "00be81c53f090fd8934aa645ac2b16c59c9a7c78",
+  "ttl_evidence_commit": "fb09352b8d62f1179f52e367ba27d750664b3e87",
+  "integration_commits": {
+    "ttl_merge": "8bc6290a09cf3d36f5ca31ed078fc34a54e7e9f8",
+    "windows_skill_digest_checkout_fix": "153b3e7",
+    "windows_scope_knowledge_digest_checkout_fix": "6a197f5"
+  },
+  "tested_commit": "6a197f5e9473d838444b6a93b7b2e661c723f9f2",
+  "environment": {
+    "os": "Windows",
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "fastapi": "0.137.1",
+    "mcp": "2.3.0",
+    "langgraph": "1.2.16",
+    "langchain_openai": "1.7.2",
+    "core_autocrlf": true,
+    "full_suite_provider_calls": 0,
+    "full_suite_model_api_key": "test-no-provider-call",
+    "full_suite_model_name": "test-no-provider-call",
+    "full_suite_model_base_url": "http://127.0.0.1:9"
+  },
+  "runs": [
+    {
+      "name": "ttl_core_bad_basetemp_invocation",
+      "commit": "8bc6290a09cf3d36f5ca31ed078fc34a54e7e9f8",
+      "command": "python -m pytest tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py -q --basetemp=(Join-Path ...) --tb=short",
+      "raw_log": "runs/rev1/ttl-core-green.log",
+      "exit_code": 4,
+      "result": "TEST_PREPARATION_FAILURE: PowerShell passed an empty --basetemp; pytest did not collect tests."
+    },
+    {
+      "name": "ttl_core_after_argument_correction",
+      "commit": "8bc6290a09cf3d36f5ca31ed078fc34a54e7e9f8",
+      "command": "python -m pytest tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py -q --basetemp <unique-path> --tb=short",
+      "raw_log": "runs/rev1/ttl-core-green-02.log",
+      "exit_code": 0,
+      "result": "3 passed"
+    },
+    {
+      "name": "clean_windows_s3_regression_before_skill_eol_rule",
+      "commit": "8bc6290a09cf3d36f5ca31ed078fc34a54e7e9f8",
+      "command": "python -m pytest tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_03_s3.py tests/test_m4_02_s3.py -q --basetemp <unique-path> --tb=short",
+      "raw_log": "runs/rev1/ttl-hf-s3-regression-01.log",
+      "exit_code": 1,
+      "result": "73 passed, 4 failed; all 4 failures raised SkillIntegrityError because core.autocrlf materialized hash-verified auth-scope skill bytes with CRLF."
+    },
+    {
+      "name": "s3_regression_after_skill_eol_rule",
+      "commit": "153b3e7",
+      "command": "python -m pytest tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_03_s3.py tests/test_m4_02_s3.py -q --basetemp <unique-path> --tb=short",
+      "raw_log": "runs/rev1/ttl-hf-s3-regression-02.log",
+      "exit_code": 0,
+      "result": "77 passed"
+    },
+    {
+      "name": "s1_s2_security_before_scope_knowledge_eol_rule",
+      "commit": "153b3e7",
+      "command": "python -m pytest tests/test_d2_investigation.py tests/test_d3_actions.py tests/test_d4_recovery.py tests/test_m1_task_control.py tests/test_m1_hf_worker.py tests/test_m1_worker_recovery.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py tests/test_m2_03_handoff.py tests/test_m4_01_dialogue_update_safety.py -q --basetemp <unique-path> --tb=short",
+      "raw_log": "runs/rev1/s1-s2-security-01.log",
+      "exit_code": 1,
+      "result": "89 passed, 15 failed; the failures raised KnowledgeIntegrityError for byte-hashed knowledge/api-scope documents checked out with CRLF."
+    },
+    {
+      "name": "s1_s2_security_final_clean_checkout",
+      "commit": "6a197f5e9473d838444b6a93b7b2e661c723f9f2",
+      "command": "python -m pytest tests/test_d2_investigation.py tests/test_d3_actions.py tests/test_d4_recovery.py tests/test_m1_task_control.py tests/test_m1_hf_worker.py tests/test_m1_worker_recovery.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py tests/test_m2_03_handoff.py tests/test_m4_01_dialogue_update_safety.py -q --basetemp docs/evidence/vnext/m4-ttl-fix-01/runs/rev1/pytest-s1-s2-security-02 --tb=short",
+      "raw_log": "runs/rev1/s1-s2-security-02.log",
+      "exit_code": 0,
+      "result": "104 passed"
+    },
+    {
+      "name": "ttl_s3_hf_final_clean_checkout",
+      "commit": "6a197f5e9473d838444b6a93b7b2e661c723f9f2",
+      "command": "python -m pytest tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_03_s3.py tests/test_m4_02_s3.py -q --basetemp docs/evidence/vnext/m4-ttl-fix-01/runs/rev1/pytest-ttl-s3-final-01 --tb=short",
+      "raw_log": "runs/rev1/ttl-s3-regression-final-01.log",
+      "exit_code": 0,
+      "result": "77 passed"
+    },
+    {
+      "name": "ttl_core_final_clean_checkout",
+      "commit": "6a197f5e9473d838444b6a93b7b2e661c723f9f2",
+      "command": "python -m pytest tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py -q --basetemp docs/evidence/vnext/m4-ttl-fix-01/runs/rev1/pytest-ttl-core-final-01 --tb=short",
+      "raw_log": "runs/rev1/ttl-core-final-01.log",
+      "exit_code": 0,
+      "result": "3 passed"
+    },
+    {
+      "name": "full_pytest_final_clean_checkout",
+      "commit": "6a197f5e9473d838444b6a93b7b2e661c723f9f2",
+      "command": "OPSPILOT_MODEL_API_KEY=test-no-provider-call; OPSPILOT_MODEL_NAME=test-no-provider-call; OPSPILOT_MODEL_BASE_URL=http://127.0.0.1:9; python -m pytest -q --basetemp docs/evidence/vnext/m4-ttl-fix-01/runs/rev1/pytest-full-final-01 --tb=short",
+      "raw_log": "runs/rev1/full-pytest-final-01.log",
+      "exit_code": 0,
+      "result": "319 passed in 320.86s; no real Provider calls"
+    },
+    {
+      "name": "static_and_dependency_checks",
+      "commit": "6a197f5e9473d838444b6a93b7b2e661c723f9f2",
+      "command": "python -m pip check; python -m compileall -q opspilot tests; git diff --check origin/main...HEAD -- .gitattributes opspilot tests",
+      "exit_code": 0,
+      "result": "No broken requirements; compileall passed; source/test diff check passed."
+    }
+  ],
+  "notes": [
+    "Run logs preserve failed attempts; the raw logs in the original TTL candidate directory were not rewritten.",
+    "No S1/S2 Gate, authorization, Gold, Receipt, or business semantics were changed.",
+    "M4-AUTONOMY-C1 remains frozen/RED and is not implemented by this TTL integration."
+  ]
+}

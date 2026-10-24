@@ -41,6 +41,22 @@ def _strict_positive_version(value: object) -> int:
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
+
+S3_EVIDENCE_TTL_SECONDS = 300
+S3_OBSERVATION_CLOCK_SKEW_SECONDS = 30
+
+
+def _parse_s3_time(value):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS s3_orders (
  tenant_id TEXT NOT NULL, service_id TEXT NOT NULL, integration_id TEXT NOT NULL,
@@ -445,47 +461,244 @@ def get_receiver_processing_fact(path, task_id):
     return _table_fact(path, task_id, "s3_receiver")
 
 
-def current_s3_evidence(connection, task_id, evidence_ids=None, *, historical=False):
-    """Revalidate actual rows/HTTP observations, not just the model's typed envelope."""
-    rows = connection.execute("SELECT * FROM d2_evidence WHERE task_id=? ORDER BY fetched_at,rowid", (task_id,)).fetchall()
+def _observation_scope(connection, task_id, evidence_rows, run_id, observation_ids):
+    """Return one trusted business Run and exact per-Evidence observation pins."""
+    pins: dict[str, str] = {}
+    if isinstance(observation_ids, dict):
+        pins = {str(key): str(value) for key, value in observation_ids.items() if value}
+    elif isinstance(observation_ids, (list, tuple, set)):
+        for observation_id in observation_ids:
+            row = connection.execute(
+                "SELECT evidence_id FROM d2_tool_observations WHERE observation_id=? AND task_id=?",
+                (str(observation_id), task_id),
+            ).fetchone()
+            if row is not None:
+                pins[str(row["evidence_id"])] = str(observation_id)
+
+    if run_id is None:
+        # A caller without an explicit Run may use only each immutable Evidence
+        # row's original Observation, and only if those origins all belong to
+        # one trusted business Run. Never resolve "the latest" across Runs.
+        if not evidence_rows:
+            return None, {}, "S3_RUN_REQUIRED"
+        inferred_runs: set[str] = set()
+        inferred_pins: dict[str, str] = {}
+        for evidence in evidence_rows:
+            ref = str(evidence["original_result_ref"] or "")
+            observation_id = ref.removeprefix("observation://") if ref.startswith("observation://") else ""
+            row = connection.execute(
+                """SELECT a.run_id FROM d2_tool_observations o
+                   JOIN d2_attempts a ON a.attempt_id=o.attempt_id AND a.task_id=o.task_id
+                   WHERE o.observation_id=? AND o.task_id=? AND o.evidence_id=?""",
+                (observation_id, task_id, str(evidence["evidence_id"])),
+            ).fetchone()
+            if row is None or not row["run_id"]:
+                return None, {}, "S3_RUN_ASSOCIATION_INVALID"
+            inferred_runs.add(str(row["run_id"]))
+            inferred_pins[str(evidence["evidence_id"])] = observation_id
+        if len(inferred_runs) != 1:
+            return None, {}, "S3_RUN_SCOPE_MISMATCH"
+        run_id = next(iter(inferred_runs))
+        if observation_ids is None:
+            pins = inferred_pins
+
+    run = connection.execute(
+        "SELECT task_id,kind,status FROM task_runs WHERE run_id=?", (run_id,),
+    ).fetchone()
+    if (
+        run is None or str(run["task_id"]) != str(task_id)
+        or str(run["kind"]) == "CHAT_READONLY"
+        or str(run["status"]) not in {"RUNNING", "SUCCEEDED"}
+    ):
+        return str(run_id), pins, "S3_RUN_ASSOCIATION_INVALID"
+    return str(run_id), pins, None
+
+
+def _s3_observation(connection, *, task_id, evidence, run_id, observation_id=None, observed_before=None):
+    fact_type = str(evidence["fact_type"])
+    tool_name = FACT_TO_TOOL.get(fact_type)
+    if tool_name is None:
+        return None, "S3_FACT_ORIGIN_INVALID"
+    query = """SELECT o.*, a.task_id AS attempt_task_id, a.run_id AS attempt_run_id,
+                      a.kind AS attempt_kind, a.call_id AS attempt_call_id,
+                      a.tool_call_id AS attempt_tool_call_id, a.tool_name AS attempt_tool_name,
+                      a.argument_digest AS attempt_argument_digest, a.status AS attempt_status,
+                      a.reserved_at AS attempt_reserved_at, a.completed_at AS attempt_completed_at,
+                      a.result_digest AS attempt_result_digest,
+                      r.task_id AS run_task_id, r.kind AS run_kind, r.status AS run_status
+               FROM d2_tool_observations o
+               LEFT JOIN d2_attempts a ON a.attempt_id=o.attempt_id AND a.task_id=o.task_id
+               LEFT JOIN task_runs r ON r.run_id=a.run_id
+               WHERE o.task_id=? AND o.evidence_id=?"""
+    params: list[object] = [task_id, str(evidence["evidence_id"])]
+    if observation_id is not None:
+        query += " AND o.observation_id=?"
+        params.append(str(observation_id))
+    else:
+        query += " AND o.tool_name=? AND a.run_id=? AND o.status='OK'"
+        params.extend((tool_name, run_id))
+        if observed_before is not None:
+            query += " AND o.created_at<=?"
+            params.append(str(observed_before))
+        query += " ORDER BY o.rowid DESC LIMIT 1"
+    row = connection.execute(query, tuple(params)).fetchone()
+    if row is None:
+        other = connection.execute(
+            """SELECT 1 FROM d2_tool_observations WHERE task_id=? AND evidence_id=?
+               AND tool_name=? AND status='OK' LIMIT 1""",
+            (task_id, str(evidence["evidence_id"]), tool_name),
+        ).fetchone()
+        return None, "S3_OBSERVATION_RUN_MISMATCH" if other else "S3_OBSERVATION_UNAVAILABLE"
+    item = dict(row)
+    if (
+        str(item["task_id"]) != str(task_id)
+        or str(item["attempt_task_id"]) != str(task_id)
+        or str(item["attempt_run_id"]) != str(run_id)
+        or str(item["run_task_id"]) != str(task_id)
+        or str(item["run_kind"]) == "CHAT_READONLY"
+        or str(item["run_status"]) not in {"RUNNING", "SUCCEEDED"}
+        or str(item["attempt_kind"]) != "MCP"
+        or str(item["attempt_status"]) != "OK"
+        or str(item["status"]) != "OK"
+        or str(item["tool_name"]) != tool_name
+        or str(item["attempt_tool_name"]) != tool_name
+        or str(item["attempt_call_id"]) != str(item["call_id"])
+        or str(item["attempt_tool_call_id"]) != str(item["tool_call_id"])
+        or str(item["attempt_argument_digest"]) != str(item["argument_digest"])
+        or not item["result_digest"]
+        or str(item["attempt_result_digest"]) != str(item["result_digest"])
+        or not item["result_json"]
+    ):
+        return None, "S3_OBSERVATION_ASSOCIATION_INVALID"
+    try:
+        result = json.loads(str(item["result_json"]))
+        if not isinstance(result, dict) or digest_json(result) != str(item["result_digest"]):
+            return None, "S3_OBSERVATION_DIGEST_INVALID"
+        persisted_at = _parse_s3_time(item["created_at"])
+        reserved_at = _parse_s3_time(item["attempt_reserved_at"])
+        completed_at = _parse_s3_time(item["attempt_completed_at"])
+        reported_at = _parse_s3_time(result.get("observed_at"))
+        if not persisted_at or not reserved_at or not completed_at or not reported_at:
+            return None, "S3_OBSERVATION_TIME_INVALID"
+        skew = S3_OBSERVATION_CLOCK_SKEW_SECONDS
+        if (
+            persisted_at < reserved_at or persisted_at > completed_at
+            or abs((persisted_at - reported_at).total_seconds()) > skew
+            or reported_at < reserved_at - timedelta(seconds=skew)
+            or reported_at > completed_at + timedelta(seconds=skew)
+        ):
+            return None, "S3_OBSERVATION_TIME_INVALID"
+        if observed_before is not None:
+            cutoff = _parse_s3_time(str(observed_before))
+            if cutoff is None or persisted_at > cutoff:
+                return None, "S3_OBSERVATION_AFTER_DIAGNOSIS"
+    except (TypeError, ValueError, KeyError):
+        return None, "S3_OBSERVATION_TIME_INVALID"
+    return {**item, "result": result, "persisted_at": persisted_at}, None
+
+
+def current_s3_evidence(
+    connection, task_id, evidence_ids=None, *, run_id=None, observation_ids=None,
+    observed_before=None, historical=False,
+):
+    """Revalidate facts and the exact successful Observation for one trusted Run."""
+    params: list[object] = [task_id]
+    query = "SELECT * FROM d2_evidence WHERE task_id=?"
+    no_evidence_selected = False
+    if evidence_ids is not None:
+        values = list(dict.fromkeys(str(item) for item in evidence_ids))
+        if not values:
+            no_evidence_selected = True
+        else:
+            query += " AND evidence_id IN (" + ",".join("?" for _ in values) + ")"
+            params.extend(values)
+    query += " ORDER BY fetched_at,rowid"
+    rows = [] if no_evidence_selected else connection.execute(query, tuple(params)).fetchall()
     try:
         binding = get_s3_binding(connection, task_id)
     except ScopeDenied:
         excluded = [
             {"source_id": str(row["evidence_id"]), "reason": "S3_AUTHORIZATION_UNAVAILABLE"}
-            for row in rows if evidence_ids is None or str(row["evidence_id"]) in evidence_ids
+            for row in rows
         ]
         if not excluded:
             excluded.append({"source_id": str(task_id), "reason": "S3_AUTHORIZATION_UNAVAILABLE"})
         return [], excluded
+    selected_run, pins, scope_error = _observation_scope(
+        connection, task_id, rows, run_id, observation_ids,
+    )
+    if scope_error:
+        return [], [{"source_id": str(row["evidence_id"]), "reason": scope_error} for row in rows] or [
+            {"source_id": str(task_id), "reason": scope_error}
+        ]
     order, delivery, receiver, current_versions = _snapshot(connection, binding)
+    now = _now()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
     current, excluded = [], []
     for row in rows:
         e = dict(row)
-        if evidence_ids is not None and e["evidence_id"] not in evidence_ids:
-            continue
         reason = None
         try:
             facts, versions = json.loads(e["facts_json"]), json.loads(e["observed_versions_json"])
             fact_type = str(e["fact_type"])
-            if fact_type not in FACT_TO_TOOL:
-                continue
+            if fact_type not in FACT_TO_TOOL or not isinstance(facts, dict) or not isinstance(versions, dict):
+                reason = "S3_MALFORMED_EVIDENCE"
             payload = {"tenant_id": e["tenant_id"], "task_id": task_id, "fact_type": fact_type,
                        "resource_id": e["resource_id"], "principal_id": e["principal_id"],
                        "data_source": e["data_source"], "observed_versions": versions,
                        "facts": facts, "trust_class": e["trust_class"]}
-            age = (_now() - datetime.fromisoformat(e["fetched_at"].replace("Z","+00:00"))).total_seconds()
-            observation = connection.execute("SELECT 1 FROM d2_tool_observations WHERE task_id=? AND evidence_id=? AND tool_name=? AND status='OK'", (task_id,e["evidence_id"],FACT_TO_TOOL[fact_type])).fetchone()
-            if (e["tenant_id"] != binding["tenant_id"] or e["principal_id"] != binding["principal_id"]
+            if reason is None and _parse_s3_time(str(e["fetched_at"])) is None:
+                reason = "S3_MALFORMED_EVIDENCE"
+            if reason is None and (
+                e["tenant_id"] != binding["tenant_id"] or e["principal_id"] != binding["principal_id"]
                 or e["resource_id"] != f"{SERVICE}:{binding['order_id']}" or e["data_source"] != SOURCES[fact_type]
-                or e["trust_class"] != "untrusted_tool_observation" or e["digest"] != digest_json(payload) or not observation):
+                or e["trust_class"] != "untrusted_tool_observation" or e["digest"] != digest_json(payload)
+            ):
                 reason = "S3_FACT_ORIGIN_INVALID"
-            elif not historical and (age > 300 or age < -30):
-                reason = "S3_EVIDENCE_EXPIRED"
-            elif (set(versions) != set(current_versions) or any(type(v) is not int or v < 1 for v in versions.values())
-                  or (not historical and versions != current_versions)):
+            selected_observation = None
+            if reason is None and observation_ids is not None and str(e["evidence_id"]) not in pins:
+                reason = "S3_OBSERVATION_UNAVAILABLE"
+            if reason is None:
+                selected_observation, reason = _s3_observation(
+                    connection, task_id=task_id, evidence=e, run_id=selected_run,
+                    observation_id=pins.get(str(e["evidence_id"])), observed_before=observed_before,
+                )
+            if reason is None:
+                fact_result = selected_observation["result"]
+                result_payload = {key: fact_result.get(key) for key in (
+                    "tenant_id", "task_id", "fact_type", "resource_id", "principal_id",
+                    "data_source", "observed_versions", "facts", "trust_class",
+                )}
+                origin_ref = str(e["original_result_ref"] or "")
+                origin_id = origin_ref.removeprefix("observation://") if origin_ref.startswith("observation://") else ""
+                origin = connection.execute(
+                    "SELECT task_id,evidence_id,tool_name,status FROM d2_tool_observations WHERE observation_id=?",
+                    (origin_id,),
+                ).fetchone()
+                if (
+                    result_payload != payload or digest_json(result_payload) != str(e["digest"])
+                    or origin is None or str(origin["task_id"]) != str(task_id)
+                    or str(origin["evidence_id"]) != str(e["evidence_id"])
+                    or str(origin["tool_name"]) != FACT_TO_TOOL[fact_type]
+                    or str(origin["status"]) != "OK"
+                ):
+                    reason = "S3_OBSERVATION_EVIDENCE_MISMATCH"
+            if reason is None and not historical:
+                age = (now - selected_observation["persisted_at"]).total_seconds()
+                if age < 0:
+                    reason = "S3_OBSERVATION_TIME_INVALID"
+                elif age > S3_EVIDENCE_TTL_SECONDS:
+                    reason = "S3_EVIDENCE_EXPIRED"
+            if reason is None and (
+                set(versions) != set(current_versions)
+                or any(type(value) is not int or value < 1 for value in versions.values())
+                or (not historical and versions != current_versions)
+            ):
                 reason = "S3_CURRENT_VERSION_MISMATCH"
-            elif fact_type == "s3_order":
+            elif reason is None and fact_type == "s3_order":
                 body = facts.get("body", {})
                 http = connection.execute(
                     """SELECT h.* FROM s3_http_observations h
@@ -505,12 +718,25 @@ def current_s3_evidence(connection, task_id, evidence_ids=None, *, historical=Fa
                     or http["route"] != ROUTE or body.get("order_id") != binding["order_id"] or body.get("order_version") != versions.get("order_version")
                     or (not historical and body.get("status") != order["status"])):
                     reason = "S3_HTTP_OBSERVATION_INVALID"
-            elif not historical and facts != (delivery if fact_type == "s3_delivery" else receiver):
-                reason = "S3_CURRENT_FACT_MISMATCH"
-            elif fact_type in {"s3_delivery", "s3_receiver"} and (facts.get("tenant_id") != binding["tenant_id"] or facts.get("service_id") != SERVICE or facts.get("order_id") != binding["order_id"]):
+            elif reason is None and not historical and fact_type in {"s3_delivery", "s3_receiver"}:
+                expected = delivery if fact_type == "s3_delivery" else receiver
+                if facts != expected:
+                    reason = "S3_CURRENT_FACT_MISMATCH"
+            if reason is None and fact_type in {"s3_delivery", "s3_receiver"} and (
+                facts.get("tenant_id") != binding["tenant_id"] or facts.get("service_id") != SERVICE
+                or facts.get("order_id") != binding["order_id"]
+            ):
                 reason = "S3_CORRELATION_INVALID"
             if reason is None:
-                current.append({**e, "facts": facts, "observed_versions": versions})
+                observation_meta = {
+                    "observation_id": str(selected_observation["observation_id"]),
+                    "attempt_id": str(selected_observation["attempt_id"]),
+                    "run_id": selected_run, "tool_name": str(selected_observation["tool_name"]),
+                    "observed_at": selected_observation["persisted_at"].isoformat(),
+                    "source_observed_at": str(selected_observation["result"].get("observed_at")),
+                    "result_digest": str(selected_observation["result_digest"]),
+                }
+                current.append({**e, "facts": facts, "observed_versions": versions, "_observation": observation_meta})
         except (ValueError, TypeError, KeyError):
             reason = "S3_MALFORMED_EVIDENCE"
         if reason:
@@ -614,9 +840,11 @@ def _gate_from_evidence(evidence):
             "recovered": False, "side_effects": []}
 
 
-def evaluate_s3_gate(path, task_id, evidence_ids=None):
+def evaluate_s3_gate(path, task_id, evidence_ids=None, *, run_id=None, observation_ids=None):
     with connect(path) as c:
-        evidence, excluded = current_s3_evidence(c, task_id, evidence_ids)
+        evidence, excluded = current_s3_evidence(
+            c, task_id, evidence_ids, run_id=run_id, observation_ids=observation_ids,
+        )
     return {**_gate_from_evidence(evidence), "excluded_sources": excluded, "policy": POLICY}
 
 
@@ -629,7 +857,7 @@ def persist_s3_diagnosis(path, task_id, run_id, evidence_ids, summary="", *, sto
         existing = c.execute("SELECT * FROM s3_diagnoses WHERE run_id=?", (run_id,)).fetchone()
         if existing:
             return dict(existing)
-        evidence, excluded = current_s3_evidence(c, task_id, evidence_ids)
+        evidence, excluded = current_s3_evidence(c, task_id, evidence_ids, run_id=run_id)
         gate = {**_gate_from_evidence(evidence), "excluded_sources": excluded, "policy": POLICY}
         if gate["decision"] != "DIAGNOSED":
             gate.update(decision="INCONCLUSIVE", outcome="INCONCLUSIVE", reason_code=stop_reason or "S3_INSUFFICIENT_CURRENT_FACTS")
@@ -639,6 +867,12 @@ def persist_s3_diagnosis(path, task_id, run_id, evidence_ids, summary="", *, sto
         revision = int(c.execute("SELECT control_revision FROM task_controls WHERE task_id=?", (task_id,)).fetchone()[0])
         body = {"schema": POLICY, "task_id": task_id, "run_id": run_id, "control_revision": revision,
                 "gate": gate, "evidence": [{"id": e["evidence_id"], "digest": e["digest"], "fact_type": e["fact_type"], "facts": e["facts"], "versions": e["observed_versions"]} for e in evidence],
+                "observations": [{"evidence_id": e["evidence_id"], **e["_observation"]} for e in evidence],
+                "observation_pins": {
+                    str(evidence_id): next((item["_observation"]["observation_id"] for item in evidence
+                                            if str(item["evidence_id"]) == str(evidence_id)), None)
+                    for evidence_id in evidence_ids
+                },
                 "model_summary_untrusted": summary[:1200], "explanation_call_id":summary_call_id if narrative else None,
                 "recovered": False, "business_writes": 0}
         ref = f"s3-diagnosis-{uuid.uuid4()}"
@@ -660,7 +894,17 @@ def s3_outcome_in_transaction(c, task_id):
         if row is None:
             return None
         body = json.loads(row["body_json"])
-        evidence, excluded = current_s3_evidence(c, task_id, json.loads(row["evidence_ids_json"]))
+        frozen_observations = body.get("observations")
+        observation_ids = body.get("observation_pins") if isinstance(body.get("observation_pins"), dict) else {
+            str(item["evidence_id"]): str(item["observation_id"])
+            for item in frozen_observations
+            if isinstance(item, dict) and item.get("evidence_id") and item.get("observation_id")
+        } if isinstance(frozen_observations, list) else None
+        evidence, excluded = current_s3_evidence(
+            c, task_id, json.loads(row["evidence_ids_json"]), run_id=str(row["run_id"]),
+            observation_ids=observation_ids,
+            observed_before=str(row["created_at"]) if observation_ids is None else None,
+        )
         rev = c.execute("SELECT control_revision FROM task_controls WHERE task_id=?", (task_id,)).fetchone()[0]
         authorization_unavailable = any(item.get("reason") == "S3_AUTHORIZATION_UNAVAILABLE" for item in excluded)
         frozen_gate = body.get("gate", {})
@@ -734,7 +978,15 @@ def _explanation_exclusions(c, task_id, body):
             valid=False
         if not valid:
             excluded.append({"source_type":"SKILL","source_id":name,"reason":"EXPLANATION_SKILL_INVALIDATED"})
-    _,fact_excluded=current_s3_evidence(c,task_id,json.loads(provenance["evidence_ids_json"]))
+    attempt = c.execute(
+        "SELECT run_id FROM d2_attempts WHERE attempt_id=? AND task_id=? AND kind='MODEL' AND status='OK'",
+        (provenance["attempt_id"], task_id),
+    ).fetchone()
+    if attempt is None or not attempt["run_id"]:
+        return excluded + [{"source_id": provenance["call_id"], "reason": "EXPLANATION_RUN_UNAVAILABLE"}]
+    _,fact_excluded=current_s3_evidence(
+        c, task_id, json.loads(provenance["evidence_ids_json"]), run_id=str(attempt["run_id"]),
+    )
     excluded.extend(fact_excluded)
     return excluded
 
@@ -747,7 +999,17 @@ def s3_memory_source(connection, task_id):
         raise MemorySourceRejected("S3 requires a trusted read-only diagnosis")
     body = json.loads(row["body_json"])
     ids = json.loads(row["evidence_ids_json"])
-    evidence, excluded = current_s3_evidence(connection, task_id, ids, historical=True)
+    frozen_observations = body.get("observations")
+    observation_ids = body.get("observation_pins") if isinstance(body.get("observation_pins"), dict) else {
+        str(item["evidence_id"]): str(item["observation_id"])
+        for item in frozen_observations
+        if isinstance(item, dict) and item.get("evidence_id") and item.get("observation_id")
+    } if isinstance(frozen_observations, list) else None
+    evidence, excluded = current_s3_evidence(
+        connection, task_id, ids, run_id=str(row["run_id"]),
+        observation_ids=observation_ids, historical=True,
+        observed_before=str(row["created_at"]) if observation_ids is None else None,
+    )
     frozen = {e["id"]: e for e in body["evidence"]}
     gate = _gate_from_evidence(evidence)
     if (digest_json(body) != row["digest"] or excluded or gate["outcome"] != row["outcome"] or not ids

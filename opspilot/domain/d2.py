@@ -629,9 +629,11 @@ def reserve_attempt(
             raise BudgetExhausted(kind, used, limit)
         connection.execute(
             """INSERT INTO d2_attempts
-               (attempt_id, task_id, run_id, kind, call_id, tool_call_id, tool_name, argument_digest)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (attempt_id, task_id, run_id, kind, call_id, tool_call_id, tool_name, argument_digest),
+               (attempt_id, task_id, run_id, kind, call_id, tool_call_id, tool_name,
+                argument_digest, reserved_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (attempt_id, task_id, run_id, kind, call_id, tool_call_id, tool_name,
+             argument_digest, utc_now()),
         )
         if context_provenance is not None:
             if kind != "MODEL":
@@ -687,9 +689,9 @@ def finish_attempt(
 ) -> None:
     with connect(path) as connection:
         connection.execute(
-            """UPDATE d2_attempts SET status = ?, completed_at = CURRENT_TIMESTAMP,
+            """UPDATE d2_attempts SET status = ?, completed_at = ?,
                        result_digest = ?, error_class = ? WHERE attempt_id = ?""",
-            (status, result_digest, error_class, attempt_id),
+            (status, utc_now(), result_digest, error_class, attempt_id),
         )
 
 
@@ -845,7 +847,11 @@ def record_tool_observation(
                 )
             }
         )
-        with connect(path) as connection:
+    stored_result = result if result is not None else ({"error_code": error_class} if error_class else None)
+    observed_at = utc_now()
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        if status == "OK" and result is not None:
             existing = connection.execute(
                 """SELECT evidence_id FROM d2_evidence
                    WHERE task_id = ? AND fact_type = ? AND resource_id = ? AND digest = ?
@@ -882,15 +888,12 @@ def record_tool_observation(
                     ),
                 )
                 progress_added = True
-
-    stored_result = result if result is not None else ({"error_code": error_class} if error_class else None)
-    with connect(path) as connection:
         connection.execute(
             """INSERT INTO d2_tool_observations
                (observation_id, task_id, call_id, attempt_id, tool_call_id, tool_name,
                 argument_digest, status, progress_added, error_class, result_digest,
-                result_json, evidence_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                result_json, evidence_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 observation_id,
                 task_id,
@@ -905,6 +908,7 @@ def record_tool_observation(
                 result_digest,
                 canonical_json(stored_result) if stored_result is not None else None,
                 evidence_id,
+                observed_at,
             ),
         )
     return {

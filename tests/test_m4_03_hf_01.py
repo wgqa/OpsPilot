@@ -79,14 +79,11 @@ def _handoff_request(db: Path, task: dict[str, object], diagnosis: dict[str, obj
     }
 
 
-def _record_fresh(db: Path, task: dict[str, object], tool: str, result: dict[str, object]) -> str:
-    from opspilot.domain.d2 import record_tool_observation
-
-    call_id = f"hf01-{uuid4()}"
-    return str(record_tool_observation(
-        db, task_id=str(task["task_id"]), call_id=call_id, attempt_id=None,
-        tool_call_id=call_id, tool_name=tool, arguments={}, status="OK", result=result,
-    )["evidence_id"])
+def _record_fresh(
+    db: Path, task: dict[str, object], tool: str, result: dict[str, object], *, run_id: str,
+) -> str:
+    from s3_observation_support import record_s3_observation
+    return str(record_s3_observation(db, task, tool, result, run_id=run_id)["evidence_id"])
 
 
 def test_current_s3_binding_uses_same_versioned_authorization_snapshot(tmp_path: Path):
@@ -321,7 +318,9 @@ def test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl(tmp_path: P
             current = clock["now"]
             return current if tz is not None else current.replace(tzinfo=None)
 
+    import opspilot.domain.d2 as d2
     monkeypatch.setattr(s3, "datetime", FrozenDateTime)
+    monkeypatch.setattr(d2, "datetime", FrozenDateTime)
     accepted_at = (clock["now"] - timedelta(seconds=299)).isoformat().replace("+00:00", "Z")
     from opspilot.domain.d2 import canonical_json, digest_json
     with connect(db) as connection:
@@ -396,9 +395,9 @@ def test_receiver_sla_invalidates_wait_diagnosis_before_evidence_ttl(tmp_path: P
     apply_pending_critical_inputs(db, identity, run_id)
     order, delivery, receiver = _facts(db, task)
     fresh_ids = [
-        _record_fresh(db, task, "get_order_status", order),
-        _record_fresh(db, task, "get_callback_delivery", delivery),
-        _record_fresh(db, task, "get_receiver_processing", receiver),
+        _record_fresh(db, task, "get_order_status", order, run_id=run_id),
+        _record_fresh(db, task, "get_callback_delivery", delivery, run_id=run_id),
+        _record_fresh(db, task, "get_receiver_processing", receiver, run_id=run_id),
     ]
     refreshed = s3.persist_s3_diagnosis(db, str(task["task_id"]), run_id, fresh_ids)
     finish_task_run(db, identity, run_id, "SUCCEEDED")

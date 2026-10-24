@@ -1,0 +1,192 @@
+F
+================================== FAILURES ===================================
+_ test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-ttl-fix-01/artifacts/pytest-m4-ttl-fix-01-debug-basetemp/test_ttl_01_04_real_mcp_refres0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023CCB024FC0>
+
+    def test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen(tmp_path: Path, monkeypatch):
+        """A new successful MCP/HTTP observation of unchanged facts must satisfy currentness."""
+        from opspilot.domain.api import make_server
+        from opspilot.domain.database import connect, reset_fixture
+        from opspilot.domain.s3 import (
+            current_s3_evidence, evaluate_s3_gate, get_s3_outcome,
+            persist_s3_diagnosis, prepare_s3_fixture,
+        )
+        from opspilot.domain.s3_mcp import build_s3_server
+        from opspilot.domain.task_control import (
+            admit_task_message,
+            apply_pending_critical_inputs,
+            claim_task_run,
+            create_session,
+            create_task_with_initial_run,
+            finish_task_run,
+            trusted_identity,
+        )
+        import opspilot.domain.d2 as d2
+        import opspilot.domain.s3 as s3
+    
+        db = tmp_path / "m4-preflight-01.sqlite3"
+        order_id = "async-order-2"
+        reset_fixture(db, "S1_POS")
+        prepare_s3_fixture(
+            db,
+            "DELIVERED_PENDING",
+            order_id=order_id,
+            queue_age_seconds=60,
+            processing_sla_seconds=3600,
+        )
+        identity = trusted_identity(db, "support-a")
+        session = create_session(db, identity)
+        task = create_task_with_initial_run(
+            db,
+            identity,
+            session_id=str(session["session_id"]),
+            service_id="orders-async-demo",
+            integration_id="async-integration-a",
+            ticket_id="M4-PREFLIGHT-01",
+            initial_message="�����ӿڷ��� 200��������û���յ��첽�ص���",
+            idempotency_key="m4-preflight-create-s3-task",
+            s3_order_id=order_id,
+        )
+        task_id, first_run_id = str(task["task_id"]), str(task["run_id"])
+    
+        clock = {"now": datetime.now(timezone.utc).replace(microsecond=0)}
+    
+        class ControlledDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                current = clock["now"]
+                return current if tz is not None else current.replace(tzinfo=None)
+    
+        # D2 stamps/validates Evidence through d2.datetime; S3 Gate TTL uses s3.datetime.
+        # Both must share the exact same controlled source to avoid a false skew failure.
+        monkeypatch.setattr(d2, "datetime", ControlledDateTime)
+        monkeypatch.setattr(s3, "datetime", ControlledDateTime)
+    
+        api = make_server(db, "tenant-a", "127.0.0.1", 0)
+        thread = threading.Thread(target=api.serve_forever, daemon=True)
+        thread.start()
+        try:
+            root = f"http://127.0.0.1:{api.server_port}"
+            mcp_server = build_s3_server(db, task_id, root)
+            before_business = _business_snapshot(db, order_id)
+    
+            claim_task_run(db, identity, first_run_id)
+            apply_pending_critical_inputs(db, identity, first_run_id)
+            first_records = _run_real_mcp_facts(db, task_id, first_run_id, mcp_server)
+            first_ids = [str(item["evidence_id"]) for item in first_records]
+>           first_gate = evaluate_s3_gate(db, task_id, first_ids, run_id=first_run_id)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_ttl_fix_01.py:211: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\s3.py:844: in evaluate_s3_gate
+    evidence, excluded = current_s3_evidence(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x0000023CCC5023E0>
+task_id = 'task-b882a741-fc0d-4735-acfa-4898ad64209e'
+evidence_ids = ['evidence-afce6e51-d01e-4db1-bd4f-0a227b2689a0', 'evidence-c5930aec-72ef-46e4-8126-d80c0e111a8d', 'evidence-3ed9d738-5dda-44cd-b521-4d824ba2ee39']
+run_id = 'run-019330c4-bd4c-48f1-bf5f-2bd36899f342', observation_ids = None
+observed_before = None, historical = False
+
+    def current_s3_evidence(
+        connection, task_id, evidence_ids=None, *, run_id=None, observation_ids=None,
+        observed_before=None, historical=False,
+    ):
+        """Revalidate facts and the exact successful Observation for one trusted Run."""
+        params: list[object] = [task_id]
+        query = "SELECT * FROM d2_evidence WHERE task_id=?"
+        if evidence_ids is not None:
+            values = list(dict.fromkeys(str(item) for item in evidence_ids))
+            if not values:
+                return [], []
+            query += " AND evidence_id IN (" + ",".join("?" for _ in values) + ")"
+            params.extend(values)
+        query += " ORDER BY fetched_at,rowid"
+        rows = connection.execute(query, tuple(params)).fetchall()
+        selected_run, pins, scope_error = _observation_scope(
+            connection, task_id, rows, run_id, observation_ids,
+        )
+        if scope_error:
+            return [], [{"source_id": str(row["evidence_id"]), "reason": scope_error} for row in rows] or [
+                {"source_id": str(task_id), "reason": scope_error}
+            ]
+        try:
+            binding = get_s3_binding(connection, task_id)
+        except ScopeDenied:
+            excluded = [
+                {"source_id": str(row["evidence_id"]), "reason": "S3_AUTHORIZATION_UNAVAILABLE"}
+                for row in rows
+            ]
+            if not excluded:
+                excluded.append({"source_id": str(task_id), "reason": "S3_AUTHORIZATION_UNAVAILABLE"})
+            return [], excluded
+        order, delivery, receiver, current_versions = _snapshot(connection, binding)
+        now = _now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
+        current, excluded = [], []
+        for row in rows:
+            e = dict(row)
+            reason = None
+            try:
+                facts, versions = json.loads(e["facts_json"]), json.loads(e["observed_versions_json"])
+                fact_type = str(e["fact_type"])
+                if fact_type not in FACT_TO_TOOL or not isinstance(facts, dict) or not isinstance(versions, dict):
+                    reason = "S3_MALFORMED_EVIDENCE"
+                payload = {"tenant_id": e["tenant_id"], "task_id": task_id, "fact_type": fact_type,
+                           "resource_id": e["resource_id"], "principal_id": e["principal_id"],
+                           "data_source": e["data_source"], "observed_versions": versions,
+                           "facts": facts, "trust_class": e["trust_class"]}
+                if reason is None and _parse_s3_time(str(e["fetched_at"])) is None:
+                    reason = "S3_MALFORMED_EVIDENCE"
+                if reason is None and (
+                    e["tenant_id"] != binding["tenant_id"] or e["principal_id"] != binding["principal_id"]
+                    or e["resource_id"] != f"{SERVICE}:{binding['order_id']}" or e["data_source"] != SOURCES[fact_type]
+                    or e["trust_class"] != "untrusted_tool_observation" or e["digest"] != digest_json(payload)
+                ):
+                    reason = "S3_FACT_ORIGIN_INVALID"
+                selected_observation = None
+                if reason is None and observation_ids is not None and str(e["evidence_id"]) not in pins:
+                    reason = "S3_OBSERVATION_UNAVAILABLE"
+                if reason is None:
+                    selected_observation, reason = _s3_observation(
+                        connection, task_id=task_id, evidence=e, run_id=selected_run,
+                        observation_id=pins.get(str(e["evidence_id"])), observed_before=observed_before,
+                    )
+                if reason is None:
+                    fact_result = selected_observation["result"]
+                    result_payload = {key: fact_result.get(key) for key in (
+                        "tenant_id", "task_id", "fact_type", "resource_id", "principal_id",
+                        "data_source", "observed_versions", "facts", "trust_class",
+                    )}
+                    origin_ref = str(e["original_result_ref"] or "")
+                    origin_id = origin_ref.removeprefix("observation://") if origin_ref.startswith("observation://") else ""
+                    origin = connection.execute(
+                        "SELECT task_id,evidence_id,tool_name,status FROM d2_tool_observations WHERE observation_id=?",
+                        (origin_id,),
+                    ).fetchone()
+                    if (
+                        result_payload != payload or digest_json(result_payload) != str(e["digest"])
+                        or origin is None or str(origin["task_id"]) != str(task_id)
+                        or str(origin["evidence_id"]) != str(e["evidence_id"])
+                        or str(origin["tool_name"]) != FACT_TO_TOOL[fact_type]
+                        or str(origin["status"]) != "OK"
+                    ):
+                        reason = "S3_OBSERVATION_EVIDENCE_MISMATCH"
+                if reason is None and not historical:
+>                   age = (now - selected_observation["persisted_at"]).total_seconds()
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E                   TypeError: unsupported operand type(s) for -: 'datetime.datetime' and 'str'
+
+opspilot\domain\s3.py:688: TypeError
+---------------------------- Captured stdout call -----------------------------
+DEBUG_S3_EVIDENCE_VALIDATION s3_order TypeError("unsupported operand type(s) for -: 'datetime.datetime' and 'str'")
+=========================== short test summary info ===========================
+FAILED tests/test_m4_ttl_fix_01.py::test_ttl_01_04_real_mcp_refresh_is_run_scoped_and_old_diagnosis_stays_frozen
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 2.62s

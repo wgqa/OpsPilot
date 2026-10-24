@@ -1,0 +1,117 @@
+{
+  "schema": "opspilot-m4-ttl-fix-01-results-v1",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/m4-ttl-fix-01",
+  "baseline_sha": "bd58c66003c4e7fea660967c7a6a30aebcd63cd7",
+  "commits": {
+    "frozen_acceptance_plan": "af5dc7e219f55e0aa82d01389621aa57702e9501",
+    "frozen_regression_test": "cb4e16842d80ea5230a169dd842d528f9ffb6584",
+    "red_materials": "1da4b7ef07829c8035279d2b2b2ed19f934ebbdd",
+    "fresh_pre_fix_red": "9301269e15c484b54b24e991a9402940af3ab135",
+    "implementation": "00be81c53f090fd8934aa645ac2b16c59c9a7c78",
+    "evidence_bundle": "fb09352b8d62f1179f52e367ba27d750664b3e87"
+  },
+  "environment": {
+    "os": "Windows",
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "mcp": "2.3.0",
+    "langgraph": "1.2.16",
+    "langchain_openai": "1.7.2",
+    "fastapi": "0.137.1",
+    "provider_calls": 0,
+    "provider_configuration_for_full_pytest": {
+      "api_key": "test-no-provider-call",
+      "model": "test-no-provider-call",
+      "base_url": "http://127.0.0.1:9"
+    }
+  },
+  "runs": [
+    {
+      "name": "valid_preflight_red",
+      "command": "python -m pytest docs/evidence/vnext/m4-ttl-fix-01/runs/preflight/test_evidence_ttl_repeated_mcp_fetch.py -q",
+      "raw_log": "runs/preflight/red-02-pytest.log",
+      "trace": "runs/preflight/TRACE-red-02.jsonl",
+      "exit_code": 1,
+      "result": "RED: Run B real HTTP/MCP reads succeeded after 301 seconds, but Gate returned NEED_MORE because reused delivery/receiver Evidence was expired."
+    },
+    {
+      "name": "fresh_pre_fix_red",
+      "command": "python -m pytest docs/evidence/vnext/m4-ttl-fix-01/runs/preflight/test_evidence_ttl_repeated_mcp_fetch.py -q",
+      "raw_log": "runs/red-before-fix/preflight-red-03-pytest.log",
+      "trace": "runs/red-before-fix/TRACE-preflight-red-03.jsonl",
+      "exit_code": 1,
+      "result": "RED reproduced S3_EVIDENCE_EXPIRED after successful repeated tool calls."
+    },
+    {
+      "name": "frozen_run_scope_red",
+      "command": "python -m pytest tests/test_m4_ttl_fix_01.py -q",
+      "raw_log": "runs/red-before-fix/ttl-run-scope-red-before-fix.log",
+      "trace": "runs/red-before-fix/TRACE-ttl-run-scope-red-before-fix.jsonl",
+      "exit_code": 1,
+      "result": "RED: evaluate_s3_gate did not yet accept an explicit run_id."
+    },
+    {
+      "name": "ttl_and_observation_integrity_final",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py --basetemp=docs/evidence/vnext/m4-ttl-fix-01/runs/green/pytest-m4-ttl-fix-01-expanded-trace-basetemp",
+      "raw_log": "runs/green/green-21-expanded-trace-tests.log",
+      "trace": "TRACE.jsonl",
+      "exit_code": 0,
+      "result": "3 passed in 5.72s"
+    },
+    {
+      "name": "ttl_hf_s3_regression",
+      "command": "python -m pytest tests/test_m4_ttl_fix_01.py tests/test_m4_ttl_fix_01_integrity.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_03_s3.py tests/test_m4_02_s3.py --basetemp=artifacts/pytest-m4-ttl-fix-01-s3-hf-basetemp-02",
+      "raw_log": "runs/green/green-15-ttl-hf-s3-regression-after-clock-align.log",
+      "exit_code": 0,
+      "result": "77 passed in 122.25s"
+    },
+    {
+      "name": "s1_s2_security_regression",
+      "command": "python -m pytest tests/test_d2_investigation.py tests/test_d3_actions.py tests/test_d4_recovery.py tests/test_m1_task_control.py tests/test_m1_hf_worker.py tests/test_m1_worker_recovery.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py tests/test_m2_03_handoff.py tests/test_m4_01_dialogue_update_safety.py --basetemp=artifacts/pytest-m4-ttl-fix-01-s1-s2-basetemp-02",
+      "raw_log": "runs/green/green-17-s1-s2-security-regression-eol-normalized.log",
+      "exit_code": 0,
+      "result": "104 passed in 85.26s"
+    },
+    {
+      "name": "full_pytest",
+      "command": "$env:OPSPILOT_MODEL_API_KEY='test-no-provider-call'; $env:OPSPILOT_MODEL_NAME='test-no-provider-call'; $env:OPSPILOT_MODEL_BASE_URL='http://127.0.0.1:9'; & 'D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe' -m pytest --basetemp=artifacts/pytest-m4-ttl-fix-01-full-basetemp-02",
+      "raw_log": "runs/green/green-19-full-pytest-dummy-provider-config.log",
+      "exit_code": 0,
+      "result": "319 passed in 313.20s"
+    },
+    {
+      "name": "compileall_and_diff_check",
+      "command": "python -m compileall -q opspilot tests; git diff --check",
+      "exit_code": 0,
+      "result": "passed"
+    }
+  ],
+  "trace_summary": {
+    "task_id": "task-8f2cfe81-b2ca-44d4-b9e8-35d738d79760",
+    "run_a_id": "run-f940b314-9746-418f-8acd-684041ca6c7e",
+    "run_b_id": "run-b9e5df8d-21a0-463a-8553-9751efb39546",
+    "elapsed_seconds": 301,
+    "run_a_gate": "DIAGNOSED/WAIT_FOR_RECEIVER_PROCESSING",
+    "run_b_gate": "DIAGNOSED/WAIT_FOR_RECEIVER_PROCESSING",
+    "run_a_diagnosis_id": "s3-diagnosis-0f9a326b-fab4-4301-8dd7-73f1061e1869",
+    "run_b_diagnosis_id": "s3-diagnosis-262747f3-1ac8-44bc-b95a-f1f88d3109c7",
+    "run_a_after_b": "INVALIDATED; 3 original observations expired; evidence rows and diagnosis body/digest unchanged",
+    "ttl_boundaries": {
+      "299_seconds": "DIAGNOSED",
+      "300_seconds": "DIAGNOSED",
+      "301_seconds": "NEED_MORE"
+    },
+    "reused_evidence_fact_types": [
+      "s3_delivery",
+      "s3_receiver"
+    ]
+  },
+  "limitations": [
+    "No remote Provider or MCP service was used.",
+    "The full suite uses a dummy local refusal endpoint for any accidental model request.",
+    "S1/S2 behavior was covered by regression; their Gate contracts were not modified.",
+    "Candidate awaits independent Main Agent acceptance."
+  ]
+}
