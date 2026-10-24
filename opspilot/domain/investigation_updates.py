@@ -21,11 +21,12 @@ from opspilot.domain.task_control import (
 
 
 INTENTS = {"FOLLOW_UP", "CRITICAL_CORRECTION", "HYPOTHESIS", "OUT_OF_SCOPE"}
-PROMPT_VERSION = "m4-01-task-input-classifier-v2"
+PROMPT_VERSION = "m4-autonomy-c1-follow-up-router-v1"
 CLASSIFIER_SYSTEM_PROMPT = """You classify a user's latest message in an existing support investigation.
-Return exactly one JSON object with exactly these keys: intent, change_summary.
+Return exactly one JSON object with exactly these keys: intent, change_summary, readonly_action.
 intent must be FOLLOW_UP, CRITICAL_CORRECTION, HYPOTHESIS, or OUT_OF_SCOPE.
 FOLLOW_UP means a question or request for explanation that does not correct an actual task fact.
+For FOLLOW_UP, readonly_action must be EXPLAIN or INVESTIGATE. Choose INVESTIGATE only when the user's actual goal needs a current bound business fact or a versioned source that is not already present as a current cited source in the conversation. Choose EXPLAIN when the currently cited material can satisfy the request, or the message merely asks for an explanation. Do not route every FOLLOW_UP to investigation; do not use a fixed keyword list or prescribe a tool order. For the other intents, readonly_action must be EXPLAIN.
 HYPOTHESIS means conditional, speculative, counterfactual, or explicitly denied correction language.
 CRITICAL_CORRECTION means the user clearly says an actual fact for this same task was wrong or incomplete and supplies the corrected/added fact. A correction may be combined with a question; preserve both in the summary.
 An explicit revision or retraction of earlier task input or its investigation premise, combined with a concrete request to re-investigate that same task, is also CRITICAL_CORRECTION even when tools must discover the corrected value. A request merely to explain or recheck current results without revising earlier input remains FOLLOW_UP.
@@ -142,15 +143,21 @@ def classify_input(
         parsed = json.loads(text)
     except json.JSONDecodeError as error:
         raise RuntimeError("INVALID_MODEL_CLASSIFICATION") from error
-    if not isinstance(parsed, dict) or set(parsed) != {"intent", "change_summary"}:
+    if not isinstance(parsed, dict) or set(parsed) not in (
+        {"intent", "change_summary"},
+        {"intent", "change_summary", "readonly_action"},
+    ):
         raise RuntimeError("INVALID_MODEL_CLASSIFICATION")
     intent = parsed.get("intent")
     summary = parsed.get("change_summary")
+    readonly_action = parsed.get("readonly_action", "EXPLAIN")
     if (
         intent not in INTENTS
         or not isinstance(summary, str)
         or len(summary) > 240
         or (intent == "CRITICAL_CORRECTION" and not summary.strip())
+        or readonly_action not in {"EXPLAIN", "INVESTIGATE"}
+        or (intent != "FOLLOW_UP" and readonly_action != "EXPLAIN")
     ):
         raise RuntimeError("INVALID_MODEL_CLASSIFICATION")
     input_tokens, output_tokens, total_tokens = _tokens(response)
@@ -158,7 +165,8 @@ def classify_input(
     return {
         "intent": intent,
         "change_summary": summary.strip(),
-        "response_digest": _digest({"intent": intent, "change_summary": summary.strip()}),
+        "readonly_action": readonly_action,
+        "response_digest": _digest({"intent": intent, "change_summary": summary.strip(), "readonly_action": readonly_action}),
         "request_digest": request_digest,
         "provider_response_id": _response_id(metadata),
         "input_tokens": input_tokens,
@@ -314,15 +322,19 @@ def reserve_assessment(
 def complete_assessment(
     path: str | Path,
     *,
+    identity: TrustedIdentity,
     assessment_id: str,
     attempt_id: str,
     classification: dict[str, Any],
 ) -> dict[str, Any]:
     intent = classification.get("intent")
     summary = classification.get("change_summary")
+    readonly_action = classification.get("readonly_action", "EXPLAIN")
     if (
         intent not in INTENTS or not isinstance(summary, str) or len(summary) > 240
         or (intent == "CRITICAL_CORRECTION" and not summary.strip())
+        or readonly_action not in {"EXPLAIN", "INVESTIGATE"}
+        or (intent != "FOLLOW_UP" and readonly_action != "EXPLAIN")
     ):
         raise TaskControlError("INVALID_MODEL_CLASSIFICATION")
     now = _now()
@@ -348,7 +360,7 @@ def complete_assessment(
             raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
         if int(current["control_revision"]) != int(row["expected_control_revision"]):
             status = "STALE"
-        normalized = {"intent": intent, "change_summary": summary.strip()}
+        normalized = {"intent": intent, "change_summary": summary.strip(), "readonly_action": readonly_action}
         response_digest = str(classification.get("response_digest") or _digest(normalized))
         connection.execute(
             """UPDATE investigation_update_attempts SET status = 'SUCCEEDED', response_digest = ?,
@@ -360,9 +372,25 @@ def complete_assessment(
         )
         connection.execute(
             """UPDATE investigation_update_assessments SET intent = ?, change_summary = ?,
-               status = ?, completed_at = ? WHERE assessment_id = ?""",
-            (intent, summary.strip(), status, now, assessment_id),
+               follow_up_action = ?, status = ?, completed_at = ? WHERE assessment_id = ?""",
+            (intent, summary.strip(), readonly_action, status, now, assessment_id),
         )
+        if status == "NO_UPDATE" and intent == "FOLLOW_UP" and readonly_action == "INVESTIGATE":
+            from opspilot.domain.task_control import create_readonly_followup_run_in_transaction
+
+            created = create_readonly_followup_run_in_transaction(
+                connection,
+                identity,
+                task_id=str(row["task_id"]),
+                session_id=str(row["session_id"]),
+                source_message_id=str(row["source_message_id"]),
+                source_digest=str(row["source_digest"]),
+                expected_control_revision=int(row["expected_control_revision"]),
+            )
+            connection.execute(
+                "UPDATE investigation_update_assessments SET investigation_run_id = ? WHERE assessment_id = ?",
+                (created["run_id"], assessment_id),
+            )
         refreshed = connection.execute(
             "SELECT * FROM investigation_update_assessments WHERE assessment_id = ?", (assessment_id,)
         ).fetchone()
@@ -427,6 +455,7 @@ def _public_assessment(connection: sqlite3.Connection, row: sqlite3.Row) -> dict
         "source_message_id": str(row["source_message_id"]),
         "target_task_id": str(row["task_id"]),
         "intent": intent,
+        "follow_up_action": str(row["follow_up_action"] or "EXPLAIN"),
         "status": status,
         "expected_control_revision": int(row["expected_control_revision"]),
         "current_control_revision": int(current["control_revision"]),

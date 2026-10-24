@@ -102,6 +102,40 @@ def _control(connection: sqlite3.Connection, tenant_id: str, task_id: str) -> sq
     return row
 
 
+def _is_readonly_followup(connection: sqlite3.Connection, run_id: str) -> bool:
+    return connection.execute(
+        "SELECT 1 FROM c1_readonly_followup_runs WHERE run_id=?", (run_id,)
+    ).fetchone() is not None
+
+
+def _record_readonly_followup_failure_in_transaction(
+    connection: sqlite3.Connection, run_id: str, reason_code: str,
+) -> None:
+    row = connection.execute(
+        "SELECT result_digest FROM c1_readonly_followup_runs WHERE run_id=?", (run_id,)
+    ).fetchone()
+    if row is None or row["result_digest"]:
+        return
+    answer = "本次只读补查未完成；Task 和既有业务诊断保持不变。请检查当前授权与运行状态后再继续。"
+    refs_json = "[]"
+    result_json = json.dumps(
+        {"run_id": run_id, "status": "NOT_COMPLETED"},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    )
+    safe_reason = reason_code[:100]
+    digest = _digest({
+        "run_id": run_id, "result_state": "NOT_COMPLETED", "answer_text": answer,
+        "source_refs_json": refs_json, "result_json": result_json, "reason_code": safe_reason,
+    })
+    now = _utc_now()
+    connection.execute(
+        """UPDATE c1_readonly_followup_runs SET result_state='NOT_COMPLETED',answer_text=?,
+           source_refs_json=?,result_json=?,result_digest=?,reason_code=?,completed_at=?
+           WHERE run_id=? AND result_digest IS NULL""",
+        (answer, refs_json, result_json, digest, safe_reason, now, run_id),
+    )
+
+
 def _is_business_complete(connection: sqlite3.Connection, tenant_id: str, task_id: str) -> bool:
     binding = connection.execute(
         "SELECT status FROM task_bindings WHERE tenant_id = ? AND task_id = ?",
@@ -1253,6 +1287,182 @@ def admit_task_message(
     return result
 
 
+def create_readonly_followup_run_in_transaction(
+    connection: sqlite3.Connection,
+    identity: TrustedIdentity,
+    *,
+    task_id: str,
+    session_id: str,
+    source_message_id: str,
+    source_digest: str,
+    expected_control_revision: int,
+) -> dict[str, object]:
+    """Persist a same-Task read-only Investigator Run from an accepted chat message.
+
+    The caller owns the surrounding Domain write transaction so the assessment,
+    Run, provenance row, retry state, and outbox event commit atomically.
+    """
+    _verify_identity(connection, identity)
+    _require_support_owner(connection, identity, task_id)
+    session = connection.execute(
+        "SELECT owner_id FROM sessions WHERE session_id=? AND tenant_id=?",
+        (session_id, identity.tenant_id),
+    ).fetchone()
+    if session is None or str(session["owner_id"]) != identity.actor_id:
+        raise TaskControlError("SESSION_SCOPE_DENIED")
+    source = connection.execute(
+        """SELECT sequence,body_digest FROM messages
+           WHERE message_id=? AND task_id=? AND tenant_id=? AND session_id=?
+             AND role='USER' AND input_kind='CHAT_READONLY'""",
+        (source_message_id, task_id, identity.tenant_id, session_id),
+    ).fetchone()
+    if source is None or str(source["body_digest"]) != source_digest:
+        raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+    control = _control(connection, identity.tenant_id, task_id)
+    if str(control["terminal_state"]) != "ACTIVE":
+        raise TaskControlError("TASK_ABORTED")
+    if control["pending_critical_message_seq"] is not None:
+        raise TaskControlError("TASK_INPUT_PENDING")
+    if int(control["control_revision"]) != expected_control_revision:
+        raise TaskControlError("TASK_CONTROL_STALE")
+    existing = connection.execute(
+        """SELECT run_id,source_digest,expected_control_revision FROM c1_readonly_followup_runs
+           WHERE tenant_id=? AND task_id=? AND source_message_id=?""",
+        (identity.tenant_id, task_id, source_message_id),
+    ).fetchone()
+    if existing is not None:
+        if (
+            str(existing["source_digest"]) != source_digest
+            or int(existing["expected_control_revision"]) != expected_control_revision
+        ):
+            raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
+        return {"run_id": str(existing["run_id"]), "replayed": True}
+
+    active = connection.execute(
+        """SELECT run_id FROM task_runs WHERE task_id=? AND status='RUNNING'
+           AND kind!='CHAT_READONLY' LIMIT 1""",
+        (task_id,),
+    ).fetchone()
+    if active is not None:
+        raise TaskRunBusy()
+    run_id = f"run-c1-followup-{uuid.uuid4()}"
+    command_id = f"command-c1-followup-{uuid.uuid4()}"
+    now = _utc_now()
+    sequence = int(source["sequence"])
+    connection.execute(
+        """INSERT INTO task_runs
+           (run_id,tenant_id,task_id,session_id,command_id,source_message_id,kind,status,
+            control_revision_at_start,expected_control_revision,consumed_message_seq,created_at)
+           VALUES (?,?,?,?,?,?,'INVESTIGATE','QUEUED',?,?,?,?)""",
+        (run_id, identity.tenant_id, task_id, session_id, command_id, source_message_id,
+         expected_control_revision, expected_control_revision, sequence, now),
+    )
+    connection.execute(
+        """INSERT INTO c1_readonly_followup_runs
+           (run_id,tenant_id,task_id,session_id,source_message_id,source_digest,
+            expected_control_revision,created_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (run_id, identity.tenant_id, task_id, session_id, source_message_id,
+         source_digest, expected_control_revision, now),
+    )
+    connection.execute(
+        """INSERT INTO worker_retry_state (run_id,retry_count,max_retries,updated_at)
+           VALUES (?,0,3,?)""",
+        (run_id, now),
+    )
+    _insert_outbox(
+        connection, identity.tenant_id, task_id, session_id, "RUN", run_id, "RUN_QUEUED",
+        {"run_id": run_id, "run_kind": "INVESTIGATE", "execution_mode": "READONLY_FOLLOWUP",
+         "source_message_id": source_message_id, "control_revision": expected_control_revision},
+    )
+    return {"run_id": run_id, "replayed": False}
+
+
+def persist_readonly_followup_result(
+    path: str | Path,
+    identity: TrustedIdentity,
+    run_id: str,
+    *,
+    result_state: str,
+    answer_text: str,
+    source_refs: list[dict[str, object]],
+    result: dict[str, object],
+    reason_code: str | None = None,
+) -> dict[str, object]:
+    """Freeze a readonly run's user-facing answer and its auditable source refs."""
+    if result_state not in {"ANSWERED", "PARTIAL", "NOT_COMPLETED"}:
+        raise TaskControlError("READONLY_RESULT_STATE_INVALID")
+    if not isinstance(answer_text, str) or len(answer_text) > 20000:
+        raise TaskControlError("READONLY_RESULT_INVALID")
+    if not isinstance(source_refs, list) or any(not isinstance(item, dict) for item in source_refs):
+        raise TaskControlError("READONLY_RESULT_SOURCES_INVALID")
+    serialized_refs = json.dumps(source_refs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    serialized_result = json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    result_digest = _digest({
+        "run_id": run_id, "result_state": result_state, "answer_text": answer_text,
+        "source_refs_json": serialized_refs, "result_json": serialized_result,
+        "reason_code": reason_code,
+    })
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _verify_identity(connection, identity)
+        row = connection.execute(
+            """SELECT f.*,r.status AS run_status,r.kind AS run_kind,
+                      r.tenant_id AS run_tenant_id,r.task_id AS run_task_id,
+                      r.session_id AS run_session_id,r.source_message_id AS run_source_message_id,
+                      r.consumed_message_seq AS run_consumed_message_seq,
+                      r.expected_control_revision AS run_expected_control_revision
+               FROM c1_readonly_followup_runs f JOIN task_runs r ON r.run_id=f.run_id
+               WHERE f.run_id=? AND f.tenant_id=?""",
+            (run_id, identity.tenant_id),
+        ).fetchone()
+        if row is None:
+            raise TaskControlError("READONLY_FOLLOWUP_NOT_FOUND")
+        _require_support_owner(connection, identity, str(row["task_id"]))
+        if (
+            str(row["run_kind"]) != "INVESTIGATE"
+            or str(row["run_tenant_id"]) != str(row["tenant_id"])
+            or str(row["run_task_id"]) != str(row["task_id"])
+            or str(row["run_session_id"]) != str(row["session_id"])
+            or str(row["run_source_message_id"]) != str(row["source_message_id"])
+        ):
+            raise TaskControlError("READONLY_FOLLOWUP_RUN_INVALID")
+        if int(row["run_expected_control_revision"]) != int(row["expected_control_revision"]):
+            raise TaskControlError("TASK_CONTROL_STALE")
+        source = connection.execute(
+            """SELECT body_digest,sequence FROM messages WHERE message_id=? AND task_id=?
+               AND tenant_id=? AND session_id=? AND role='USER' AND input_kind='CHAT_READONLY'""",
+            (row["source_message_id"], row["task_id"], identity.tenant_id, row["session_id"]),
+        ).fetchone()
+        if (
+            source is None or str(source["body_digest"]) != str(row["source_digest"])
+            or int(source["sequence"]) != int(row["run_consumed_message_seq"])
+        ):
+            raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+        existing_digest = row["result_digest"]
+        if existing_digest:
+            if str(existing_digest) != result_digest:
+                raise TaskControlError("READONLY_RESULT_CONFLICT")
+            return {"run_id": run_id, "result_state": str(row["result_state"]), "result_digest": result_digest, "replayed": True}
+        if str(row["run_status"]) != "RUNNING":
+            raise TaskControlError("TASK_RUN_NOT_ACTIVE")
+        control = _control(connection, identity.tenant_id, str(row["task_id"]))
+        if (
+            str(control["terminal_state"]) != "ACTIVE"
+            or control["pending_critical_message_seq"] is not None
+            or int(control["control_revision"]) != int(row["expected_control_revision"])
+        ):
+            raise TaskControlError("TASK_CONTROL_STALE")
+        now = _utc_now()
+        connection.execute(
+            """UPDATE c1_readonly_followup_runs SET result_state=?,answer_text=?,source_refs_json=?,
+               result_json=?,result_digest=?,reason_code=?,completed_at=? WHERE run_id=? AND result_digest IS NULL""",
+            (result_state, answer_text, serialized_refs, serialized_result, result_digest,
+             reason_code, now, run_id),
+        )
+    return {"run_id": run_id, "result_state": result_state, "result_digest": result_digest, "replayed": False}
+
+
 def abort_task(
     path: str | Path,
     identity: TrustedIdentity,
@@ -1578,6 +1788,10 @@ def finish_task_run(
             "UPDATE task_runs SET status = ?, blocked_reason = ?, ended_at = ? WHERE run_id = ?",
             (status, blocked_reason, now, run_id),
         )
+        if _is_readonly_followup(connection, run_id) and status in {"FAILED", "BLOCKED"}:
+            _record_readonly_followup_failure_in_transaction(
+                connection, run_id, blocked_reason or f"RUN_{status}",
+            )
         _insert_outbox(
             connection, identity.tenant_id, str(run["task_id"]) if run["task_id"] is not None else None,
             str(run["session_id"]), "RUN", run_id, f"RUN_STATUS_{status}",
@@ -1586,6 +1800,7 @@ def finish_task_run(
         if (
             run["task_id"] is not None
             and str(run["kind"]) != "CHAT_READONLY"
+            and not _is_readonly_followup(connection, run_id)
             and status in {"WAITING_INPUT", "WAITING_APPROVAL", "SUCCEEDED", "FAILED", "BLOCKED"}
         ):
             existing_task = connection.execute(
@@ -1730,7 +1945,7 @@ def recover_running_task_runs(
                     "WHERE run_id = ? AND status = 'RESERVED'",
                     (now, run["run_id"]),
                 )
-            elif run["task_id"] is not None:
+            elif run["task_id"] is not None and not _is_readonly_followup(connection, str(run["run_id"])):
                 connection.execute(
                     """UPDATE task_bindings SET status = ?
                        WHERE task_id = ? AND status NOT IN ('ABORTED', 'COMPLETED')""",
@@ -1765,6 +1980,8 @@ def mark_run_interrupted_by_worker(
             "UPDATE task_runs SET status = ?, ended_at = ?, blocked_reason = ? WHERE run_id = ? AND status = 'RUNNING'",
             (status, now, reason, run_id),
         )
+        if status == "BLOCKED" and _is_readonly_followup(connection, run_id):
+            _record_readonly_followup_failure_in_transaction(connection, run_id, reason)
         if run["kind"] == "CHAT_READONLY":
             connection.execute(
                 "UPDATE chat_attempts SET status = 'INTERRUPTED', error_class = ?, completed_at = ? "
@@ -1776,7 +1993,7 @@ def mark_run_interrupted_by_worker(
                 "WHERE run_id = ? AND status = 'RESERVED'",
                 (reason[:100], now, run_id),
             )
-        elif run["task_id"] is not None:
+        elif run["task_id"] is not None and not _is_readonly_followup(connection, run_id):
             task_status = "INCONCLUSIVE" if status == "BLOCKED" else "INTERRUPTED_RECOVERABLE"
             connection.execute(
                 """UPDATE task_bindings SET status = ? WHERE task_id = ?
@@ -1822,7 +2039,12 @@ def schedule_worker_retry(
                 "UPDATE task_runs SET status = 'BLOCKED', blocked_reason = ?, ended_at = ? WHERE run_id = ?",
                 (reason, now, run_id),
             )
-            if run["kind"] != "CHAT_READONLY" and run["task_id"] is not None:
+            if _is_readonly_followup(connection, run_id):
+                _record_readonly_followup_failure_in_transaction(connection, run_id, reason)
+            if (
+                run["kind"] != "CHAT_READONLY" and run["task_id"] is not None
+                and not _is_readonly_followup(connection, run_id)
+            ):
                 connection.execute(
                     "UPDATE task_bindings SET status = 'INCONCLUSIVE' WHERE task_id = ? AND status NOT IN ('ABORTED', 'COMPLETED')",
                     (run["task_id"],),
@@ -1954,7 +2176,13 @@ def record_worker_run_failure(
             current = connection.execute("SELECT status FROM task_runs WHERE run_id = ?", (run_id,)).fetchone()
             return {"run_id": run_id, "status": str(current["status"]), "recorded": False}
 
-        if task_status not in {None, "ABORTED", "COMPLETED", "WAITING_INPUT", "WAITING_APPROVAL"}:
+        if status == "BLOCKED" and _is_readonly_followup(connection, run_id):
+            _record_readonly_followup_failure_in_transaction(connection, run_id, reason)
+
+        if (
+            not _is_readonly_followup(connection, run_id)
+            and task_status not in {None, "ABORTED", "COMPLETED", "WAITING_INPUT", "WAITING_APPROVAL"}
+        ):
             projected = "INTERRUPTED_RECOVERABLE" if status == "INTERRUPTED_RECOVERABLE" else "INCONCLUSIVE"
             connection.execute(
                 """UPDATE task_bindings SET status = ? WHERE task_id = ? AND tenant_id = ?

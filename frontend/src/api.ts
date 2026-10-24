@@ -42,6 +42,7 @@ export interface InvestigationUpdateAssessment {
   source_message_id: string;
   target_task_id: string;
   intent: string;
+  follow_up_action: 'EXPLAIN' | 'INVESTIGATE';
   status: string;
   expected_control_revision: number;
   current_control_revision: number;
@@ -84,6 +85,20 @@ export interface Inspector {
   evidence: Array<Record<string, unknown>>;
   observations: Array<Record<string, unknown>>;
   runs: Array<Record<string, unknown>>;
+  readonly_followups: Array<{
+    run_id: string;
+    source_message_id: string;
+    expected_control_revision: number;
+    result_state: 'ANSWERED' | 'PARTIAL' | 'NOT_COMPLETED' | null;
+    answer_text: string | null;
+    source_refs: Array<Record<string, unknown>>;
+    result: Record<string, unknown>;
+    result_digest: string | null;
+    reason_code: string | null;
+    created_at: string;
+    completed_at: string | null;
+    run_status: string;
+  }>;
   investigation_model_traces: Array<Record<string, unknown>>;
   chat_model_attempts: Array<Record<string, unknown>>;
   chat_context_provenance: Array<Record<string, unknown>>;

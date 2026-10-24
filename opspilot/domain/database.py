@@ -261,6 +261,26 @@ CREATE TABLE IF NOT EXISTS task_run_inputs (
     provenance TEXT NOT NULL CHECK (provenance = 'USER_INPUT_UNTRUSTED'),
     consumed_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS c1_readonly_followup_runs (
+    run_id TEXT PRIMARY KEY REFERENCES task_runs(run_id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL REFERENCES task_bindings(task_id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    source_message_id TEXT NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
+    source_digest TEXT NOT NULL,
+    expected_control_revision INTEGER NOT NULL CHECK (expected_control_revision >= 0),
+    result_state TEXT CHECK (result_state IS NULL OR result_state IN ('ANSWERED', 'PARTIAL', 'NOT_COMPLETED')),
+    answer_text TEXT,
+    source_refs_json TEXT NOT NULL DEFAULT '[]',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    result_digest TEXT,
+    reason_code TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    UNIQUE (tenant_id, task_id, source_message_id)
+);
+CREATE INDEX IF NOT EXISTS ix_c1_readonly_followup_task
+    ON c1_readonly_followup_runs(tenant_id, task_id, created_at);
 CREATE TABLE IF NOT EXISTS domain_outbox (
     event_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -984,6 +1004,7 @@ CREATE TABLE IF NOT EXISTS investigation_update_assessments (
     expected_control_revision INTEGER NOT NULL CHECK (expected_control_revision >= 0),
     prior_input_text TEXT NOT NULL,
     intent TEXT CHECK (intent IS NULL OR intent IN ('FOLLOW_UP', 'CRITICAL_CORRECTION', 'HYPOTHESIS', 'OUT_OF_SCOPE')),
+    follow_up_action TEXT NOT NULL DEFAULT 'EXPLAIN' CHECK (follow_up_action IN ('EXPLAIN', 'INVESTIGATE')),
     change_summary TEXT,
     status TEXT NOT NULL CHECK (status IN ('ASSESSING', 'NO_UPDATE', 'PENDING_CONFIRMATION', 'CONFIRMED', 'CANCELLED', 'STALE', 'FAILED')),
     operation_id TEXT NOT NULL UNIQUE,
@@ -1055,7 +1076,7 @@ def initialize(path: str | Path) -> None:
         from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 14:
+        if version > 15:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1389,6 +1410,18 @@ def initialize(path: str | Path) -> None:
                    WHERE b.service_id='orders-async-demo'"""
             )
             connection.execute("PRAGMA user_version = 14")
+            version = 14
+        if version < 15:
+            assessment_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(investigation_update_assessments)").fetchall()
+            }
+            if "follow_up_action" not in assessment_columns:
+                connection.execute(
+                    "ALTER TABLE investigation_update_assessments "
+                    "ADD COLUMN follow_up_action TEXT NOT NULL DEFAULT 'EXPLAIN'"
+                )
+            connection.execute("PRAGMA user_version = 15")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:

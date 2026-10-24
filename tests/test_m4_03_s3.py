@@ -98,6 +98,16 @@ def test_knowledge_retrieval_is_version_scoped_and_rejects_out_of_domain_hits():
         search_knowledge("callback", limit=9)
 
 
+def test_specific_receiver_ack_query_ranks_the_v2_202_contract_first():
+    from opspilot.domain.s3_assets import search_knowledge
+
+    ranked = search_knowledge(
+        "HTTP 202 receiver acknowledgement", limit=1, contract_version=2,
+        method="bm25-lite-v1",
+    )
+    assert ranked[0]["document_id"] == "receiver-ack-contract-v2"
+
+
 @pytest.mark.parametrize(("state", "options", "expected_outcome", "expected_direction", "handoff"), [
     ("DELIVERY_FAILED", {"attempt_count": 1, "max_attempts": 3, "retry_state": "SCHEDULED"},
      "CALLBACK_DELIVERY_FAILED", "WAIT_FOR_SCHEDULED_RETRY", False),

@@ -712,6 +712,7 @@ def create_app(
             return await asyncio.to_thread(
                 complete_assessment,
                 resolved_db,
+                identity=context.identity,
                 assessment_id=assessment_id,
                 attempt_id=attempt_id,
                 classification=classification,

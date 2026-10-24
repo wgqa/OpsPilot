@@ -641,7 +641,7 @@ def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
         plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert tuple(control) == ("ACTIVE", 0)
-    assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 14
+    assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 15
     print("M1_EVIDENCE " + json.dumps({
         "case": "migration",
         "user_version": version,

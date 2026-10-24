@@ -55,7 +55,7 @@ def build_s3_server(db_path, task_id, api_url):
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def search_callback_knowledge(query: Query, reason: Reason, ctx: Context) -> dict[str, object]:
-        """Retrieve one relevant active versioned integration contract by a short query; method only, not live facts."""
+        """Retrieve one active contract using concise, discriminative terms for the missing clause (for example, status and receiving role). The trusted binding selects the version automatically. Method only, not live facts."""
         binding = validate(reason,ctx,{"query","reason"})
         version = int(binding["contract_version"])
         return {"documents":search_knowledge(query, contract_version=version),

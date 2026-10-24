@@ -2282,6 +2282,18 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                FROM task_runs r WHERE r.task_id = ? AND r.tenant_id = ? ORDER BY r.created_at DESC LIMIT 50""",
             (task_id, identity.tenant_id),
         ).fetchall()
+        readonly_followups = (
+            connection.execute(
+                """SELECT f.run_id,f.source_message_id,f.source_digest,f.expected_control_revision,
+                          f.result_state,f.answer_text,f.source_refs_json,f.result_json,f.result_digest,
+                          f.reason_code,f.created_at,f.completed_at,r.status AS run_status
+                   FROM c1_readonly_followup_runs f JOIN task_runs r ON r.run_id=f.run_id
+                   WHERE f.tenant_id=? AND f.task_id=?
+                   ORDER BY f.created_at DESC,f.run_id DESC LIMIT 20""",
+                (identity.tenant_id, task_id),
+            ).fetchall()
+            if identity.role == "SUPPORT" else []
+        )
         task_input_messages = connection.execute(
             """SELECT m.message_id, m.sequence, m.input_kind, m.body_digest,
                       m.application_state, m.applied_run_id, c.command_kind,
@@ -2414,6 +2426,21 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
         "evidence": evidence,
         "observations": [{key: row[key] for key in row.keys()} for row in observations],
         "runs": [{key: row[key] for key in row.keys()} for row in runs],
+        "readonly_followups": [{
+            "run_id": str(row["run_id"]),
+            "source_message_id": str(row["source_message_id"]),
+            "source_digest": str(row["source_digest"]),
+            "expected_control_revision": int(row["expected_control_revision"]),
+            "result_state": str(row["result_state"]) if row["result_state"] else None,
+            "answer_text": str(row["answer_text"]) if row["answer_text"] else None,
+            "source_refs": json.loads(str(row["source_refs_json"])),
+            "result": json.loads(str(row["result_json"])),
+            "result_digest": str(row["result_digest"]) if row["result_digest"] else None,
+            "reason_code": str(row["reason_code"]) if row["reason_code"] else None,
+            "created_at": str(row["created_at"]),
+            "completed_at": str(row["completed_at"]) if row["completed_at"] else None,
+            "run_status": str(row["run_status"]),
+        } for row in readonly_followups],
         "task_input_messages": [{
             "message_id": str(row["message_id"]),
             "sequence": int(row["sequence"]),

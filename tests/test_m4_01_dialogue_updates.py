@@ -122,6 +122,8 @@ def test_m401_01_followup_is_explanation_only(m4_client, monkeypatch: pytest.Mon
     assert response.status_code == 200, response.text
     assessment = response.json()
     assert assessment["intent"] == "FOLLOW_UP"
+    assert assessment["follow_up_action"] == "EXPLAIN"
+    assert assessment["investigation_run_id"] is None
     assert assessment["proposal"] is None
     assert _counts(db, task_id) == before
 

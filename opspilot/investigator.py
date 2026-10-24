@@ -28,6 +28,7 @@ from opspilot.config import (
     ROOT,
     database_path,
 )
+from opspilot.domain.database import connect
 from opspilot.domain.context_engineering import (
     ContextBudgetExceeded,
     context_budget_for_model,
@@ -1152,6 +1153,7 @@ def build_investigation_graph(
     evaluation_strategy: str = "A",
     memory_enabled: bool = True,
     s3_mode: bool = False,
+    readonly_followup_mode: bool = False,
     interrupt_after_for_test: tuple[str, ...] = (),
 ):
     async def intake(state: InvestigatorState) -> dict[str, object]:
@@ -1171,7 +1173,8 @@ def build_investigation_graph(
                 None if run_id is not None else 0,
                 run_id=run_id,
             )
-            connection.execute("UPDATE task_bindings SET status = 'RUNNING' WHERE task_id = ?", (task_id,))
+            if not readonly_followup_mode:
+                connection.execute("UPDATE task_bindings SET status = 'RUNNING' WHERE task_id = ?", (task_id,))
         from opspilot.domain.investigation_context import load_investigation_context
 
         if run_id is not None:
@@ -2295,7 +2298,8 @@ def build_investigation_graph(
     if s3_mode:
         from opspilot.s3_investigation import S3Nodes
         s3 = S3Nodes(db_path, task_id, run_id, llm, model_id, mcp_client, model_tool_specs,
-                     strategy=evaluation_strategy, memory_enabled=memory_enabled)
+                     strategy=evaluation_strategy, memory_enabled=memory_enabled,
+                     readonly_followup=readonly_followup_mode)
         investigate, execute_read_tools, evidence_gate, report = s3.investigate, s3.execute, s3.gate, s3.report
         def after_investigate(state):
             return "execute_read_tools" if state.get("pending_call_refs") or state.get("policy_tool_call") else "evidence_gate"
@@ -2421,6 +2425,7 @@ async def run_investigation(
     resolved_checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
     task_identity = None
     run_record: dict[str, object] | None = None
+    readonly_followup_mode = False
     approval_resume_link: dict[str, object] | None = None
     critical_inputs: list[dict[str, object]] = []
     if run_id is not None:
@@ -2432,6 +2437,13 @@ async def run_investigation(
         run_record = get_task_run(resolved_db, task_identity, run_id)
         if run_record.get("task_id") is None or run_record.get("kind") == "CHAT_READONLY":
             raise TaskControlError("TASK_REQUIRED_FOR_BUSINESS_RUN")
+        with connect(resolved_db) as connection:
+            readonly_followup_mode = connection.execute(
+                "SELECT 1 FROM c1_readonly_followup_runs WHERE run_id=? AND task_id=?",
+                (run_id, run_record["task_id"]),
+            ).fetchone() is not None
+        if readonly_followup_mode and str(run_record.get("kind")) != "INVESTIGATE":
+            raise TaskControlError("READONLY_FOLLOWUP_RUN_KIND_INVALID")
         binding = get_task_binding(resolved_db, str(run_record["task_id"]))
         if task_id not in {str(binding["task_id"]), str(binding["thread_id"])}:
             raise TaskControlError("TASK_RUN_SCOPE_DENIED")
@@ -2485,8 +2497,6 @@ async def run_investigation(
         max_retries=0,
     )
     if s2_mode:
-        from opspilot.domain.database import connect
-
         with connect(resolved_db) as connection:
             trusted_scope_context = connection.execute(
                 """SELECT 1 FROM task_bindings b JOIN services s
@@ -2536,6 +2546,7 @@ async def run_investigation(
             from opspilot.domain.task_control import (
                 apply_pending_critical_inputs,
                 claim_task_run,
+                finish_task_run,
                 resume_task_run,
             )
 
@@ -2561,6 +2572,23 @@ async def run_investigation(
                 run_claimed = True
                 applied = apply_pending_critical_inputs(resolved_db, task_identity, run_id)
                 critical_inputs = list(applied.get("inputs", []))
+            if readonly_followup_mode:
+                with connect(resolved_db) as connection:
+                    persisted_result = connection.execute(
+                        "SELECT result_state,result_digest FROM c1_readonly_followup_runs WHERE run_id=?",
+                        (run_id,),
+                    ).fetchone()
+                if (
+                    persisted_result is not None
+                    and persisted_result["result_digest"]
+                    and str(persisted_result["result_state"]) in {"ANSWERED", "PARTIAL"}
+                ):
+                    completed = finish_task_run(resolved_db, task_identity, run_id, "SUCCEEDED")
+                    return {
+                        "stage": "complete", "status": str(completed["status"]),
+                        "readonly_followup_replayed": True,
+                        "readonly_result_state": str(persisted_result["result_state"]),
+                    }
             if d3_mode and resume:
                 from opspilot.domain.d3 import authorize_workflow_resume
 
@@ -2593,6 +2621,7 @@ async def run_investigation(
                     run_id=run_id,
                     s2_mode=s2_mode,
                     s3_mode=s3_mode,
+                    readonly_followup_mode=readonly_followup_mode,
                     evaluation_strategy=evaluation_strategy,
                     memory_enabled=_memory_enabled_for_test,
                     interrupt_after_for_test=_interrupt_after_for_test,

@@ -130,6 +130,35 @@ def _read_context(connection: sqlite3.Connection, task_id: str, run_id: str) -> 
         raise InvestigationContextInvalid("CRITICAL_INPUT_HIGHWATER_GAP")
 
     source_id = str(row["source_message_id"] or "")
+    readonly_followup = connection.execute(
+        """SELECT source_message_id,source_digest,expected_control_revision
+           FROM c1_readonly_followup_runs WHERE run_id=? AND task_id=? AND tenant_id=?""",
+        (run_id, task_id, str(row["tenant_id"])),
+    ).fetchone()
+    if readonly_followup is not None:
+        if (
+            source_id != str(readonly_followup["source_message_id"])
+            or int(readonly_followup["expected_control_revision"]) != int(expected_revision)
+        ):
+            raise InvestigationContextInvalid("READONLY_FOLLOWUP_SOURCE_STALE")
+        followup_message = connection.execute(
+            """SELECT m.*,r.control_revision_at_start,
+                      r.expected_control_revision AS applied_control_revision
+               FROM messages m JOIN task_runs r ON r.source_message_id=m.message_id
+               WHERE r.run_id=? AND m.message_id=? AND m.task_id=? AND m.tenant_id=?
+                 AND m.session_id=? AND m.role='USER' AND m.input_kind='CHAT_READONLY'""",
+            (run_id, source_id, task_id, str(row["tenant_id"]), str(row["session_id"])),
+        ).fetchone()
+        if (
+            followup_message is None
+            or str(followup_message["body_digest"]) != str(readonly_followup["source_digest"])
+        ):
+            raise InvestigationContextInvalid("READONLY_FOLLOWUP_SOURCE_INVALID")
+        selected.append(input_ref(followup_message, "READONLY_FOLLOWUP"))
+    elif source_id and str(row["kind"]) == "INVESTIGATE":
+        # Ordinary Investigator Runs must source their initial symptom or the
+        # currently applied correction; chat-only messages cannot be borrowed.
+        pass
     if source_id and not any(item["message_id"] == source_id for item in selected):
         raise InvestigationContextInvalid("RUN_SOURCE_MESSAGE_NOT_CONSUMED")
     if int(row["consumed_message_seq"]) < max(int(item["sequence"]) for item in selected):
@@ -249,7 +278,7 @@ def validate_task_run_context_in_transaction(
     if not run_id or type(expected_revision) is not int:
         raise InvestigationContextInvalid("TASK_RUN_CONTEXT_REQUIRED")
     run = connection.execute(
-        "SELECT tenant_id, source_message_id, expected_control_revision, consumed_message_seq, applied_critical_message_seq, status FROM task_runs WHERE run_id = ? AND task_id = ?",
+        "SELECT tenant_id, session_id, source_message_id, expected_control_revision, consumed_message_seq, applied_critical_message_seq, status FROM task_runs WHERE run_id = ? AND task_id = ?",
         (run_id, task_id),
     ).fetchone()
     if run is None:
@@ -271,6 +300,19 @@ def validate_task_run_context_in_transaction(
         raise InvestigationContextInvalid("TASK_INPUT_PROVENANCE_REQUIRED")
     initial_refs = [ref for ref in refs if isinstance(ref, dict) and ref.get("kind") == "INITIAL_SYMPTOM"]
     correction_refs = [ref for ref in refs if isinstance(ref, dict) and ref.get("kind") == "CRITICAL_CORRECTION"]
+    followup_refs = [ref for ref in refs if isinstance(ref, dict) and ref.get("kind") == "READONLY_FOLLOWUP"]
+    readonly_followup = connection.execute(
+        "SELECT source_message_id,source_digest,expected_control_revision FROM c1_readonly_followup_runs WHERE run_id=? AND task_id=? AND tenant_id=?",
+        (run_id, task_id, str(run["tenant_id"])),
+    ).fetchone()
+    if readonly_followup is None and followup_refs:
+        raise InvestigationContextInvalid("READONLY_FOLLOWUP_SOURCE_UNEXPECTED")
+    if readonly_followup is not None and (
+        len(followup_refs) != 1
+        or str(followup_refs[0].get("message_id")) != str(readonly_followup["source_message_id"])
+        or int(readonly_followup["expected_control_revision"]) != int(run["expected_control_revision"])
+    ):
+        raise InvestigationContextInvalid("READONLY_FOLLOWUP_SOURCE_STALE")
     if len(initial_refs) != 1:
         raise InvestigationContextInvalid("INITIAL_SYMPTOM_PROVENANCE_REQUIRED")
     if initial_refs[0].get("kind") == "INITIAL_SYMPTOM":
@@ -311,7 +353,7 @@ def validate_task_run_context_in_transaction(
         if not isinstance(ref, dict):
             raise InvestigationContextInvalid("TASK_INPUT_PROVENANCE_INVALID")
         message = connection.execute(
-            "SELECT body, body_digest, sequence, input_kind, application_state, applied_run_id FROM messages WHERE message_id = ? AND task_id = ? AND tenant_id = ?",
+            "SELECT role,session_id,body,body_digest,sequence,input_kind,application_state,applied_run_id FROM messages WHERE message_id = ? AND task_id = ? AND tenant_id = ?",
             (str(ref.get("message_id", "")), task_id, str(run["tenant_id"])),
         ).fetchone()
         if ref.get("kind") == "LEGACY_DEMO_FALLBACK":
@@ -338,5 +380,16 @@ def validate_task_run_context_in_transaction(
                 or str(source["provenance"]) != "USER_INPUT_UNTRUSTED"
             ):
                 raise InvestigationContextInvalid("CRITICAL_INPUT_PROVENANCE_STALE")
+        elif ref.get("kind") == "READONLY_FOLLOWUP":
+            if (
+                message is None
+                or str(message["role"]) != "USER"
+                or str(message["session_id"]) != str(run["session_id"])
+                or str(message["input_kind"]) != "CHAT_READONLY"
+                or str(message["application_state"]) not in {"NOT_APPLICABLE", "RECEIVED_NOT_APPLIED"}
+                or str(ref.get("message_id")) != str(readonly_followup["source_message_id"])
+                or str(message["body_digest"]) != str(readonly_followup["source_digest"])
+            ):
+                raise InvestigationContextInvalid("READONLY_FOLLOWUP_SOURCE_INVALID")
         elif ref.get("kind") != "INITIAL_SYMPTOM":
             raise InvestigationContextInvalid("TASK_INPUT_KIND_INVALID")

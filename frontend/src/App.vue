@@ -12,8 +12,10 @@ const csrf = ref(sessionStorage.getItem('opspilot.csrf') ?? '');
 const sessions = ref<SessionItem[]>([]);
 const sessionId = ref('');
 const messages = ref<MessageItem[]>([]);
+const sessionHistoryReady = ref(false);
 const taskId = ref('');
 const investigationUpdates = ref<InvestigationUpdateAssessment[]>([]);
+const pendingAssessmentMessageIds = ref<Set<string>>(new Set());
 const investigationKind = ref<'AUTH_INCIDENT' | 'ASYNC_CALLBACK'>('AUTH_INCIDENT');
 const s3OrderResources = ref<S3OrderResource[]>([]);
 const selectedS3OrderId = ref('');
@@ -62,7 +64,26 @@ const pendingInvestigationUpdates = computed(() => investigationUpdates.value.fi
   (item) => item.proposal !== null && item.status === 'PENDING_CONFIRMATION',
 ));
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
-const displayStream = computed(() => activeChatRun.value?.status === 'RUNNING' && chunks.value.length > 0);
+const investigatedFollowupMessageIds = computed(() => new Set(
+  investigationUpdates.value
+    .filter((item) => item.intent === 'FOLLOW_UP' && item.follow_up_action === 'INVESTIGATE')
+    .map((item) => item.source_message_id),
+));
+const suppressedChatAnswerMessageIds = computed(() => new Set([
+  ...pendingAssessmentMessageIds.value,
+  ...investigatedFollowupMessageIds.value,
+]));
+const displayMessages = computed(() => messages.value.filter((message) => {
+  if (message.role !== 'ASSISTANT' || !message.task_id) return true;
+  if (!sessionHistoryReady.value) return false;
+  const source = [...messages.value].reverse().find((candidate) =>
+    candidate.role === 'USER' && candidate.task_id === message.task_id && candidate.sequence < message.sequence,
+  );
+  return !source || !suppressedChatAnswerMessageIds.value.has(source.message_id);
+}));
+const displayStream = computed(() => activeChatRun.value?.status === 'RUNNING'
+  && chunks.value.length > 0
+  && !suppressedChatAnswerMessageIds.value.has(String(activeChatRun.value.source_message_id ?? '')));
 const latestContextProvenance = computed(() => inspector.value?.investigator_context_provenance[0] ?? null);
 const activeChatContext = computed(() => inspector.value?.chat_context_provenance.find(
   (item) => item.run_id === activeChatRun.value?.run_id,
@@ -355,6 +376,7 @@ async function createSession(): Promise<void> {
 
 async function selectSession(value: string): Promise<void> {
   sessionId.value = value;
+  sessionHistoryReady.value = false;
   taskId.value = '';
   investigationUpdates.value = [];
   taskMemoryContext.value = null;
@@ -374,9 +396,12 @@ async function selectSession(value: string): Promise<void> {
 async function refreshSession(): Promise<void> {
   if (!sessionId.value) return;
   loading.value = true;
+  let linkedTask: string | null = null;
+  let taskInspectorLoaded = false;
   try {
     const response = await api.messages(sessionId.value);
     messages.value = response.items;
+    linkedTask = [...response.items].reverse().find((item) => item.task_id)?.task_id ?? null;
     const runs = await api.sessionRuns(sessionId.value);
     const chatRuns = [...runs.items].filter((run) => run.kind === 'CHAT_READONLY');
     const latestChat = chatRuns.at(-1) ?? null;
@@ -389,26 +414,26 @@ async function refreshSession(): Promise<void> {
     } else if (latestChat && ['FAILED', 'BLOCKED'].includes(latestChat.status)) {
       errorMessage.value = `上次只读回答结束：${readableStatus(latestChat.status)}${latestChat.waiting_reason ? `（${latestChat.waiting_reason}）` : ''}`;
     }
-    let linkedTask = [...response.items].reverse().find((item) => item.task_id)?.task_id;
     if (!linkedTask) {
       const linkedTasks = await api.session(sessionId.value);
-      linkedTask = [...linkedTasks.tasks].reverse().find((item) => item.task_id)?.task_id;
+      linkedTask = [...linkedTasks.tasks].reverse().find((item) => item.task_id)?.task_id ?? null;
     }
     if (linkedTask) {
       taskId.value = linkedTask;
-      await refreshInspector();
+      taskInspectorLoaded = await refreshInspector();
     }
     await refreshEventHistory();
     connectEvents();
   } catch (error) {
     errorMessage.value = explainError(error);
   } finally {
+    sessionHistoryReady.value = !linkedTask || taskInspectorLoaded;
     loading.value = false;
   }
 }
 
-async function refreshInspector(): Promise<void> {
-  if (!taskId.value) return;
+async function refreshInspector(): Promise<boolean> {
+  if (!taskId.value) return false;
   try {
     inspector.value = await api.inspector(taskId.value);
     if (user.value?.role === 'SUPPORT') {
@@ -427,8 +452,10 @@ async function refreshInspector(): Promise<void> {
       taskMemoryContext.value = await api.taskMemories(taskId.value);
       taskSemanticContext.value = await api.taskSemanticMemories(taskId.value);
     }
+    return true;
   } catch (error) {
     if (user.value?.role === 'APPROVER') errorMessage.value = explainError(error);
+    return false;
   }
 }
 
@@ -505,6 +532,7 @@ async function sendMessage(): Promise<void> {
   const body = draft.value.trim();
   if (!sessionId.value || !body || !csrf.value || busy.value) return;
   busy.value = true;
+  let pendingMessageId: string | null = null;
   errorMessage.value = '';
   notice.value = '';
   chunks.value = [];
@@ -512,19 +540,47 @@ async function sendMessage(): Promise<void> {
   try {
     const accepted = await api.send(sessionId.value, body, taskId.value || null, csrf.value);
     draft.value = '';
+    if (taskId.value) {
+      pendingMessageId = accepted.message_id;
+      pendingAssessmentMessageIds.value = new Set([...pendingAssessmentMessageIds.value, accepted.message_id]);
+    }
     activeChatRun.value = await api.run(accepted.run_id);
     await refreshSessionMessagesOnly();
-    await watchRun(accepted.run_id);
     if (taskId.value) {
       const assessment = await api.assessTaskUpdate(taskId.value, accepted.message_id, csrf.value);
+      investigationUpdates.value = [
+        ...investigationUpdates.value.filter((item) => item.source_message_id !== accepted.message_id),
+        assessment,
+      ];
       if (assessment.proposal?.status === 'PENDING_CONFIRMATION') {
         notice.value = 'OpsPilot 发现这条消息可能是 Task 关键纠错。请核对原文、当前输入和变更摘要，再决定是否重新调查。';
+      } else if (assessment.intent === 'FOLLOW_UP' && assessment.follow_up_action === 'INVESTIGATE' && assessment.investigation_run_id) {
+        activeChatRun.value = null;
+        chunks.value = [];
+        notice.value = `OpsPilot 选择补查当前 Task 证据；调查 Run ${assessment.investigation_run_id} 正在执行。`;
+        await watchRun(assessment.investigation_run_id);
+        await refreshInspector();
+        const followup = inspector.value?.readonly_followups.find((item) => item.run_id === assessment.investigation_run_id);
+        notice.value = followup?.result_state === 'ANSWERED'
+          ? '只读补查已完成，答案与来源已显示在对话中。'
+          : followup?.result_state === 'PARTIAL'
+            ? '只读补查只完成了部分目标；请查看缺口和来源后继续对话。'
+            : `补查 Run ${assessment.investigation_run_id} 尚未形成完整结果；Task 的业务状态与诊断未改变。`;
+      } else {
+        await watchRun(accepted.run_id);
       }
       await refreshInspector();
+    } else {
+      await watchRun(accepted.run_id);
     }
   } catch (error) {
     errorMessage.value = explainError(error);
   } finally {
+    if (pendingMessageId) {
+      const pending = new Set(pendingAssessmentMessageIds.value);
+      pending.delete(pendingMessageId);
+      pendingAssessmentMessageIds.value = pending;
+    }
     busy.value = false;
   }
 }
@@ -1219,7 +1275,7 @@ onBeforeUnmount(() => {
           <div v-else-if="messages.length === 0 && !loading" class="empty-conversation">
             <div class="message-orb">✳</div><h2>开始一段新的调查对话</h2><p>提出问题；回答会由配置的模型根据当前可访问事实生成。</p>
           </div>
-          <article v-for="message in messages" :key="message.message_id" class="message-row" :class="message.role.toLowerCase()" :data-message-id="message.message_id">
+          <article v-for="message in displayMessages" :key="message.message_id" class="message-row" :class="message.role.toLowerCase()" :data-message-id="message.message_id">
             <div class="message-avatar">{{ message.role === 'USER' ? user.actor_id.slice(-1).toUpperCase() : '✳' }}</div>
             <div class="message-content">
               <div class="message-meta"><strong>{{ message.role === 'USER' ? user.actor_id : 'OpsPilot' }}</strong><span>{{ dateLabel(message.created_at) }}</span><span v-if="sourceKind(message)" class="message-task">{{ readableInputKind(sourceKind(message)) }} · 未验证</span><span v-else-if="message.role === 'USER' && message.task_id" class="message-task">只读对话</span></div>
@@ -1227,6 +1283,12 @@ onBeforeUnmount(() => {
             </div>
           </article>
           <div v-if="inspector && inspector.trusted_state.s3_outcome" class="s3-result-card" data-testid="s3-diagnosis"><span>当前调查结果 · 持久业务回执</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
+          <article v-for="followup in [...(inspector?.readonly_followups ?? [])].reverse()" :key="followup.run_id" class="readonly-followup-card" :data-testid="`readonly-followup-${followup.run_id}`" :data-source-message-id="followup.source_message_id">
+            <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">READONLY TASK FOLLOW-UP</span><h2>同一 Task 的只读补查</h2></div><span class="status-badge" :class="followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ followup.result_state ?? followup.run_status }}</span></div>
+            <p>{{ followup.answer_text || '本次补查尚未形成可展示的回答。' }}</p>
+            <small>Run {{ followup.run_id }} · 来源消息 {{ followup.source_message_id }} · 控制版本 {{ followup.expected_control_revision }} · 来源 {{ followup.source_refs.map((ref) => `${String(ref.kind)}:${String(ref.evidence_id ?? ref.document_id ?? ref.message_id ?? '')}`).join('、') || '暂无' }}</small>
+            <small v-if="followup.reason_code">结果状态：{{ followup.reason_code }}</small>
+          </article>
           <section
             v-for="assessment in pendingInvestigationUpdates"
             :key="assessment.assessment_id"
