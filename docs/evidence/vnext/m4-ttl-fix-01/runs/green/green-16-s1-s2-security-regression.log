@@ -1,0 +1,140 @@
+........................................................................ [ 69%]
+.....F
+================================== FAILURES ===================================
+____ test_m2_02_current_s2_facts_create_diagnosis_receipt_and_frozen_draft ____
+
+demo_db = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-ttl-fix-01/artifacts/pytest-m4-ttl-fix-01-s1-s2-basetemp/test_m2_02_current_s2_facts_cr0/domain.sqlite3')
+live_api = 'http://127.0.0.1:51388'
+
+    def test_m2_02_current_s2_facts_create_diagnosis_receipt_and_frozen_draft(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        """A current real 403 plus matching scoped facts must reach only HANDOFF_READY."""
+        reset_fixture(demo_db, "S2_SCOPE_DENIED")
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        created = create_task_with_initial_run(
+            demo_db, identity, session_id=session_id, service_id="orders-demo",
+            integration_id="integration-a", ticket_id="INC-A-001",
+            initial_message="������ѯ�ӿڷ��� 403��������ʵ��Ȩԭ��׼������ݸ塣",
+            idempotency_key="m2-02-s2-red-initial",
+        )
+        task_id, run_id = str(created["task_id"]), str(created["run_id"])
+        claim_task_run(demo_db, identity, run_id)
+        apply_pending_critical_inputs(demo_db, identity, run_id)
+        _install_scope_write_audit(demo_db)
+    
+        probe = probe_endpoint_fact(
+            demo_db, task_id, "orders-demo", "integration-a", live_api,
+        )
+        assert probe["facts"]["http_status"] == 403
+        assert probe["facts"]["request_id"]
+        assert probe["facts"]["versions_stable_during_probe"] is True
+        probe_attempt, _ = reserve_attempt(
+            demo_db, task_id, "MCP", 6, call_id="m2-02-red-probe-call",
+            tool_call_id="m2-02-red-probe-tool", tool_name="probe_endpoint",
+            argument_digest="red-probe-arguments", run_id=run_id,
+        )
+        finish_attempt(demo_db, probe_attempt, "OK")
+        probe_observation = record_tool_observation(
+            demo_db,
+            task_id=task_id,
+            call_id="m2-02-red-probe-call",
+            attempt_id=probe_attempt,
+            tool_call_id="m2-02-red-probe-tool",
+            tool_name="probe_endpoint",
+            arguments={"service_id": "orders-demo", "integration_id": "integration-a"},
+            status="OK",
+            result=probe,
+        )
+        request_id = str(probe["facts"]["request_id"])
+        authz = get_scope_authz_facts_fact(demo_db, task_id, request_id)
+        assert authz["facts"]["currentness"] == "CURRENT"
+        assert authz["facts"]["request_id"] == request_id
+        assert authz["facts"]["reason_code"] == "SCOPE_INSUFFICIENT"
+        authz_attempt, _ = reserve_attempt(
+            demo_db, task_id, "MCP", 6, call_id="m2-02-red-authz-call",
+            tool_call_id="m2-02-red-authz-tool", tool_name="get_scope_authz_facts",
+            argument_digest="red-authz-arguments", run_id=run_id,
+        )
+        finish_attempt(demo_db, authz_attempt, "OK")
+        authz_observation = record_tool_observation(
+            demo_db,
+            task_id=task_id,
+            call_id="m2-02-red-authz-call",
+            attempt_id=authz_attempt,
+            tool_call_id="m2-02-red-authz-tool",
+            tool_name="get_scope_authz_facts",
+            arguments={"request_id": request_id},
+            status="OK",
+            result=authz,
+        )
+        evidence_ids = [str(probe_observation["evidence_id"]), str(authz_observation["evidence_id"])]
+    
+        # The following trusted S2 domain contract is intentionally exercised on the
+        # M2-01 baseline. Its absence must be a product RED, not an environment error.
+        from opspilot.domain.s2_diagnosis import (
+            create_diagnosis_receipt,
+            evaluate_s2_evidence_gate,
+            freeze_handoff_draft,
+            get_s2_task_outcome,
+        )
+    
+        gate = evaluate_s2_evidence_gate(demo_db, task_id, evidence_ids, run_id=run_id)
+        assert gate["decision"] == "DIAGNOSED", gate
+        receipt = create_diagnosis_receipt(demo_db, task_id=task_id, run_id=run_id, evidence_ids=evidence_ids)
+        assert receipt["outcome"] == "DIAGNOSED"
+>       draft = freeze_handoff_draft(demo_db, task_id=task_id, receipt_id=receipt["receipt_id"])
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m2_02_s2_diagnosis.py:180: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\s2_diagnosis.py:648: in freeze_handoff_draft
+    knowledge = load_scope_knowledge(str(binding["service_id"]))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+service_id = 'orders-demo', include_legacy = False
+
+    def load_scope_knowledge(service_id: str, *, include_legacy: bool = False) -> list[dict[str, str]]:
+        """Load only digest-verified versioned scope documents applicable to this service."""
+        if service_id == "orders-async-demo":
+            from opspilot.domain.s3_assets import load_knowledge
+            return load_knowledge()
+        try:
+            manifest = json.loads((KNOWLEDGE_DIRECTORY / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise KnowledgeIntegrityError("The API Scope Knowledge manifest is unavailable or invalid.") from error
+        if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 or not isinstance(manifest.get("documents"), list):
+            raise KnowledgeIntegrityError("The API Scope Knowledge manifest schema is invalid.")
+        selected: list[dict[str, str]] = []
+        for raw in manifest["documents"]:
+            if not isinstance(raw, dict) or raw.get("service_id") != service_id:
+                continue
+            if not raw.get("applicable") and not include_legacy:
+                continue
+            filename = raw.get("file")
+            digest = raw.get("digest")
+            if (
+                not isinstance(filename, str) or Path(filename).name != filename
+                or raw.get("digest_algorithm") != "sha256" or not isinstance(digest, str)
+                or not _SHA256.fullmatch(digest)
+            ):
+                raise KnowledgeIntegrityError("An API Scope Knowledge entry is malformed.")
+            path = (KNOWLEDGE_DIRECTORY / filename).resolve()
+            if path.parent != KNOWLEDGE_DIRECTORY.resolve():
+                raise KnowledgeIntegrityError("An API Scope Knowledge path escapes its asset directory.")
+            try:
+                body = path.read_bytes()
+            except OSError as error:
+                raise KnowledgeIntegrityError("An API Scope Knowledge document is unavailable.") from error
+            actual = hashlib.sha256(body).hexdigest()
+            if actual != digest:
+>               raise KnowledgeIntegrityError("An API Scope Knowledge document digest does not match its manifest.")
+E               opspilot.domain.knowledge_assets.KnowledgeIntegrityError: An API Scope Knowledge document digest does not match its manifest.
+
+opspilot\domain\knowledge_assets.py:53: KnowledgeIntegrityError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_02_s2_diagnosis.py::test_m2_02_current_s2_facts_create_diagnosis_receipt_and_frozen_draft
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed, 77 passed in 68.79s (0:01:08)
