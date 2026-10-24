@@ -1,0 +1,89 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_hf02_later_chat_turn_excludes_answer_after_its_knowledge_source_becomes_stale _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent新项目/docs/evidence/vnext/m4-c1-hf-01/runs/pytest-red-lineage-01/test_hf02_later_chat_turn_excl0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001C32B35D7F0>
+
+    def test_hf02_later_chat_turn_excludes_answer_after_its_knowledge_source_becomes_stale(
+        tmp_path: Path, monkeypatch,
+    ) -> None:
+        from opspilot.domain.chat import complete_chat_attempt, persist_chat_chunk, prepare_chat_attempt
+        from opspilot.domain.task_control import register_worker_owner
+        import opspilot.domain.s3_assets as assets
+    
+        db = tmp_path / "hf02-chat-lineage.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id, suffix="chat-lineage")
+        app = create_app(db_path=db, start_worker=False, credentials={"support-a": PASSWORD},
+                         expected_origin=ORIGIN, heartbeat_seconds=0.05)
+        monkeypatch.setattr(
+            "opspilot.domain.investigation_updates.classify_input",
+            lambda **_kwargs: {"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "EXPLAIN"},
+        )
+        identity = trusted_identity(db, "support-a")
+        with TestClient(app, raise_server_exceptions=False) as client:
+            login = client.post("/api/auth/login", headers={"Origin": ORIGIN},
+                                json={"actor_id": "support-a", "password": PASSWORD})
+            assert login.status_code == 200, login.text
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            first = client.post(
+                f"/api/sessions/{session_id}/messages",
+                headers={**headers, "Idempotency-Key": "m4-c1-hf-01-hf02-answer-lineage"},
+                json={"task_id": task_id, "input_kind": "CHAT_READONLY", "body": "解释刚才引用的协议。"},
+            )
+            assert first.status_code == 202, first.text
+            first_run_id, first_message_id = str(first.json()["run_id"]), str(first.json()["message_id"])
+            routed = client.post(
+                f"/api/tasks/{task_id}/investigation-updates/proposals",
+                headers={**headers, "Idempotency-Key": first_message_id},
+                json={"source_message_id": first_message_id},
+            )
+            assert routed.status_code == 200, routed.text
+            claim_task_run(db, identity, first_run_id)
+            register_worker_owner(db, "hf02-lineage-worker", 4202)
+            first_context = prepare_chat_attempt(db, first_run_id, "hf02-lineage-worker", "hf02-lineage-test")
+            answer_text = "This answer depends on the currently applicable receiver-ack-contract-v2."
+            persist_chat_chunk(db, "hf02-lineage-worker", str(first_context["attempt_id"]), 1, answer_text)
+            answer = complete_chat_attempt(
+                db, "hf02-lineage-worker", str(first_context["attempt_id"]), answer_text,
+                provider_response_id="hf02-lineage-provider-response", input_tokens=20, output_tokens=12,
+                total_tokens=32,
+            )
+            answer_message_id = str(answer["message_id"])
+    
+            existing = assets.load_knowledge(contract_version=2)
+            replaced = [dict(item) for item in existing]
+            document = next(item for item in replaced if item["document_id"] == prior["document_id"])
+            document.update({"version": "hf02-replacement-v3", "digest": "e" * 64})
+            monkeypatch.setattr(assets, "load_knowledge", lambda *, contract_version=None: replaced)
+    
+            second = client.post(
+                f"/api/sessions/{session_id}/messages",
+                headers={**headers, "Idempotency-Key": "m4-c1-hf-01-hf02-after-stale"},
+                json={"task_id": task_id, "input_kind": "CHAT_READONLY", "body": "刚才那条协议现在仍适用吗？"},
+            )
+            assert second.status_code == 202, second.text
+            second_run_id, second_message_id = str(second.json()["run_id"]), str(second.json()["message_id"])
+            second_route = client.post(
+                f"/api/tasks/{task_id}/investigation-updates/proposals",
+                headers={**headers, "Idempotency-Key": second_message_id},
+                json={"source_message_id": second_message_id},
+            )
+            assert second_route.status_code == 200, second_route.text
+            assert second_route.json()["follow_up_action"] == "EXPLAIN"
+            claim_task_run(db, identity, second_run_id)
+            with connect(db) as connection:
+                run = connection.execute("SELECT * FROM task_runs WHERE run_id=?", (second_run_id,)).fetchone()
+                prepared = _prepare_context(connection, run, "hf02-lineage-test", db)
+    
+>       assert not any(item["role"] == "assistant" and answer_text in item["content"]
+                       for item in prepared["messages"])
+E       assert not True
+E        +  where True = any(<generator object test_hf02_later_chat_turn_excludes_answer_after_its_knowledge_source_becomes_stale.<locals>.<genexpr> at 0x000001C32B957AE0>)
+
+tests\test_m4_c1_hf_01.py:691: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_hf_01.py::test_hf02_later_chat_turn_excludes_answer_after_its_knowledge_source_becomes_stale
+1 failed in 1.72s
