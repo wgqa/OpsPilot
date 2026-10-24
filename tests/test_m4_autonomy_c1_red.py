@@ -24,7 +24,7 @@ from opspilot.domain.task_control import (
     finish_task_run,
     trusted_identity,
 )
-from opspilot.domain.d2 import record_tool_observation
+from tests.s3_observation_support import record_s3_observation
 from opspilot.web.app import create_app
 
 
@@ -73,19 +73,15 @@ def _diagnosed_task(db: Path) -> tuple[str, str, str, str]:
 
     evidence_ids: list[str] = []
     for index, (tool_name, fact) in enumerate(facts):
-        observed = record_tool_observation(
+        observed = record_s3_observation(
             db,
-            task_id=task_id,
-            call_id=f"m4-c1-red-observation-{index}",
-            attempt_id=None,
-            tool_call_id=f"m4-c1-red-tool-{index}",
-            tool_name=tool_name,
+            {"task_id": task_id, "run_id": run_id},
+            tool_name,
+            fact,
             arguments={},
-            status="OK",
-            result=fact,
         )
         evidence_ids.append(str(observed["evidence_id"]))
-    gate = evaluate_s3_gate(db, task_id, evidence_ids)
+    gate = evaluate_s3_gate(db, task_id, evidence_ids, run_id=run_id)
     assert gate["decision"] == "DIAGNOSED", gate
     diagnosis = persist_s3_diagnosis(db, task_id, run_id, evidence_ids)
     finish_task_run(db, identity, run_id, "SUCCEEDED")
