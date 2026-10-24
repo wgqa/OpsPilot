@@ -1,0 +1,167 @@
+FFFFF
+================================== FAILURES ===================================
+__ test_hf01_completed_answer_and_current_knowledge_reach_classifier_context __
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-c1-hf-01-red-02/test_hf01_completed_answer_and0')
+
+    def test_hf01_completed_answer_and_current_knowledge_reach_classifier_context(tmp_path: Path) -> None:
+        db = tmp_path / "hf01-classifier.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id)
+        current = _new_user_message(
+            db, session_id, task_id, body="你刚才引用的那份协议，为什么不能证明接收方已经处理完成？",
+            suffix="hf01-current",
+        )
+        prepared = reserve_assessment(
+            db, trusted_identity(db, "support-a"), task_id=task_id,
+            source_message_id=str(current["message_id"]), idempotency_key=str(current["message_id"]),
+            model_id="hf01-deterministic",
+        )["prepared"]
+>       histories = prepared["prior_readonly_followups"]
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'prior_readonly_followups'
+
+tests\test_m4_c1_hf_01.py:162: KeyError
+__ test_hf01_prior_followup_is_a_bounded_chat_context_block_with_provenance ___
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-c1-hf-01-red-02/test_hf01_prior_followup_is_a_0')
+
+    def test_hf01_prior_followup_is_a_bounded_chat_context_block_with_provenance(tmp_path: Path) -> None:
+        db = tmp_path / "hf01-chat.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id)
+        current = _new_user_message(
+            db, session_id, task_id, body="你刚才引用的那份协议，为什么不能证明接收方已经处理完成？",
+            suffix="hf01-chat-current",
+        )
+        with connect(db) as connection:
+            run = connection.execute(
+                "SELECT * FROM task_runs WHERE run_id=?", (current["run_id"],),
+            ).fetchone()
+            prepared = _prepare_context(connection, run, "hf01-deterministic", db)
+        prompt = json.dumps(prepared["messages"], ensure_ascii=False)
+>       assert "Earlier I cited receiver-ack-contract-v2" in prompt
+E       assert 'Earlier I cited receiver-ack-contract-v2' in '[{"role": "system", "content": "You are OpsPilot\'s read-only support chat. Answer questions and explain only. Never ...ole": "user", "content": "按当前绑定协议核对 HTTP 202，并给出可查证依据。"}, {"role": "user", "content": "你刚才引用的那份协议，为什么不能证明接收方已经处理完成？"}]'
+
+tests\test_m4_c1_hf_01.py:188: AssertionError
+_ test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evidence _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-c1-hf-01-red-02/test_hf03_investigator_gets_pr0')
+
+    def test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evidence(tmp_path: Path) -> None:
+        db = tmp_path / "hf03-investigator.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id)
+        current = _new_user_message(
+            db, session_id, task_id, body="那现在接收方完成处理了吗？", suffix="hf03-current",
+        )
+        assessment = reserve_assessment(
+            db, trusted_identity(db, "support-a"), task_id=task_id,
+            source_message_id=str(current["message_id"]), idempotency_key=str(current["message_id"]),
+            model_id="hf03-deterministic",
+        )
+        routed = complete_assessment(
+            db, identity=trusted_identity(db, "support-a"),
+            assessment_id=str(assessment["prepared"]["assessment_id"]),
+            attempt_id=str(assessment["prepared"]["attempt_id"]),
+            classification={"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "INVESTIGATE"},
+        )
+        run_id = str(routed["investigation_run_id"])
+        claim_task_run(db, trusted_identity(db, "support-a"), run_id)
+        context = load_investigation_context(db, task_id, run_id)
+>       prior_context = context["prior_readonly_followups"]
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'prior_readonly_followups'
+
+tests\test_m4_c1_hf_01.py:217: KeyError
+____ test_hf05_task_chat_run_is_not_worker_claimable_before_classification ____
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-c1-hf-01-red-02/test_hf05_task_chat_run_is_not0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001C6952C7E90>
+
+    def test_hf05_task_chat_run_is_not_worker_claimable_before_classification(tmp_path: Path, monkeypatch) -> None:
+        db = tmp_path / "hf05-routing.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        app = create_app(db_path=db, start_worker=False, credentials={"support-a": PASSWORD},
+                         expected_origin=ORIGIN, heartbeat_seconds=0.05)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            login = client.post("/api/auth/login", headers={"Origin": ORIGIN},
+                                json={"actor_id": "support-a", "password": PASSWORD})
+            assert login.status_code == 200, login.text
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            accepted = client.post(
+                f"/api/sessions/{session_id}/messages",
+                headers={**headers, "Idempotency-Key": "m4-c1-hf-01-hf05-pending"},
+                json={"task_id": task_id, "input_kind": "CHAT_READONLY", "body": "核对当前接收状态。"},
+            )
+            assert accepted.status_code == 202, accepted.text
+            run_id = str(accepted.json()["run_id"])
+        from opspilot.domain.task_control import next_worker_run
+    
+>       assert next_worker_run(db) is None
+E       AssertionError: assert {'run_id': 'run-6094ae4c-a175-4e67-b964-6bb7ac241930', 'tenant_id': 'tenant-a', 'task_id': 'task-436eccc6-525b-4771-888b-b9f1c2d89f98', 'session_id': 'session-edbd6ff6-166d-4b53-87ed-e340b80aa71f', ...} is None
+E        +  where {'run_id': 'run-6094ae4c-a175-4e67-b964-6bb7ac241930', 'tenant_id': 'tenant-a', 'task_id': 'task-436eccc6-525b-4771-888b-b9f1c2d89f98', 'session_id': 'session-edbd6ff6-166d-4b53-87ed-e340b80aa71f', ...} = <function next_worker_run at 0x000001C694CC1C60>(WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-c1-hf-01-red-02/test_hf05_task_chat_run_is_not0/hf05-routing.sqlite3'))
+
+tests\test_m4_c1_hf_01.py:245: AssertionError
+______ test_hf05_investigate_route_blocks_the_unused_chat_run_atomically ______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-m4-c1-hf-01-red-02/test_hf05_investigate_route_bl0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001C69600EED0>
+
+    def test_hf05_investigate_route_blocks_the_unused_chat_run_atomically(tmp_path: Path, monkeypatch) -> None:
+        db = tmp_path / "hf05-single-route.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        app = create_app(db_path=db, start_worker=False, credentials={"support-a": PASSWORD},
+                         expected_origin=ORIGIN, heartbeat_seconds=0.05)
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "hf05-deterministic")
+        monkeypatch.setattr(
+            "opspilot.domain.investigation_updates.classify_input",
+            lambda **_kwargs: {"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "INVESTIGATE"},
+        )
+        with TestClient(app, raise_server_exceptions=False) as client:
+            login = client.post("/api/auth/login", headers={"Origin": ORIGIN},
+                                json={"actor_id": "support-a", "password": PASSWORD})
+            assert login.status_code == 200, login.text
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            accepted = client.post(
+                f"/api/sessions/{session_id}/messages",
+                headers={**headers, "Idempotency-Key": "m4-c1-hf-01-hf05-investigate"},
+                json={"task_id": task_id, "input_kind": "CHAT_READONLY",
+                      "body": "请重新查当前绑定订单接收方现在的处理状态。"},
+            )
+            assert accepted.status_code == 202, accepted.text
+            source_id = str(accepted.json()["message_id"])
+            result = client.post(
+                f"/api/tasks/{task_id}/investigation-updates/proposals",
+                headers={**headers, "Idempotency-Key": source_id},
+                json={"source_message_id": source_id},
+            )
+            assert result.status_code == 200, result.text
+            assert result.json()["follow_up_action"] == "INVESTIGATE"
+            chat_run_id = str(accepted.json()["run_id"])
+        with connect(db) as connection:
+            chat_run = connection.execute(
+                "SELECT status,blocked_reason FROM task_runs WHERE run_id=?", (chat_run_id,),
+            ).fetchone()
+            chat_calls = int(connection.execute(
+                "SELECT COUNT(*) FROM chat_attempts WHERE run_id=?", (chat_run_id,),
+            ).fetchone()[0])
+>       assert str(chat_run["status"]) == "BLOCKED"
+E       AssertionError: assert 'QUEUED' == 'BLOCKED'
+E         
+E         - BLOCKED
+E         + QUEUED
+
+tests\test_m4_c1_hf_01.py:289: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_hf_01.py::test_hf01_completed_answer_and_current_knowledge_reach_classifier_context
+FAILED tests/test_m4_c1_hf_01.py::test_hf01_prior_followup_is_a_bounded_chat_context_block_with_provenance
+FAILED tests/test_m4_c1_hf_01.py::test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evidence
+FAILED tests/test_m4_c1_hf_01.py::test_hf05_task_chat_run_is_not_worker_claimable_before_classification
+FAILED tests/test_m4_c1_hf_01.py::test_hf05_investigate_route_blocks_the_unused_chat_run_atomically
+5 failed in 6.03s
