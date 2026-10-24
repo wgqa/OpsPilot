@@ -1,0 +1,93 @@
+..........F..                                                            [100%]
+================================== FAILURES ===================================
+_ test_hf05_late_investigate_classification_cannot_start_second_chain_after_timeout_fallback _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent新项目/docs/evidence/vnext/m4-c1-hf-01/runs/pytest-hf01-target-01/test_hf05_late_investigate_cla0')
+
+    def test_hf05_late_investigate_classification_cannot_start_second_chain_after_timeout_fallback(tmp_path: Path) -> None:
+        from datetime import datetime, timedelta, timezone
+    
+        from opspilot.domain.chat import prepare_chat_attempt
+        from opspilot.domain.investigation_updates import complete_assessment
+        from opspilot.domain.task_control import next_worker_run, register_worker_owner
+    
+        db = tmp_path / "hf05-late-classification.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        message = _new_user_message(
+            db, session_id, task_id, body="现在接收方处理完成了吗？", suffix="hf05-late-classification",
+        )
+        identity = trusted_identity(db, "support-a")
+        assessment = reserve_assessment(
+            db, identity, task_id=task_id, source_message_id=str(message["message_id"]),
+            idempotency_key=str(message["message_id"]), model_id="hf05-late-classification-deterministic",
+        )["prepared"]
+    
+        # The bounded fallback has already released and started the same Chat Run.
+        with connect(db) as connection:
+            connection.execute(
+                "UPDATE task_runs SET created_at=? WHERE run_id=?",
+                ((datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(), str(message["run_id"])),
+            )
+        assert next_worker_run(db)["run_id"] == message["run_id"]
+        claim_task_run(db, identity, str(message["run_id"]))
+        register_worker_owner(db, "hf05-late-worker", 4115)
+        prepared_chat = prepare_chat_attempt(
+            db, str(message["run_id"]), "hf05-late-worker", "hf05-late-no-provider-test",
+        )
+    
+>       late = complete_assessment(
+            db,
+            identity=identity,
+            assessment_id=str(assessment["assessment_id"]),
+            attempt_id=str(assessment["attempt_id"]),
+            classification={"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "INVESTIGATE"},
+        )
+
+tests\test_m4_c1_hf_01.py:601: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent新项目/docs/evidence/vnext/m4-c1-hf-01/runs/pytest-hf01-target-01/test_hf05_late_investigate_cla0/hf05-late-classification.sqlite3')
+identity = TrustedIdentity(actor_id='support-a', tenant_id='tenant-a', role='SUPPORT')
+assessment_id = 'update-assessment-389ed7f0-7d87-44aa-8570-3270687c1f0f'
+attempt_id = 'update-model-attempt-f6035b86-ec60-47ed-b904-46278febc24f'
+classification = {'intent': 'FOLLOW_UP', 'change_summary': '', 'readonly_action': 'INVESTIGATE'}
+
+    def complete_assessment(
+        path: str | Path,
+        *,
+        identity: TrustedIdentity,
+        assessment_id: str,
+        attempt_id: str,
+        classification: dict[str, Any],
+    ) -> dict[str, Any]:
+        intent = classification.get("intent")
+        summary = classification.get("change_summary")
+        readonly_action = classification.get("readonly_action", "EXPLAIN")
+        if (
+            intent not in INTENTS or not isinstance(summary, str) or len(summary) > 240
+            or (intent == "CRITICAL_CORRECTION" and not summary.strip())
+            or readonly_action not in {"EXPLAIN", "INVESTIGATE"}
+            or (intent != "FOLLOW_UP" and readonly_action != "EXPLAIN")
+        ):
+            raise TaskControlError("INVALID_MODEL_CLASSIFICATION")
+        now = _now()
+        status = "PENDING_CONFIRMATION" if intent == "CRITICAL_CORRECTION" else "NO_UPDATE"
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM investigation_update_assessments WHERE assessment_id = ?",
+                (assessment_id,),
+            ).fetchone()
+            attempt = connection.execute(
+                "SELECT * FROM investigation_update_attempts WHERE attempt_id = ? AND assessment_id = ?",
+                (attempt_id, assessment_id),
+            ).fetchone()
+            if row is None or attempt is None or str(row["status"]) != "ASSESSING" or str(attempt["status"]) != "RESERVED":
+>               raise TaskControlError("UPDATE_ASSESSMENT_NOT_ACTIVE")
+E               opspilot.domain.task_control.TaskControlError: UPDATE_ASSESSMENT_NOT_ACTIVE
+
+opspilot\domain\investigation_updates.py:391: TaskControlError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_hf_01.py::test_hf05_late_investigate_classification_cannot_start_second_chain_after_timeout_fallback
+1 failed, 12 passed in 17.14s

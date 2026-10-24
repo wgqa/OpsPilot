@@ -1,0 +1,189 @@
+{
+  "schema": "opspilot-m4-c1-hf-01-results-v1",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/m4-autonomy-c1",
+  "task_base_sha": "b398e59dba03a25ef1e5f04aa197c4e918b0529f",
+  "remote_main_at_start_sha": "77ea80e87e538f0f1fae8118ef231ec622601755",
+  "north_star_blob": "1f737712c7a36ceb34433ac09c3fbba3c3305542",
+  "agents_blob": "30319000ed0054007e9b7b6b46bf98b1493c8179",
+  "commits": {
+    "acceptance_freeze": "863a237d067bb02a39a0542cdce1e34a612ffd80",
+    "initial_red": "8135ab6fcd3de5e57a852124c515a95ef885cc13",
+    "lineage_freeze": "d7d6e58db55217f7986aaf7c8943a0b82e53f964",
+    "lineage_red_exitcode": "f368f495e01f70bec9015768d844797c3504723d",
+    "lineage_red_raw_log": "ab014cc6f57e0e93cde4b7873584ec5a28eeb49d",
+    "implementation": "b26712732ef8659906d5799b7f30a95b83d447d8"
+  },
+  "environment": {
+    "python": "3.12.14",
+    "pytest": "9.1.1",
+    "node": "v24.16.0",
+    "npm": "11.13.0",
+    "vue": "3.5.44",
+    "playwright": "1.64.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "real_provider": "DeepSeek deepseek-flash for the Web journey",
+    "test_provider": "NoToolModel and deterministic test doubles; no paid provider calls"
+  },
+  "implementation_files": [
+    "frontend/src/App.vue",
+    "opspilot/domain/chat.py",
+    "opspilot/domain/investigation_context.py",
+    "opspilot/domain/investigation_updates.py",
+    "opspilot/domain/task_control.py",
+    "opspilot/investigator.py",
+    "opspilot/web/app.py",
+    "tests/test_m4_c1_hf_01.py"
+  ],
+  "validation": [
+    {
+      "name": "full_pytest_unfiltered_first_run",
+      "command": ".venv\\Scripts\\python.exe -X utf8 docs/evidence/vnext/m4-c1-hf-01/runs/capture_pytest_utf8.py docs/evidence/vnext/m4-c1-hf-01/runs/full-pytest-01.log -q --basetemp docs/evidence/vnext/m4-c1-hf-01/runs/pytest-full-01",
+      "exit_code": 1,
+      "result": "336 passed, 2 failed",
+      "failures": [
+        "test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix: preserved preimplementation RED",
+        "test_hf_b_stale_gate_stops_after_no_tool_progress: child process lacked model env; no-provider rerun passed with nonsecret placeholder config"
+      ],
+      "log": "runs/full-pytest-01.log"
+    },
+    {
+      "name": "hf01_targeted",
+      "command": ".venv\\Scripts\\python.exe -X utf8 docs/evidence/vnext/m4-c1-hf-01/runs/capture_pytest_utf8.py docs/evidence/vnext/m4-c1-hf-01/runs/hf01-target-green-02.log tests/test_m4_c1_hf_01.py -q --basetemp docs/evidence/vnext/m4-c1-hf-01/runs/pytest-hf01-target-02",
+      "exit_code": 0,
+      "passed": 13,
+      "failed": 0,
+      "log": "runs/hf01-target-green-02.log"
+    },
+    {
+      "name": "m2_hf_stale_noop_process_recovery",
+      "command": "$env:OPSPILOT_MODEL_API_KEY='hf01-no-provider-call'; $env:OPSPILOT_MODEL_NAME='hf01-scope-integration'; .venv\\Scripts\\python.exe -X utf8 docs/evidence/vnext/m4-c1-hf-01/runs/capture_pytest_utf8.py docs/evidence/vnext/m4-c1-hf-01/runs/m2-hf-stale-noop-target-01.log tests/test_m2_02_hf_01.py::test_hf_b_stale_gate_stops_after_no_tool_progress -q --basetemp docs/evidence/vnext/m4-c1-hf-01/runs/pytest-m2-hf-stale-noop-01",
+      "exit_code": 0,
+      "passed": 1,
+      "failed": 0,
+      "provider_network": "NoToolModel substituted in child worker; no real Provider call",
+      "log": "runs/m2-hf-stale-noop-target-01.log"
+    },
+    {
+      "name": "full_pytest_preserving_old_red",
+      "command": "$env:OPSPILOT_MODEL_API_KEY='hf01-no-provider-call'; $env:OPSPILOT_MODEL_NAME='hf01-scope-integration'; .venv\\Scripts\\python.exe -X utf8 docs/evidence/vnext/m4-c1-hf-01/runs/capture_pytest_utf8.py docs/evidence/vnext/m4-c1-hf-01/runs/full-pytest-green-01.log -q --basetemp docs/evidence/vnext/m4-c1-hf-01/runs/pytest-full-green-01 -k 'not test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix'",
+      "exit_code": 0,
+      "passed": 338,
+      "failed": 0,
+      "deselected": 1,
+      "deselected_reason": "Frozen original preimplementation RED kept unchanged",
+      "log": "runs/full-pytest-green-01.log"
+    },
+    {
+      "name": "frontend_typecheck",
+      "command": "npm run typecheck",
+      "working_directory": "frontend",
+      "exit_code": 0,
+      "log": "runs/frontend-typecheck-01.log"
+    },
+    {
+      "name": "frontend_build",
+      "command": "npm run build",
+      "working_directory": "frontend",
+      "exit_code": 0,
+      "log": "runs/frontend-build-01.log"
+    },
+    {
+      "name": "python_compileall",
+      "command": ".venv\\Scripts\\python.exe -m compileall -q opspilot",
+      "exit_code": 0
+    },
+    {
+      "name": "git_diff_check",
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "browser_e2e": {
+    "status": "BROWSER_FLOW_COMPLETED_WITH_PARTIAL_LAST_FOLLOWUP",
+    "browser": "Microsoft Edge via Playwright",
+    "model": "deepseek-flash",
+    "task_id": "task-dfb79780-81ab-422e-bdc1-8b42862b91a9",
+    "session_id": "session-b812fb67-9b7b-4050-a2bd-4c36c1620020",
+    "order_id": "async-order",
+    "steps": [
+      {
+        "label": "knowledge-probe",
+        "route": "INVESTIGATE",
+        "answer_state": "ANSWERED",
+        "chat_sidecar_attempts": 0,
+        "mcp_tools": ["search_callback_knowledge"],
+        "knowledge": {
+          "document_id": "receiver-ack-contract-v2",
+          "version": "2.0.0",
+          "digest": "76abb5047ae680dedc4c097b91918c438aaa8d04aca5e4600bd1296aa6bf3a70"
+        }
+      },
+      {
+        "label": "pronoun-explanation",
+        "route": "EXPLAIN",
+        "answer_state": "COMPLETED",
+        "chat_attempts": 1,
+        "prior_answer_in_manifest": true,
+        "knowledge_currentness": "CURRENT_APPLICABLE"
+      },
+      {
+        "label": "current-receiver-state",
+        "route": "INVESTIGATE",
+        "chat_sidecar_attempts": 0,
+        "mcp_tools": ["get_receiver_processing"],
+        "observation_id": "observation-5f4bf60f-5d7b-49c3-ae68-720c51f8c00c",
+        "evidence_id": "evidence-354f385e-e9e6-4260-9b4a-0028dd5aa9de",
+        "observed_status": "QUEUED",
+        "answer_state": "PARTIAL",
+        "reason_code": "FOLLOWUP_BUDGET_OR_PROVIDER_EXHAUSTED",
+        "answer_text_nonempty": false
+      }
+    ],
+    "provider_usage": {
+      "requests": 12,
+      "input_tokens": 21509,
+      "output_tokens": 6917,
+      "total_tokens": 28426,
+      "classifier": {"requests": 3, "total_tokens": 4404},
+      "investigator": {"requests": 8, "total_tokens": 19652},
+      "visible_chat": {"requests": 1, "total_tokens": 4370},
+      "hidden_chat_sidecar_requests": 0,
+      "comparison_historical_hidden_chat_tokens": 3709
+    },
+    "mcp_observation_count": 5,
+    "http_observation": {
+      "request_id": "0f09b2b077aa23b6",
+      "status": 200,
+      "resource": "bound async-order route"
+    },
+    "fixture_preparation_http_202_is_agent_action": false,
+    "console_errors": [
+      "unauthenticated GET /api/auth/me returned 401 before login",
+      "one non-API 404; exact URL not captured"
+    ],
+    "replay_commands": {
+      "backend": "$env:OPSPILOT_HF01_RUN_ROOT='<evidence>/runs/web-e2e-hf01-03'; $env:OPSPILOT_LOCAL_ENV_FILE='<local provider env file>'; .venv\\Scripts\\python.exe -X utf8 docs/evidence/vnext/m4-c1-hf-01/runs/start_hf01_web.py",
+      "frontend": "npm run dev -- --host 127.0.0.1 --port 5178",
+      "browser": "$env:OPSPILOT_FRONTEND_ROOT='<repo>/frontend'; $env:OPSPILOT_UI_BASE_URL='http://127.0.0.1:5178'; $env:OPSPILOT_HF01_WEB_EVIDENCE='<evidence>/runs/web-e2e-hf01-03'; node docs/evidence/vnext/m4-c1-hf-01/runs/m4_c1_hf01_browser.mjs",
+      "note": "The local provider env file is supplied by the operator; no credential value is included in the report or trace."
+    },
+    "trace": "TRACE.jsonl",
+    "trace_sha256": "794368c27c49ccd8a946eff60a7432e5c81ddb372321c3b8f579327084499eb6",
+    "journey": "runs/web-e2e-hf01-03/journey.json",
+    "screenshots": [
+      "runs/web-e2e-hf01-03/00-empty-session.png",
+      "runs/web-e2e-hf01-03/01-s3-diagnosis.png",
+      "runs/web-e2e-hf01-03/02-knowledge-followup.png",
+      "runs/web-e2e-hf01-03/03-pronoun-explanation.png",
+      "runs/web-e2e-hf01-03/04-current-state-followup.png"
+    ]
+  },
+  "known_limitations": [
+    "The final current-state followup performed fresh authorized MCP evidence collection but ended PARTIAL with empty natural-language answer; the UI showed the missing-answer state and reason code.",
+    "The browser recorded one non-API 404 whose exact URL was not captured.",
+    "The frozen preimplementation RED remains a failing case by design and is excluded only from the post-fix green full-suite run."
+  ]
+}

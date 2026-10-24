@@ -1,0 +1,71 @@
+.F                                                                       [100%]
+================================== FAILURES ===================================
+____ test_hf05_explain_route_releases_one_chat_run_and_persists_provenance ____
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent新项目/docs/evidence/vnext/m4-c1-hf-01/runs/pytest-debug-02/test_hf05_explain_route_releas0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002E6279BF360>
+
+    def test_hf05_explain_route_releases_one_chat_run_and_persists_provenance(tmp_path: Path, monkeypatch) -> None:
+        from opspilot.domain.chat import assert_chat_context_current, get_chat_manifest, prepare_chat_attempt
+        from opspilot.domain.task_control import next_worker_run, register_worker_owner
+    
+        db = tmp_path / "hf05-explain.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        _persist_previous_followup(db, session_id, task_id, suffix="explain-context")
+        app = create_app(db_path=db, start_worker=False, credentials={"support-a": PASSWORD},
+                         expected_origin=ORIGIN, heartbeat_seconds=0.05)
+        calls = {"n": 0}
+    
+        def classify(**_kwargs):
+            calls["n"] += 1
+            return {"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "EXPLAIN"}
+    
+        monkeypatch.setattr("opspilot.domain.investigation_updates.classify_input", classify)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            login = client.post("/api/auth/login", headers={"Origin": ORIGIN},
+                                json={"actor_id": "support-a", "password": PASSWORD})
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            accepted = client.post(
+                f"/api/sessions/{session_id}/messages",
+                headers={**headers, "Idempotency-Key": "m4-c1-hf-01-hf05-explain"},
+                json={"task_id": task_id, "input_kind": "CHAT_READONLY", "body": "解释当前协议的含义。"},
+            )
+            assert accepted.status_code == 202, accepted.text
+            run_id, message_id = str(accepted.json()["run_id"]), str(accepted.json()["message_id"])
+            with connect(db) as connection:
+                pending = connection.execute(
+                    "SELECT status,blocked_reason FROM task_runs WHERE run_id=?", (run_id,),
+                ).fetchone()
+                assert str(pending["blocked_reason"]) == "UPDATE_CLASSIFICATION_PENDING"
+                assert connection.execute("SELECT COUNT(*) FROM chat_attempts WHERE run_id=?", (run_id,)).fetchone()[0] == 0
+            assessment = client.post(
+                f"/api/tasks/{task_id}/investigation-updates/proposals",
+                headers={**headers, "Idempotency-Key": message_id}, json={"source_message_id": message_id},
+            )
+            assert assessment.status_code == 200, assessment.text
+            assert assessment.json()["follow_up_action"] == "EXPLAIN"
+            replay = client.post(
+                f"/api/tasks/{task_id}/investigation-updates/proposals",
+                headers={**headers, "Idempotency-Key": message_id}, json={"source_message_id": message_id},
+            )
+            assert replay.status_code == 200, replay.text
+            assert calls["n"] == 1
+            assert str(replay.json()["assessment_id"]) == str(assessment.json()["assessment_id"])
+    
+>       assert next_worker_run(db)["run_id"] == run_id
+E       AssertionError: assert 'run-2b00668a...-bf0e89ad7b55' == 'run-a38d25dd...-7f5ff84c6080'
+E         
+E         - run-a38d25dd-f177-4af4-9b33-7f5ff84c6080
+E         + run-2b00668a-5af2-4951-bcd6-bf0e89ad7b55
+
+tests\test_m4_c1_hf_01.py:473: AssertionError
+============================== warnings summary ===============================
+D:\python\Lib\site-packages\fastapi\testclient.py:1
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_hf_01.py::test_hf05_explain_route_releases_one_chat_run_and_persists_provenance
+1 failed, 1 passed, 1 warning in 4.00s

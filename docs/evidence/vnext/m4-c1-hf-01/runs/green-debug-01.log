@@ -1,0 +1,135 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_hf01_classifier_provider_payload_contains_prior_answer_and_currentness _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent新项目/docs/evidence/vnext/m4-c1-hf-01/runs/pytest-debug-01/test_hf01_classifier_provider_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000241091F2FD0>
+
+    def test_hf01_classifier_provider_payload_contains_prior_answer_and_currentness(tmp_path: Path, monkeypatch) -> None:
+        import sys
+        from types import ModuleType
+        from types import SimpleNamespace
+    
+        from opspilot.domain.investigation_updates import classify_input
+    
+        db = tmp_path / "hf01-classifier-payload.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        _persist_previous_followup(db, session_id, task_id, suffix="classifier-payload")
+        current = _new_user_message(
+            db, session_id, task_id, body="刚才那条协议能证明处理完成吗？", suffix="classifier-payload-current",
+        )
+        prepared = reserve_assessment(
+            db, trusted_identity(db, "support-a"), task_id=task_id,
+            source_message_id=str(current["message_id"]), idempotency_key=str(current["message_id"]),
+            model_id="hf01-deterministic",
+        )["prepared"]
+        captured: dict[str, str] = {}
+    
+        class FakeChatOpenAI:
+            def __init__(self, **_kwargs):
+                pass
+    
+            def invoke(self, messages):
+                captured["human"] = str(messages[-1].content)
+                return SimpleNamespace(
+                    content='{"intent":"FOLLOW_UP","change_summary":"","readonly_action":"EXPLAIN"}',
+                    usage_metadata={}, response_metadata={},
+                )
+    
+        fake_module = ModuleType("langchain_openai")
+        fake_module.ChatOpenAI = FakeChatOpenAI
+        monkeypatch.setitem(sys.modules, "langchain_openai", fake_module)
+>       classify_input(prepared=prepared, model_id="hf01-deterministic", api_key="local-test-key")
+
+tests\test_m4_c1_hf_01.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+prepared = {'assessment_id': 'update-assessment-ea872943-b5de-4861-80ea-d208cd64be06', 'attempt_id': 'update-model-attempt-663396... 'task-6b0bd4df-2f8b-429d-a43d-dd514edefaec', 'source_message_id': 'message-0e909433-56e5-4280-95da-f73ac1d58097', ...}
+model_id = 'hf01-deterministic', api_key = 'local-test-key', base_url = None
+
+    def classify_input(
+        *, prepared: dict[str, Any], model_id: str, api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> dict[str, Any]:
+        """Ask the configured provider for a narrow, untrusted intent label and summary."""
+>       from langchain_core.messages import HumanMessage, SystemMessage
+E       ModuleNotFoundError: No module named 'langchain_core'
+
+opspilot\domain\investigation_updates.py:99: ModuleNotFoundError
+____ test_hf05_explain_route_releases_one_chat_run_and_persists_provenance ____
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent新项目/docs/evidence/vnext/m4-c1-hf-01/runs/pytest-debug-01/test_hf05_explain_route_releas0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000241096A2EA0>
+
+    def test_hf05_explain_route_releases_one_chat_run_and_persists_provenance(tmp_path: Path, monkeypatch) -> None:
+        from opspilot.domain.chat import assert_chat_context_current, get_chat_manifest, prepare_chat_attempt
+        from opspilot.domain.task_control import next_worker_run, register_worker_owner
+    
+        db = tmp_path / "hf05-explain.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        app = create_app(db_path=db, start_worker=False, credentials={"support-a": PASSWORD},
+                         expected_origin=ORIGIN, heartbeat_seconds=0.05)
+        calls = {"n": 0}
+    
+        def classify(**_kwargs):
+            calls["n"] += 1
+            return {"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "EXPLAIN"}
+    
+        monkeypatch.setattr("opspilot.domain.investigation_updates.classify_input", classify)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            login = client.post("/api/auth/login", headers={"Origin": ORIGIN},
+                                json={"actor_id": "support-a", "password": PASSWORD})
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            accepted = client.post(
+                f"/api/sessions/{session_id}/messages",
+                headers={**headers, "Idempotency-Key": "m4-c1-hf-01-hf05-explain"},
+                json={"task_id": task_id, "input_kind": "CHAT_READONLY", "body": "解释当前协议的含义。"},
+            )
+            assert accepted.status_code == 202, accepted.text
+            run_id, message_id = str(accepted.json()["run_id"]), str(accepted.json()["message_id"])
+            with connect(db) as connection:
+                pending = connection.execute(
+                    "SELECT status,blocked_reason FROM task_runs WHERE run_id=?", (run_id,),
+                ).fetchone()
+                assert str(pending["blocked_reason"]) == "UPDATE_CLASSIFICATION_PENDING"
+                assert connection.execute("SELECT COUNT(*) FROM chat_attempts WHERE run_id=?", (run_id,)).fetchone()[0] == 0
+            assessment = client.post(
+                f"/api/tasks/{task_id}/investigation-updates/proposals",
+                headers={**headers, "Idempotency-Key": message_id}, json={"source_message_id": message_id},
+            )
+            assert assessment.status_code == 200, assessment.text
+            assert assessment.json()["follow_up_action"] == "EXPLAIN"
+            replay = client.post(
+                f"/api/tasks/{task_id}/investigation-updates/proposals",
+                headers={**headers, "Idempotency-Key": message_id}, json={"source_message_id": message_id},
+            )
+            assert replay.status_code == 200, replay.text
+            assert calls["n"] == 1
+            assert str(replay.json()["assessment_id"]) == str(assessment.json()["assessment_id"])
+    
+        assert next_worker_run(db)["run_id"] == run_id
+        identity = trusted_identity(db, "support-a")
+        claim_task_run(db, identity, run_id)
+        register_worker_owner(db, "hf05-worker", 4105)
+        prepared = prepare_chat_attempt(db, run_id, "hf05-worker", "hf05-no-provider-test")
+        assert prepared["attempt_id"]
+        assert_chat_context_current(db, "hf05-worker", str(prepared["attempt_id"]))
+        manifest = get_chat_manifest(db, identity, run_id)
+        refs = manifest["prior_readonly_followup_refs"]
+>       assert refs, json.dumps({"blocks": manifest["context_blocks"], "excluded": manifest["excluded_sources"]}, ensure_ascii=False)
+E       AssertionError: {"blocks": [{"authority": "APPLICATION_DEFINED_SAFETY_POLICY", "block_id": "trusted-control", "category": "TRUSTED_CONTROL", "estimated_tokens": 320, "source_refs": [], "status": "SELECTED"}, {"authority": "DOMAIN_TASK_STATE", "block_id": "current-task-state", "category": "CURRENT_TASK_STATE", "estimated_tokens": 397, "source_refs": ["task-af181203-d109-4905-8f78-5a63bacab117"], "status": "SELECTED"}, {"authority": "CURRENT_AUTHORIZED_MCP_EVIDENCE", "block_id": "current-facts", "category": "CURRENT_FACTS", "estimated_tokens": 889, "source_refs": ["evidence-06efd3fc-9ba6-480e-8722-8fe616b210c8", "evidence-106bb67e-9d31-448e-8f8e-47378e016852", "evidence-54d6680e-62b8-440d-affd-94204920f047"], "status": "SELECTED"}, {"authority": "UNTRUSTED_USER_INPUT", "block_id": "message:message-c3fafa3a-2462-4beb-850e-e37b3232e500", "category": "TASK_INPUT_ANCHOR", "estimated_tokens": 37, "source_refs": ["message-c3fafa3a-2462-4beb-850e-e37b3232e500"], "status": "SELECTED"}, {"authority": "UNTRUSTED_USER_INPUT", "block_id": "message:message-d5c77e39-f429-46a9-9694-bf3ae2f3a620", "category": "CURRENT_USER_INPUT", "estimated_tokens": 17, "source_refs": ["message-d5c77e39-f429-46a9-9694-bf3ae2f3a620"], "status": "SELECTED"}], "excluded": []}
+E       assert []
+
+tests\test_m4_c1_hf_01.py:469: AssertionError
+============================== warnings summary ===============================
+D:\python\Lib\site-packages\fastapi\testclient.py:1
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_hf_01.py::test_hf01_classifier_provider_payload_contains_prior_answer_and_currentness
+FAILED tests/test_m4_c1_hf_01.py::test_hf05_explain_route_releases_one_chat_run_and_persists_provenance
+2 failed, 1 warning in 4.03s

@@ -1,0 +1,47 @@
+..F..                                                                    [100%]
+================================== FAILURES ===================================
+_ test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evidence _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent新项目/docs/evidence/vnext/m4-c1-hf-01/runs/pytest-initial-01/test_hf03_investigator_gets_pr0')
+
+    def test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evidence(tmp_path: Path) -> None:
+        db = tmp_path / "hf03-investigator.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id)
+        current = _new_user_message(
+            db, session_id, task_id, body="那现在接收方完成处理了吗？", suffix="hf03-current",
+        )
+        assessment = reserve_assessment(
+            db, trusted_identity(db, "support-a"), task_id=task_id,
+            source_message_id=str(current["message_id"]), idempotency_key=str(current["message_id"]),
+            model_id="hf03-deterministic",
+        )
+        routed = complete_assessment(
+            db, identity=trusted_identity(db, "support-a"),
+            assessment_id=str(assessment["prepared"]["assessment_id"]),
+            attempt_id=str(assessment["prepared"]["attempt_id"]),
+            classification={"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "INVESTIGATE"},
+        )
+        run_id = str(routed["investigation_run_id"])
+        claim_task_run(db, trusted_identity(db, "support-a"), run_id)
+        context = load_investigation_context(db, task_id, run_id)
+        prior_context = context["prior_readonly_followups"]
+        assert prior_context[0]["run_id"] == prior["run_id"]
+        old_evidence = next(ref for ref in prior_context[0]["source_refs"] if ref["kind"] == "EVIDENCE")
+>       assert old_evidence["currentness"] == "HISTORICAL_RUN_ONLY"
+E       AssertionError: assert 'INVALID_SOUR...N_ASSOCIATION' == 'HISTORICAL_RUN_ONLY'
+E         
+E         - HISTORICAL_RUN_ONLY
+E         + INVALID_SOURCE_RUN_ASSOCIATION
+
+tests\test_m4_c1_hf_01.py:220: AssertionError
+============================== warnings summary ===============================
+D:\python\Lib\site-packages\fastapi\testclient.py:1
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_hf_01.py::test_hf03_investigator_gets_prior_result_as_history_but_not_as_current_evidence
+1 failed, 4 passed, 1 warning in 9.41s
