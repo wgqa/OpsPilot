@@ -1,0 +1,61 @@
+C1_ACCEPTANCE_FIX_TRACE {"after": {"control_revision": 0, "diagnosis_count": 2, "diagnosis_digests": ["570bbbb03074521bb32d9ca994fd96811ca8dea3fb4b2e770aee6f8d2dd72027", "995f64982b91289424b293d095d8c92431994c862f6930a5f7be3ef15d6088eb"], "diagnosis_ids": ["s3-diagnosis-fca64dcd-108b-4bd8-9240-415ccdcf6a3f", "s3-diagnosis-37655899-01f9-4e92-82b6-14a62ee742c6"], "outbox_count": 7, "task_status": "INCONCLUSIVE", "writes": {"d3_action_intents": 0, "d3_action_ledgers": 0, "d3_approvals": 0, "d3_plans": 0, "s3_handoff_queue_entries": 0, "s3_handoff_receipts": 0}}, "before": {"control_revision": 0, "diagnosis_count": 1, "diagnosis_digests": ["570bbbb03074521bb32d9ca994fd96811ca8dea3fb4b2e770aee6f8d2dd72027"], "diagnosis_ids": ["s3-diagnosis-fca64dcd-108b-4bd8-9240-415ccdcf6a3f"], "outbox_count": 6, "task_status": "WAITING_HANDOFF", "writes": {"d3_action_intents": 0, "d3_action_ledgers": 0, "d3_approvals": 0, "d3_plans": 0, "s3_handoff_queue_entries": 0, "s3_handoff_receipts": 0}}, "case_id": "C1-FIX-01-BUDGET-EXHAUSTED", "existing_diagnosis_id": "s3-diagnosis-fca64dcd-108b-4bd8-9240-415ccdcf6a3f", "model_attempts": 8, "model_limit": 8, "readonly_result_reason": null, "readonly_result_state": null, "report_ref": "s3-diagnosis-37655899-01f9-4e92-82b6-14a62ee742c6", "run_id": "run-c1-followup-3b98cea5-35ea-4121-b9a9-99b614682706", "task_id": "task-58bd6370-6b6b-49a1-8fcf-f433f40d7b0a"}
+FC1_ACCEPTANCE_FIX_TRACE {"after": {"control_revision": 0, "diagnosis_count": 1, "diagnosis_digests": ["dcd99740ccf2012e6a022790debc9745db9ca3fea94c698bc24d70db87da3cf7"], "diagnosis_ids": ["s3-diagnosis-9a22ab86-e04d-406d-adbf-0945435b37db"], "outbox_count": 6, "task_status": "WAITING_HANDOFF", "writes": {"d3_action_intents": 0, "d3_action_ledgers": 0, "d3_approvals": 0, "d3_plans": 0, "s3_handoff_queue_entries": 0, "s3_handoff_receipts": 0}}, "before": {"control_revision": 0, "diagnosis_count": 1, "diagnosis_digests": ["dcd99740ccf2012e6a022790debc9745db9ca3fea94c698bc24d70db87da3cf7"], "diagnosis_ids": ["s3-diagnosis-9a22ab86-e04d-406d-adbf-0945435b37db"], "outbox_count": 6, "task_status": "WAITING_HANDOFF", "writes": {"d3_action_intents": 0, "d3_action_ledgers": 0, "d3_approvals": 0, "d3_plans": 0, "s3_handoff_queue_entries": 0, "s3_handoff_receipts": 0}}, "case_id": "C1-FIX-02-CURRENT-SOURCE-DIRECT-EXPLANATION", "existing_diagnosis_id": "s3-diagnosis-9a22ab86-e04d-406d-adbf-0945435b37db", "knowledge_digest": "76abb5047ae680dedc4c097b91918c438aaa8d04aca5e4600bd1296aa6bf3a70", "knowledge_document_id": "receiver-ack-contract-v2", "knowledge_version": "2.0.0", "mcp_attempts": 3, "model_attempts": 1, "readonly_result_reason": null, "readonly_result_state": "ANSWERED", "run_id": "run-c1-followup-28d78e1a-1787-4dee-a766-334e83d4fd71", "source_refs": [{"digest": "84e14706ba87ab68caf2831e4a38319dc5ec50029ad0d187ff579b9724a7baff", "kind": "USER_MESSAGE", "message_id": "message-1ff44fb7-d590-45bb-acf5-23e360dadde2", "provenance": "USER_INPUT_UNTRUSTED"}, {"digest": "76abb5047ae680dedc4c097b91918c438aaa8d04aca5e4600bd1296aa6bf3a70", "document_id": "receiver-ack-contract-v2", "kind": "KNOWLEDGE", "source": "local:orders-async-demo/contract-v2", "valid_from": "2026-10-01T00:00:00+00:00", "version": "2.0.0"}], "task_id": "task-65c31125-0287-437d-bad7-d37f7c03629d"}
+.
+================================== FAILURES ===================================
+_ test_readonly_followup_budget_exhaustion_never_persists_business_diagnosis __
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-c1-fix-red-04/test_readonly_followup_budget_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002A8909A53D0>
+
+    def test_readonly_followup_budget_exhaustion_never_persists_business_diagnosis(
+        tmp_path: Path, monkeypatch,
+    ) -> None:
+        db, task_id, _diagnosis_run_id, diagnosis_id, run_id = _readonly_run(tmp_path, monkeypatch)
+        before = _business_snapshot(db, task_id, diagnosis_id)
+        for index in range(MAX_MODEL_CALLS):
+            reserve_attempt(
+                db, task_id, "MODEL", MAX_MODEL_CALLS,
+                call_id=f"c1-fix-exhausted-budget-{index}", run_id=run_id,
+            )
+        assert attempt_counts(db, task_id)["MODEL"] == MAX_MODEL_CALLS
+    
+        class ProviderMustNotBeCalled:
+            async def ainvoke(self, _messages):
+                raise AssertionError("provider called after Task MODEL budget exhaustion")
+    
+        node = S3Nodes(
+            db, task_id, run_id, ProviderMustNotBeCalled(), "c1-test-model", None, [],
+            readonly_followup=True,
+        )
+        result = asyncio.run(node.report({"evidence_ids": [], "diagnosis_draft": {}}))
+        after = _business_snapshot(db, task_id, diagnosis_id)
+        with connect(db) as connection:
+            readonly_row = connection.execute(
+                "SELECT run_id,result_state,answer_text,source_refs_json,result_json,result_digest,reason_code "
+                "FROM c1_readonly_followup_runs WHERE run_id=?", (run_id,),
+            ).fetchone()
+            readonly_result = dict(readonly_row) if readonly_row is not None else None
+        trace = {
+            "case_id": "C1-FIX-01-BUDGET-EXHAUSTED",
+            "task_id": task_id,
+            "run_id": run_id,
+            "existing_diagnosis_id": diagnosis_id,
+            "model_attempts": attempt_counts(db, task_id)["MODEL"],
+            "model_limit": MAX_MODEL_CALLS,
+            "report_ref": result.get("report_ref"),
+            "readonly_result_state": result.get("readonly_result_state"),
+            "readonly_result_reason": readonly_result["reason_code"] if readonly_result else None,
+            "before": _trace_snapshot(before),
+            "after": _trace_snapshot(after),
+        }
+        print("C1_ACCEPTANCE_FIX_TRACE " + json.dumps(trace, ensure_ascii=False, sort_keys=True))
+    
+>       assert result.get("readonly_result_state") in {"PARTIAL", "NOT_COMPLETED"}
+E       AssertionError: assert None in {'NOT_COMPLETED', 'PARTIAL'}
+E        +  where None = <built-in method get of dict object at 0x000002A891F08E80>('readonly_result_state')
+E        +    where <built-in method get of dict object at 0x000002A891F08E80> = {'stage': 'complete', 'report_ref': 's3-diagnosis-37655899-01f9-4e92-82b6-14a62ee742c6', 'gate_decision': {'checked_fa...LUSIVE', 'excluded_sources': [], 'handling_direction': 'EVIDENCE_INSUFFICIENT', ...}, 'budget': {'MODEL': 8, 'MCP': 3}}.get
+
+tests\test_m4_autonomy_c1_acceptance_fix_01.py:165: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_autonomy_c1_acceptance_fix_01.py::test_readonly_followup_budget_exhaustion_never_persists_business_diagnosis
+1 failed, 1 passed in 4.06s
