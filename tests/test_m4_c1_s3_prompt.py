@@ -6,7 +6,9 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage
 
+from opspilot.domain.context_engineering import ContextBudgetExceeded, estimate_messages_tokens
 from opspilot.domain.database import connect, reset_fixture
+from opspilot.domain.d2 import canonical_json
 from opspilot.domain.investigation_updates import complete_assessment, reserve_assessment
 from opspilot.domain.task_control import claim_task_run, trusted_identity
 from opspilot.s3_investigation import S3Nodes
@@ -289,4 +291,55 @@ def test_c1_wire_04_knowledge_change_after_prompt_blocks_provider_call(tmp_path:
 
     assert calls >= 2
     assert model.messages == []
+
+
+def test_c1_wire_05_prior_followup_growth_stays_inside_context_budget(tmp_path: Path, monkeypatch) -> None:
+    import opspilot.investigator as investigator
+
+    db = tmp_path / "c1-wire-budget.sqlite3"
+    reset_fixture(db, "S1_POS")
+    session_id, task_id, _, _ = _diagnosed_task(db)
+    _persist_previous_followup(db, session_id, task_id, suffix="wire-budget")
+    _message_id, run_id = _start_investigation_run(
+        db, session_id, task_id, suffix="wire-budget-current",
+    )
+    model = CapturingModel()
+    node = _node(db, task_id, run_id, model)
+    messages, _metadata = node.prompt({"evidence_ids": [], "diagnosis_draft": {}})
+    serialized = [{"role": message.type, "content": str(message.content)} for message in messages]
+    full_required = estimate_messages_tokens(serialized) + 8
+    body_without_history = json.loads(str(messages[-1].content))
+    body_without_history["prior_readonly_followups"] = []
+    body_without_history["prior_readonly_followup_exclusions"] = []
+    body_without_history["prior_followup_authority"] = ""
+    without_history = [
+        serialized[0],
+        {"role": messages[-1].type, "content": canonical_json(body_without_history)},
+    ]
+    baseline_required = estimate_messages_tokens(without_history) + 8
+    assert full_required > baseline_required
+    input_budget = (full_required + baseline_required) // 2
+    assert baseline_required <= input_budget < full_required
+    monkeypatch.setattr(
+        investigator,
+        "context_budget_for_model",
+        lambda model_id: {"model_id": model_id, "input_budget_tokens": input_budget},
+    )
+
+    try:
+        asyncio.run(node.model_call({"evidence_ids": [], "diagnosis_draft": {}}))
+    except ContextBudgetExceeded as error:
+        assert error.code == "INVESTIGATOR_CONTEXT_EXCEEDS_BUDGET"
+        assert error.required_tokens == full_required
+        assert error.input_budget_tokens == input_budget
+    else:
+        raise AssertionError("prior follow-up context bypassed the input budget")
+
+    assert model.messages == []
+    with connect(db) as connection:
+        model_attempts = int(connection.execute(
+            "SELECT COUNT(*) FROM d2_attempts WHERE task_id=? AND run_id=? AND kind='MODEL'",
+            (task_id, run_id),
+        ).fetchone()[0])
+    assert model_attempts == 0
 
