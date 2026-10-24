@@ -21,6 +21,9 @@ class CapturingModel:
     def __init__(self) -> None:
         self.messages = []
 
+    def bind_tools(self, *_args, **_kwargs):
+        return self
+
     async def ainvoke(self, messages):
         self.messages.append(messages)
         return AIMessage(content="RESULT: ANSWERED\n依据当前上下文作出只读解释。")
@@ -118,14 +121,19 @@ def test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance(tm
     model = CapturingModel()
     node = _node(db, task_id, run_id, model)
 
-    call_id, _calls, _text = asyncio.run(node.model_call(
-        {"evidence_ids": [], "diagnosis_draft": {}}, explain=True,
-    ))
+    state = {"evidence_ids": [], "diagnosis_draft": {}}
+    call_id, _calls, _text = asyncio.run(node.model_call(state))
+    explain_call_id, _explain_calls, _explain_text = asyncio.run(
+        node.model_call(state, explain=True),
+    )
 
-    assert len(model.messages) == 1
+    assert len(model.messages) == 2
     body = json.loads(str(model.messages[0][-1].content))
+    explain_body = json.loads(str(model.messages[1][-1].content))
     history = body["prior_readonly_followups"]
+    explain_history = explain_body["prior_readonly_followups"]
     assert len(history) == 1
+    assert explain_history == history
     assert history[0]["run_id"] == prior["run_id"]
     assert history[0]["result_digest"] == prior["result_digest"]
     assert "receiver-ack-contract-v2" in history[0]["answer_text"]
@@ -139,6 +147,8 @@ def test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance(tm
     assert old_evidence["currentness"] == "HISTORICAL_RUN_ONLY"
     assert all(item.get("evidence_id") != old_evidence["evidence_id"]
                for item in body["current_mcp_evidence"])
+    assert all(item.get("evidence_id") != old_evidence["evidence_id"]
+               for item in explain_body["current_mcp_evidence"])
 
     provenance = _call_provenance(db, call_id)
     summary = next(item for item in provenance["summary_refs"]
@@ -154,8 +164,15 @@ def test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance(tm
                  if item["category"] == "PRIOR_READONLY_FOLLOWUP")
     assert prior["run_id"] in block["source_refs"]
     assert prior["result_digest"] in block["source_refs"]
+    assert block["estimated_tokens"] > 0
     assert provenance["context_budget"]["estimated_input_tokens"] >= 1
+    assert provenance["context_budget"]["estimated_input_tokens"] <= provenance["context_budget"]["input_budget_tokens"]
     assert provenance["model_status"] == "OK"
+    explain_provenance = _call_provenance(db, explain_call_id)
+    assert any(item.get("kind") == "PRIOR_READONLY_FOLLOWUP"
+               for item in explain_provenance["summary_refs"])
+    assert explain_provenance["context_budget"]["estimated_input_tokens"] <= explain_provenance["context_budget"]["input_budget_tokens"]
+    assert explain_provenance["model_status"] == "OK"
     after = _business_snapshot(db, task_id)
     assert after == before
     assert diagnosis_id in {item["receipt_id"] for item in after["diagnoses"]}
@@ -182,7 +199,7 @@ def test_c1_wire_02_stale_knowledge_is_historical_and_exclusion_is_recorded(
     model = CapturingModel()
 
     call_id, _calls, _text = asyncio.run(_node(db, task_id, run_id, model).model_call(
-        {"evidence_ids": [], "diagnosis_draft": {}}, explain=True,
+        {"evidence_ids": [], "diagnosis_draft": {}},
     ))
 
     body = json.loads(str(model.messages[0][-1].content))
@@ -264,9 +281,7 @@ def test_c1_wire_04_knowledge_change_after_prompt_blocks_provider_call(tmp_path:
 
     monkeypatch.setattr(node, "prompt", invalidate_after_first_prompt)
     try:
-        asyncio.run(node.model_call(
-            {"evidence_ids": [], "diagnosis_draft": {}}, explain=True,
-        ))
+        asyncio.run(node.model_call({"evidence_ids": [], "diagnosis_draft": {}}))
     except RuntimeError as error:
         assert str(error) == "S3_CONTEXT_INVALIDATED_BEFORE_PROVIDER"
     else:
