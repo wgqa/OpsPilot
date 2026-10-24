@@ -1,0 +1,129 @@
+{
+  "schema": "opspilot-m4-autonomy-c1-rev1-results-v1",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/m4-autonomy-c1",
+  "base_sha": "77ea80e87e538f0f1fae8118ef231ec622601755",
+  "implementation_sha": "b12d387ee6cc5370b69b6809a0e306bb748c8e6b",
+  "freeze_commits": [
+    "e313b7a",
+    "d12fa21"
+  ],
+  "effective_red_commit": "cef50e9",
+  "evidence_commit": null,
+  "evidence_commit_note": "This manifest is committed in the evidence commit; final SHA is reported in the delivery message to avoid self-reference.",
+  "environment": {
+    "os": "Windows",
+    "python": "3.12.14",
+    "pytest": "9.1.1",
+    "fastapi": "0.137.1",
+    "langgraph": "1.2.16",
+    "langgraph_checkpoint": "4.3.0",
+    "langchain_core": "1.7.0",
+    "langchain_openai": "1.7.2",
+    "mcp": "2.3.0",
+    "uvicorn": "0.49.0",
+    "node": "24.16.0",
+    "npm": "11.13.0"
+  },
+  "runs": [
+    {
+      "name": "targeted_regression",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_m4_autonomy_c1_followup_red.py tests/test_m4_03_s3.py tests/test_m4_01_dialogue_updates.py tests/test_m1_task_control.py tests/test_m2_01_facts.py tests/test_m2_03_handoff.py tests/test_m301_memory.py tests/test_m303_semantic_memory.py tests/test_m1_dynamic_investigation.py -q --basetemp=docs/evidence/vnext/m4-autonomy-c1/runs/rev1/target-full-regression-03-basetemp",
+      "raw_log": "runs/rev1/target-full-regression-03.log",
+      "exit_code": 0,
+      "result": "79 passed"
+    },
+    {
+      "name": "full_pytest",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q --ignore=tests/test_m4_autonomy_c1_red.py --basetemp=docs/evidence/vnext/m4-autonomy-c1/runs/rev1/full-pytest-final-03-basetemp; model settings were loaded from the local .env into the child process without printing values",
+      "raw_log": "runs/rev1/full-pytest-final-03.log",
+      "exit_code": 0,
+      "result": "323 passed in 276.22s",
+      "excluded_test": "tests/test_m4_autonomy_c1_red.py",
+      "exclusion_reason": "Frozen pre-implementation RED expects FOLLOW_UP rejection; retained as historical evidence and excluded from post-implementation green suite."
+    },
+    {
+      "name": "frontend_typecheck",
+      "command": "npm run typecheck",
+      "raw_log": "runs/rev1/frontend-typecheck-05.log",
+      "exit_code": 0,
+      "result": "vue-tsc --noEmit passed"
+    },
+    {
+      "name": "frontend_build",
+      "command": "npm run build",
+      "raw_log": "runs/rev1/frontend-build-05.log",
+      "exit_code": 0,
+      "result": "Vite 8.3.4 production build passed"
+    },
+    {
+      "name": "frontend_eslint_changed_view",
+      "command": "npm exec -- eslint src/App.vue",
+      "raw_log": "runs/rev1/frontend-eslint-final.log.exitcode.txt",
+      "exit_code": 0,
+      "result": "No ESLint diagnostics"
+    },
+    {
+      "name": "real_web_provider_mcp_e2e",
+      "command": "See runs/rev1/web-e2e-04/start_web_e2e_04.py and structured TRACE.jsonl; browser navigated, submitted a follow-up, and reloaded the task view.",
+      "raw_log": "runs/rev1/web-e2e-04/backend.stdout.log",
+      "trace": "runs/rev1/web-e2e-04/TRACE.jsonl",
+      "browser_observation": "runs/rev1/web-e2e-04/BROWSER-REFRESH.json",
+      "exit_code": 0,
+      "result": "Real DeepSeek and MCP follow-up returned ANSWERED with protocol and current delivery/receiver sources; formal S3 Gate remained NEED_MORE and no business write occurred."
+    }
+  ],
+  "live_journey": {
+    "session_id": "session-83d92f78-9dc6-4069-9de8-d607812eab97",
+    "task_id": "task-c1dc432b-8311-4766-a407-77efeaa76749",
+    "initial_run_id": "run-01cb289a-ffa5-4e17-a9ee-4bd98bd48377",
+    "followup_message_id": "message-e9d75701-6bc1-4714-a441-8a94e972777c",
+    "followup_run_id": "run-c1-followup-d2086ae7-a00e-4614-a441-8a94e972777c",
+    "followup_result": "ANSWERED",
+    "knowledge": {
+      "document_id": "receiver-ack-contract-v2",
+      "version": "2.0.0",
+      "digest": "76abb5047ae680dedc4c097b91918c438aaa8d04aca5e4600bd1296aa6bf3a70"
+    },
+    "evidence_ids": [
+      "evidence-dda45a86-84d6-4f2e-b6f0-d21b0201f221",
+      "evidence-87697079-f3d9-4d93-be3c-6a07fd94a257"
+    ],
+    "gate": "NEED_MORE/S3_CURRENT_FACTS_REQUIRED",
+    "task_status_after": "WAITING_HANDOFF",
+    "task_control_revision_after": 0,
+    "business_side_effects": {
+      "approvals": 0,
+      "plans": 0,
+      "action_intents": 0,
+      "action_ledgers": 0,
+      "handoff_queue_entries": 0,
+      "handoff_receipts": 0
+    },
+    "investigator_model_calls": 8,
+    "investigator_mcp_calls": 6,
+    "tokens": {
+      "initial_investigation": 10009,
+      "followup_investigation": 10222,
+      "classifier": 1047,
+      "chat_sidecar": 3709,
+      "total": 24987
+    }
+  },
+  "preserved_failures": [
+    "runs/rev1/web-e2e-02/TRACE.jsonl",
+    "runs/rev1/web-e2e-03/TRACE-review.jsonl",
+    "runs/rev1/full-pytest-final-01.log",
+    "runs/rev1/full-pytest-final-02-setup-fail.log",
+    "runs/rev1/frontend-typecheck-04.log",
+    "runs/rev1/frontend-build-04.log",
+    "runs/rev1/readonly-followup-red-baseline-01.log"
+  ],
+  "known_limits": [
+    "Real Provider direct-explanation path was not separately exercised; deterministic tests cover it.",
+    "The hidden CHAT_READONLY sidecar still consumes 3709 tokens.",
+    "The browser screenshot was captured in live CUA interaction but not saved as a repository PNG; structured browser observation is committed.",
+    "The final follow-up answers a protocol question while the formal business Gate remains NEED_MORE; it is not a diagnosis or recovery."
+  ]
+}
