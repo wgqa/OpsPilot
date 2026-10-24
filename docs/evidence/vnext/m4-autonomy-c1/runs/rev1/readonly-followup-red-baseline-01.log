@@ -1,0 +1,87 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-c1-red-baseline-01/test_explicit_protocol_followu0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D7C992CC30>
+
+    def test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix(
+        tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Expected RED: baseline only classifies FOLLOW_UP, with no investigator Run path."""
+        db = tmp_path / "m4-autonomy-c1.sqlite3"
+        reset_fixture(db, "S1_POS")
+>       session_id, task_id, diagnosis_run_id, diagnosis_id = _diagnosed_task(db)
+                                                              ^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_autonomy_c1_red.py:101: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-c1-red-baseline-01/test_explicit_protocol_followu0/m4-autonomy-c1.sqlite3')
+
+    def _diagnosed_task(db: Path) -> tuple[str, str, str, str]:
+        """Build a fresh, current S3 diagnosis; this RED does not exercise TTL behavior."""
+        prepare_s3_fixture(db, "DELIVERED_PENDING", contract_version=2, queue_age_seconds=60)
+        identity = trusted_identity(db, "support-a")
+        session = create_session(db, identity)
+        created = create_task_with_initial_run(
+            db,
+            identity,
+            session_id=str(session["session_id"]),
+            service_id="orders-async-demo",
+            integration_id="async-integration-a",
+            ticket_id="M4-C1-RED",
+            initial_message="��������ɣ�HTTP 202 �����ʵ���λص�״̬��",
+            idempotency_key="m4-c1-red-create-task",
+            s3_order_id="async-order",
+        )
+        task_id, run_id = str(created["task_id"]), str(created["run_id"])
+        claim_task_run(db, identity, run_id)
+    
+        server = make_server(db, "tenant-a", "127.0.0.1", 0)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
+        thread.start()
+        try:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            facts = [
+                ("get_order_status", get_order_status_fact(db, task_id, base_url)),
+                ("get_callback_delivery", get_callback_delivery_fact(db, task_id)),
+                ("get_receiver_processing", get_receiver_processing_fact(db, task_id)),
+            ]
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+    
+        evidence_ids: list[str] = []
+        for index, (tool_name, fact) in enumerate(facts):
+            observed = record_tool_observation(
+                db,
+                task_id=task_id,
+                call_id=f"m4-c1-red-observation-{index}",
+                attempt_id=None,
+                tool_call_id=f"m4-c1-red-tool-{index}",
+                tool_name=tool_name,
+                arguments={},
+                status="OK",
+                result=fact,
+            )
+            evidence_ids.append(str(observed["evidence_id"]))
+        gate = evaluate_s3_gate(db, task_id, evidence_ids)
+>       assert gate["decision"] == "DIAGNOSED", gate
+E       AssertionError: {'decision': 'NEED_MORE', 'outcome': None, 'reason_code': 'S3_CURRENT_FACTS_REQUIRED', 'required_facts': ['s3_order'], ...}
+E       assert 'NEED_MORE' == 'DIAGNOSED'
+E         
+E         - DIAGNOSED
+E         + NEED_MORE
+
+tests\test_m4_autonomy_c1_red.py:89: AssertionError
+============================== warnings summary ===============================
+D:\python\Lib\site-packages\fastapi\testclient.py:1
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix
+1 failed, 1 warning in 2.02s
