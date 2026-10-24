@@ -1,0 +1,113 @@
+FF.F                                                                     [100%]
+================================== FAILURES ===================================
+__ test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance __
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent����Ŀ/docs/evidence/vnext/m4-c1-final-wiring/runs/red-05/pytest-tmp/test_c1_wire_01_s3_model_call_0')
+
+    def test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance(tmp_path: Path) -> None:
+        db = tmp_path / "c1-wire-valid.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, diagnosis_id = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id, suffix="wire-valid")
+        _message_id, run_id = _start_investigation_run(
+            db, session_id, task_id, suffix="wire-valid-current",
+        )
+        before = _business_snapshot(db, task_id)
+        model = CapturingModel()
+        node = _node(db, task_id, run_id, model)
+    
+        call_id, _calls, _text = asyncio.run(node.model_call(
+            {"evidence_ids": [], "diagnosis_draft": {}}, explain=True,
+        ))
+    
+        assert len(model.messages) == 1
+        body = json.loads(str(model.messages[0][-1].content))
+>       history = body["prior_readonly_followups"]
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'prior_readonly_followups'
+
+tests\test_m4_c1_s3_prompt.py:127: KeyError
+___ test_c1_wire_02_stale_knowledge_is_historical_and_exclusion_is_recorded ___
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent����Ŀ/docs/evidence/vnext/m4-c1-final-wiring/runs/red-05/pytest-tmp/test_c1_wire_02_stale_knowledg0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CE732E79E0>
+
+    def test_c1_wire_02_stale_knowledge_is_historical_and_exclusion_is_recorded(
+        tmp_path: Path, monkeypatch,
+    ) -> None:
+        import opspilot.domain.s3_assets as assets
+    
+        db = tmp_path / "c1-wire-stale.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id, suffix="wire-stale")
+        _message_id, run_id = _start_investigation_run(
+            db, session_id, task_id, suffix="wire-stale-current",
+        )
+        before = _business_snapshot(db, task_id)
+        original = assets.load_knowledge(contract_version=2)
+        replaced = [dict(item) for item in original]
+        target = next(item for item in replaced if item["document_id"] == prior["document_id"])
+        target.update({"version": "wire-replacement-v3", "digest": "a" * 64})
+        monkeypatch.setattr(assets, "load_knowledge", lambda *, contract_version=None: replaced)
+        model = CapturingModel()
+    
+        call_id, _calls, _text = asyncio.run(_node(db, task_id, run_id, model).model_call(
+            {"evidence_ids": [], "diagnosis_draft": {}}, explain=True,
+        ))
+    
+        body = json.loads(str(model.messages[0][-1].content))
+>       history = body["prior_readonly_followups"][0]
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'prior_readonly_followups'
+
+tests\test_m4_c1_s3_prompt.py:189: KeyError
+_____ test_c1_wire_04_knowledge_change_after_prompt_blocks_provider_call ______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent����Ŀ/docs/evidence/vnext/m4-c1-final-wiring/runs/red-05/pytest-tmp/test_c1_wire_04_knowledge_chan0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CE732E6FC0>
+
+    def test_c1_wire_04_knowledge_change_after_prompt_blocks_provider_call(tmp_path: Path, monkeypatch) -> None:
+        import opspilot.domain.s3_assets as assets
+    
+        db = tmp_path / "c1-wire-preflight.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id, suffix="wire-preflight")
+        _message_id, run_id = _start_investigation_run(
+            db, session_id, task_id, suffix="wire-preflight-current",
+        )
+        original_docs = assets.load_knowledge(contract_version=2)
+        replacement = [dict(item) for item in original_docs]
+        target = next(item for item in replacement if item["document_id"] == prior["document_id"])
+        target.update({"version": "wire-preflight-v3", "digest": "b" * 64})
+        model = CapturingModel()
+        node = _node(db, task_id, run_id, model)
+        original_prompt = node.prompt
+        calls = 0
+    
+        def invalidate_after_first_prompt(state, *, normalize=False, explain=False):
+            nonlocal calls
+            result = original_prompt(state, normalize=normalize, explain=explain)
+            calls += 1
+            if calls == 1:
+                monkeypatch.setattr(assets, "load_knowledge", lambda *, contract_version=None: replacement)
+            return result
+    
+        monkeypatch.setattr(node, "prompt", invalidate_after_first_prompt)
+        try:
+            asyncio.run(node.model_call(
+                {"evidence_ids": [], "diagnosis_draft": {}}, explain=True,
+            ))
+        except RuntimeError as error:
+            assert str(error) == "S3_CONTEXT_INVALIDATED_BEFORE_PROVIDER"
+        else:
+>           raise AssertionError("stale prior Knowledge was sent to the S3 model")
+E           AssertionError: stale prior Knowledge was sent to the S3 model
+
+tests\test_m4_c1_s3_prompt.py:273: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_s3_prompt.py::test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance
+FAILED tests/test_m4_c1_s3_prompt.py::test_c1_wire_02_stale_knowledge_is_historical_and_exclusion_is_recorded
+FAILED tests/test_m4_c1_s3_prompt.py::test_c1_wire_04_knowledge_change_after_prompt_blocks_provider_call
+3 failed, 1 passed in 6.73s

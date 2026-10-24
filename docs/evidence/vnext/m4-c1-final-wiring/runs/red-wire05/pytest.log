@@ -1,0 +1,38 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+______ test_c1_wire_05_prior_followup_growth_stays_inside_context_budget ______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/m4-autonomy-c1/agent����Ŀ/docs/evidence/vnext/m4-c1-final-wiring/runs/red-wire05/pytest-tmp/test_c1_wire_05_prior_followup0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CE0E16CAA0>
+
+    def test_c1_wire_05_prior_followup_growth_stays_inside_context_budget(tmp_path: Path, monkeypatch) -> None:
+        import opspilot.investigator as investigator
+    
+        db = tmp_path / "c1-wire-budget.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        _persist_previous_followup(db, session_id, task_id, suffix="wire-budget")
+        _message_id, run_id = _start_investigation_run(
+            db, session_id, task_id, suffix="wire-budget-current",
+        )
+        model = CapturingModel()
+        node = _node(db, task_id, run_id, model)
+        messages, _metadata = node.prompt({"evidence_ids": [], "diagnosis_draft": {}})
+        serialized = [{"role": message.type, "content": str(message.content)} for message in messages]
+        full_required = estimate_messages_tokens(serialized) + 8
+        body_without_history = json.loads(str(messages[-1].content))
+        body_without_history["prior_readonly_followups"] = []
+        body_without_history["prior_readonly_followup_exclusions"] = []
+        body_without_history["prior_followup_authority"] = ""
+        without_history = [
+            serialized[0],
+            {"role": messages[-1].type, "content": canonical_json(body_without_history)},
+        ]
+        baseline_required = estimate_messages_tokens(without_history) + 8
+>       assert full_required > baseline_required
+E       assert 906 > 928
+
+tests\test_m4_c1_s3_prompt.py:320: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_s3_prompt.py::test_c1_wire_05_prior_followup_growth_stays_inside_context_budget
+1 failed, 343 deselected in 2.93s
