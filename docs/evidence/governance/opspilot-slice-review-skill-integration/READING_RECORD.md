@@ -39,4 +39,24 @@ Codex CLI 版本：`codex-cli 0.145.0`。
 
 ## 正式评审 Section C 调用
 
-`PENDING`：待实现提交形成后，在同一 Codex 会话中读取提交版本 Skill 并依 Section C 对该候选执行只读审查演练，记录前置核验、六维输出及限制。该演练属于实施方自检，不代表主 Agent 独立审查，不签署主 Agent PASS。
+本节是本实施会话对实现提交的 Skill Section C 调用演练。目标版本为提交 `6943c10f5effd334ad1ed890f78057f8ebe40a4a`；该提交版本的 Skill 与 `AGENTS.md` 已从 Git 实际读取，Section C 按提交内容执行。它是实施方自检，不是主 Agent 独立审查。
+
+**审查前置核验**
+
+- Repo / Branch：`wgqa/OpsPilot` / `codex/opspilot-slice-review-skill-20261024`
+- Base SHA / Candidate HEAD SHA：`77ea80e87e538f0f1fae8118ef231ec622601755` / `6943c10f5effd334ad1ed890f78057f8ebe40a4a`
+- Diff：1 个提交；`AGENTS.md` 顶部入口、项目级 Skill、读取记录，共 3 个文件，+111 行；无合并历史。
+- `PROJECT_NORTH_STAR.md`：目标提交 Blob `1f737712c7a36ceb34433ac09c3fbba3c3305542`，完整读取；`AGENTS.md`：Base Blob `30319000ed0054007e9b7b6b46bf98b1493c8179`、候选 Blob `32c45506cceeaa8c76a5c56bf8360ff476b58856`，均实际读取。
+- 冻结合同：本轮用户任务卡、ZIP `AGENTS_INSERTION.md`；`PROJECT_NORTH_STAR.md` §8 是权威评审准则。没有新增或复制产品 Gold/业务合同。
+- 核验范围：Skill 文件与入口 Diff、Codex model-visible Skill 元数据、A 节运行输出、Git whitespace。业务源码、pytest、HTTP、MCP、Provider、浏览器、独立主 Agent 复跑均 `NOT_RUN`；CLI 实时远端查询 `UNVERIFIED`，父会话 `git fetch origin main` 确认远端 SHA 仍为 Base。
+
+**主 Agent 六维裁决演练**
+
+> **用户变化：** 不增加 OpsPilot 业务能力；后续开发会话会获得实际读取当前 Skill、总纲和阶段合同的清楚入口。
+> **Agent 决策：** 产品 Agent 行为未改变；Codex Skill 元数据确实进入模型可见输入，CLI 开工运行实际读取并执行了 A 节。
+> **观察驱动：** 发现 Skill 元数据只证明可发现；只有 `codex exec` 读取 Skill 并核验文件才证明开工流程执行。默认模型不支持时，换用 CLI 支持模型后流程完成。
+> **新增约束：** 未增加业务 Gate；要求新开发会话读取准则以避免过期记忆覆盖当前合同，同时保留普通问答豁免。CLI 实测证明开工流程可执行；未做业务路径双向测试，因为本轮无业务行为变更。
+> **简化结果：** `PROJECT_NORTH_STAR.md` §8 保持唯一权威；`AGENTS.md` 只增加一段入口，没有复制六问、裁决协议或增加脚本、Hook、CI。
+> **证据与停止线：** Codex discovery 与 Section A 通过；Section C 为实施方只读自检。实时 GitHub 查询失败、业务测试未运行、主 Agent 独立验收未发生；完成文档集成与读取记录后停止。
+
+**实施状态：** `ACCEPTANCE_CANDIDATE`；不签署 `PASS`，不合并，不进入下一产品阶段，交主 Agent 独立验收。
