@@ -1,0 +1,545 @@
+FFFFFF                                                                   [100%]
+================================== FAILURES ===================================
+_ test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-PROCESSED-EARLY-PROCESSED-60-PROCESSED-NO_FURTHER_ACTION] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_sla_chat_outbound_context0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C01B02CAA0>
+case_id = 'SLA-PROCESSED-EARLY', receiver_status = 'PROCESSED', queue_age = 60
+expected_current_state = 'PROCESSED', expected_direction = 'NO_FURTHER_ACTION'
+
+    @pytest.mark.parametrize(
+        ("case_id", "receiver_status", "queue_age", "expected_current_state", "expected_direction"),
+        [
+            ("SLA-PROCESSED-EARLY", "PROCESSED", 60, "PROCESSED", "NO_FURTHER_ACTION"),
+            ("SLA-QUEUED-IN-WINDOW", "QUEUED", 60, "QUEUED", "WAIT_FOR_RECEIVER_PROCESSING"),
+            ("SLA-QUEUED-OVERDUE", "QUEUED", 360, "QUEUED", "CONTACT_RECEIVER_OPERATOR"),
+            ("SLA-202-UNKNOWN", None, 60, None, "EVIDENCE_INSUFFICIENT"),
+        ],
+    )
+    def test_sla_chat_outbound_context_carries_correct_same_event_rule(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        case_id: str,
+        receiver_status: str | None,
+        queue_age: int,
+        expected_current_state: str | None,
+        expected_direction: str,
+    ) -> None:
+>       db, task, prepared = _make_sla_chat_context(
+            tmp_path, monkeypatch, receiver_status=receiver_status,
+            queue_age_seconds=queue_age, order_id=case_id.lower(),
+        )
+
+tests\test_m4_eg_01.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_sla_chat_outbound_context0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C01B02CAA0>
+receiver_status = 'PROCESSED', queue_age_seconds = 60
+order_id = 'sla-processed-early'
+
+    def _make_sla_chat_context(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        receiver_status: str | None,
+        queue_age_seconds: int = 60,
+        order_id: str,
+    ) -> tuple[Path, dict[str, object], dict[str, object]]:
+        import opspilot.domain.s3 as s3
+        from opspilot.domain.s3 import persist_s3_diagnosis
+        from test_m4_03_s3 import _task
+    
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERED_PENDING", order_id,
+            queue_age_seconds=queue_age_seconds, processing_sla_seconds=300,
+        )
+        now = datetime.now(timezone.utc)
+        monkeypatch.setattr(s3, "_now", lambda: now)
+        accepted_at = (now - timedelta(seconds=queue_age_seconds)).isoformat().replace("+00:00", "Z")
+        with connect(db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET accepted_at=?, status=? WHERE order_id=?",
+                (accepted_at, receiver_status or "QUEUED", order_id),
+            )
+            # The fixture's real HTTP 202 and durable queue record stay correlated.
+            row = connection.execute(
+                "SELECT transport_response_json FROM s3_deliveries WHERE order_id=?", (order_id,),
+            ).fetchone()
+            response = json.loads(str(row["transport_response_json"]))
+            response["accepted_at"] = accepted_at
+            from opspilot.domain.d2 import canonical_json, digest_json
+            connection.execute(
+                "UPDATE s3_deliveries SET transport_response_json=?, response_digest=? WHERE order_id=?",
+                (canonical_json(response), digest_json(response), order_id),
+            )
+    
+        order, delivery, receiver = _facts(db, task)
+        evidence_ids = [
+            _evidence(db, task, "get_order_status", order),
+            _evidence(db, task, "get_callback_delivery", delivery),
+        ]
+        if receiver_status is not None:
+            evidence_ids.append(_evidence(db, task, "get_receiver_processing", receiver))
+        diagnosis = persist_s3_diagnosis(
+            db, str(task["task_id"]), str(task["run_id"]), evidence_ids,
+            stop_reason="EG01_NO_CURRENT_RECEIVER_STATE" if receiver_status is None else None,
+        )
+        finish_task_run(db, identity, str(task["run_id"]), "SUCCEEDED")
+        register_worker_owner(db, _CHAT_OWNER, 6201)
+        accepted = admit_task_message(
+            db, identity, session_id=str(task["session_id"]), task_id=str(task["task_id"]),
+            input_kind="CHAT_READONLY", body="ͬһ�¼������Ƿ�����ɣ�",
+            idempotency_key=f"eg01-chat-{order_id}",
+        )
+        from opspilot.domain.task_control import claim_task_run
+        claim_task_run(db, identity, str(accepted["run_id"]))
+        from opspilot.domain.chat import prepare_chat_attempt
+        prepared = prepare_chat_attempt(db, str(accepted["run_id"]), _CHAT_OWNER, "eg01-deterministic")
+        assert diagnosis["run_id"] == task["run_id"]
+>       assert prepared["run_id"] == accepted["run_id"]
+               ^^^^^^^^^^^^^^^^^^
+E       KeyError: 'run_id'
+
+tests\test_m4_eg_01.py:82: KeyError
+_ test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-QUEUED-IN-WINDOW-QUEUED-60-QUEUED-WAIT_FOR_RECEIVER_PROCESSING] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_sla_chat_outbound_context1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C01B02CB30>
+case_id = 'SLA-QUEUED-IN-WINDOW', receiver_status = 'QUEUED', queue_age = 60
+expected_current_state = 'QUEUED'
+expected_direction = 'WAIT_FOR_RECEIVER_PROCESSING'
+
+    @pytest.mark.parametrize(
+        ("case_id", "receiver_status", "queue_age", "expected_current_state", "expected_direction"),
+        [
+            ("SLA-PROCESSED-EARLY", "PROCESSED", 60, "PROCESSED", "NO_FURTHER_ACTION"),
+            ("SLA-QUEUED-IN-WINDOW", "QUEUED", 60, "QUEUED", "WAIT_FOR_RECEIVER_PROCESSING"),
+            ("SLA-QUEUED-OVERDUE", "QUEUED", 360, "QUEUED", "CONTACT_RECEIVER_OPERATOR"),
+            ("SLA-202-UNKNOWN", None, 60, None, "EVIDENCE_INSUFFICIENT"),
+        ],
+    )
+    def test_sla_chat_outbound_context_carries_correct_same_event_rule(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        case_id: str,
+        receiver_status: str | None,
+        queue_age: int,
+        expected_current_state: str | None,
+        expected_direction: str,
+    ) -> None:
+>       db, task, prepared = _make_sla_chat_context(
+            tmp_path, monkeypatch, receiver_status=receiver_status,
+            queue_age_seconds=queue_age, order_id=case_id.lower(),
+        )
+
+tests\test_m4_eg_01.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_sla_chat_outbound_context1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C01B02CB30>
+receiver_status = 'QUEUED', queue_age_seconds = 60
+order_id = 'sla-queued-in-window'
+
+    def _make_sla_chat_context(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        receiver_status: str | None,
+        queue_age_seconds: int = 60,
+        order_id: str,
+    ) -> tuple[Path, dict[str, object], dict[str, object]]:
+        import opspilot.domain.s3 as s3
+        from opspilot.domain.s3 import persist_s3_diagnosis
+        from test_m4_03_s3 import _task
+    
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERED_PENDING", order_id,
+            queue_age_seconds=queue_age_seconds, processing_sla_seconds=300,
+        )
+        now = datetime.now(timezone.utc)
+        monkeypatch.setattr(s3, "_now", lambda: now)
+        accepted_at = (now - timedelta(seconds=queue_age_seconds)).isoformat().replace("+00:00", "Z")
+        with connect(db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET accepted_at=?, status=? WHERE order_id=?",
+                (accepted_at, receiver_status or "QUEUED", order_id),
+            )
+            # The fixture's real HTTP 202 and durable queue record stay correlated.
+            row = connection.execute(
+                "SELECT transport_response_json FROM s3_deliveries WHERE order_id=?", (order_id,),
+            ).fetchone()
+            response = json.loads(str(row["transport_response_json"]))
+            response["accepted_at"] = accepted_at
+            from opspilot.domain.d2 import canonical_json, digest_json
+            connection.execute(
+                "UPDATE s3_deliveries SET transport_response_json=?, response_digest=? WHERE order_id=?",
+                (canonical_json(response), digest_json(response), order_id),
+            )
+    
+        order, delivery, receiver = _facts(db, task)
+        evidence_ids = [
+            _evidence(db, task, "get_order_status", order),
+            _evidence(db, task, "get_callback_delivery", delivery),
+        ]
+        if receiver_status is not None:
+            evidence_ids.append(_evidence(db, task, "get_receiver_processing", receiver))
+        diagnosis = persist_s3_diagnosis(
+            db, str(task["task_id"]), str(task["run_id"]), evidence_ids,
+            stop_reason="EG01_NO_CURRENT_RECEIVER_STATE" if receiver_status is None else None,
+        )
+        finish_task_run(db, identity, str(task["run_id"]), "SUCCEEDED")
+        register_worker_owner(db, _CHAT_OWNER, 6201)
+        accepted = admit_task_message(
+            db, identity, session_id=str(task["session_id"]), task_id=str(task["task_id"]),
+            input_kind="CHAT_READONLY", body="ͬһ�¼������Ƿ�����ɣ�",
+            idempotency_key=f"eg01-chat-{order_id}",
+        )
+        from opspilot.domain.task_control import claim_task_run
+        claim_task_run(db, identity, str(accepted["run_id"]))
+        from opspilot.domain.chat import prepare_chat_attempt
+        prepared = prepare_chat_attempt(db, str(accepted["run_id"]), _CHAT_OWNER, "eg01-deterministic")
+        assert diagnosis["run_id"] == task["run_id"]
+>       assert prepared["run_id"] == accepted["run_id"]
+               ^^^^^^^^^^^^^^^^^^
+E       KeyError: 'run_id'
+
+tests\test_m4_eg_01.py:82: KeyError
+_ test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-QUEUED-OVERDUE-QUEUED-360-QUEUED-CONTACT_RECEIVER_OPERATOR] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_sla_chat_outbound_context2')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C01C5CFE00>
+case_id = 'SLA-QUEUED-OVERDUE', receiver_status = 'QUEUED', queue_age = 360
+expected_current_state = 'QUEUED'
+expected_direction = 'CONTACT_RECEIVER_OPERATOR'
+
+    @pytest.mark.parametrize(
+        ("case_id", "receiver_status", "queue_age", "expected_current_state", "expected_direction"),
+        [
+            ("SLA-PROCESSED-EARLY", "PROCESSED", 60, "PROCESSED", "NO_FURTHER_ACTION"),
+            ("SLA-QUEUED-IN-WINDOW", "QUEUED", 60, "QUEUED", "WAIT_FOR_RECEIVER_PROCESSING"),
+            ("SLA-QUEUED-OVERDUE", "QUEUED", 360, "QUEUED", "CONTACT_RECEIVER_OPERATOR"),
+            ("SLA-202-UNKNOWN", None, 60, None, "EVIDENCE_INSUFFICIENT"),
+        ],
+    )
+    def test_sla_chat_outbound_context_carries_correct_same_event_rule(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        case_id: str,
+        receiver_status: str | None,
+        queue_age: int,
+        expected_current_state: str | None,
+        expected_direction: str,
+    ) -> None:
+>       db, task, prepared = _make_sla_chat_context(
+            tmp_path, monkeypatch, receiver_status=receiver_status,
+            queue_age_seconds=queue_age, order_id=case_id.lower(),
+        )
+
+tests\test_m4_eg_01.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_sla_chat_outbound_context2')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C01C5CFE00>
+receiver_status = 'QUEUED', queue_age_seconds = 360
+order_id = 'sla-queued-overdue'
+
+    def _make_sla_chat_context(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        receiver_status: str | None,
+        queue_age_seconds: int = 60,
+        order_id: str,
+    ) -> tuple[Path, dict[str, object], dict[str, object]]:
+        import opspilot.domain.s3 as s3
+        from opspilot.domain.s3 import persist_s3_diagnosis
+        from test_m4_03_s3 import _task
+    
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERED_PENDING", order_id,
+            queue_age_seconds=queue_age_seconds, processing_sla_seconds=300,
+        )
+        now = datetime.now(timezone.utc)
+        monkeypatch.setattr(s3, "_now", lambda: now)
+        accepted_at = (now - timedelta(seconds=queue_age_seconds)).isoformat().replace("+00:00", "Z")
+        with connect(db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET accepted_at=?, status=? WHERE order_id=?",
+                (accepted_at, receiver_status or "QUEUED", order_id),
+            )
+            # The fixture's real HTTP 202 and durable queue record stay correlated.
+            row = connection.execute(
+                "SELECT transport_response_json FROM s3_deliveries WHERE order_id=?", (order_id,),
+            ).fetchone()
+            response = json.loads(str(row["transport_response_json"]))
+            response["accepted_at"] = accepted_at
+            from opspilot.domain.d2 import canonical_json, digest_json
+            connection.execute(
+                "UPDATE s3_deliveries SET transport_response_json=?, response_digest=? WHERE order_id=?",
+                (canonical_json(response), digest_json(response), order_id),
+            )
+    
+        order, delivery, receiver = _facts(db, task)
+        evidence_ids = [
+            _evidence(db, task, "get_order_status", order),
+            _evidence(db, task, "get_callback_delivery", delivery),
+        ]
+        if receiver_status is not None:
+            evidence_ids.append(_evidence(db, task, "get_receiver_processing", receiver))
+        diagnosis = persist_s3_diagnosis(
+            db, str(task["task_id"]), str(task["run_id"]), evidence_ids,
+            stop_reason="EG01_NO_CURRENT_RECEIVER_STATE" if receiver_status is None else None,
+        )
+        finish_task_run(db, identity, str(task["run_id"]), "SUCCEEDED")
+        register_worker_owner(db, _CHAT_OWNER, 6201)
+        accepted = admit_task_message(
+            db, identity, session_id=str(task["session_id"]), task_id=str(task["task_id"]),
+            input_kind="CHAT_READONLY", body="ͬһ�¼������Ƿ�����ɣ�",
+            idempotency_key=f"eg01-chat-{order_id}",
+        )
+        from opspilot.domain.task_control import claim_task_run
+        claim_task_run(db, identity, str(accepted["run_id"]))
+        from opspilot.domain.chat import prepare_chat_attempt
+        prepared = prepare_chat_attempt(db, str(accepted["run_id"]), _CHAT_OWNER, "eg01-deterministic")
+        assert diagnosis["run_id"] == task["run_id"]
+>       assert prepared["run_id"] == accepted["run_id"]
+               ^^^^^^^^^^^^^^^^^^
+E       KeyError: 'run_id'
+
+tests\test_m4_eg_01.py:82: KeyError
+_ test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-202-UNKNOWN-None-60-None-EVIDENCE_INSUFFICIENT] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_sla_chat_outbound_context3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C01CD196D0>
+case_id = 'SLA-202-UNKNOWN', receiver_status = None, queue_age = 60
+expected_current_state = None, expected_direction = 'EVIDENCE_INSUFFICIENT'
+
+    @pytest.mark.parametrize(
+        ("case_id", "receiver_status", "queue_age", "expected_current_state", "expected_direction"),
+        [
+            ("SLA-PROCESSED-EARLY", "PROCESSED", 60, "PROCESSED", "NO_FURTHER_ACTION"),
+            ("SLA-QUEUED-IN-WINDOW", "QUEUED", 60, "QUEUED", "WAIT_FOR_RECEIVER_PROCESSING"),
+            ("SLA-QUEUED-OVERDUE", "QUEUED", 360, "QUEUED", "CONTACT_RECEIVER_OPERATOR"),
+            ("SLA-202-UNKNOWN", None, 60, None, "EVIDENCE_INSUFFICIENT"),
+        ],
+    )
+    def test_sla_chat_outbound_context_carries_correct_same_event_rule(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        case_id: str,
+        receiver_status: str | None,
+        queue_age: int,
+        expected_current_state: str | None,
+        expected_direction: str,
+    ) -> None:
+>       db, task, prepared = _make_sla_chat_context(
+            tmp_path, monkeypatch, receiver_status=receiver_status,
+            queue_age_seconds=queue_age, order_id=case_id.lower(),
+        )
+
+tests\test_m4_eg_01.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_sla_chat_outbound_context3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002C01CD196D0>
+receiver_status = None, queue_age_seconds = 60, order_id = 'sla-202-unknown'
+
+    def _make_sla_chat_context(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        receiver_status: str | None,
+        queue_age_seconds: int = 60,
+        order_id: str,
+    ) -> tuple[Path, dict[str, object], dict[str, object]]:
+        import opspilot.domain.s3 as s3
+        from opspilot.domain.s3 import persist_s3_diagnosis
+        from test_m4_03_s3 import _task
+    
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERED_PENDING", order_id,
+            queue_age_seconds=queue_age_seconds, processing_sla_seconds=300,
+        )
+        now = datetime.now(timezone.utc)
+        monkeypatch.setattr(s3, "_now", lambda: now)
+        accepted_at = (now - timedelta(seconds=queue_age_seconds)).isoformat().replace("+00:00", "Z")
+        with connect(db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET accepted_at=?, status=? WHERE order_id=?",
+                (accepted_at, receiver_status or "QUEUED", order_id),
+            )
+            # The fixture's real HTTP 202 and durable queue record stay correlated.
+            row = connection.execute(
+                "SELECT transport_response_json FROM s3_deliveries WHERE order_id=?", (order_id,),
+            ).fetchone()
+            response = json.loads(str(row["transport_response_json"]))
+            response["accepted_at"] = accepted_at
+            from opspilot.domain.d2 import canonical_json, digest_json
+            connection.execute(
+                "UPDATE s3_deliveries SET transport_response_json=?, response_digest=? WHERE order_id=?",
+                (canonical_json(response), digest_json(response), order_id),
+            )
+    
+        order, delivery, receiver = _facts(db, task)
+        evidence_ids = [
+            _evidence(db, task, "get_order_status", order),
+            _evidence(db, task, "get_callback_delivery", delivery),
+        ]
+        if receiver_status is not None:
+            evidence_ids.append(_evidence(db, task, "get_receiver_processing", receiver))
+        diagnosis = persist_s3_diagnosis(
+            db, str(task["task_id"]), str(task["run_id"]), evidence_ids,
+            stop_reason="EG01_NO_CURRENT_RECEIVER_STATE" if receiver_status is None else None,
+        )
+        finish_task_run(db, identity, str(task["run_id"]), "SUCCEEDED")
+        register_worker_owner(db, _CHAT_OWNER, 6201)
+        accepted = admit_task_message(
+            db, identity, session_id=str(task["session_id"]), task_id=str(task["task_id"]),
+            input_kind="CHAT_READONLY", body="ͬһ�¼������Ƿ�����ɣ�",
+            idempotency_key=f"eg01-chat-{order_id}",
+        )
+        from opspilot.domain.task_control import claim_task_run
+        claim_task_run(db, identity, str(accepted["run_id"]))
+        from opspilot.domain.chat import prepare_chat_attempt
+        prepared = prepare_chat_attempt(db, str(accepted["run_id"]), _CHAT_OWNER, "eg01-deterministic")
+        assert diagnosis["run_id"] == task["run_id"]
+>       assert prepared["run_id"] == accepted["run_id"]
+               ^^^^^^^^^^^^^^^^^^
+E       KeyError: 'run_id'
+
+tests\test_m4_eg_01.py:82: KeyError
+____ test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule ____
+
+    def test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule() -> None:
+        from opspilot.domain.s3_assets import load_knowledge
+    
+        document = next(
+            item for item in load_knowledge(contract_version=2)
+            if item["document_id"] == "receiver-ack-contract-v2"
+        )
+>       assert document["version"] == "2.1.0"
+E       AssertionError: assert '2.0.0' == '2.1.0'
+E         
+E         - 2.1.0
+E         ?   ^
+E         + 2.0.0
+E         ?   ^
+
+tests\test_m4_eg_01.py:133: AssertionError
+_ test_s3_memory_is_in_actual_investigator_provider_message_and_off_is_absent _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-02/test_s3_memory_is_in_actual_in0')
+
+    def test_s3_memory_is_in_actual_investigator_provider_message_and_off_is_absent(tmp_path: Path) -> None:
+        from langchain_core.messages import AIMessage
+        from opspilot.domain.episodic_memory import confirm_memory, create_memory_candidate
+        from opspilot.domain.s3 import persist_s3_diagnosis
+        from opspilot.s3_investigation import S3Nodes
+        from test_m4_03_s3 import _task
+    
+        class CapturingModel:
+            def __init__(self) -> None:
+                self.messages: list[object] = []
+    
+            def bind_tools(self, *_args, **_kwargs):
+                return self
+    
+            async def ainvoke(self, messages):
+                self.messages.append(messages)
+                return AIMessage(content="I will verify the target Task's own current event before concluding.")
+    
+        db, identity, source = _prepared_task(
+            tmp_path, "DELIVERY_FAILED", "eg01-memory-source", attempt_count=3,
+            max_attempts=3, retry_state="EXHAUSTED",
+        )
+        order, delivery, _receiver = _facts(db, source)
+        source_evidence = [
+            _evidence(db, source, "get_order_status", order),
+            _evidence(db, source, "get_callback_delivery", delivery),
+        ]
+        source_diagnosis = persist_s3_diagnosis(
+            db, str(source["task_id"]), str(source["run_id"]), source_evidence,
+        )
+        finish_task_run(db, identity, str(source["run_id"]), "SUCCEEDED")
+        candidate = create_memory_candidate(
+            db, str(source["task_id"]), "support-a", idempotency_key="eg01-memory-candidate",
+        )
+        active = confirm_memory(
+            db, str(candidate["memory_id"]), "approver-a", idempotency_key="eg01-memory-confirm",
+        )
+    
+        from opspilot.domain.s3 import prepare_s3_fixture
+        prepare_s3_fixture(
+            db, "DELIVERED_PENDING", order_id="eg01-memory-target", queue_age_seconds=60,
+        )
+        _, target = _task(
+            db, "eg01-memory-target",
+            text="�ϴ��������������ƵĻص����⡣����ǲ���Ҳһ�����ܲο�֮ǰ�Ĵ���������ҵ���һ����",
+        )
+        assert target["task_id"] != source["task_id"]
+        model_on = CapturingModel()
+        node_on = S3Nodes(
+            db, str(target["task_id"]), str(target["run_id"]), model_on,
+            "eg01-deterministic", None, [], memory_enabled=True,
+        )
+>       call_id, _calls, _text = asyncio.run(node_on.model_call({"evidence_ids": [], "diagnosis_draft": {}}))
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_eg_01.py:192: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\Lib\asyncio\runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\Lib\asyncio\runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+opspilot\s3_investigation.py:254: in model_call
+    messages, metadata = self.prompt(state, normalize=normalize, explain=explain)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\s3_investigation.py:162: in prompt
+    context = load_investigation_context(self.db, self.task, self.run)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\domain\investigation_context.py:421: in load_investigation_context
+    return _read_context(connection, task_id, run_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x000002C01C9F64D0>
+task_id = 'task-47878773-a58f-44b2-919f-2fd917612773'
+run_id = 'run-d37f9678-ab00-4adb-8f99-e46aae0df3d8'
+
+    def _read_context(connection: sqlite3.Connection, task_id: str, run_id: str) -> dict[str, Any]:
+        row = connection.execute(
+            """SELECT r.*, b.actor_id AS binding_actor_id, b.service_id, b.integration_id,
+                      b.principal_id, b.tenant_id AS binding_tenant_id,
+                      s.owner_id, c.terminal_state, c.control_revision,
+                      c.pending_critical_message_seq,
+                      c.applied_critical_message_seq AS control_applied_critical_message_seq
+               FROM task_runs r
+               JOIN task_bindings b ON b.task_id = r.task_id AND b.tenant_id = r.tenant_id
+               JOIN sessions s ON s.session_id = r.session_id AND s.tenant_id = r.tenant_id
+               JOIN task_controls c ON c.task_id = r.task_id AND c.tenant_id = r.tenant_id
+               WHERE r.run_id = ? AND r.task_id = ?""",
+            (run_id, task_id),
+        ).fetchone()
+        if row is None:
+            raise InvestigationContextInvalid("INVESTIGATION_RUN_CONTEXT_NOT_FOUND")
+        if str(row["kind"]) not in {"INVESTIGATE", "RESUME", "APPROVAL_RESUME", "RECONCILE"}:
+            raise InvestigationContextInvalid("INVESTIGATION_RUN_KIND_INVALID")
+        if str(row["status"]) != "RUNNING":
+>           raise InvestigationContextInvalid("TASK_RUN_NOT_ACTIVE")
+E           opspilot.domain.investigation_context.InvestigationContextInvalid: TASK_RUN_NOT_ACTIVE
+
+opspilot\domain\investigation_context.py:256: InvestigationContextInvalid
+=========================== short test summary info ===========================
+FAILED tests/test_m4_eg_01.py::test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-PROCESSED-EARLY-PROCESSED-60-PROCESSED-NO_FURTHER_ACTION]
+FAILED tests/test_m4_eg_01.py::test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-QUEUED-IN-WINDOW-QUEUED-60-QUEUED-WAIT_FOR_RECEIVER_PROCESSING]
+FAILED tests/test_m4_eg_01.py::test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-QUEUED-OVERDUE-QUEUED-360-QUEUED-CONTACT_RECEIVER_OPERATOR]
+FAILED tests/test_m4_eg_01.py::test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-202-UNKNOWN-None-60-None-EVIDENCE_INSUFFICIENT]
+FAILED tests/test_m4_eg_01.py::test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule
+FAILED tests/test_m4_eg_01.py::test_s3_memory_is_in_actual_investigator_provider_message_and_off_is_absent
+6 failed in 9.08s

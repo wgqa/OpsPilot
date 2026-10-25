@@ -1,0 +1,263 @@
+FFFFFF                                                                   [100%]
+================================== FAILURES ===================================
+_ test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-PROCESSED-EARLY-PROCESSED-60-PROCESSED-NO_FURTHER_ACTION] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-04/test_sla_chat_outbound_context0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002866965C8C0>
+case_id = 'SLA-PROCESSED-EARLY', receiver_status = 'PROCESSED', queue_age = 60
+expected_current_state = 'PROCESSED', expected_direction = 'NO_FURTHER_ACTION'
+
+    @pytest.mark.parametrize(
+        ("case_id", "receiver_status", "queue_age", "expected_current_state", "expected_direction"),
+        [
+            ("SLA-PROCESSED-EARLY", "PROCESSED", 60, "PROCESSED", "NO_FURTHER_ACTION"),
+            ("SLA-QUEUED-IN-WINDOW", "QUEUED", 60, "QUEUED", "WAIT_FOR_RECEIVER_PROCESSING"),
+            ("SLA-QUEUED-OVERDUE", "QUEUED", 360, "QUEUED", "CONTACT_RECEIVER_OPERATOR"),
+            ("SLA-202-UNKNOWN", None, 60, None, "EVIDENCE_INSUFFICIENT"),
+        ],
+    )
+    def test_sla_chat_outbound_context_carries_correct_same_event_rule(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        case_id: str,
+        receiver_status: str | None,
+        queue_age: int,
+        expected_current_state: str | None,
+        expected_direction: str,
+    ) -> None:
+        db, task, prepared = _make_sla_chat_context(
+            tmp_path, monkeypatch, receiver_status=receiver_status,
+            queue_age_seconds=queue_age, order_id=case_id.lower(),
+        )
+        prompt = _prompt_text(prepared)
+        with connect(db) as connection:
+            diagnosis = connection.execute(
+                "SELECT body_json FROM s3_diagnoses WHERE task_id=?", (task["task_id"],),
+            ).fetchone()
+        gate = json.loads(str(diagnosis["body_json"]))["gate"]
+        assert gate["handling_direction"] == expected_direction
+        assert expected_current_state is None or expected_current_state in prompt
+>       assert "SLA applies only to a same-event receiver that is still QUEUED" in prompt
+E       assert 'SLA applies only to a same-event receiver that is still QUEUED' in 'You are OpsPilot\'s read-only support chat. Answer questions and explain only. Never claim that approval, repair, del...ion":1,"scope_policy_version":1}}]\nORIGINAL_TASK_INPUT (UNTRUSTED USER INPUT): �����ӿڷ��� 200��������û���յ��첽�ص���\nͬһ�¼������Ƿ�����ɣ�'
+
+tests\test_m4_eg_01.py:122: AssertionError
+_ test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-QUEUED-IN-WINDOW-QUEUED-60-QUEUED-WAIT_FOR_RECEIVER_PROCESSING] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-04/test_sla_chat_outbound_context1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002866965CA40>
+case_id = 'SLA-QUEUED-IN-WINDOW', receiver_status = 'QUEUED', queue_age = 60
+expected_current_state = 'QUEUED'
+expected_direction = 'WAIT_FOR_RECEIVER_PROCESSING'
+
+    @pytest.mark.parametrize(
+        ("case_id", "receiver_status", "queue_age", "expected_current_state", "expected_direction"),
+        [
+            ("SLA-PROCESSED-EARLY", "PROCESSED", 60, "PROCESSED", "NO_FURTHER_ACTION"),
+            ("SLA-QUEUED-IN-WINDOW", "QUEUED", 60, "QUEUED", "WAIT_FOR_RECEIVER_PROCESSING"),
+            ("SLA-QUEUED-OVERDUE", "QUEUED", 360, "QUEUED", "CONTACT_RECEIVER_OPERATOR"),
+            ("SLA-202-UNKNOWN", None, 60, None, "EVIDENCE_INSUFFICIENT"),
+        ],
+    )
+    def test_sla_chat_outbound_context_carries_correct_same_event_rule(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        case_id: str,
+        receiver_status: str | None,
+        queue_age: int,
+        expected_current_state: str | None,
+        expected_direction: str,
+    ) -> None:
+        db, task, prepared = _make_sla_chat_context(
+            tmp_path, monkeypatch, receiver_status=receiver_status,
+            queue_age_seconds=queue_age, order_id=case_id.lower(),
+        )
+        prompt = _prompt_text(prepared)
+        with connect(db) as connection:
+            diagnosis = connection.execute(
+                "SELECT body_json FROM s3_diagnoses WHERE task_id=?", (task["task_id"],),
+            ).fetchone()
+        gate = json.loads(str(diagnosis["body_json"]))["gate"]
+        assert gate["handling_direction"] == expected_direction
+        assert expected_current_state is None or expected_current_state in prompt
+>       assert "SLA applies only to a same-event receiver that is still QUEUED" in prompt
+E       assert 'SLA applies only to a same-event receiver that is still QUEUED' in 'You are OpsPilot\'s read-only support chat. Answer questions and explain only. Never claim that approval, repair, del...ion":1,"scope_policy_version":1}}]\nORIGINAL_TASK_INPUT (UNTRUSTED USER INPUT): �����ӿڷ��� 200��������û���յ��첽�ص���\nͬһ�¼������Ƿ�����ɣ�'
+
+tests\test_m4_eg_01.py:122: AssertionError
+_ test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-QUEUED-OVERDUE-QUEUED-360-QUEUED-CONTACT_RECEIVER_OPERATOR] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-04/test_sla_chat_outbound_context2')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002866AC4DE80>
+case_id = 'SLA-QUEUED-OVERDUE', receiver_status = 'QUEUED', queue_age = 360
+expected_current_state = 'QUEUED'
+expected_direction = 'CONTACT_RECEIVER_OPERATOR'
+
+    @pytest.mark.parametrize(
+        ("case_id", "receiver_status", "queue_age", "expected_current_state", "expected_direction"),
+        [
+            ("SLA-PROCESSED-EARLY", "PROCESSED", 60, "PROCESSED", "NO_FURTHER_ACTION"),
+            ("SLA-QUEUED-IN-WINDOW", "QUEUED", 60, "QUEUED", "WAIT_FOR_RECEIVER_PROCESSING"),
+            ("SLA-QUEUED-OVERDUE", "QUEUED", 360, "QUEUED", "CONTACT_RECEIVER_OPERATOR"),
+            ("SLA-202-UNKNOWN", None, 60, None, "EVIDENCE_INSUFFICIENT"),
+        ],
+    )
+    def test_sla_chat_outbound_context_carries_correct_same_event_rule(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        case_id: str,
+        receiver_status: str | None,
+        queue_age: int,
+        expected_current_state: str | None,
+        expected_direction: str,
+    ) -> None:
+        db, task, prepared = _make_sla_chat_context(
+            tmp_path, monkeypatch, receiver_status=receiver_status,
+            queue_age_seconds=queue_age, order_id=case_id.lower(),
+        )
+        prompt = _prompt_text(prepared)
+        with connect(db) as connection:
+            diagnosis = connection.execute(
+                "SELECT body_json FROM s3_diagnoses WHERE task_id=?", (task["task_id"],),
+            ).fetchone()
+        gate = json.loads(str(diagnosis["body_json"]))["gate"]
+        assert gate["handling_direction"] == expected_direction
+        assert expected_current_state is None or expected_current_state in prompt
+>       assert "SLA applies only to a same-event receiver that is still QUEUED" in prompt
+E       assert 'SLA applies only to a same-event receiver that is still QUEUED' in 'You are OpsPilot\'s read-only support chat. Answer questions and explain only. Never claim that approval, repair, del...ion":1,"scope_policy_version":1}}]\nORIGINAL_TASK_INPUT (UNTRUSTED USER INPUT): �����ӿڷ��� 200��������û���յ��첽�ص���\nͬһ�¼������Ƿ�����ɣ�'
+
+tests\test_m4_eg_01.py:122: AssertionError
+_ test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-202-UNKNOWN-None-60-None-EVIDENCE_INSUFFICIENT] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-04/test_sla_chat_outbound_context3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002866AC8DDC0>
+case_id = 'SLA-202-UNKNOWN', receiver_status = None, queue_age = 60
+expected_current_state = None, expected_direction = 'EVIDENCE_INSUFFICIENT'
+
+    @pytest.mark.parametrize(
+        ("case_id", "receiver_status", "queue_age", "expected_current_state", "expected_direction"),
+        [
+            ("SLA-PROCESSED-EARLY", "PROCESSED", 60, "PROCESSED", "NO_FURTHER_ACTION"),
+            ("SLA-QUEUED-IN-WINDOW", "QUEUED", 60, "QUEUED", "WAIT_FOR_RECEIVER_PROCESSING"),
+            ("SLA-QUEUED-OVERDUE", "QUEUED", 360, "QUEUED", "CONTACT_RECEIVER_OPERATOR"),
+            ("SLA-202-UNKNOWN", None, 60, None, "EVIDENCE_INSUFFICIENT"),
+        ],
+    )
+    def test_sla_chat_outbound_context_carries_correct_same_event_rule(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        case_id: str,
+        receiver_status: str | None,
+        queue_age: int,
+        expected_current_state: str | None,
+        expected_direction: str,
+    ) -> None:
+        db, task, prepared = _make_sla_chat_context(
+            tmp_path, monkeypatch, receiver_status=receiver_status,
+            queue_age_seconds=queue_age, order_id=case_id.lower(),
+        )
+        prompt = _prompt_text(prepared)
+        with connect(db) as connection:
+            diagnosis = connection.execute(
+                "SELECT body_json FROM s3_diagnoses WHERE task_id=?", (task["task_id"],),
+            ).fetchone()
+        gate = json.loads(str(diagnosis["body_json"]))["gate"]
+        assert gate["handling_direction"] == expected_direction
+        assert expected_current_state is None or expected_current_state in prompt
+>       assert "SLA applies only to a same-event receiver that is still QUEUED" in prompt
+E       assert 'SLA applies only to a same-event receiver that is still QUEUED' in 'You are OpsPilot\'s read-only support chat. Answer questions and explain only. Never claim that approval, repair, del...ion":1,"scope_policy_version":1}}]\nORIGINAL_TASK_INPUT (UNTRUSTED USER INPUT): �����ӿڷ��� 200��������û���յ��첽�ص���\nͬһ�¼������Ƿ�����ɣ�'
+
+tests\test_m4_eg_01.py:122: AssertionError
+____ test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule ____
+
+    def test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule() -> None:
+        from opspilot.domain.s3_assets import load_knowledge
+    
+        document = next(
+            item for item in load_knowledge(contract_version=2)
+            if item["document_id"] == "receiver-ack-contract-v2"
+        )
+>       assert document["version"] == "2.1.0"
+E       AssertionError: assert '2.0.0' == '2.1.0'
+E         
+E         - 2.1.0
+E         ?   ^
+E         + 2.0.0
+E         ?   ^
+
+tests\test_m4_eg_01.py:135: AssertionError
+_ test_s3_memory_is_in_actual_investigator_provider_message_and_off_is_absent _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/.pytest-tmp/m4-eg-01-red-sla-04/test_s3_memory_is_in_actual_in0')
+
+    def test_s3_memory_is_in_actual_investigator_provider_message_and_off_is_absent(tmp_path: Path) -> None:
+        from langchain_core.messages import AIMessage
+        from opspilot.domain.episodic_memory import confirm_memory, create_memory_candidate
+        from opspilot.domain.s3 import persist_s3_diagnosis
+        from opspilot.s3_investigation import S3Nodes
+        from test_m4_03_s3 import _task
+    
+        class CapturingModel:
+            def __init__(self) -> None:
+                self.messages: list[object] = []
+    
+            def bind_tools(self, *_args, **_kwargs):
+                return self
+    
+            async def ainvoke(self, messages):
+                self.messages.append(messages)
+                return AIMessage(content="I will verify the target Task's own current event before concluding.")
+    
+        db, identity, source = _prepared_task(
+            tmp_path, "DELIVERY_FAILED", "eg01-memory-source", attempt_count=3,
+            max_attempts=3, retry_state="EXHAUSTED",
+        )
+        order, delivery, _receiver = _facts(db, source)
+        source_evidence = [
+            _evidence(db, source, "get_order_status", order),
+            _evidence(db, source, "get_callback_delivery", delivery),
+        ]
+        source_diagnosis = persist_s3_diagnosis(
+            db, str(source["task_id"]), str(source["run_id"]), source_evidence,
+        )
+        finish_task_run(db, identity, str(source["run_id"]), "SUCCEEDED")
+        candidate = create_memory_candidate(
+            db, str(source["task_id"]), "support-a", idempotency_key="eg01-memory-candidate",
+        )
+        active = confirm_memory(
+            db, str(candidate["memory_id"]), "approver-a", idempotency_key="eg01-memory-confirm",
+        )
+    
+        from opspilot.domain.s3 import prepare_s3_fixture
+        prepare_s3_fixture(
+            db, "DELIVERED_PENDING", order_id="eg01-memory-target", queue_age_seconds=60,
+        )
+        _, target = _task(
+            db, "eg01-memory-target",
+            text="A similar callback delivery failure happened before. Please investigate this retry and delivery problem.",
+        )
+        assert target["task_id"] != source["task_id"]
+        from opspilot.domain.task_control import apply_pending_critical_inputs, claim_task_run
+        claim_task_run(db, identity, str(target["run_id"]))
+        apply_pending_critical_inputs(db, identity, str(target["run_id"]))
+        model_on = CapturingModel()
+        node_on = S3Nodes(
+            db, str(target["task_id"]), str(target["run_id"]), model_on,
+            "eg01-deterministic", None, [], memory_enabled=True,
+        )
+        call_id, _calls, _text = asyncio.run(node_on.model_call({"evidence_ids": [], "diagnosis_draft": {}}))
+        sent = "\n".join(str(item.content) for item in model_on.messages[0])
+        assert str(active["memory_id"]) in sent
+        assert str(source["task_id"]) in sent
+        assert "historical_episodic_method_only" in sent
+        assert "historical_episodic_method_only" in sent and "current_mcp_evidence" in sent
+>       assert "get_order_status" in sent or "get_callback_delivery" in sent
+E       assert ('get_order_status' in 'Investigate this bound asynchronous order READ ONLY. The latest user question is your goal, not the Domain Gate decis...MPTOM","message_id":"message-ca82871f-cc05-4872-aa25-39e76827982b","provenance":"USER_INPUT_UNTRUSTED","sequence":1}]}' or 'get_callback_delivery' in 'Investigate this bound asynchronous order READ ONLY. The latest user question is your goal, not the Domain Gate decis...MPTOM","message_id":"message-ca82871f-cc05-4872-aa25-39e76827982b","provenance":"USER_INPUT_UNTRUSTED","sequence":1}]}')
+
+tests\test_m4_eg_01.py:203: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_eg_01.py::test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-PROCESSED-EARLY-PROCESSED-60-PROCESSED-NO_FURTHER_ACTION]
+FAILED tests/test_m4_eg_01.py::test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-QUEUED-IN-WINDOW-QUEUED-60-QUEUED-WAIT_FOR_RECEIVER_PROCESSING]
+FAILED tests/test_m4_eg_01.py::test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-QUEUED-OVERDUE-QUEUED-360-QUEUED-CONTACT_RECEIVER_OPERATOR]
+FAILED tests/test_m4_eg_01.py::test_sla_chat_outbound_context_carries_correct_same_event_rule[SLA-202-UNKNOWN-None-60-None-EVIDENCE_INSUFFICIENT]
+FAILED tests/test_m4_eg_01.py::test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule
+FAILED tests/test_m4_eg_01.py::test_s3_memory_is_in_actual_investigator_provider_message_and_off_is_absent
+6 failed in 9.10s
