@@ -244,8 +244,10 @@ def test_chat_context_preserves_only_current_run_s3_observations(
             "transport_request_id": next(item["facts"]["transport_request_id"] for item in observations if item["fact_type"] == "s3_delivery"),
             "gate": gate, "frozen_diagnosis_gate": diagnosis_body["gate"],
             "chat_evidence_refs": prepared["evidence_refs"],
+            "provider_input_messages": prepared["messages"],
             "chat_fact_types": [item["fact_type"] for item in facts],
             "chat_fact_evidence_ids": [item["evidence_id"] for item in facts],
+            "excluded_sources": prepared["excluded_sources"],
             "business_snapshot_before_chat": business_before_chat,
             "business_snapshot_after_chat": _business_snapshot(db, task_id),
             "provider_call": "NOT_RUN; prepare_chat_attempt output is the exact provider-input payload, no Provider was invoked by this test",
@@ -276,6 +278,16 @@ def test_chat_context_preserves_only_current_run_s3_observations(
             and item["observed_versions"] == delivery["observed_versions"]
             for item in facts
         )
+        delivery_context = next(item for item in facts if item["fact_type"] == "s3_delivery")
+        assert "transport_response_json" not in delivery_context["facts"], (
+            "the immutable HTTP 202 payload may describe acceptance-time QUEUED, not current Receiver state"
+        )
+        with connect(db) as connection:
+            manifest = connection.execute(
+                "SELECT evidence_refs_json FROM chat_context_manifests WHERE attempt_id=?",
+                (prepared["attempt_id"],),
+            ).fetchone()
+        assert json.loads(str(manifest["evidence_refs_json"])) == prepared["evidence_refs"]
         if receiver_status is None:
             assert "s3_receiver" not in {item["fact_type"] for item in facts}
             assert "HTTP 202 alone proves acceptance only; without current same-event receiver evidence, state is UNKNOWN" in "\n".join(
@@ -285,3 +297,56 @@ def test_chat_context_preserves_only_current_run_s3_observations(
         api.shutdown()
         thread.join()
         api.server_close()
+
+
+def test_chat_context_does_not_mix_another_tasks_s3_observations(tmp_path: Path) -> None:
+    """A valid, current observation from another bound Task is never Chat evidence."""
+    import os
+
+    from opspilot.domain.s3 import persist_s3_diagnosis, prepare_s3_fixture
+    from opspilot.domain.task_control import (
+        admit_task_message, finish_task_run, register_worker_owner,
+    )
+    from test_m4_03_s3 import _evidence, _facts, _task
+
+    order_a, order_b = "hf01-cross-task-a", "hf01-cross-task-b"
+    db, identity_a, task_a = _prepared_task(tmp_path, "DELIVERED_PENDING", order_a)
+    facts_a = _facts(db, task_a)
+    evidence_a = _evidence(db, task_a, "get_order_status", facts_a[0])
+    diagnosis_a = persist_s3_diagnosis(db, str(task_a["task_id"]), str(task_a["run_id"]), [evidence_a], stop_reason="INCONCLUSIVE_PARTIAL")
+    finish_task_run(db, identity_a, str(task_a["run_id"]), "SUCCEEDED")
+
+    prepare_s3_fixture(db, "DELIVERED_PENDING", order_id=order_b)
+    identity_b, task_b = _task(db, order_b, text="确认第二个订单的回调状态")
+    facts_b = _facts(db, task_b)
+    evidence_b = _evidence(db, task_b, "get_order_status", facts_b[0])
+    diagnosis_b = persist_s3_diagnosis(db, str(task_b["task_id"]), str(task_b["run_id"]), [evidence_b], stop_reason="INCONCLUSIVE_PARTIAL")
+    finish_task_run(db, identity_b, str(task_b["run_id"]), "SUCCEEDED")
+
+    worker_id = "hf01-cross-task-chat-worker"
+    register_worker_owner(db, worker_id, os.getpid())
+    accepted = admit_task_message(
+        db, identity_b, session_id=str(task_b["session_id"]), task_id=str(task_b["task_id"]),
+        input_kind="CHAT_READONLY", body="只解释第二个订单当前能确认的事实。",
+        idempotency_key="hf01-cross-task-chat-b",
+    )
+    from opspilot.domain.task_control import claim_task_run
+    claim_task_run(db, identity_b, str(accepted["run_id"]))
+    from opspilot.domain.chat import prepare_chat_attempt
+
+    prepared = prepare_chat_attempt(db, str(accepted["run_id"]), worker_id, "hf01-cross-task-context")
+    facts = _current_facts_from_messages(prepared["messages"])
+    _trace({
+        "case_id": "HF01-CROSS-TASK",
+        "source_task_id": str(task_a["task_id"]), "target_task_id": str(task_b["task_id"]),
+        "source_evidence_id": evidence_a, "source_run_id": str(task_a["run_id"]),
+        "source_diagnosis": {"receipt_id": diagnosis_a["receipt_id"], "digest": diagnosis_a["digest"]},
+        "target_evidence_id": evidence_b, "target_run_id": str(task_b["run_id"]),
+        "target_diagnosis": {"receipt_id": diagnosis_b["receipt_id"], "digest": diagnosis_b["digest"]},
+        "chat_run_id": str(accepted["run_id"]), "chat_fact_evidence_ids": [item["evidence_id"] for item in facts],
+        "chat_fact_order_ids": [item["facts"]["body"]["order_id"] for item in facts if item["fact_type"] == "s3_order"],
+        "result": "PASS: only Task B's current Run observation entered Chat Context",
+    })
+    assert evidence_b in {item["evidence_id"] for item in facts}
+    assert evidence_a not in {item["evidence_id"] for item in facts}
+    assert {item["facts"]["body"]["order_id"] for item in facts if item["fact_type"] == "s3_order"} == {order_b}

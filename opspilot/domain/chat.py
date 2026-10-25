@@ -163,7 +163,7 @@ def _current_evidence(
     excluded_sources: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     if state.get("service_id") == "orders-async-demo":
-        from opspilot.domain.s3 import current_s3_evidence, s3_outcome_in_transaction
+        from opspilot.domain.s3 import FACT_TO_TOOL, current_s3_evidence, s3_outcome_in_transaction
         diagnosis = connection.execute(
             "SELECT * FROM s3_diagnoses WHERE task_id=? ORDER BY rowid DESC LIMIT 1", (task_id,)
         ).fetchone()
@@ -179,25 +179,55 @@ def _current_evidence(
                     "source_id": str(diagnosis["receipt_id"]), "reason": "S3_DIAGNOSIS_NOT_CURRENT",
                 }])
             return []
-        body = json.loads(str(diagnosis["body_json"]))
-        ids = json.loads(str(diagnosis["evidence_ids_json"]))
-        pins = body.get("observation_pins") if isinstance(body.get("observation_pins"), dict) else None
-        if pins is None and isinstance(body.get("observations"), list):
-            pins = {
-                str(item["evidence_id"]): str(item["observation_id"])
-                for item in body["observations"]
-                if isinstance(item, dict) and item.get("evidence_id") and item.get("observation_id")
-            }
+        # Gate checked_fact_ids are the minimal facts used for a formal outcome,
+        # not the complete set of current observations that Chat may explain.
+        # Rebuild candidate IDs from persisted successful MCP attempts for the
+        # diagnosis Run, then let the Domain validator recheck each fact,
+        # Observation, binding, authorization, version and TTL. Do not trust the
+        # frozen diagnosis body's copied facts or observation pins as authority.
+        run_id = str(diagnosis["run_id"])
+        tool_names = tuple(sorted(set(FACT_TO_TOOL.values())))
+        tool_placeholders = ",".join("?" for _ in tool_names)
+        observation_rows = connection.execute(
+            f"""SELECT o.evidence_id FROM d2_tool_observations o
+                 JOIN d2_attempts a ON a.attempt_id=o.attempt_id AND a.task_id=o.task_id
+                 JOIN d2_evidence e ON e.evidence_id=o.evidence_id AND e.task_id=o.task_id
+                 WHERE o.task_id=? AND a.run_id=? AND a.kind='MCP' AND a.status='OK'
+                   AND o.status='OK' AND o.tool_name IN ({tool_placeholders})
+                   AND e.fact_type IN ({','.join('?' for _ in FACT_TO_TOOL)})
+                 ORDER BY o.rowid""",
+            (task_id, run_id, *tool_names, *FACT_TO_TOOL.keys()),
+        ).fetchall()
+        ids = list(dict.fromkeys(str(item["evidence_id"]) for item in observation_rows if item["evidence_id"]))
+        if not ids:
+            if excluded_sources is not None:
+                excluded_sources.append({"source_id": run_id, "reason": "S3_RUN_OBSERVATIONS_UNAVAILABLE"})
+            return []
         items, excluded = current_s3_evidence(
-            connection, task_id, ids, run_id=str(diagnosis["run_id"]),
-            observation_ids=pins,
-            observed_before=str(diagnosis["created_at"]) if pins is None else None,
+            connection, task_id, ids, run_id=run_id,
+            observed_before=str(diagnosis["created_at"]),
         )
         if excluded_sources is not None:
             excluded_sources.extend(excluded)
-        return [{"evidence_id":e["evidence_id"],"fact_type":e["fact_type"],"fetched_at":e["fetched_at"],
-                 "digest":e["digest"],"versions_digest":_digest(_canonical(e["observed_versions"])),
-                 "versions":e["observed_versions"],"facts":e["facts"]} for e in items]
+        current_facts = []
+        for evidence in items:
+            facts = evidence["facts"]
+            if evidence["fact_type"] == "s3_delivery" and isinstance(facts, dict):
+                # The immutable POST response can describe receiver state at
+                # acceptance time. Chat uses the separately observed current
+                # s3_receiver fact for status, so do not present that snapshot
+                # as if it were current Receiver evidence.
+                facts = {key: value for key, value in facts.items() if key != "transport_response_json"}
+            current_facts.append({
+                "evidence_id": evidence["evidence_id"],
+                "fact_type": evidence["fact_type"],
+                "fetched_at": evidence["fetched_at"],
+                "digest": evidence["digest"],
+                "versions_digest": _digest(_canonical(evidence["observed_versions"])),
+                "versions": evidence["observed_versions"],
+                "facts": facts,
+            })
+        return current_facts
     binding = connection.execute(
         "SELECT tenant_id FROM task_bindings WHERE task_id = ?", (task_id,)
     ).fetchone()
