@@ -615,7 +615,9 @@ async function confirmInvestigationUpdate(proposal: InvestigationUpdateProposal)
       .find((facts) => typeof facts?.http_status === 'number');
     const probeSummary = typeof probeFacts?.http_status === 'number'
       ? `；当前真实 Probe HTTP ${probeFacts.http_status}` : '';
-    notice.value = `重新调查已结束：Run ${readableStatus(completed.status)}；确定性 Gate ${readableGate(previousGate)} → ${readableGate(currentGate)}${reason ? `（${reason}）` : ''}；当前有效 Evidence ${currentEvidence.length} 项${probeSummary}。判断依据是新 Run 的可信事实，用户纠错仍是未验证线索。`;
+    notice.value = inspector.value?.task.service_id === 'orders-async-demo'
+      ? `重新调查 Run ${readableStatus(completed.status)}；正式业务 Gate：${readableGate(currentGate)}。本轮答复的观察来源与未知事项见上方卡片；部分调查事实不等同于正式业务资格。纠错文字仍是未验证线索。`
+      : `重新调查已结束：Run ${readableStatus(completed.status)}；确定性 Gate ${readableGate(previousGate)} → ${readableGate(currentGate)}${reason ? `（${reason}）` : ''}；当前有效 Evidence ${currentEvidence.length} 项${probeSummary}。判断依据是新 Run 的可信事实，用户纠错仍是未验证线索。`;
   } catch (error) {
     errorMessage.value = explainError(error);
     await refreshInspector();
@@ -910,7 +912,7 @@ function readableUpdateStatus(value: unknown): string {
 
 function readableGate(value: unknown): string {
   const gate = String(value ?? 'INCONCLUSIVE');
-  return ({ READY: '证据满足 Plan 候选条件', DIAGNOSED: '可信 Scope 诊断通过', HANDOFF_READY: '申请草稿已冻结', NEED_MORE: '证据仍需补充', NO_ACTION: '当前事实不允许动作', INCONCLUSIVE: '证据不足或存在冲突' } as Record<string, string>)[gate] ?? gate;
+  return ({ READY: '证据满足 Plan 候选条件', DIAGNOSED: '可信业务诊断已形成', HANDOFF_READY: '申请草稿已冻结', NEED_MORE: '证据仍需补充', NO_ACTION: '当前事实不允许动作', INCONCLUSIVE: '证据不足或存在冲突' } as Record<string, string>)[gate] ?? gate;
 }
 
 function readableRunReason(value: unknown): string {
@@ -1296,7 +1298,7 @@ onBeforeUnmount(() => {
               <div class="message-bubble">{{ message.body }}</div>
             </div>
           </article>
-          <div v-if="inspector && inspector.trusted_state.s3_outcome" class="s3-result-card" data-testid="s3-diagnosis"><span>当前调查结果 · 持久业务回执</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', RECEIVER_PROCESSED: '同一回调事件已由接收方处理完成', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
+          <div v-if="inspector && inspector.trusted_state.s3_outcome" class="s3-result-card" data-testid="s3-diagnosis"><span>当前调查结果 · 持久业务回执</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', RECEIVER_PROCESSED: '同一回调事件已由接收方处理完成', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation && !(inspector.investigation_answers ?? []).some(item => item.report_ref === (inspector!.trusted_state.s3_outcome as Record<string, unknown>).receipt_id)">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
           <article v-for="followup in [...(inspector?.readonly_followups ?? [])].reverse()" :key="followup.run_id" class="readonly-followup-card" :data-testid="`readonly-followup-${followup.run_id}`" :data-source-message-id="followup.source_message_id">
             <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">READONLY TASK FOLLOW-UP</span><h2>同一任务的连续调查</h2></div><span class="status-badge" :class="followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ followup.result_state === 'ANSWERED' ? '已答复' : followup.result_state === 'PARTIAL' ? '结果与待核实事项' : followup.result_state === 'NOT_COMPLETED' ? '需要补充' : '调查中' }}</span></div>
             <p>{{ followup.answer_text || '本次补查尚未形成可展示的回答。' }}</p>

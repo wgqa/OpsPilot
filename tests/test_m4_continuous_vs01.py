@@ -465,3 +465,32 @@ def test_vs01_actual_receiver_response_meets_the_frozen_s3_gate(tmp_path):
     gate=evaluate_s3_gate(db,task["task_id"],ids,run_id=task["run_id"])
     assert gate["decision"] == "DIAGNOSED",gate
     assert gate["handling_direction"] == "WAIT_FOR_RECEIVER_PROCESSING"
+
+
+def test_vs11_followup_after_applied_correction_carries_the_trusted_highwater(tmp_path):
+    from opspilot.domain.task_control import trusted_identity,admit_task_message,claim_task_run,apply_pending_critical_inputs,finish_task_run
+    from opspilot.domain.investigation_context import load_investigation_context
+    from opspilot.domain.s3 import persist_s3_diagnosis
+    db=tmp_path/"corrected-followup.sqlite3"
+    reset_fixture(db,"S1_POS")
+    session,task,_,_=_diagnosed_task(db)
+    identity=trusted_identity(db,"support-a")
+    correction=admit_task_message(db,identity,session_id=session,task_id=task,input_kind="CORRECT_TASK_INPUT",
+        body="更正：请核对 earlier-event 的历史，不要把最新事件当成这次。",idempotency_key="formal-correction")
+    claim_task_run(db,identity,correction["run_id"])
+    apply_pending_critical_inputs(db,identity,correction["run_id"])
+    persist_s3_diagnosis(db,task,correction["run_id"],[])
+    finish_task_run(db,identity,correction["run_id"],"SUCCEEDED")
+    before=_business_only(db,task)
+    for i in range(8): reserve_attempt(db,task,"MODEL",8,call_id=f"spent-corrected-{i}")
+    _,run=_start_investigation_run(db,session,task,suffix="after-correction")
+    context=load_investigation_context(db,task,run)
+    assert any(item["kind"]=="CRITICAL_CORRECTION" for item in context["inputs"])
+    assert context["task_run_control"]["applied_critical_message_seq"] > 0
+    model=Model([])
+    asyncio.run(_node(db,task,run,model).report({"evidence_ids":[],"tool_observations":[]}))
+    assert _business_only(db,task)==before and not model.messages
+    assert attempt_counts(db,task)["MODEL"]==8
+    with connect(db) as c:
+        row=c.execute("SELECT answer_text,result_state FROM c1_readonly_followup_runs WHERE run_id=?",(run,)).fetchone()
+    assert row[0].strip() and row[1]=="PARTIAL"

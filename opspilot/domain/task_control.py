@@ -1386,10 +1386,10 @@ def create_readonly_followup_run_in_transaction(
     connection.execute(
         """INSERT INTO task_runs
            (run_id,tenant_id,task_id,session_id,command_id,source_message_id,kind,status,
-            control_revision_at_start,expected_control_revision,consumed_message_seq,created_at)
-           VALUES (?,?,?,?,?,?,'INVESTIGATE','QUEUED',?,?,?,?)""",
+          control_revision_at_start,expected_control_revision,consumed_message_seq,applied_critical_message_seq,created_at)
+         VALUES (?,?,?,?,?,?,'INVESTIGATE','QUEUED',?,?,?,?,?)""",
         (run_id, identity.tenant_id, task_id, session_id, command_id, source_message_id,
-         expected_control_revision, expected_control_revision, sequence, now),
+         expected_control_revision, expected_control_revision, sequence, int(control["applied_critical_message_seq"]), now),
     )
     connection.execute(
         """INSERT INTO c1_readonly_followup_runs

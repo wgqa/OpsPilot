@@ -88,7 +88,7 @@ export interface Inspector {
   investigation_answers?: Array<{
     run_id: string; source_message_id: string; answer_text: string; result_state: string;
     source_refs: Array<Record<string, unknown>>; result: Record<string, unknown>;
-    currentness: string; created_at: string;
+    currentness: string; created_at: string; report_ref: string;
   }>;
   readonly_followups: Array<{
     run_id: string;
