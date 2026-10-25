@@ -144,11 +144,13 @@ def prepare_transport_history_fixture(
                 self.close_connection = True  # actual send, no definite response
                 self.connection.shutdown(2)
                 return
-            response = {**body, "receiver_state": receiver_status if code == 202 else "UNAVAILABLE",
+            response = {**body, "receiver_state": "QUEUED" if code == 202 else "UNAVAILABLE",
                         "failure_code": None if code == 202 else "TEMPORARY_UNAVAILABLE",
                         "attempt_count": ordinals[body["event_id"]], "max_attempts": 10,
                         "retry_state": "NOT_APPLICABLE" if code == 202 else "SCHEDULED",
                         "retry_at": None if code == 202 else (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()}
+            if code == 202:
+                response.update(accepted_at=utc_now(),processing_sla_seconds=300)
             raw = canonical_json(response).encode()
             self.send_response(int(code))
             self.send_header("Content-Type", "application/json")
@@ -207,20 +209,22 @@ def prepare_transport_history_fixture(
                     connection.execute("UPDATE s3_orders SET status='COMPLETED' WHERE tenant_id=? AND service_id=? AND order_id=?", (tenant_id, SERVICE, order_id))
                     connection.execute(
                         """UPDATE s3_deliveries SET event_id=?,order_version=?,version=version+1,status=?,receiver_http_status=?,transport_request_id=?,
-                           response_digest=?,failure_code=?,attempt_count=?,max_attempts=10,retry_state=?,transport_response_json=?
+                           response_digest=?,failure_code=?,attempt_count=?,max_attempts=10,retry_state=?,retry_at=?,transport_response_json=?
                            WHERE tenant_id=? AND service_id=? AND order_id=?""",
                         (event, request["order_version"], "ACKNOWLEDGED" if accepted else "FAILED", code, request["request_id"], digest_json(projection_response),
-                         projection_response["failure_code"], ordinals[event], "NOT_APPLICABLE" if accepted else "SCHEDULED",
+                         projection_response["failure_code"], ordinals[event], "NOT_APPLICABLE" if accepted else "SCHEDULED",projection_response.get("retry_at"),
                          canonical_json(projection_response), tenant_id, SERVICE, order_id),
                     )
                     delivery_version = connection.execute("SELECT version FROM s3_deliveries WHERE tenant_id=? AND service_id=? AND order_id=?", (tenant_id, SERVICE, order_id)).fetchone()[0]
                     connection.execute(
                         """UPDATE s3_receivers SET event_id=?,delivery_version=?,version=version+1,status=?,accepted_at=?,processing_sla_seconds=300
                            WHERE tenant_id=? AND service_id=? AND order_id=?""",
-                        (event, delivery_version, receiver_status if accepted else "NOT_RECEIVED", observed if accepted else None, tenant_id, SERVICE, order_id),
+                        (event, delivery_version, receiver_status if accepted else "NOT_RECEIVED", response.get("accepted_at") if accepted else None, tenant_id, SERVICE, order_id),
                     )
             trace.append({"preparation_only": True, "request": request, "http_status": code, "response": response,
-                          "raw_http_status":raw_http_status,"started_at": started, "observed_at": observed, "error": error, "persisted": captured, "record": record if captured else None})
+                          "raw_http_status":raw_http_status,"started_at": started, "observed_at": observed, "error": error, "persisted": captured,
+                          "prepared_receiver_projection_after_http":receiver_status if code==202 else "NOT_RECEIVED",
+                          "record": record if captured else None})
     finally:
         server.shutdown()
         thread.join(timeout=3)

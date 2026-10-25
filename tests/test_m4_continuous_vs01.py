@@ -454,3 +454,14 @@ def test_vs08_a_single_fenced_final_answer_is_reusable_without_another_call():
     wrapped="**查询已完成，不需要再调用工具。**\n\n```json\n"+json.dumps(result,ensure_ascii=False)+"\n```"
     assert parse_response(wrapped) == result
     assert parse_response("```json\n{}\n```\n```json\n"+json.dumps(result)+"\n```") is None
+
+
+def test_vs01_actual_receiver_response_meets_the_frozen_s3_gate(tmp_path):
+    from test_m4_03_s3 import _facts,_evidence
+    from opspilot.domain.s3 import evaluate_s3_gate
+    db,_,task=_history_task(tmp_path,receiver="QUEUED")
+    facts=_facts(db,task)
+    ids=[_evidence(db,task,tool,fact) for tool,fact in zip(("get_order_status","get_callback_delivery","get_receiver_processing"),facts)]
+    gate=evaluate_s3_gate(db,task["task_id"],ids,run_id=task["run_id"])
+    assert gate["decision"] == "DIAGNOSED",gate
+    assert gate["handling_direction"] == "WAIT_FOR_RECEIVER_PROCESSING"
