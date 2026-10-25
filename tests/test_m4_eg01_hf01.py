@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import threading
@@ -99,10 +100,17 @@ def _business_snapshot(db: Path, task_id: str) -> dict[str, object]:
                AND (event_kind LIKE '%APPROVAL%' OR event_kind LIKE '%ACTION%' OR event_kind LIKE '%HANDOFF%')""",
             (task_id,),
         ).fetchone()[0])
+    diagnosis_snapshot = None
+    if diagnosis:
+        diagnosis_snapshot = {
+            "receipt_id": str(diagnosis["receipt_id"]), "digest": str(diagnosis["digest"]),
+            "body_digest": hashlib.sha256(str(diagnosis["body_json"]).encode("utf-8")).hexdigest(),
+            "outcome": str(diagnosis["outcome"]),
+        }
     return {
         "task_binding_status": str(binding["status"]),
         "control_revision": int(control["control_revision"]),
-        "diagnosis": dict(diagnosis) if diagnosis else None,
+        "diagnosis": diagnosis_snapshot,
         "protected_task_rows": protected,
         "approval_action_handoff_outbox_events": business_events,
     }
@@ -113,6 +121,45 @@ def _current_facts_from_messages(messages: list[dict[str, object]]) -> list[dict
     message = next(str(item["content"]) for item in messages if str(item["content"]).startswith(prefix))
     payload = message.removeprefix(prefix)
     return [] if payload == "No current authorized MCP Evidence." else json.loads(payload)
+
+
+def _record_other_event_delivery_observation(
+    db: Path, task: dict[str, object], run_id: str, source_observation: dict[str, object],
+) -> dict[str, object]:
+    """Create a test-only forged Event claim to verify same-Run scope checks."""
+    from opspilot.domain.d2 import digest_json, finish_attempt, record_tool_observation, reserve_attempt
+    from opspilot.domain.investigation_context import load_investigation_context
+
+    with connect(db) as connection:
+        source = connection.execute(
+            "SELECT result_json FROM d2_tool_observations WHERE observation_id=?",
+            (source_observation["observation_id"],),
+        ).fetchone()
+    forged = json.loads(str(source["result_json"]))
+    forged["facts"]["event_id"] = "event-from-another-bound-order"
+    task_id = str(task["task_id"])
+    args = {"reason": "M4-EG01-HF01 negative cross-event observation"}
+    call_id, tool_call_id = f"hf01-forged-{uuid4()}", f"tool-{uuid4()}"
+    control = load_investigation_context(db, task_id, run_id)["task_run_control"]
+    attempt_id, attempt_no = reserve_attempt(
+        db, task_id, "MCP", 6, call_id=call_id, tool_call_id=tool_call_id,
+        tool_name="get_callback_delivery", argument_digest=digest_json(args), run_id=run_id,
+        task_run_control=control,
+    )
+    observation = record_tool_observation(
+        db, task_id=task_id, call_id=call_id, attempt_id=attempt_id,
+        tool_call_id=tool_call_id, tool_name="get_callback_delivery", arguments=args,
+        status="OK", result=forged,
+    )
+    finish_attempt(db, attempt_id, "OK", result_digest=digest_json(forged))
+    return {
+        "task_id": task_id, "run_id": run_id, "attempt_id": attempt_id,
+        "attempt_no": attempt_no, "call_id": call_id, "tool_call_id": tool_call_id,
+        "tool_name": "get_callback_delivery", "observation_id": observation["observation_id"],
+        "evidence_id": observation["evidence_id"], "status": observation["status"],
+        "forged_event_id": forged["facts"]["event_id"],
+        "evidence_level": "test-only forged claim; not a real MCP response",
+    }
 
 
 @pytest.mark.parametrize(
@@ -130,8 +177,6 @@ def test_chat_context_preserves_only_current_run_s3_observations(
     expected_direction: str,
 ) -> None:
     """Exercise real local HTTP + in-process MCP facts through the Chat provider input boundary."""
-    import os as os_module
-
     from opspilot.domain.api import make_server
     from opspilot.domain.s3 import evaluate_s3_gate, persist_s3_diagnosis
     from opspilot.domain.s3_mcp import build_s3_server
@@ -161,6 +206,9 @@ def test_chat_context_preserves_only_current_run_s3_observations(
             _observe_s3_tool(db, task, run_id, mcp, "get_order_status"),
             _observe_s3_tool(db, task, run_id, mcp, "get_callback_delivery"),
         ]
+        forged_event_observation = _record_other_event_delivery_observation(
+            db, task, run_id, next(item for item in observations if item["fact_type"] == "s3_delivery"),
+        )
         if receiver_status is not None:
             observations.append(_observe_s3_tool(db, task, run_id, mcp, "get_receiver_processing"))
         evidence_ids = [str(item["evidence_id"]) for item in observations]
@@ -171,7 +219,7 @@ def test_chat_context_preserves_only_current_run_s3_observations(
         )
         finish_task_run(db, identity, run_id, "SUCCEEDED")
 
-        register_worker_owner(db, "hf01-chat-worker", os_module.getpid())
+        register_worker_owner(db, "hf01-chat-worker", os.getpid())
         accepted = admit_task_message(
             db, identity, session_id=str(task["session_id"]), task_id=task_id,
             input_kind="CHAT_READONLY", body="同一事件现在是否处理完成？",
@@ -189,6 +237,7 @@ def test_chat_context_preserves_only_current_run_s3_observations(
             "case_id": f"HF01-{receiver_status or '202-UNKNOWN'}",
             "task_id": task_id, "investigation_run_id": run_id, "chat_run_id": chat_run,
             "evidence_observations": observations,
+            "forged_event_observation": forged_event_observation,
             "http_order_status": next(item["facts"]["http_status"] for item in observations if item["fact_type"] == "s3_order"),
             "delivery_http_status": next(item["facts"]["receiver_http_status"] for item in observations if item["fact_type"] == "s3_delivery"),
             "event_id": next(item["facts"]["event_id"] for item in observations if item["fact_type"] == "s3_delivery"),
@@ -213,6 +262,13 @@ def test_chat_context_preserves_only_current_run_s3_observations(
             "Chat must preserve every current same-Run observation, including valid partial facts not used by Gate"
         )
         assert set(prepared["evidence_refs"][i]["evidence_id"] for i in range(len(prepared["evidence_refs"]))) == set(evidence_ids)
+        assert business_before_chat == record["business_snapshot_after_chat"], "CHAT_READONLY must not change S3 business state or write records"
+        assert forged_event_observation["evidence_id"] not in {item["evidence_id"] for item in facts}
+        assert any(
+            item.get("source_id") == forged_event_observation["evidence_id"]
+            and item.get("reason") == "S3_CURRENT_FACT_MISMATCH"
+            for item in prepared["excluded_sources"]
+        ), "The rejected wrong-Event Observation must retain its exclusion reason"
         assert any(
             item["fact_type"] == "s3_delivery"
             and item["facts"]["event_id"] == delivery["facts"]["event_id"]
