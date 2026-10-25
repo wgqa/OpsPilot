@@ -1,0 +1,97 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+_________________ test_vs01_real_transport_history_capability _________________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-red-01/test_vs01_real_transport_histo0')
+
+    def test_vs01_real_transport_history_capability(tmp_path):
+        # No fabricated Observation is used to establish a transport send.
+>       from opspilot.domain import s3_history
+E       ImportError: cannot import name 's3_history' from 'opspilot.domain' (C:\Users\tu me manques\.codex\worktrees\c1-approved-integration-20261025\agent新项目\opspilot\domain\__init__.py)
+
+tests\test_m4_continuous_vs01.py:51: ImportError
+___ test_vs06_remaining_candidates_follow_observation_into_normal_decision ____
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-red-01/test_vs06_remaining_candidates0')
+
+    def test_vs06_remaining_candidates_follow_observation_into_normal_decision(tmp_path):
+        db, task, run = _followup(tmp_path)
+        model = Model([
+            AIMessage(content="two relevant candidates", tool_calls=[
+                {"name": "search_callback_knowledge", "id": "first", "args": {"query": "202", "reason": "interpret acknowledgement"}},
+                {"name": "get_receiver_processing", "id": "second", "args": {"reason": "check actual processing"}},
+            ]),
+            AIMessage(content="RESULT: PARTIAL\n当前协议检索没有结果，仍无法确认目标事件的处理状态。"),
+        ])
+        class Client:
+            def __init__(self): self.names = []
+            async def call_tool(self, name, args):
+                self.names.append(name)
+                return SimpleNamespace(is_error=False, structured_content={"documents": []})
+        client = Client()
+        node = _node(db, task, run, model, client)
+        async def journey():
+            state = {"evidence_ids": [], "tool_observations": []}
+            state.update(await node.investigate(state))
+            state.update(await node.execute(state))
+            state.update(await node.investigate(state))
+            return state
+        asyncio.run(journey())
+        second_input = json.loads(model.messages[1][-1].content)
+        remaining = second_input.get("unexecuted_candidates", [])
+>       assert any(item["tool_name"] == "get_receiver_processing" and item.get("tool_call_id") == "second" for item in remaining)
+E       assert False
+E        +  where False = any(<generator object test_vs06_remaining_candidates_follow_observation_into_normal_decision.<locals>.<genexpr> at 0x000001BFDCAC32A0>)
+
+tests\test_m4_continuous_vs01.py:94: AssertionError
+____ test_vs08_reuses_a_current_final_answer_without_report_provider_call _____
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-red-01/test_vs08_reuses_a_current_fin0')
+
+    def test_vs08_reuses_a_current_final_answer_without_report_provider_call(tmp_path):
+        db, task, run = _followup(tmp_path)
+        # The real prompt/trace/source validation is exercised, not a hand-written final-answer flag.
+        model = Model([AIMessage(content="RESULT: PARTIAL\n当前还没有本轮接收状态证据，不能断言已处理完成。")])
+        node = _node(db, task, run, model)
+        before = _business_only(db, task)
+        async def journey():
+            state = {"evidence_ids": [], "tool_observations": []}
+            state.update(await node.investigate(state))
+            state.update(await node.report(state))
+            return state
+        asyncio.run(journey())
+        with connect(db) as c:
+            row = c.execute("SELECT answer_text FROM c1_readonly_followup_runs WHERE run_id=?", (run,)).fetchone()
+>       assert len(model.messages) == 1
+E       assert 2 == 1
+E        +  where 2 = len([[SystemMessage(content='You investigate the latest READONLY_FOLLOWUP for this bound asynchronous order task, READ ONL...-b4e9-83cf03de1f58","provenance":"USER_INPUT_UNTRUSTED","sequence":2}]}', additional_kwargs={}, response_metadata={})]])
+E        +    where [[SystemMessage(content='You investigate the latest READONLY_FOLLOWUP for this bound asynchronous order task, READ ONL...-b4e9-83cf03de1f58","provenance":"USER_INPUT_UNTRUSTED","sequence":2}]}', additional_kwargs={}, response_metadata={})]] = <test_m4_continuous_vs01.Model object at 0x000001BFDC943CB0>.messages
+
+tests\test_m4_continuous_vs01.py:114: AssertionError
+__ test_vs09_budget_exhaustion_delivers_explicit_nonblank_gap_without_writes __
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-red-01/test_vs09_budget_exhaustion_de0')
+
+    def test_vs09_budget_exhaustion_delivers_explicit_nonblank_gap_without_writes(tmp_path):
+        db, task, run = _followup(tmp_path)
+        for i in range(8):
+            reserve_attempt(db, task, "MODEL", 8, call_id=f"spent-{i}", run_id=run)
+        model = Model([])
+        node = _node(db, task, run, model)
+        before = _business_only(db, task)
+        asyncio.run(node.report({"evidence_ids": [], "tool_observations": []}))
+        with connect(db) as c:
+            row = c.execute("SELECT answer_text,result_state FROM c1_readonly_followup_runs WHERE run_id=?", (run,)).fetchone()
+>       assert row[0].strip(), "An empty PARTIAL does not answer the user or identify a concrete gap"
+E       AssertionError: An empty PARTIAL does not answer the user or identify a concrete gap
+E       assert ''
+E        +  where '' = <built-in method strip of str object at 0x00007FFC76A32CA0>()
+E        +    where <built-in method strip of str object at 0x00007FFC76A32CA0> = ''.strip
+
+tests\test_m4_continuous_vs01.py:129: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs01_real_transport_history_capability
+FAILED tests/test_m4_continuous_vs01.py::test_vs06_remaining_candidates_follow_observation_into_normal_decision
+FAILED tests/test_m4_continuous_vs01.py::test_vs08_reuses_a_current_final_answer_without_report_provider_call
+FAILED tests/test_m4_continuous_vs01.py::test_vs09_budget_exhaustion_delivers_explicit_nonblank_gap_without_writes
+4 failed in 6.20s
