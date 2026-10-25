@@ -1,0 +1,39 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_________________ test_vs01_real_transport_history_capability _________________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-history-failure-capture/test_vs01_real_transport_histo0')
+
+    def test_vs01_real_transport_history_capability(tmp_path):
+        # No fabricated Observation is used to establish a transport send.
+        from opspilot.domain import s3_history
+    
+        db = tmp_path / "history.sqlite3"
+>       reset_fixture(db, "S1_POS")
+
+tests\test_m4_continuous_vs01.py:54: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\database.py:1611: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-history-failure-capture/test_vs01_real_transport_histo0/history.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 15:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 16.
+
+opspilot\domain\database.py:1083: RuntimeError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs01_real_transport_history_capability
+1 failed in 0.83s

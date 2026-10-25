@@ -1,0 +1,17 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___ test_vs08_a_single_fenced_final_answer_is_reusable_without_another_call ___
+
+    def test_vs08_a_single_fenced_final_answer_is_reusable_without_another_call():
+        from opspilot.s3_delivery import parse_response
+        # Actual development Provider format: a short preface, followed by one JSON block.
+        result={"action":"answer","result_state":"PARTIAL","answer":"当前只证实已受理，处理结果未知。","processing_claim":"UNKNOWN"}
+        wrapped="**查询已完成，不需要再调用工具。**\n\n```json\n"+json.dumps(result,ensure_ascii=False)+"\n```"
+>       assert parse_response(wrapped) == result
+E       assert None == {'action': 'answer', 'result_state': 'PARTIAL', 'answer': '当前只证实已受理，处理结果未知。', 'processing_claim': 'UNKNOWN'}
+E        +  where None = <function parse_response at 0x000001CC3AB9D8A0>('**查询已完成，不需要再调用工具。**\n\n```json\n{"action": "answer", "result_state": "PARTIAL", "answer": "当前只证实已受理，处理结果未知。", "processing_claim": "UNKNOWN"}\n```')
+
+tests\test_m4_continuous_vs01.py:455: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs08_a_single_fenced_final_answer_is_reusable_without_another_call
+1 failed in 0.84s

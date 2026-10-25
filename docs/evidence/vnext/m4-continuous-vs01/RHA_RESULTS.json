@@ -1,0 +1,593 @@
+[
+  {
+    "release": "budget-02",
+    "case_id": "DEV-P5-PROCESSED",
+    "strategy": "A",
+    "profile": [
+      12,
+      8
+    ],
+    "task_id": "task-ed797cf6-7170-4a2c-8e4c-a2828e18af07",
+    "run_id": "run-96bf1c1a-f268-4d40-adc4-f7f79554b6b8",
+    "source_trace": "runs\\budget-02\\DEV-P5-PROCESSED-A-12-8\\TRACE.json",
+    "delivery_mode": "MODEL",
+    "result_state": "ANSWERED",
+    "answer_text": "已查清，回调最终成功并被接收方处理完成。\n\n【订单】order-9708e095fd85（order_version 1）当前状态为 COMPLETED；这是 2026-10-25T06:42:32.456Z 读取订单接口（HTTP 200）得到的当前快照，并非仅凭 200 推断出的完成。\n\n【回调过程】绑定事件 event-ad31baff7442（contract_version 2）：\n1) 第 1 次传输：started_at 2026-10-25T06:42:29.332Z，返回 HTTP 503，failure_code TEMPORARY_UNAVAILABLE，receiver_state UNAVAILABLE，retry_state SCHEDULED（retry_at 06:43:29.360Z）。这就是您所说的“上次回调失败”，属于接收方临时不可用，并非业务拒绝。\n2) 第 2 次传输：started_at 2026-10-25T06:42:29.374Z，返回 HTTP 202，accepted_at 2026-10-25T06:42:29.399Z，receiver_state 为 QUEUED；attempt_count 为 2，max_attempts 为 10。\n3) 当前投递快照（delivery_version 3）显示：status ACKNOWLEDGED，receiver_http_status 为 202，retry_state 为 NOT_APPLICABLE，说明重试已经结束。\n\n【是否处理完成】接收方对该事件 event-ad31baff7442 的当前处理状态为 PROCESSED（version 3，accepted_at 06:42:29.399Z，processing_sla_seconds 为 300，observed_at 06:42:41.772Z）。也就是说，从接收方的接受时间到确认处理完成约 12 秒，远在 300 秒处理 SLA 以内。此处依据的是接收方处理状态本身，202 仅说明接收方已接受并排队，单凭 202 本身并不能证明处理完成。\n\n需注意的时间细节：该事件的业务事件时间 event_created_at 为 2026-10-24T06:42:29.332882Z（即前一天），而两次 HTTP 传输的实际发生与观测时间均为 2026-10-25T06:42:29Z 前后，不能把准备好的旧事件描述成“昨天已发送”。\n\n【未知项与边界】传输历史仅覆盖已记录的观测（coverage: RECORDED_OBSERVATIONS_ONLY），并未构成完整审计：没有记录不等于没有发送，因为发送到持久化之间的崩溃窗口不可见；也未记录第 2 次之后还有其它尝试（retry_state 已为 NOT_APPLICABLE，且处理已完成）。因此结论仅限该事件 event_id：event-ad31baff7442。若还有其他事件，则需单独核实。\n\n【建议】无需重发，也无需再重试；如需向业务方回复，可按“临时不可用→自动重试→202 接受→接收方已处理完成”的链路说明。",
+    "actual_tools": [
+      "get_order_status",
+      "get_callback_delivery",
+      "get_callback_transport_history",
+      "get_receiver_processing"
+    ],
+    "model_requests": 5,
+    "mcp_attempts": 4,
+    "invalid_observations": 0,
+    "latency_seconds": 21.899016200000005,
+    "usage": {
+      "input_tokens": 22956,
+      "output_tokens": 3042,
+      "total_tokens": 25998,
+      "peak_estimated_usd": 0.0105372,
+      "usage_known": 5,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [
+        "evidence-07d67884-2dd7-4f5a-8c30-15699b6283e9",
+        "evidence-07d67884-2dd7-4f5a-8c30-15699b6283e9",
+        "evidence-85f39984-f802-450f-837a-f528f420756b",
+        "evidence-e9f835f0-8900-4188-9436-981b70eb5055"
+      ],
+      "decision": "DIAGNOSED",
+      "excluded_sources": [],
+      "handling_direction": "NO_FURTHER_ACTION",
+      "handoff_allowed": false,
+      "outcome": "RECEIVER_PROCESSED",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "RECEIVER_PROCESSED",
+      "recovered": false,
+      "required_facts": [],
+      "side_effects": [],
+      "valid_until": null
+    }
+  },
+  {
+    "release": "budget-02",
+    "case_id": "DEV-P5-PROCESSED",
+    "strategy": "A",
+    "profile": [
+      16,
+      10
+    ],
+    "task_id": "task-53dd995d-0b50-494c-b9f0-353d2fa38d0f",
+    "run_id": "run-e38eaacb-1cb1-4cae-b2be-00c7a3fce7d0",
+    "source_trace": "runs\\budget-02\\DEV-P5-PROCESSED-A-16-10\\TRACE.json",
+    "delivery_mode": "DETERMINISTIC_FALLBACK",
+    "result_state": "PARTIAL",
+    "answer_text": "本次调查只能交付以下已核实事实与缺口：\n关注的事件是 event-ad31baff7442。\nevent-ad31baff7442 第 1 次，请求 transport-fcb0f629-2964-4e10-a289-93390eaa9b6b，2026-10-25T06:43:17.295+00:00：HTTP 503。\nevent-ad31baff7442 第 2 次，请求 transport-8e2d6d6e-bd15-48a3-b160-b522ad409e81，2026-10-25T06:43:17.353+00:00：HTTP 202。\n同一事件当前接收处理状态为 PROCESSED；HTTP 接受与处理完成是不同事实。\n这些仅为已记录观察；未记录和发送后未落库窗口不构成完整审计。\n适用协议来源：receiver-ack-contract-v2@2.0.0。\n事实来源：evidence-188714d8-3597-4b16-8b6f-116106a1b215, evidence-2c6f6553-e39d-4a56-8cff-b75cac3a9134, evidence-819832ec-96c5-4d60-b5c4-da0f7987c80e, evidence-973f34bc-704e-406c-8b02-7619cc47eec6。\n调查额度或模型可用性限制了进一步解释；需继续核实上述缺口，不能据此声称已重发、恢复或交接。",
+    "actual_tools": [
+      "get_order_status",
+      "get_callback_delivery",
+      "get_callback_transport_history",
+      "get_receiver_processing",
+      "search_callback_knowledge",
+      "get_callback_delivery"
+    ],
+    "model_requests": 16,
+    "mcp_attempts": 6,
+    "invalid_observations": 0,
+    "latency_seconds": 109.79543000000012,
+    "usage": {
+      "input_tokens": 112231,
+      "output_tokens": 20091,
+      "total_tokens": 132322,
+      "peak_estimated_usd": 0.0577785,
+      "usage_known": 16,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [
+        "evidence-188714d8-3597-4b16-8b6f-116106a1b215",
+        "evidence-188714d8-3597-4b16-8b6f-116106a1b215",
+        "evidence-2c6f6553-e39d-4a56-8cff-b75cac3a9134",
+        "evidence-973f34bc-704e-406c-8b02-7619cc47eec6"
+      ],
+      "decision": "DIAGNOSED",
+      "excluded_sources": [],
+      "handling_direction": "NO_FURTHER_ACTION",
+      "handoff_allowed": false,
+      "outcome": "RECEIVER_PROCESSED",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "RECEIVER_PROCESSED",
+      "recovered": false,
+      "required_facts": [],
+      "side_effects": [],
+      "valid_until": null
+    }
+  },
+  {
+    "release": "budget-02",
+    "case_id": "DEV-P5-PROCESSED",
+    "strategy": "A",
+    "profile": [
+      8,
+      6
+    ],
+    "task_id": "task-549b33e3-bf36-4e48-93ce-0b8e75adac6d",
+    "run_id": "run-5c57bbc5-5e20-4743-841f-91ce89668ddb",
+    "source_trace": "runs\\budget-02\\DEV-P5-PROCESSED-A-8-6\\TRACE.json",
+    "delivery_mode": "MODEL",
+    "result_state": "ANSWERED",
+    "answer_text": "已查清该订单（order-9708e095fd85，订单版本 1）的回调过程，并以接收方当前状态核实处理已完成。\n\n**回调过程（同一事件 event-ad31baff7442，未换 Event）**\n1. 第 1 次传输：HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，接收方状态 UNAVAILABLE，响应中 retry_state=SCHEDULED，retry_at=2026-10-25T06:42:34Z 左右（实际 HTTP 观察时间 2026-10-25T06:41:34.171Z）。\n2. 第 2 次传输：同一 event_id 重试，HTTP 202，接收方状态 QUEUED，accepted_at=2026-10-25T06:41:34.231Z，retry_at=null（实际 HTTP 观察时间 2026-10-25T06:41:34.233Z）。202 只表示接收方已受理入队，本身不等于处理完成。\n\n**当前是否处理完成：是**\n- 接收方处理状态（直接读取该绑定事件）：status=PROCESSED，delivery_version 3，processing_sla_seconds=300，accepted_at=2026-10-25T06:41:34.231Z，观察时间 2026-10-25T06:41:44.050Z。\n- 订单当前状态：COMPLETED，order_version 1（本次读取 HTTP 200，观察时间 2026-10-25T06:41:37.680Z）；三次记录中的 order_version 均为 1，未见版本漂移。\n\n**来源与说明**：以上均来自本次运行实际读取的订单状态、回调传输历史（该事件的事件业务时间 event_created_at=2026-10-24T06:41:34.128Z，两次实际 HTTP 时间均在 2026-10-25T06:41:34Z 附近）和接收方处理状态；传输历史的覆盖范围标注为 RECORDED_OBSERVATIONS_ONLY，即已知观测记录而非完整审计，因此“无记录”不等于“未发送”，但就本事件而言失败与 202 受理、最终 PROCESSED 都有直接记录。本次仅做只读核查，未执行任何重发或写操作。",
+    "actual_tools": [
+      "get_order_status",
+      "get_callback_transport_history",
+      "get_receiver_processing"
+    ],
+    "model_requests": 4,
+    "mcp_attempts": 3,
+    "invalid_observations": 0,
+    "latency_seconds": 18.292100700000447,
+    "usage": {
+      "input_tokens": 16085,
+      "output_tokens": 2598,
+      "total_tokens": 18683,
+      "peak_estimated_usd": 0.0079431,
+      "usage_known": 4,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [
+        "evidence-32c0727e-558f-4994-8ffb-90c99f92d741"
+      ],
+      "decision": "INCONCLUSIVE",
+      "excluded_sources": [],
+      "handling_direction": "EVIDENCE_INSUFFICIENT",
+      "handoff_allowed": false,
+      "outcome": "INCONCLUSIVE",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "MODEL_NO_TOOL",
+      "recovered": false,
+      "required_facts": [
+        "s3_delivery"
+      ],
+      "side_effects": [],
+      "valid_until": null
+    }
+  },
+  {
+    "release": "budget-02",
+    "case_id": "DEV-P5-QUEUED",
+    "strategy": "A",
+    "profile": [
+      12,
+      8
+    ],
+    "task_id": "task-66b060e5-afa5-45af-a528-5c56a419aeeb",
+    "run_id": "run-a019bc96-b627-4770-a39c-c7d227fa3d4f",
+    "source_trace": "runs\\budget-02\\DEV-P5-QUEUED-A-12-8\\TRACE.json",
+    "delivery_mode": "MODEL",
+    "result_state": "ANSWERED",
+    "answer_text": "已查清该订单 order-1ae813afa160（order_version=1）的回调过程与当前接收方状态。\n\n【订单侧】订单快照返回 HTTP 200，业务状态为 COMPLETED（order_version=1，契约版本 2，观察时间 2026-10-25T06:41:55.804Z）。注意：200 只说明读取成功，不单独证明回调完成。\n\n【回调事件】event-8a0ce81450cb（同一事件 ID 贯穿两次尝试，未更换事件）。业务事件时间 event_created_at=2026-10-24T06:41:52.764994Z。\n1) 第 1 次尝试 transport-a4433345-2321-46aa-9e05-e58228b1ca06，实际 HTTP 时间 started_at=2026-10-25T06:41:52.764Z，返回 HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED，retry_at=2026-10-25T06:42:52.787372Z，attempt_count=1/10。这就是“上次失败”的那一次。\n2) 第 2 次尝试 transport-d5d38636-9fb1-4d0f-ae35-7132b88dd9d3，HTTP 时间 started_at=2026-10-25T06:41:52.802Z，返回 HTTP 202，accepted_at=2026-10-25T06:41:52.849Z，failure_code=null，receiver_state=QUEUED，retry_state=NOT_APPLICABLE，attempt_count=2/10。投递侧状态为 ACKNOWLEDGED（delivery version 3）。\n\n【现在是否处理完成】未完成。接收方当前处理状态（event_id=event-8a0ce81450cb，delivery_version=3，version=3，观察时间 2026-10-25T06:42:02.484Z）为 status=QUEUED，accepted_at=2026-10-25T06:41:52.849Z，processing_sla_seconds=300。按绑定契约 receiver-ack-contract-v2（Receiver acknowledgement and processing SLA v2，version 2.0.0，2026-10-01 起生效）：“HTTP 202 仅表示接收方已把事件持久放入队列，不代表业务处理完成”。该事件仍处 SLA 内（截止约 2026-10-25T06:46:52.849Z），应在期限内继续观察同一 event_id 直到状态变化；仅在队列记录超过可信 SLA 仍未处理时，才可请接收方运维排查。不得自动重发。\n\n【未知项】接收方是否会在 SLA 内转为已处理，当前无法确定（UNKNOWN）；传输历史为“已记录观测”而非完整审计，缺失记录不等于未发送。",
+    "actual_tools": [
+      "get_order_status",
+      "get_callback_delivery",
+      "get_callback_transport_history",
+      "get_receiver_processing",
+      "search_callback_knowledge"
+    ],
+    "model_requests": 8,
+    "mcp_attempts": 5,
+    "invalid_observations": 0,
+    "latency_seconds": 36.242549900000085,
+    "usage": {
+      "input_tokens": 46948,
+      "output_tokens": 6115,
+      "total_tokens": 53063,
+      "peak_estimated_usd": 0.0214224,
+      "usage_known": 8,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [
+        "evidence-5a64ec12-1fd6-445a-b1a6-e2fc9e59e464",
+        "evidence-5a64ec12-1fd6-445a-b1a6-e2fc9e59e464",
+        "evidence-acaaf207-e50c-4760-9775-1067828e78f3",
+        "evidence-0e38e56f-63ec-4d5f-870c-bd4e593ef0d0"
+      ],
+      "decision": "DIAGNOSED",
+      "excluded_sources": [],
+      "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+      "handoff_allowed": false,
+      "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "recovered": false,
+      "required_facts": [],
+      "side_effects": [],
+      "valid_until": "2026-10-25T06:46:52.849000Z"
+    }
+  },
+  {
+    "release": "budget-02",
+    "case_id": "DEV-P5-QUEUED",
+    "strategy": "A",
+    "profile": [
+      16,
+      10
+    ],
+    "task_id": "task-5e3acb57-3e7d-4859-a854-2f34a626f1d9",
+    "run_id": "run-2de6e2e2-08ce-4ee8-a81f-a081fd205e7b",
+    "source_trace": "runs\\budget-02\\DEV-P5-QUEUED-A-16-10\\TRACE.json",
+    "delivery_mode": "MODEL",
+    "result_state": "ANSWERED",
+    "answer_text": "已查清，结论如下（全部为本轮只读实时证据，时间为 UTC）。\n\n① 订单本身：order-1ae813afa160 当前 status=COMPLETED（order_version=1，evidence 读取时间 2026-10-25T06:42:55.640Z，get_order_status 返回 HTTP 200）。请注意：订单 200/COMPLETED 只表示订单侧记录，不等于回调已被接收方处理完成。\n\n② 回调过程（同一 event_id = event-8a0ce81450cb，业务事件时间 event_created_at=2026-10-24T06:42:51.574891Z，实际两次 HTTP 传输都发生在 2026-10-25T06:42:51Z）：\n- 第 1 次（attempt_no=1，transport-536bcee3-ed49-4e2c-a004-3ba2caca8bde）：started_at 2026-10-25T06:42:51.574Z，HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，当时返回 retry_state=SCHEDULED、retry_at=2026-10-25T06:43:51.615Z。\n- 第 2 次（attempt_no=2，transport-0f5b3458-1cea-4b4c-9f5d-5933a7b05452）：started_at 2026-10-25T06:42:51.631Z，HTTP 202，receiver_state=QUEUED，accepted_at=2026-10-25T06:42:51.677Z，attempt_count=2、max_attempts=10、retry_state=NOT_APPLICABLE。即“上次失败”为 503 临时不可用，随后同一 event_id 重试已成功入队。\n- 传输历史覆盖为 RECORDED_OBSERVATIONS_ONLY（仅已记录观测，非完整审计），无记录不代表未发送。\n\n③ 当前投递/接收状态：绑定投递记录 status=ACKNOWLEDGED、receiver_http_status=202、attempt_count=2、version=3（读取于 2026-10-25T06:42:58.154Z）；接收方处理记录（同一 event_id）status=QUEUED、delivery_version=3、accepted_at=2026-10-25T06:42:51.677Z、processing_sla_seconds=300（直接在接收方读取于 2026-10-25T06:43:02.247Z）。\n\n④ 所以“现在是否处理完成”：尚未完成。目前只能确认 202 已被接收方持久化入队，业务处理仍在排队。按 receiver-ack-contract-v2：HTTP 202 = 已入队，不等于业务处理完成；该 QUEUED 事件的 SLA 截止时间为 2026-10-25T06:47:51.677Z，当前观察点（06:43:02）仍在 SLA 内，应继续观察至截止；只有同一 event_id 的排队记录超过该 SLA，才可请接收方运维排查；不得自动重发。\n\n⑤ 未知/限制（明确不能断言的）：接收方在该观察点之后的最终处理结果当前 UNKNOWN（SLA 未到，暂无完成证据）；也无法据此推断任何未记录的发送。本轮为只读，未执行也不需要任何重发或写入。",
+    "actual_tools": [
+      "get_order_status",
+      "get_callback_delivery",
+      "get_callback_transport_history",
+      "get_receiver_processing",
+      "search_callback_knowledge"
+    ],
+    "model_requests": 6,
+    "mcp_attempts": 5,
+    "invalid_observations": 0,
+    "latency_seconds": 25.26407190000009,
+    "usage": {
+      "input_tokens": 31714,
+      "output_tokens": 4046,
+      "total_tokens": 35760,
+      "peak_estimated_usd": 0.014369399999999997,
+      "usage_known": 6,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [
+        "evidence-51dc0f16-ff01-4eb8-99a0-8aabcb2719ea",
+        "evidence-51dc0f16-ff01-4eb8-99a0-8aabcb2719ea",
+        "evidence-aa7ca203-ce8d-4140-8fed-30ebec06b9aa",
+        "evidence-8a5655ee-887a-4817-857c-56d1fb5ea1b5"
+      ],
+      "decision": "DIAGNOSED",
+      "excluded_sources": [],
+      "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+      "handoff_allowed": false,
+      "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "recovered": false,
+      "required_facts": [],
+      "side_effects": [],
+      "valid_until": "2026-10-25T06:47:51.677000Z"
+    }
+  },
+  {
+    "release": "budget-02",
+    "case_id": "DEV-P5-QUEUED",
+    "strategy": "A",
+    "profile": [
+      8,
+      6
+    ],
+    "task_id": "task-7fcadbd9-969d-4aed-a722-57fb33e7291f",
+    "run_id": "run-d2484f80-c800-4be4-9c20-bacc747c636c",
+    "source_trace": "runs\\budget-02\\DEV-P5-QUEUED-A-8-6\\TRACE.json",
+    "delivery_mode": "MODEL",
+    "result_state": "ANSWERED",
+    "answer_text": "查清了：这单的「上次失败」只是同一条回调事件的第 1 次投递失败，第 2 次已经被接收方受理并排队，但目前仍未处理完成。\n\n1) 订单侧（来源：get_order_status，读取时间 2026-10-25T06:41:13Z）：order-1ae813afa160 状态 COMPLETED，order_version=1，HTTP 200。订单本身已完成，问题只落在回调投递链路上。\n\n2) 回调事件（来源：get_callback_delivery，读取时间 2026-10-25T06:41:16Z）：目标事件 event-8a0ce81450cb，delivery version 3，状态 ACKNOWLEDGED，receiver_http_status=202，attempt_count=2，max_attempts=10，failure_code=null，retry_at=null（retry_state=NOT_APPLICABLE）。\n\n3) 实际传输过程（来源：get_callback_transport_history，读取时间 2026-10-25T06:41:18Z，覆盖范围仅 RECORDED_OBSERVATIONS_ONLY）：\n- 第 1 次 attempt_no=1：实际 HTTP 时间 started_at 2026-10-25T06:41:10.040Z，返回 HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED，retry_at=2026-10-25T06:42:10Z。这次就是「上次失败」。\n- 第 2 次 attempt_no=2：实际 HTTP 时间 started_at 2026-10-25T06:41:10.132Z，返回 HTTP 202，accepted_at=2026-10-25T06:41:10.164Z，receiver_state=QUEUED，failure_code=null。即重试成功被接收方持久化接收进队列，而不是又被拒绝。\n（注：该事件的 event_created_at 为业务事件时间 2026-10-24T06:41:10.040Z，上面两次是 2026-10-25T06:41:10Z 真正发生的 HTTP 投递，两者不要混为一谈。）\n\n4) 接收方当前处理状态（来源：get_receiver_processing，针对 event-8a0ce81450cb，读取时间 2026-10-25T06:41:20Z）：status=QUEUED，delivery_version=3，accepted_at=2026-10-25T06:41:10.164Z，processing_sla_seconds=300。按契约（receiver-ack-contract-v2：HTTP 202 仅表示接收方已把事件持久化入队，不代表业务处理完成；QUEUED 且在 SLA 内应继续观察，只有超过可信 SLA 的排队记录才可请接收方运维排查，且不得自动重投），SLA 截止约在 2026-10-25T06:46:10Z，最后一次观测时仅过去约 10 秒，处于 SLA 内。\n\n结论：回调没有失败终结，第 2 次投递已被接收方接受，事件当前为 QUEUED、处理未完成（也未超时），此刻不需要、也不应重投；在 SLA 截止（约 06:46:10Z）前继续观察同一 event_id 的接收方状态即可。\n\n未知/边界：transport history 只有已记录观测，非完整审计（发送到落库之间的崩溃窗口无法排除，缺失记录不等于没有发送）；QUEUED 是最后一次读取时的状态，之后是否转为 PROCESSED 需再读同一 event_id 才能确认；接收方内部业务处理结果本次未取到。",
+    "actual_tools": [
+      "get_order_status",
+      "get_callback_delivery",
+      "get_callback_transport_history",
+      "get_receiver_processing",
+      "search_callback_knowledge"
+    ],
+    "model_requests": 6,
+    "mcp_attempts": 5,
+    "invalid_observations": 0,
+    "latency_seconds": 23.728747299999668,
+    "usage": {
+      "input_tokens": 28235,
+      "output_tokens": 3610,
+      "total_tokens": 31845,
+      "peak_estimated_usd": 0.0128025,
+      "usage_known": 6,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [
+        "evidence-1434dfff-a783-48fa-a1f5-2afca5890dad",
+        "evidence-1434dfff-a783-48fa-a1f5-2afca5890dad",
+        "evidence-425d234d-ff67-4844-9969-5d3dfea73413",
+        "evidence-71d9d123-8a0e-4dd4-86ef-4a4d8858e5eb"
+      ],
+      "decision": "DIAGNOSED",
+      "excluded_sources": [],
+      "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+      "handoff_allowed": false,
+      "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "recovered": false,
+      "required_facts": [],
+      "side_effects": [],
+      "valid_until": "2026-10-25T06:46:10.164000Z"
+    }
+  },
+  {
+    "release": "controls-02",
+    "case_id": "DEV-P5-PROCESSED",
+    "strategy": "H",
+    "profile": [
+      8,
+      6
+    ],
+    "task_id": "task-f6e09400-8d9f-4ec4-a6a3-da6cc1588b45",
+    "run_id": "run-3b042d13-7d48-4ede-8546-d8c0480f8cf4",
+    "source_trace": "runs\\controls-02\\DEV-P5-PROCESSED-H-8-6\\TRACE.json",
+    "delivery_mode": "RULE",
+    "result_state": "ANSWERED",
+    "answer_text": "当前可核查的事实与未知事项：\n关注的事件是 event-ad31baff7442。\n本轮没有目标事件可用的历史发送记录；不能用最新快照或 attempt_count 还原旧请求。\n同一事件当前接收处理状态为 PROCESSED；HTTP 接受与处理完成是不同事实。\n事实来源：evidence-1376273c-1095-4f28-b820-5d96d23f1a45, evidence-5bc80b61-ee65-479f-a839-0dfee53610df, evidence-09131174-2bd9-4c52-bbcf-fccb0ea95e1e。\n这些只读结论不代表已重发、恢复或交接。",
+    "actual_tools": [
+      "get_callback_delivery",
+      "get_order_status",
+      "get_receiver_processing"
+    ],
+    "model_requests": 1,
+    "mcp_attempts": 3,
+    "invalid_observations": 0,
+    "latency_seconds": 11.630123800000547,
+    "usage": {
+      "input_tokens": 709,
+      "output_tokens": 1616,
+      "total_tokens": 2325,
+      "peak_estimated_usd": 0.0021518999999999996,
+      "usage_known": 1,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [
+        "evidence-5bc80b61-ee65-479f-a839-0dfee53610df",
+        "evidence-5bc80b61-ee65-479f-a839-0dfee53610df",
+        "evidence-1376273c-1095-4f28-b820-5d96d23f1a45",
+        "evidence-09131174-2bd9-4c52-bbcf-fccb0ea95e1e"
+      ],
+      "decision": "DIAGNOSED",
+      "excluded_sources": [],
+      "handling_direction": "NO_FURTHER_ACTION",
+      "handoff_allowed": false,
+      "outcome": "RECEIVER_PROCESSED",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "RECEIVER_PROCESSED",
+      "recovered": false,
+      "required_facts": [],
+      "side_effects": [],
+      "valid_until": null
+    }
+  },
+  {
+    "release": "controls-02",
+    "case_id": "DEV-P5-PROCESSED",
+    "strategy": "R",
+    "profile": [
+      8,
+      6
+    ],
+    "task_id": "task-13371449-53ce-463b-b874-8ec34cb3466f",
+    "run_id": "run-1ede6f54-e655-4fb0-9ca9-00a469ac70dc",
+    "source_trace": "runs\\controls-02\\DEV-P5-PROCESSED-R-8-6\\TRACE.json",
+    "delivery_mode": "RULE",
+    "result_state": "ANSWERED",
+    "answer_text": "当前可核查的事实与未知事项：\n关注的事件是 event-ad31baff7442。\nevent-ad31baff7442 第 1 次，请求 transport-1ced34eb-3492-40f5-b17f-e0a7c754eb85，2026-10-25T06:45:35.257+00:00：HTTP 503。\nevent-ad31baff7442 第 2 次，请求 transport-1b115998-427a-410a-800a-f7b8dd8ce11f，2026-10-25T06:45:35.305+00:00：HTTP 202。\n同一事件当前接收处理状态为 PROCESSED；HTTP 接受与处理完成是不同事实。\n这些仅为已记录观察；未记录和发送后未落库窗口不构成完整审计。\n事实来源：evidence-408f5109-96ef-4aa5-a907-0e2e90362b31, evidence-77a275eb-db5d-44ed-8d7f-bc8415693115。\n这些只读结论不代表已重发、恢复或交接。",
+    "actual_tools": [
+      "get_callback_transport_history",
+      "get_receiver_processing"
+    ],
+    "model_requests": 0,
+    "mcp_attempts": 2,
+    "invalid_observations": 0,
+    "latency_seconds": 1.326393399999688,
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "peak_estimated_usd": 0.0,
+      "usage_known": 0,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [],
+      "decision": "INCONCLUSIVE",
+      "excluded_sources": [],
+      "handling_direction": "EVIDENCE_INSUFFICIENT",
+      "handoff_allowed": false,
+      "outcome": "INCONCLUSIVE",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "POLICY_NO_ACTION",
+      "recovered": false,
+      "required_facts": [
+        "s3_order"
+      ],
+      "side_effects": [],
+      "valid_until": null
+    }
+  },
+  {
+    "release": "controls-02",
+    "case_id": "DEV-P5-QUEUED",
+    "strategy": "H",
+    "profile": [
+      8,
+      6
+    ],
+    "task_id": "task-26835fb6-c7ef-48e8-96ca-177400c8e99b",
+    "run_id": "run-955a3c06-2ae1-4e0a-836b-e3602ee24d02",
+    "source_trace": "runs\\controls-02\\DEV-P5-QUEUED-H-8-6\\TRACE.json",
+    "delivery_mode": "RULE",
+    "result_state": "ANSWERED",
+    "answer_text": "当前可核查的事实与未知事项：\n关注的事件是 event-8a0ce81450cb。\n本轮没有目标事件可用的历史发送记录；不能用最新快照或 attempt_count 还原旧请求。\n同一事件当前接收处理状态为 QUEUED；HTTP 接受与处理完成是不同事实。\n事实来源：evidence-5346f98b-e27c-42a5-8e8c-88aec04fd4e0, evidence-6a8e8bbd-d9e9-4fb5-b8ec-de9e955ace39, evidence-b9bb75d2-98cc-4f11-83f9-703ddec427e0。\n这些只读结论不代表已重发、恢复或交接。",
+    "actual_tools": [
+      "get_order_status",
+      "get_callback_delivery",
+      "get_receiver_processing"
+    ],
+    "model_requests": 1,
+    "mcp_attempts": 3,
+    "invalid_observations": 0,
+    "latency_seconds": 3.9595847999999023,
+    "usage": {
+      "input_tokens": 709,
+      "output_tokens": 275,
+      "total_tokens": 984,
+      "peak_estimated_usd": 0.0005427,
+      "usage_known": 1,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [
+        "evidence-5346f98b-e27c-42a5-8e8c-88aec04fd4e0",
+        "evidence-5346f98b-e27c-42a5-8e8c-88aec04fd4e0",
+        "evidence-6a8e8bbd-d9e9-4fb5-b8ec-de9e955ace39",
+        "evidence-b9bb75d2-98cc-4f11-83f9-703ddec427e0"
+      ],
+      "decision": "DIAGNOSED",
+      "excluded_sources": [],
+      "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+      "handoff_allowed": false,
+      "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "recovered": false,
+      "required_facts": [],
+      "side_effects": [],
+      "valid_until": "2026-10-25T06:50:36.970000Z"
+    }
+  },
+  {
+    "release": "controls-02",
+    "case_id": "DEV-P5-QUEUED",
+    "strategy": "R",
+    "profile": [
+      8,
+      6
+    ],
+    "task_id": "task-6836d735-24e3-485b-b1fe-b3ff5dabdaa3",
+    "run_id": "run-d5d47be4-1fc7-4ea3-9817-cb4cfb2d9665",
+    "source_trace": "runs\\controls-02\\DEV-P5-QUEUED-R-8-6\\TRACE.json",
+    "delivery_mode": "RULE",
+    "result_state": "ANSWERED",
+    "answer_text": "当前可核查的事实与未知事项：\n关注的事件是 event-8a0ce81450cb。\nevent-8a0ce81450cb 第 1 次，请求 transport-5457af98-c57c-424c-8c96-1a8170de5232，2026-10-25T06:45:33.417+00:00：HTTP 503。\nevent-8a0ce81450cb 第 2 次，请求 transport-6b8b386e-1f69-44ab-a468-71b08b292803，2026-10-25T06:45:33.463+00:00：HTTP 202。\n同一事件当前接收处理状态为 QUEUED；HTTP 接受与处理完成是不同事实。\n这些仅为已记录观察；未记录和发送后未落库窗口不构成完整审计。\n事实来源：evidence-f66a2a6c-64ae-4cae-b6ae-21d8ea8ed9d2, evidence-b2d4c5e7-8bef-48e5-8d8e-e7104504ed3d。\n这些只读结论不代表已重发、恢复或交接。",
+    "actual_tools": [
+      "get_callback_transport_history",
+      "get_receiver_processing"
+    ],
+    "model_requests": 0,
+    "mcp_attempts": 2,
+    "invalid_observations": 0,
+    "latency_seconds": 1.5109080000001995,
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "peak_estimated_usd": 0.0,
+      "usage_known": 0,
+      "usage_unknown": 0
+    },
+    "criteria": {
+      "nonempty_delivery": true,
+      "zero_business_writes": true,
+      "business_snapshot_unchanged": true
+    },
+    "failure": null,
+    "preparation_valid_for_formal_gate": true,
+    "current_final_source_independently_tested": null,
+    "formal_gate": {
+      "checked_fact_ids": [],
+      "decision": "INCONCLUSIVE",
+      "excluded_sources": [],
+      "handling_direction": "EVIDENCE_INSUFFICIENT",
+      "handoff_allowed": false,
+      "outcome": "INCONCLUSIVE",
+      "policy": "s3-callback-evidence-v1",
+      "reason_code": "POLICY_NO_ACTION",
+      "recovered": false,
+      "required_facts": [
+        "s3_order"
+      ],
+      "side_effects": [],
+      "valid_until": null
+    }
+  }
+]

@@ -1,0 +1,92 @@
+......F.....F........................................................... [ 69%]
+................................                                         [100%]
+================================== FAILURES ===================================
+______ test_vs05_real_graph_continues_after_diagnosis_for_the_user_goal _______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-regression-01/test_vs05_real_graph_continues0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EE75C61F40>
+
+    def test_vs05_real_graph_continues_after_diagnosis_for_the_user_goal(tmp_path, monkeypatch):
+        from opspilot.investigator import run_investigation
+        from opspilot.domain.s3_history import prepare_transport_history_fixture
+        from test_m4_03_s3 import _task
+        db = tmp_path / "graph.sqlite3"
+        reset_fixture(db, "S1_POS")
+        prepare_transport_history_fixture(db, order_id="graph-order", attempts=[
+            {"event_id":"graph-event", "http_status":503}, {"event_id":"graph-event", "http_status":202},
+        ])
+        _, task = _task(db, "graph-order", text="graph-event 上次失败后怎么样？请查实际回调历史。")
+        responses = [AIMessage(content="",tool_calls=[{"id":f"tool-{n}","name":name,"args":{"reason":"verify actual facts"}}])
+                     for n,name in enumerate(("get_order_status","get_callback_delivery","get_receiver_processing","get_callback_transport_history"))]
+        responses.append(AIMessage(content=json.dumps({"action":"answer","result_state":"ANSWERED","answer":"graph-event 两次实际请求依次为 503 和 202，当前接收为 QUEUED，尚不能证明处理完成。",
+                                                       "target_event_id":"graph-event","processing_claim":"QUEUED"},ensure_ascii=False)))
+        model = Model(responses)
+        monkeypatch.setattr("opspilot.investigator.ChatOpenAI", lambda **_kwargs:model)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY","deterministic-no-provider")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME","deterministic-no-provider")
+        result = asyncio.run(run_investigation(str(task["task_id"]),"support-a",db_path=db,
+                             checkpoint_db_path=tmp_path/"checkpoint.sqlite3",run_id=str(task["run_id"])))
+        assert len(model.messages) == 5  # Gate is already DIAGNOSED after the third read, but the goal still needs history
+        with connect(db) as c:
+            tools = [row[0] for row in c.execute("SELECT tool_name FROM d2_tool_observations WHERE task_id=? ORDER BY rowid",(task["task_id"],))]
+        assert tools[-1] == "get_callback_transport_history"
+>       assert result["values"]["stage"] == "complete"
+               ^^^^^^^^^^^^^^^^
+E       KeyError: 'values'
+
+tests\test_m4_continuous_vs01.py:227: KeyError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:58353/api/async-orders/async-order?order_id=graph-order "HTTP/1.0 200 OK"
+______ test_c1_wire_05_prior_followup_growth_stays_inside_context_budget ______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-regression-01/test_c1_wire_05_prior_followup0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EE7AAEA6F0>
+
+    def test_c1_wire_05_prior_followup_growth_stays_inside_context_budget(tmp_path: Path, monkeypatch) -> None:
+        import opspilot.investigator as investigator
+    
+        db = tmp_path / "c1-wire-budget.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        _persist_previous_followup(db, session_id, task_id, suffix="wire-budget")
+        _message_id, run_id = _start_investigation_run(
+            db, session_id, task_id, suffix="wire-budget-current",
+        )
+        model = CapturingModel()
+        node = _node(db, task_id, run_id, model)
+        messages, _metadata = node.prompt({"evidence_ids": [], "diagnosis_draft": {}})
+        serialized = [{"role": message.type, "content": str(message.content)} for message in messages]
+        full_required = estimate_messages_tokens(serialized) + 8
+        body_without_history = json.loads(str(messages[-1].content))
+        body_without_history["prior_readonly_followups"] = []
+        body_without_history["prior_readonly_followup_exclusions"] = []
+        body_without_history["prior_followup_authority"] = ""
+        without_history = [
+            serialized[0],
+            {"role": messages[-1].type, "content": canonical_json(body_without_history)},
+        ]
+        baseline_required = estimate_messages_tokens(without_history) + 8
+        assert full_required > baseline_required
+        input_budget = (full_required + baseline_required) // 2
+        assert baseline_required <= input_budget < full_required
+        monkeypatch.setattr(
+            investigator,
+            "context_budget_for_model",
+            lambda model_id: {"model_id": model_id, "input_budget_tokens": input_budget},
+        )
+    
+        try:
+            asyncio.run(node.model_call({"evidence_ids": [], "diagnosis_draft": {}}))
+        except ContextBudgetExceeded as error:
+            assert error.code == "INVESTIGATOR_CONTEXT_EXCEEDS_BUDGET"
+            assert error.required_tokens == full_required
+            assert error.input_budget_tokens == input_budget
+        else:
+>           raise AssertionError("prior follow-up context bypassed the input budget")
+E           AssertionError: prior follow-up context bypassed the input budget
+
+tests\test_m4_c1_s3_prompt.py:341: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs05_real_graph_continues_after_diagnosis_for_the_user_goal
+FAILED tests/test_m4_c1_s3_prompt.py::test_c1_wire_05_prior_followup_growth_stays_inside_context_budget
+2 failed, 102 passed in 111.20s (0:01:51)

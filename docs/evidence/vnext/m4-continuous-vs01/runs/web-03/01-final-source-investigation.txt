@@ -1,0 +1,34 @@
+- main:
+  - strong: OpsPilot
+  - generic: SUPPORT WORKSPACE
+  - generic: SUPPORT
+  - generic: support-a
+  - button "退出"
+  - region "聊天工作区":
+    - text: PERSISTENT SESSION
+    - heading "会话 45258aa9" [level=1]
+    - paragraph: 消息与运行状态保存在本地 Domain
+    - button "＋ 新建调查任务"
+    - button "显示 Task 检查器": ▤
+    - generic: i
+    - generic: 业务调查使用服务端可信资源绑定。用户描述和关键更正只提供调查线索，真实状态来自当前 MCP Evidence。S3 可把经你确认的人工处理请求交给本地队列；队列接收不表示订单恢复，也不会自动重发回调。
+    - article:
+      - generic: A
+      - strong: support-a
+      - generic: 2026/10/25 15:30:27
+      - generic: 初始故障描述 · 未验证
+      - generic: 上次回调失败了，后来怎么样？请查清 event-7965ae03fc4d 的真实回调过程，再核实现在是否处理完成，并说明来源与未知事项。
+    - generic: 当前调查结果 · 持久业务回执
+    - generic: 当前证据不足，需要继续核实
+    - generic: 仅只读诊断；未重发回调，也未宣称业务恢复。回执 s3-diagnosis-1e40f4df-f1c9-4849-8c93-abb931b5db69
+    - article:
+      - heading "本次调查答复" [level=2]
+      - generic: 已答复
+      - generic: 形成于 2026/10/25 15:31:00。以下是该 Run 当时的观察；刷新页面不会重新取证。
+      - paragraph: "结论：event-7965ae03fc4d 第一次回调确实失败（503），随后同一 Event 重试被接收端以 202 持久接收入队（ACKNOWLEDGED / QUEUED）；但查询时刻接收端仍为 QUEUED，处于 300 秒处理 SLA 之内，因此**业务处理尚未完成**（不能声称已完成）。 真实回调过程（事件 event-7965ae03fc4d，订单 order-95245723eced v1，契约 v2）： 1) 尝试 #1 —— 实际 HTTP 时间 started_at 2026-10-25T07:27:36.253Z，返回 HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED（响应中 retry_at 标注 2026-10-25T07:28:36.336Z）；transport_request_id=transport-25f9009c-5d32-44b9-b58c-7551be155359。 2) 尝试 #2 —— started_at 2026-10-25T07:27:36.350Z，返回 HTTP 202，accepted_at=2026-10-25T07:27:36.383Z，receiver_state=QUEUED，failure_code=null，retry_state=NOT_APPLICABLE，processing_sla_seconds=300；transport_request_id=transport-6da29012-23f0-471b-8fc1-ac4838d36852。 3) 绑定投递记录：status=ACKNOWLEDGED，attempt_count=2（上限 10），delivery_version=3，transport_request_id 同上（202 的传输请求）。 现在是否处理完成：接收端处理记录 event_id=event-7965ae03fc4d，version=3，status=QUEUED，accepted_at=2026-10-25T07:27:36.383Z，观测时间 2026-10-25T07:30:36.303Z。按契约 v2，HTTP 202 仅表示接收端把事件持久化入队，不等于业务处理完成；同一 event_id 的 QUEUED 在 SLA 内应继续观察。SLA 截止时间 = accepted_at + 300s = 2026-10-25T07:32:36.383Z，观测时点仍在其内，故当前只能判定为“已接收、排队中、未完成”。 来源与时间：本 Run MCP 读数 —— get_callback_transport_history（transport_history version 3，观测 2026-10-25T07:30:31.221Z）、get_callback_delivery（delivery version 3，观测 2026-10-25T07:30:33.376Z）、get_receiver_processing（receiver version 3，观测 2026-10-25T07:30:36.303Z）；协议依据 receiver-ack-contract-v2（version 2.0.0，来源 local:orders-async-demo/contract-v2，当前适用）。 未知与限制： - 接收端在 2026-10-25T07:32:36.383Z 截止之后是否会转为处理完成，本次未观测到，属 UNKNOWN；只有同一 event_id 的队列记录超过该可信 SLA 仍为 QUEUED，才有依据请接收端运营排查（任何情况下都不自动重发）。 - 尝试 #2 的实际发生时间（约 07:27:36.386Z）早于尝试 #1 响应中给出的 retry_at（07:28:36.336Z），我无法从现有证据解释该调度差异，不做推断。 - 传输历史为“已记录的观测”，不含发送到落库之间的完整审计；无记录不等于没有发送，缺失记录不构成“未发送”的证明。 - event_created_at（2026-10-24T07:27:36.253Z）是业务事件时间，与上述实际 HTTP 发送/接收时间（2026-10-25T07:27:36Z）含义不同，不可混为一谈。 建议下一步（只读）：观察至 2026-10-25T07:32:36.383Z 后再查同一 event_id 的接收端状态。"
+      - generic "查看形成时间与来源（4）"
+    - status: 已确认预注册订单 order-95245723eced；正在核实订单、投递与接收状态。
+    - textbox "询问当前证据、任务状态，或继续上一轮对话…"
+    - generic: Enter 发送 Shift + Enter 换行 · 模型可识别纠错候选，Task 只在你确认后更新
+    - button "发送消息" [disabled]: ↑
+    - generic: 回答只解释已授权信息。审批、修复和交付需要后续的可信控制流程。

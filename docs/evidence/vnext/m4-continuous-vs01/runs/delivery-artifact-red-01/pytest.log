@@ -1,0 +1,40 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________ test_vs07_unproductive_provider_is_bounded_and_nonblank ___________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-delivery-artifact-red/test_vs07_unproductive_provide0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002770BA578C0>
+
+    def test_vs07_unproductive_provider_is_bounded_and_nonblank(tmp_path, monkeypatch):
+        from opspilot.investigator import run_investigation
+        from opspilot.domain.s3_history import prepare_transport_history_fixture
+        from test_m4_03_s3 import _task
+        db = tmp_path / "bounded.sqlite3"
+        reset_fixture(db,"S1_POS")
+        prepare_transport_history_fixture(db,order_id="bounded-order",attempts=[{"event_id":"bounded-event","http_status":202}])
+        _, task = _task(db,"bounded-order",text="请核对当前回调状态。")
+        class RepeatingModel(Model):
+            async def ainvoke(self,messages):
+                self.messages.append(messages)
+                return AIMessage(content="",tool_calls=[{"id":f"repeat-{len(self.messages)}","name":"get_receiver_processing","args":{"reason":"same check"}}])
+        model = RepeatingModel([])
+        monkeypatch.setattr("opspilot.investigator.ChatOpenAI",lambda **_kwargs:model)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY","deterministic-no-provider")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME","deterministic-no-provider")
+        result = asyncio.run(run_investigation(str(task["task_id"]),"support-a",db_path=db,
+                             checkpoint_db_path=tmp_path/"checkpoint.sqlite3",run_id=str(task["run_id"])))
+        counts = attempt_counts(db,task["task_id"])
+        assert counts["MODEL"] == 8 and counts["MCP"] <= 6 and len(model.messages) == 8
+        assert result["graph_state"]["stage"] == "complete"
+        from opspilot.domain.chat import get_task_inspector
+        from opspilot.domain.task_control import trusted_identity
+        view=get_task_inspector(db,trusted_identity(db,"support-a"),str(task["task_id"]))
+        replies=view.get("investigation_answers",[])
+>       assert replies and replies[-1]["answer_text"].strip(), "A frozen Diagnosis reference alone is not a usable user answer"
+E       AssertionError: A frozen Diagnosis reference alone is not a usable user answer
+E       assert ([])
+
+tests\test_m4_continuous_vs01.py:297: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs07_unproductive_provider_is_bounded_and_nonblank
+1 failed in 4.32s

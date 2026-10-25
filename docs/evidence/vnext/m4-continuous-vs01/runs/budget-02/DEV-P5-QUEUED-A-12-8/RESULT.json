@@ -1,0 +1,1121 @@
+{
+  "case_id": "DEV-P5-QUEUED",
+  "strategy": "A",
+  "profile": [
+    12,
+    8
+  ],
+  "default_profile": false,
+  "task_id": "task-66b060e5-afa5-45af-a528-5c56a419aeeb",
+  "run_id": "run-a019bc96-b627-4770-a39c-c7d227fa3d4f",
+  "physical_mapping": {
+    "evt-dev-p5-queued-old": "event-8a0ce81450cb"
+  },
+  "target_event_id": "event-8a0ce81450cb",
+  "failure": null,
+  "elapsed_seconds": 36.242549900000085,
+  "answer": {
+    "answer_text": "已查清该订单 order-1ae813afa160（order_version=1）的回调过程与当前接收方状态。\n\n【订单侧】订单快照返回 HTTP 200，业务状态为 COMPLETED（order_version=1，契约版本 2，观察时间 2026-10-25T06:41:55.804Z）。注意：200 只说明读取成功，不单独证明回调完成。\n\n【回调事件】event-8a0ce81450cb（同一事件 ID 贯穿两次尝试，未更换事件）。业务事件时间 event_created_at=2026-10-24T06:41:52.764994Z。\n1) 第 1 次尝试 transport-a4433345-2321-46aa-9e05-e58228b1ca06，实际 HTTP 时间 started_at=2026-10-25T06:41:52.764Z，返回 HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED，retry_at=2026-10-25T06:42:52.787372Z，attempt_count=1/10。这就是“上次失败”的那一次。\n2) 第 2 次尝试 transport-d5d38636-9fb1-4d0f-ae35-7132b88dd9d3，HTTP 时间 started_at=2026-10-25T06:41:52.802Z，返回 HTTP 202，accepted_at=2026-10-25T06:41:52.849Z，failure_code=null，receiver_state=QUEUED，retry_state=NOT_APPLICABLE，attempt_count=2/10。投递侧状态为 ACKNOWLEDGED（delivery version 3）。\n\n【现在是否处理完成】未完成。接收方当前处理状态（event_id=event-8a0ce81450cb，delivery_version=3，version=3，观察时间 2026-10-25T06:42:02.484Z）为 status=QUEUED，accepted_at=2026-10-25T06:41:52.849Z，processing_sla_seconds=300。按绑定契约 receiver-ack-contract-v2（Receiver acknowledgement and processing SLA v2，version 2.0.0，2026-10-01 起生效）：“HTTP 202 仅表示接收方已把事件持久放入队列，不代表业务处理完成”。该事件仍处 SLA 内（截止约 2026-10-25T06:46:52.849Z），应在期限内继续观察同一 event_id 直到状态变化；仅在队列记录超过可信 SLA 仍未处理时，才可请接收方运维排查。不得自动重发。\n\n【未知项】接收方是否会在 SLA 内转为已处理，当前无法确定（UNKNOWN）；传输历史为“已记录观测”而非完整审计，缺失记录不等于未发送。",
+    "authority": "USER_DELIVERY_NOT_BUSINESS_RECEIPT",
+    "control_revision": 0,
+    "currentness": "HISTORICAL_AT_DELIVERY",
+    "report_ref": "s3-diagnosis-eef924bc-9ffd-4420-b3d1-1d2d08b56dbc",
+    "result": {
+      "candidate_decisions": [
+        {
+          "decision": "RECONSIDERED_SELECTION",
+          "decision_call_id": "call-c149cad0-8cc9-4e77-a641-ebc18ce56de9",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_01_C5u6P74JI8bm5Y56QNDz1193",
+          "selected_calls": [
+            {
+              "arguments": {
+                "reason": "读取当前绑定回调事件的订单版本与实际传输确认/失败"
+              },
+              "tool_call_id": "call_00_pkvc1c7sf1eNhc30ScpL7848",
+              "tool_name": "get_callback_delivery"
+            }
+          ]
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-c149cad0-8cc9-4e77-a641-ebc18ce56de9",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328",
+          "selected_calls": []
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-f51dd7c6-6909-475a-9c73-512eba0e9c71",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328",
+          "selected_calls": []
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-f51dd7c6-6909-475a-9c73-512eba0e9c71",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-c149cad0-8cc9-4e77-a641-ebc18ce56de9|call_01_dkpmE9YVd4bYoH3794ym9558",
+          "selected_calls": []
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-372e2c66-f056-4d49-b3af-3154895c60a8",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328",
+          "selected_calls": []
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-372e2c66-f056-4d49-b3af-3154895c60a8",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-c149cad0-8cc9-4e77-a641-ebc18ce56de9|call_01_dkpmE9YVd4bYoH3794ym9558",
+          "selected_calls": []
+        },
+        {
+          "decision": "RECONSIDERED_SELECTION",
+          "decision_call_id": "call-372e2c66-f056-4d49-b3af-3154895c60a8",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-f51dd7c6-6909-475a-9c73-512eba0e9c71|call_01_jiCeDqQM1hyFYZm8v3Y27871",
+          "selected_calls": [
+            {
+              "arguments": {
+                "reason": "核实该回调事件在接收方当前的处理状态（ACK/202 不等于已完成处理）"
+              },
+              "tool_call_id": "call_00_QH9W9SxFta58o1C2hA0q4223",
+              "tool_name": "get_receiver_processing"
+            }
+          ]
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-253293ed-fa61-4209-a0fe-30f44b626b08",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328",
+          "selected_calls": []
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-253293ed-fa61-4209-a0fe-30f44b626b08",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-c149cad0-8cc9-4e77-a641-ebc18ce56de9|call_01_dkpmE9YVd4bYoH3794ym9558",
+          "selected_calls": []
+        },
+        {
+          "decision": "MODIFIED_SELECTION",
+          "decision_call_id": "call-253293ed-fa61-4209-a0fe-30f44b626b08",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-372e2c66-f056-4d49-b3af-3154895c60a8|call_01_F86ssHLr2ob6kmG1yY7q2485",
+          "selected_calls": [
+            {
+              "arguments": {
+                "query": "202 Accepted 已接受是否代表接收方处理完成；receiver_state QUEUED 与 ACKNOWLEDGED 的含义",
+                "reason": "需要绑定版本协议条款说明 202 接受/ACK 与接收方处理完成的关系"
+              },
+              "tool_call_id": "call_00_LvuT7AQWwTVdrd8O9U8J3199",
+              "tool_name": "search_callback_knowledge"
+            }
+          ]
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-7c41d31f-882b-42e9-861a-d8ad7b1c9f3f",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328",
+          "selected_calls": []
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-7c41d31f-882b-42e9-861a-d8ad7b1c9f3f",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-c149cad0-8cc9-4e77-a641-ebc18ce56de9|call_01_dkpmE9YVd4bYoH3794ym9558",
+          "selected_calls": []
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-43bfb15f-e199-45d1-9e98-347690ecc34b",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328",
+          "selected_calls": []
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-43bfb15f-e199-45d1-9e98-347690ecc34b",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-c149cad0-8cc9-4e77-a641-ebc18ce56de9|call_01_dkpmE9YVd4bYoH3794ym9558",
+          "selected_calls": []
+        },
+        {
+          "decision": "WITHDRAWN_AFTER_ANSWER",
+          "decision_call_id": "call-a41d52c8-65ca-4046-9a1a-19573d57946d",
+          "reason": "同一传输历史已由 call_00_iUpGyxd8JnSPqdUU2CLx5572 取回，重复调用无新信息",
+          "reference": "call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328",
+          "selected_calls": []
+        },
+        {
+          "decision": "WITHDRAWN_AFTER_ANSWER",
+          "decision_call_id": "call-a41d52c8-65ca-4046-9a1a-19573d57946d",
+          "reason": "同一传输历史已由 call_00_iUpGyxd8JnSPqdUU2CLx5572 取回，重复调用无新信息",
+          "reference": "call-c149cad0-8cc9-4e77-a641-ebc18ce56de9|call_01_dkpmE9YVd4bYoH3794ym9558",
+          "selected_calls": []
+        }
+      ],
+      "delivery_mode": "MODEL",
+      "model_call_id": "call-a41d52c8-65ca-4046-9a1a-19573d57946d",
+      "response_action": "answer",
+      "unexecuted_candidates": []
+    },
+    "result_state": "ANSWERED",
+    "run_id": "run-a019bc96-b627-4770-a39c-c7d227fa3d4f",
+    "source_digest": "ea03012c256290d98288874e89e3ccd2ba6fc610709bc4a896f49ca768623acd",
+    "source_message_id": "message-645b6679-442c-443c-9560-1ca5e2ed0d2c",
+    "source_refs": [
+      {
+        "evidence_id": "evidence-5a64ec12-1fd6-445a-b1a6-e2fc9e59e464",
+        "fact_type": "s3_order",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-45acaa6a-5e10-4609-9f05-83aa81cc18db",
+        "origin_run_id": "run-a019bc96-b627-4770-a39c-c7d227fa3d4f",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1
+        }
+      },
+      {
+        "evidence_id": "evidence-acaaf207-e50c-4760-9775-1067828e78f3",
+        "fact_type": "s3_delivery",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-aa88fea2-3a8a-4642-8ae6-6c4c4bfe8ddc",
+        "origin_run_id": "run-a019bc96-b627-4770-a39c-c7d227fa3d4f",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1
+        }
+      },
+      {
+        "evidence_id": "evidence-2b9057b2-136f-41ac-b2e2-701734278fb5",
+        "fact_type": "s3_transport_history",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-85edef65-8be0-4e43-ac3f-c0cdf97f371c",
+        "origin_run_id": "run-a019bc96-b627-4770-a39c-c7d227fa3d4f",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1,
+          "transport_history_version": 3
+        }
+      },
+      {
+        "evidence_id": "evidence-0e38e56f-63ec-4d5f-870c-bd4e593ef0d0",
+        "fact_type": "s3_receiver",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-53c3a970-10e6-420c-8ac7-8b816c150d72",
+        "origin_run_id": "run-a019bc96-b627-4770-a39c-c7d227fa3d4f",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1
+        }
+      },
+      {
+        "digest": "76abb5047ae680dedc4c097b91918c438aaa8d04aca5e4600bd1296aa6bf3a70",
+        "document_id": "receiver-ack-contract-v2",
+        "kind": "KNOWLEDGE",
+        "source": "local:orders-async-demo/contract-v2",
+        "valid_from": "2026-10-01T00:00:00+00:00",
+        "version": "2.0.0"
+      }
+    ],
+    "task_id": "task-66b060e5-afa5-45af-a528-5c56a419aeeb"
+  },
+  "actual_tools": [
+    "get_order_status",
+    "get_callback_delivery",
+    "get_callback_transport_history",
+    "get_receiver_processing",
+    "search_callback_knowledge"
+  ],
+  "write_counts": {
+    "d3_plans": 0,
+    "d3_approvals": 0,
+    "d3_action_intents": 0,
+    "d3_action_ledgers": 0,
+    "s3_handoff_queue_entries": 0,
+    "s3_handoff_receipts": 0
+  },
+  "run_statuses": [
+    "SUCCEEDED"
+  ],
+  "provider_requests": [
+    {
+      "event": "RESERVE",
+      "request_id": "2cfdab41-c471-437d-b687-0a8417c7209d",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:26:53.311492+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "af8583713b78c69b3784c1d623dece25c4b419344a3892fc1426cf9a235035c7",
+      "input_token_upper": 10881,
+      "output_token_upper": 512,
+      "reserved_usd": 0.0038786999999999997,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "2cfdab41-c471-437d-b687-0a8417c7209d",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 1.6332805000001827,
+      "usage": {
+        "input_tokens": 2228,
+        "output_tokens": 250,
+        "total_tokens": 2478,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 121
+        }
+      },
+      "estimated_peak_usd": 0.0009684,
+      "provider_response_id": "lc_run--01a171bd-9903-7585-a1a3-339af653cbc2-0",
+      "tool_calls": [
+        {
+          "name": "get_order_status",
+          "args": {
+            "reason": "先确认订单当前状态与完成情况"
+          },
+          "id": "call_00_GfuvTR9iRqttOKrtJbDh1183",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_callback_delivery",
+          "args": {
+            "reason": "读取当前回调事件、订单版本及实际传输确认结果"
+          },
+          "id": "call_01_0U0X0z3Qtn4WeuoZEFdd0474",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "发现该订单相关的实际回调传输尝试记录"
+          },
+          "id": "call_02_E8Zv2pwZRs2gwi03XEe16485",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "3aa6efc2-4139-48b5-b311-a515f06d56d1",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:26:55.301486+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "eb9dc21576a7f4d17ac0ce359a8ceba4c2a415c83cd1330651e6147a434fbb94",
+      "input_token_upper": 13438,
+      "output_token_upper": 512,
+      "reserved_usd": 0.004645799999999999,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "3aa6efc2-4139-48b5-b311-a515f06d56d1",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 3.1434658999996827,
+      "usage": {
+        "input_tokens": 3089,
+        "output_tokens": 516,
+        "total_tokens": 3605,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 369
+        }
+      },
+      "estimated_peak_usd": 0.0015458999999999998,
+      "provider_response_id": "lc_run--01a171bd-a0cc-7709-ba61-232101b9d97b-0",
+      "tool_calls": [
+        {
+          "name": "get_callback_delivery",
+          "args": {
+            "reason": "读取当前回调事件、订单版本及实际传输确认/失败结果"
+          },
+          "id": "call_00_C0pGMSezoUPcjCgeK6Ht5338",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "列出该订单已知的实际回调传输尝试，核实此前失败与后续重试"
+          },
+          "id": "call_01_zyrMLSKt5I9e4mA0I9kv7480",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_receiver_processing",
+          "args": {
+            "reason": "核实接收方对当前回调事件的处理状态（ACK≠处理完成）"
+          },
+          "id": "call_02_ExKuFgK60OzfHhhE5enR3475",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "1af9d7ef-c85b-44ed-9dfd-af02413a3b8e",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:26:58.667102+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "506fdabe58f065f99772b779ec100cc9490c122f3b69b0259cbb3d541ee6d8f6",
+      "input_token_upper": 16712,
+      "output_token_upper": 512,
+      "reserved_usd": 0.005627999999999999,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "1af9d7ef-c85b-44ed-9dfd-af02413a3b8e",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 1.4152481999999509,
+      "usage": {
+        "input_tokens": 4237,
+        "output_tokens": 234,
+        "total_tokens": 4471,
+        "input_token_details": {
+          "cache_read": 1536
+        },
+        "output_token_details": {
+          "reasoning": 111
+        }
+      },
+      "estimated_peak_usd": 0.0015519,
+      "provider_response_id": "lc_run--01a171bd-adee-766a-8e72-10c59a075466-0",
+      "tool_calls": [
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "核实此前回调失败与后续重试的实际传输尝试记录",
+            "event_id": "event-8a0ce81450cb"
+          },
+          "id": "call_00_ccklENkVGevLHEz2C0lA2667",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_receiver_processing",
+          "args": {
+            "reason": "核实接收方对当前回调事件的处理状态（ACK不等于处理完成）"
+          },
+          "id": "call_01_GMwOwq4L6vmPlikBtqW59665",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "568e8e5f-0bbf-425d-8403-1814f0660b9b",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:27:00.298795+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "a6d132386e359217f8fcd3316c61a28b466a2f3217b24ad1434ca20073b35085",
+      "input_token_upper": 23011,
+      "output_token_upper": 512,
+      "reserved_usd": 0.0075176999999999996,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "568e8e5f-0bbf-425d-8403-1814f0660b9b",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 1.1742331000004924,
+      "usage": {
+        "input_tokens": 6452,
+        "output_tokens": 184,
+        "total_tokens": 6636,
+        "input_token_details": {
+          "cache_read": 1792
+        },
+        "output_token_details": {
+          "reasoning": 116
+        }
+      },
+      "estimated_peak_usd": 0.0021564,
+      "provider_response_id": "lc_run--01a171bd-b44f-7248-a397-f98dc47334f8-0",
+      "tool_calls": [
+        {
+          "name": "get_receiver_processing",
+          "args": {
+            "reason": "核实接收方对当前回调事件 event-8a0ce81450cb 的处理状态（202/ACK 不等于处理完成）"
+          },
+          "id": "call_00_JssAdusnuPxqw00oAjfA8896",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "de97b53e-ad5a-485b-aba6-ef31446da762",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:27:01.704510+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "364323fb69aed548f02cacf01eea4d67ac57e88792c25464ffb55d45832752fa",
+      "input_token_upper": 25274,
+      "output_token_upper": 512,
+      "reserved_usd": 0.0081966,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "de97b53e-ad5a-485b-aba6-ef31446da762",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 3.9372354000006453,
+      "usage": {
+        "input_tokens": 7232,
+        "output_tokens": 627,
+        "total_tokens": 7859,
+        "input_token_details": {
+          "cache_read": 2176
+        },
+        "output_token_details": {
+          "reasoning": 531
+        }
+      },
+      "estimated_peak_usd": 0.002922,
+      "provider_response_id": "lc_run--01a171bd-b9cc-744e-8bc4-5dc1ef584bdf-0",
+      "tool_calls": [
+        {
+          "name": "search_callback_knowledge",
+          "args": {
+            "query": "回调 202 ACK 已受理 不等于处理完成 receiver QUEUED 状态含义",
+            "reason": "需要协议依据说明 202/ACK 与接收方处理完成的关系及 QUEUED 含义"
+          },
+          "id": "call_00_HIOYRSsOJu9BY2HqlXj40365",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "696001b5-60db-42c7-b51d-111afacfcc2c",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:27:05.849410+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "3c383dc551dbfff9c1cfbd2a12db8eeb653684dfa0128530d0c30afee94c7fc4",
+      "input_token_upper": 27348,
+      "output_token_upper": 512,
+      "reserved_usd": 0.0088188,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "696001b5-60db-42c7-b51d-111afacfcc2c",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 10.468743500000528,
+      "usage": {
+        "input_tokens": 7864,
+        "output_tokens": 1923,
+        "total_tokens": 9787,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 1380
+        }
+      },
+      "estimated_peak_usd": 0.0046668,
+      "provider_response_id": "lc_run--01a171bd-c9fe-736e-9d3c-b25ab71700d0-0",
+      "tool_calls": [
+        {
+          "name": "get_callback_delivery",
+          "args": {
+            "reason": "忽略：不执行，占位说明"
+          },
+          "id": "call_00_jS4RI3TWfDol0GXzlneI4889",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "当前证据已足以回答，无需再调用工具。\n\n**结论要点**\n\n- 订单 order-1ae813afa160 当前状态 COMPLETED（order_version 1，读取于 2026-10-25T06:26:55Z）。\n- 回调事件 event-8a0ce81450cb 的真实传输记录：\n  - 第 1 次尝试：启动 2026-10-25T06:26:52.166Z → HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED（原定 retry_at 2026-10-25T06:27:52Z）。\n  - 第 2 次尝试：启动 2026-10-25T06:26:52.242Z → HTTP 202，failure_code=null，receiver_state=QUEUED；投递记录 status=ACKNOWLEDGED，attempt_count=2，delivery_version=3。\n- 接收方处理状态：同一 event_id、delivery_version=3，status=QUEUED，accepted_at 2026-10-25T06:26:52.273Z，processing_sla_seconds=300 → SLA 截止约 2026-10-25T06:31:52Z。202/ACK 只表示“已持久入队”，不等于业务处理完成。\n- 因此：**上次失败（503）之后已重试成功入队，但业务处理尚未完成，仍在 SLA 内，需继续观察至截止时间**；只有同一 event_id 的队列记录超过受信 SLA 仍为 QUEUED，才可请接收方运维排查。不得自动重发。\n- 另注：事件业务时间 event_created_at 为 2026-10-24T06:26:52Z，而实际 HTTP 传输发生在 2026-10-25T06:26:52Z；第 2 次尝试启动时间早于第 1 次 503 中安排的 retry_at，说明这次并非按计划延迟重试（仅为记录的观察事实）。\n- 未知项：传输历史仅为“已记录观察”，无记录不等于未发送；接收方后续处理结果目前 UNKNOWN/待定。",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "109b03b2-5565-4987-ac3d-e60a5768c13e",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:27:16.516995+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "df029505d6a405a93569fa9a6aea5948cc1fb13c12f100d63b420ee2c9c57fd0",
+      "input_token_upper": 27831,
+      "output_token_upper": 512,
+      "reserved_usd": 0.008963699999999998,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "109b03b2-5565-4987-ac3d-e60a5768c13e",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 9.166030200000023,
+      "usage": {
+        "input_tokens": 8081,
+        "output_tokens": 1636,
+        "total_tokens": 9717,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 507
+        }
+      },
+      "estimated_peak_usd": 0.0043875,
+      "provider_response_id": "lc_run--01a171bd-f3a9-73c0-999d-c01653cc58db-0",
+      "tool_calls": [],
+      "assistant_text": "**查询已完成，不需要再调用工具。**\n\n```json\n{\n  \"action\": \"answer\",\n  \"result_state\": \"PARTIAL\",\n  \"answer\": \"一、订单侧（get_order_status，observed_at 2026-10-25T06:26:55.169Z，order_version 1）：订单 order-1ae813afa160 状态为 COMPLETED，业务侧已完成。HTTP 200 只代表读取成功，这里的状态字段本身即 COMPLETED。\\n\\n二、回调事件 event-8a0ce81450cb 的传输过程（get_callback_transport_history，observed_at 2026-10-25T06:27:00.163Z；delivery 记录 observed_at 2026-10-25T06:27:16.391Z，delivery_version 3）：\\n· 第 1 次尝试 attempt_no 1，transport-1bd51141-b56b-44a4-9b6e-c532fbf2c93c，实际 HTTP 时间 2026-10-25T06:26:52.166Z，返回 HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED，retry_at=2026-10-25T06:27:52.223Z。这就是您说的\\u201c上次回调失败\\u201d。\\n· 第 2 次尝试 attempt_no 2，transport-4047bc2e-4bc4-4943-98a2-75aef3292113，实际 HTTP 时间 2026-10-25T06:26:52.242Z，返回 HTTP 202，failure_code=null，receiver_state=QUEUED，retry_state=NOT_APPLICABLE。\\n· 注意时间口径：event_created_at 是 2026-10-24T06:26:52.166Z（业务事件时间），但两次实际 HTTP 发送都发生在 2026-10-25T06:26:52Z 前后，不能说成\\u201c昨天发出的\\u201d。\\n\\n三、当前是否处理完成（get_receiver_processing，observed_at 2026-10-25T06:27:01.572Z，receiver_state version 3）：同一 event_id event-8a0ce81450cb 在接收方状态为 QUEUED，accepted_at=2026-10-25T06:26:52.273Z，processing_sla_seconds=300，即处理截止时间约为 2026-10-25T06:31:52.273Z。\\n按已检索到的现行契约《Receiver acknowledgement and processing SLA v2》（document_id receiver-ack-contract-v2，version 2.0.0，CURRENT_APPLICABLE）：HTTP 202 只表示接收方已把事件持久化入队，并不表示业务处理完成；处于 QUEUED 且仍在 SLA 内的，应持续观察到截止时间，只有同一 event_id 的队列记录超过可信 SLA 才能请接收方运维排查，且任何时候都不自动重发。\\n\\n四、结论：旧的 503 已被同一次事件的第 2 次尝试以 202 受理取代，事件已入接收方队列；但截至观测时点（06:27:01Z）它仍是 QUEUED，尚未处理完成，且仍在 300 秒 SLA 内，现在还不能判定异常、也不应重发。\\n\\n五、未知与后续：处理完成状态窗口为 UNKNOWN，因此当前处理结论按 QUEUED（未完成）记录；请在 2026-10-25T06:31:52Z 之后重新核对同一 event_id 的接收方状态，若届时仍为 QUEUED 才算超出 SLA，可据此请接收方运维排查；若状态转为已处理，则本次回调流程闭环。传输历史为 RECORDED_OBSERVATIONS_ONLY，未记录不等于未发送（发送与落库之间的窗口不在审计范围内），本次核对不涉及该缺口。本回答全程只读，未做任何重发或业务写入。\",\n  \"target_event_id\": \"event-8a0ce81450cb\",\n  \"processing_claim\": \"QUEUED\",\n  \"candidate_updates\": [\n    {\n      \"reference\": \"call-17bcce40-1256-4e8f-a41e-36c02cd72390|call_02_E8Zv2pwZRs2gwi03XEe16485\",\n      \"decision\": \"DROP\",\n      \"reason\": \"同一订单的传输历史已在本 Run 执行并返回两次尝试记录，重复查询无新增信息\"\n    },\n    {\n      \"reference\": \"call-1940f819-f1ad-4b51-b096-6ecb31971c34|call_01_zyrMLSKt5I9e4mA0I9kv7480\",\n      \"decision\": \"DROP\",\n      \"reason\": \"传输历史证据已充分覆盖 503 与 202 两次尝试，无需再次列出\"\n    }\n  ]\n}\n```",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "c3c8084a-34c0-48c1-a50a-59cb750f39d8",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:27:25.800785+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "314904a8929efa499b79644a0c314f68d6f356309e3c0db5632d826728520d78",
+      "input_token_upper": 27819,
+      "output_token_upper": 512,
+      "reserved_usd": 0.008960099999999999,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "c3c8084a-34c0-48c1-a50a-59cb750f39d8",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 10.767679199999293,
+      "usage": {
+        "input_tokens": 8081,
+        "output_tokens": 1950,
+        "total_tokens": 10031,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 601
+        }
+      },
+      "estimated_peak_usd": 0.004764299999999999,
+      "provider_response_id": "lc_run--01a171be-17ec-75ba-a4de-67d7d11fc70f-0",
+      "tool_calls": [],
+      "assistant_text": "## 结论\n\n**上一次回调失败是一次临时性失败，之后系统自动重试，第二次已被接收方持久接收并进入队列；但接收方业务处理尚未完成，仍为 QUEUED（在 SLA 内）。现在不能判定\"已处理完成\"，也不应重发。**\n\n## 回调过程核实（订单 order-1ae813afa160 / 事件 event-8a0ce81450cb）\n\n| 时间（UTC，实际 HTTP 时间） | 事实 |\n|---|---|\n| 2026-10-24T06:26:52.166 | 业务事件创建时间（event_created_at，非发送时间） |\n| 2026-10-25T06:26:52.226 | 第 1 次传输：HTTP **503**，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED（retry_at 06:27:52） |\n| 2026-10-25T06:26:52.273 | 第 2 次传输（同一 event_id / order_version=1，新 request_id transport-4047bc2e…）：HTTP **202**，receiver_state=**QUEUED**，failure_code=null，retry_state=NOT_APPLICABLE，attempt_count=2 / max_attempts=10 |\n| 2026-10-25T06:27:16.391 | 投递快照：status=**ACKNOWLEDGED**，delivery version 3，无 retry_at、无 failure_code |\n\n要点：第 1 次 503 是临时不可用，系统按计划重试；第 2 次收到 202 仅代表接收方**持久接收并入队**，不等于业务处理完成（依据 receiver-ack-contract-v2：202 = durably accepted into queue，not completed business processing；同一 event_id、delivery version、receiver state、accepted_at 与 processing SLA 需一起看）。\n\n## 是否处理完成\n\n- 接收方处理状态（同一 event_id，receiver 观测 06:27:01.566，version 3）：**QUEUED**，accepted_at = 2026-10-25T06:26:52.273Z，processing_sla_seconds = **300**。\n- 观测时距接收时间约 24 秒，远未到 SLA 期限；按契约，SLA 内的 QUEUED 事件应继续观察到截止时间（约 2026-10-25T06:31:52Z），此时**不构成异常，也不应自动重发**。\n- 订单侧：订单状态 COMPLETED（order_version 1，查询 06:26:55.163），但这不能替代接收方处理状态。\n\n## 未知与边界\n\n- 接收方是否最终处理成功：**UNKNOWN**（当前仅 QUEUED，尚无终态）。\n- 传输历史覆盖为 RECORDED_OBSERVATIONS_ONLY，\"没有记录不等于没发送\"，存在发送-落库间隙，不是完整审计。\n- 若接收方在 SLA 截止后仍为 QUEUED（delivery version 3、同一 event_id），才可依据契约请接收方运营排查；重发须由受信流程决定，我不执行任何发送。\n\n**处理声明：QUEUED。**\n\ncandidate_updates：未执行的重复传输历史查询已无必要，其余查询均已被本轮证据覆盖。\n\n```json\n{\"action\":\"answer\",\"result_state\":\"ANSWERED\",\"answer\":\"上一次回调（2026-10-25T06:26:52.226Z，同一 event-8a0ce81450cb、order_version=1）首次传输返回 HTTP 503 / TEMPORARY_UNAVAILABLE（receiver_state=UNAVAILABLE，retry_state=SCHEDULED）；随后自动重试，第 2 次传输于 2026-10-25T06:26:52.273Z 返回 HTTP 202，receiver_state=QUEUED，attempt_count=2/10，无失败码；投递侧状态为 ACKNOWLEDGED（delivery version 3，2026-10-25T06:27:16.391Z 观测）。接收方处理状态为 QUEUED（accepted_at 06:26:52.273Z，processing_sla_seconds=300，06:27:01.566Z 观测），观测时仅过去约 24 秒，仍在 SLA 内，因此业务处理尚未完成，不能判定处理成功；按 receiver-ack-contract-v2，202 仅表示已持久入队，不表示处理完成，SLA 内 QUEUED 应继续观察到约 2026-10-25T06:31:52Z 截止，不应自动重发；若截止后仍为同一 event_id 的 QUEUED（delivery version 3），才可请接收方运营排查。注意 event_created_at 为 2026-10-24T06:26:52.166Z，属业务事件时间，实际 HTTP 发生在 2026-10-25T06:26:52Z。未知：接收方最终处理结果 UNKNOWN；传输历史仅含已记录观测，非完整审计（无记录不等于未发送）。订单状态 COMPLETED（order_version 1）不能替代接收方处理状态。\",\"target_event_id\":\"event-8a0ce81450cb\",\"processing_claim\":\"QUEUED\",\"candidate_updates\":[{\"reference\":\"call-17bcce40-1256-4e8f-a41e-36c02cd72390|call_02_E8Zv2pwZRs2gwi03XEe16485\",\"decision\":\"DROP\",\"reason\":\"传输历史已在本轮同一订单范围执行并取得完整记录，重复查询无新增信息\"},{\"reference\":\"call-1940f819-f1ad-4b51-b096-6ecb31971c34|call_01_zyrMLSKt5I9e4mA0I9kv7480\",\"decision\":\"DROP\",\"reason\":\"同上，传输尝试（503 后 202）已由本轮证据确认\"}]}\n```",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "be2bc329-1ee6-49dd-a091-b4394ee071ed",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:27:36.720374+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "5cdeee5c6f2e1b0dcc156e3f9d9894eb8b1a92090f8bbe947d9cd36f37e0d27f",
+      "input_token_upper": 27819,
+      "output_token_upper": 512,
+      "reserved_usd": 0.008960099999999999,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "be2bc329-1ee6-49dd-a091-b4394ee071ed",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 11.340761499999644,
+      "usage": {
+        "input_tokens": 8083,
+        "output_tokens": 2219,
+        "total_tokens": 10302,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 1039
+        }
+      },
+      "estimated_peak_usd": 0.0050877,
+      "provider_response_id": "lc_run--01a171be-4294-7472-b159-c62a2f1c2111-0",
+      "tool_calls": [],
+      "assistant_text": "```json\n{\n  \"action\": \"answer\",\n  \"result_state\": \"ANSWERED\",\n  \"target_event_id\": \"event-8a0ce81450cb\",\n  \"processing_claim\": \"QUEUED\",\n  \"answer\": \"已查清：上次确实失败过，但同一事件后来已被接收方接收排队；截至最后一次观测，业务处理尚未完成（仍在接收方队列中，且仍在 SLA 窗口内）。\\n\\n一、订单侧（get_order_status，观测 2026-10-25T06:26:55Z）\\n订单 order-1ae813afa160 返回 HTTP 200，status=COMPLETED，order_version=1，contract_version=2。200 只说明订单侧已完成，不能代表回调已处理完成。\\n\\n二、回调过程（get_callback_transport_history，观测 2026-10-25T06:27:00Z；RECORDED_OBSERVATIONS_ONLY）\\n目标事件：event-8a0ce81450cb（order_version=1）。注意 event_created_at=2026-10-24T06:26:52Z 是业务事件时间，实际 HTTP 尝试发生在 2026-10-25T06:26:52Z，两者不可混为“昨天发送”。\\n1) 第 1 次尝试 transport-1bd51141…（attempt_no=1），started_at=2026-10-25T06:26:52.166Z → HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED（retry_at=2026-10-25T06:27:52Z）。这就是“上次失败”。\\n2) 第 2 次尝试 transport-4047bc2e…（attempt_no=2），started_at=2026-10-25T06:26:52.242Z → HTTP 202，attempt_count=2，receiver_state=QUEUED，retry_state=NOT_APPLICABLE。即重试已被接收方持久化接收。\\n\\n三、投递状态（get_callback_delivery，观测 2026-10-25T06:27:16Z，delivery version=3）\\nstatus=ACKNOWLEDGED，attempt_count=2/10，receiver_http_status=202，failure_code=null，retry_at=null，transport_request_id=transport-4047bc2e-4bc4-4943-98a2-75aef3292113。202/ACKNOWLEDGED 仅表示接收方已持久化入队，不等于业务处理完成。\\n\\n四、接收方处理状态（get_receiver_processing，观测 2026-10-25T06:27:01Z，receiver state version=3）\\n同一事件 event-8a0ce81450cb：status=QUEUED，accepted_at=2026-10-25T06:26:52.273Z，processing_sla_seconds=300 → SLA 截止约 2026-10-25T06:31:52.273Z。也就是说在观测时刻它仍在队列内、仍在 SLA 窗口之内。\\n\\n五、结论与依据\\n依据 receiver-ack-contract-v2（Receiver acknowledgement and processing SLA v2，contract_version=2，本地 orders-async-demo/contract-v2）：QUEUED 事件在 SLA 内应继续观察至截止时间；只有同一 event_id 的队列记录已超过其可信 SLA 仍未推进，才支持请接收方运维排查；任何情况下都不应自动重发。因此当前正确动作是继续观察 event-8a0ce81450cb，而不是重发或判定完成。\\n\\n六、未知事项（不得推断）\\n1) 接收方状态系 06:27:01Z 的快照，其后若已完成处理，本次证据未覆盖；故“此刻是否已完成”为 UNKNOWN，只能说最近已知状态是 QUEUED 且在 SLA 内。\\n2) 传输历史为“已记录观测”而非完整审计，缺失记录不能证明未发送；发送-落库崩溃窗口不可排除。\\n3) 第 1 次 503 不能用来推断该事件后来恢复与否，恢复结论仅来自同一 event_id 的第 2 次 202 与接收方同 event_id 的 QUEUED 记录。\",\n  \"candidate_updates\": [\n    {\n      \"reference\": \"call-17bcce40-1256-4e8f-a41e-36c02cd72390|call_02_E8Zv2pwZRs2gwi03XEe16485\",\n      \"decision\": \"DROP\",\n      \"reason\": \"该订单的传输历史已在本轮执行并返回（attempt 1 为 503、attempt 2 为 202），重复查询无新增信息\"\n    },\n    {\n      \"reference\": \"call-1940f819-f1ad-4b51-b096-6ecb31971c34|call_01_zyrMLSKt5I9e4mA0I9kv7480\",\n      \"decision\": \"DROP\",\n      \"reason\": \"失败与重试过程已由同一订单实际 Transport 历史核实，无需再次列出\"\n    }\n  ]\n}\n```",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "bfbbb4b1-f425-4ef0-a701-1e41e7d2ddaf",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:27:48.202196+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "773dcf46c85ca398f183b833f76495b16f481f0a263c3497c19f2a0e10a5268b",
+      "input_token_upper": 27819,
+      "output_token_upper": 512,
+      "reserved_usd": 0.008960099999999999,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "bfbbb4b1-f425-4ef0-a701-1e41e7d2ddaf",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 5.659403900000143,
+      "usage": {
+        "input_tokens": 8085,
+        "output_tokens": 1056,
+        "total_tokens": 9141,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 254
+        }
+      },
+      "estimated_peak_usd": 0.0036926999999999997,
+      "provider_response_id": "lc_run--01a171be-6f6d-739e-8b07-8a609888e320-0",
+      "tool_calls": [],
+      "assistant_text": "{\"action\":\"answer\",\"result_state\":\"ANSWERED\",\"answer\":\"已查清：订单 order-1ae813afa160（业务状态 COMPLETED，订单版本 v1）的回调事件 event-8a0ce81450cb 确实先失败、后重试成功受理，但“受理”不等于“业务处理完成”，目前仍无法确认处理完成。\\n\\n回调传输过程（来源：本 Run 的 get_callback_transport_history 实测记录，observed_at 2026-10-25T06:27:00Z）：\\n1) 第 1 次尝试 transport-1bd51141-b56b-44a4-9b6e-c532fbf2c93c：HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，重试已排期 retry_at=2026-10-25T06:27:52.223716Z（实际 HTTP 时间 started_at 2026-10-25T06:26:52.166Z；事件业务时间为 event_created_at 2026-10-24T06:26:52.166Z，请勿混用）。\\n2) 第 2 次尝试 transport-4047bc2e-4bc4-4943-98a2-75aef3292113：HTTP 202，failure_code=null，receiver_state=QUEUED，retry_state=NOT_APPLICABLE（started_at 2026-10-25T06:26:52.242Z，202 表示接收方已持久入队，不代表处理完成）。\\n\\n接收方处理状态（来源：get_receiver_processing，observed_at 2026-10-25T06:27:01.572Z，receiver_version v3 / delivery_version v3）：同一 event_id、delivery_version=3，status=QUEUED，accepted_at=2026-10-25T06:26:52.273Z，processing_sla_seconds=300，因此处理截止约为 2026-10-25T06:31:52.273Z。\\n\\n结论（依据 receiver-ack-contract-v2：202 仅代表入队；同一 event_id + delivery version 在 SLA 内的 QUEUED 事件应继续观察，只有超过可信 SLA 的排队记录才支持请接收方运维排查，绝不自动重发）：当前该事件处于接收方队列中、仍在 SLA 内，尚未处理完成。\\n\\n未知项：接收方是否最终处理完成，此刻无法判定（QUEUED 状态在 06:31:52Z 后需再次查看同一 event_id 的接收方状态）；传输历史仅为“已记录观测”，不含发送到落库之间的崩溃窗口，不能视为完整审计（无记录不等于未发送）。本次未做任何重发或写操作。\",\"target_event_id\":\"event-8a0ce81450cb\",\"processing_claim\":\"QUEUED\",\"candidate_updates\":[{\"reference\":\"call-17bcce40-1256-4e8f-a41e-36c02cd72390|call_02_E8Zv2pwZRs2gwi03XEe16485\",\"decision\":\"DROP\",\"reason\":\"传输历史已由本 Run 的 get_callback_transport_history 实测取得，候选重复\"},{\"reference\":\"call-1940f819-f1ad-4b51-b096-6ecb31971c34|call_01_zyrMLSKt5I9e4mA0I9kv7480\",\"decision\":\"DROP\",\"reason\":\"同一传输历史查询已执行并有结果，无需再次执行\"}]}",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "5f6d58cc-195c-488b-87f9-342ff27e3f5b",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:41:53.900726+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "3792165c72440fc1645da5dd44bcc6c3de680d797d2fc5b471485f0bd5a60e49",
+      "input_token_upper": 10881,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.4751234999999999,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "5f6d58cc-195c-488b-87f9-342ff27e3f5b",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 1.7206378999999288,
+      "usage": {
+        "input_tokens": 2226,
+        "output_tokens": 274,
+        "total_tokens": 2500,
+        "input_token_details": {
+          "cache_read": 1792
+        },
+        "output_token_details": {
+          "reasoning": 139
+        }
+      },
+      "estimated_peak_usd": 0.0009965999999999998,
+      "provider_response_id": "lc_run--01a171cb-56f0-718f-b2da-fd9969a38c53-0",
+      "tool_calls": [
+        {
+          "name": "get_order_status",
+          "args": {
+            "reason": "确认订单当前状态，判断回调是否对应已完成订单"
+          },
+          "id": "call_00_XrgyMLNiLYBhiSTHClfO2497",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_callback_delivery",
+          "args": {
+            "reason": "读取当前绑定回调事件的订单版本与实际传输确认/失败"
+          },
+          "id": "call_01_C5u6P74JI8bm5Y56QNDz1193",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "列出该订单相关回调事件与各次实际传输尝试"
+          },
+          "id": "call_02_OrAem1huE0okwanlp4ty0328",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "10386689-a43d-44ae-ab71-ad1540f50be6",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:41:55.917920+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "fbfe3188f3be2adaeb5d7f736363e1622db0bb3cfce0507b3b6c3145f86d47a1",
+      "input_token_upper": 13451,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.47589449999999994,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "10386689-a43d-44ae-ab71-ad1540f50be6",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 1.135095800000272,
+      "usage": {
+        "input_tokens": 3116,
+        "output_tokens": 163,
+        "total_tokens": 3279,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 67
+        }
+      },
+      "estimated_peak_usd": 0.0011304,
+      "provider_response_id": "lc_run--01a171cb-5ed0-7452-b52f-99e0e2630ca5-0",
+      "tool_calls": [
+        {
+          "name": "get_callback_delivery",
+          "args": {
+            "reason": "读取当前绑定回调事件的订单版本与实际传输确认/失败"
+          },
+          "id": "call_00_pkvc1c7sf1eNhc30ScpL7848",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "列出该订单相关回调事件与各次实际传输尝试"
+          },
+          "id": "call_01_dkpmE9YVd4bYoH3794ym9558",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "af22a7bd-bb42-4f98-80e4-40c1e7a12822",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:41:57.257957+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "4f00981fce2be1faaae370320de380863d628c3de9e58d5dc271a07a7383beae",
+      "input_token_upper": 16403,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.4767801,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "af22a7bd-bb42-4f98-80e4-40c1e7a12822",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 2.3986469000001307,
+      "usage": {
+        "input_tokens": 4147,
+        "output_tokens": 401,
+        "total_tokens": 4548,
+        "input_token_details": {
+          "cache_read": 1536
+        },
+        "output_token_details": {
+          "reasoning": 282
+        }
+      },
+      "estimated_peak_usd": 0.0017253,
+      "provider_response_id": "lc_run--01a171cb-640e-765b-915c-a9449eeae879-0",
+      "tool_calls": [
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "核实失败与重试的实际传输尝试序列",
+            "event_id": "event-8a0ce81450cb"
+          },
+          "id": "call_00_iUpGyxd8JnSPqdUU2CLx5572",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_receiver_processing",
+          "args": {
+            "reason": "核对接收方对该事件当前的处理状态（ACK不等于已处理）"
+          },
+          "id": "call_01_jiCeDqQM1hyFYZm8v3Y27871",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "1100f203-7014-4067-99bf-41a6ee11fbbe",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:41:59.860771+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "f0ae4a15774a7c5306fb112e6e9e2cba9723c0c7fcb34a968eea4a63328d137d",
+      "input_token_upper": 22521,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.4786154999999999,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "1100f203-7014-4067-99bf-41a6ee11fbbe",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 2.5393506999998863,
+      "usage": {
+        "input_tokens": 6288,
+        "output_tokens": 301,
+        "total_tokens": 6589,
+        "input_token_details": {
+          "cache_read": 1792
+        },
+        "output_token_details": {
+          "reasoning": 161
+        }
+      },
+      "estimated_peak_usd": 0.0022475999999999998,
+      "provider_response_id": "lc_run--01a171cb-6e37-7002-af4c-86aa9b5b2e87-0",
+      "tool_calls": [
+        {
+          "name": "get_receiver_processing",
+          "args": {
+            "reason": "核实该回调事件在接收方当前的处理状态（ACK/202 不等于已完成处理）"
+          },
+          "id": "call_00_QH9W9SxFta58o1C2hA0q4223",
+          "type": "tool_call"
+        },
+        {
+          "name": "search_callback_knowledge",
+          "args": {
+            "query": "回调 202 ACKNOWLEDGED receiver_state QUEUED 是否代表处理完成",
+            "reason": "需要绑定版本的协议条款说明 202 接受与接收方处理完成之间的关系"
+          },
+          "id": "call_01_F86ssHLr2ob6kmG1yY7q2485",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "366a0e19-01e2-4d14-91f1-690e70207f3f",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:42:02.598594+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "279b98dbd5363d413ad3d3c2d56f430a5ce07cab486646d342754bf1ed2d2722",
+      "input_token_upper": 25124,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.47939639999999994,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "366a0e19-01e2-4d14-91f1-690e70207f3f",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 2.7851873999998134,
+      "usage": {
+        "input_tokens": 7211,
+        "output_tokens": 461,
+        "total_tokens": 7672,
+        "input_token_details": {
+          "cache_read": 2048
+        },
+        "output_token_details": {
+          "reasoning": 358
+        }
+      },
+      "estimated_peak_usd": 0.0027164999999999997,
+      "provider_response_id": "lc_run--01a171cb-78eb-7346-a209-0662e4cde694-0",
+      "tool_calls": [
+        {
+          "name": "search_callback_knowledge",
+          "args": {
+            "query": "202 Accepted 已接受是否代表接收方处理完成；receiver_state QUEUED 与 ACKNOWLEDGED 的含义",
+            "reason": "需要绑定版本协议条款说明 202 接受/ACK 与接收方处理完成的关系"
+          },
+          "id": "call_00_LvuT7AQWwTVdrd8O9U8J3199",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "c487060b-aa56-4575-a7fd-e2f2564ca0de",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:42:05.576508+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "944713e145eec0942e3718810f461220f00f56f8ed062d4a4909dc80ffa4a9e1",
+      "input_token_upper": 27332,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.48005879999999995,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "c487060b-aa56-4575-a7fd-e2f2564ca0de",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 8.661136200000328,
+      "usage": {
+        "input_tokens": 7869,
+        "output_tokens": 1671,
+        "total_tokens": 9540,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 671
+        }
+      },
+      "estimated_peak_usd": 0.0043659,
+      "provider_response_id": "lc_run--01a171cb-848d-7256-a676-5fb0cd2d2310-0",
+      "tool_calls": [],
+      "assistant_text": "## 结论\n\n查询结果已足够回答，直接给出结论（不再重复调用工具）。\n\n**1) 那次失败确实存在，且已自动重试并获接收方接受（但未处理完成）**\n\n- 绑定订单 `order-1ae813afa160` 当前 `status=COMPLETED`，`order_version=1`（来源：`get_order_status`，观测时间 2026-10-25T06:41:55.804Z）。注意：订单完成≠回调处理完成。\n- 目标回调事件：`event-8a0ce81450cb`（`order_version=1`、`contract_version=2`），共 2 次真实传输尝试：\n  - 尝试 1（attempt_no=1，transport-a4433345…）：HTTP **503**，`failure_code=TEMPORARY_UNAVAILABLE`，`receiver_state=UNAVAILABLE`，当时计划重试 `retry_at=2026-10-25T06:42:52.787Z`；实际 HTTP 时间 `started_at=2026-10-25T06:41:52.764Z`。\n  - 尝试 2（attempt_no=2，transport-d5d38636…）：HTTP **202**，`accepted_at=2026-10-25T06:41:52.849Z`，`receiver_state=QUEUED`，`failure_code=null`，`retry_state=NOT_APPLICABLE`；实际 HTTP 时间 `started_at=2026-10-25T06:41:52.802Z`。事件时间 `event_created_at=2026-10-24T06:41:52.764Z`（业务事件时间，不是本次发送时间）。\n- 一处需要如实指出的观察：历史记录显示第 2 次尝试发生在本事件第 1 次失败后约 40 毫秒，早于此前排定的 `retry_at`（06:42:52.787Z）。这只说明记录中的实际传输时间与当时排定时间不一致，我不对其原因作推断。\n- 传输历史覆盖为 `RECORDED_OBSERVATIONS_ONLY`，并明确「无记录不等于未发送，send-to-persist 崩溃窗口不是完整审计」（来源：`get_callback_transport_history`，2026-10-25T06:41:59.739Z）。\n\n**2) 现在是否处理完成？——尚未完成**\n\n- 绑定投递状态：`ACKNOWLEDGED`、`attempt_count=2`、`max_attempts=10`、`receiver_http_status=202`、`retry_state=NOT_APPLICABLE`、delivery version 3（来源：`get_callback_delivery`，2026-10-25T06:41:57.140Z）。\n- 同一 `event_id` 的接收方处理状态：`status=QUEUED`，`accepted_at=2026-10-25T06:41:52.849Z`，`processing_sla_seconds=300`，version 3（来源：`get_receiver_processing`，2026-10-25T06:42:02.488Z）。\n- 协议依据（contract v2, `receiver-ack-contract-v2`）：HTTP 202 仅表示接收方已将事件持久化接受进队列，**不代表业务处理完成**；QUEUED 且处于 SLA 内应继续观察至截止时间；只有匹配的队列记录超过 SLA 仍未完成，才支持请接收方运维排查；**不得自动重发**。\n\n**3) 当前判定与建议**\n\n- 处理声明：**QUEUED（未处理完成）**，SLA 截止约为 `accepted_at + 300s = 2026-10-25T06:46:52.849Z`；本次查询时刻（06:42:02）仍在 SLA 内，因此现在既不能说已完成，也不构成「卡住」证据。\n- 未知/边界：接收方 06:46:52.849Z 之后的处理结果当前未知（UNKNOWN）；传输侧记录不构成完整审计；我无写权限，未做也未建议任何重发或修改动作。\n\n**建议**：在 SLA 截止后再次读取同一 `event_id`（`event-8a0ce81450cb`）的接收方处理状态来确认是否变为已完成；若届时候仍是 QUEUED、且 delivery version/记录未变，才具备请接收方运维排查的依据。",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "7dec6efb-62b1-4a2e-ba1d-824a2f05662c",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:42:14.373391+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "a7ae45803c2839cd86075e92a72dfa4af6868b0e159a82c4c3364763285c5b44",
+      "input_token_upper": 27869,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.4802199,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "7dec6efb-62b1-4a2e-ba1d-824a2f05662c",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 7.981101899999885,
+      "usage": {
+        "input_tokens": 8077,
+        "output_tokens": 1656,
+        "total_tokens": 9733,
+        "input_token_details": {
+          "cache_read": 2816
+        },
+        "output_token_details": {
+          "reasoning": 670
+        }
+      },
+      "estimated_peak_usd": 0.004410299999999999,
+      "provider_response_id": "lc_run--01a171cb-a6e9-7510-8ae7-a621f140c21a-0",
+      "tool_calls": [],
+      "assistant_text": "```json\n{\n  \"action\": \"answer\",\n  \"result_state\": \"ANSWERED\",\n  \"target_event_id\": \"event-8a0ce81450cb\",\n  \"processing_claim\": \"QUEUED\",\n  \"candidate_updates\": [\n    {\"reference\": \"call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328\", \"decision\": \"DROP\", \"reason\": \"传输历史已通过同事件的 get_callback_transport_history 获得，重复查询无新增信息\"},\n    {\"reference\": \"call-c149cad0-8cc9-4e77-a641-ebc18ce56de9|call_01_dkpmE9YVd4bYoH3794ym9558\", \"decision\": \"DROP\", \"reason\": \"同上，传输历史已取得，无需重复\"}\n  ],\n  \"answer\": \"【订单】order-1ae813afa160（order_version=1）当前订单状态为 COMPLETED（读取时间 2026-10-25T06:41:55.804Z，HTTP 200）。注意：订单已完成≠回调已被接收方处理完成。\\n\\n【回调事件】目标事件 event-8a0ce81450cb，delivery_version=3，业务事件时间 event_created_at=2026-10-24T06:41:52.764994Z；以下 HTTP 传输的实际发生时间是 2026-10-25T06:41:52Z 左右（比事件创建晚约一天，属实际观测时间，不代表事件在前一天被发送）。\\n\\n【传输过程（共 2 次实际尝试，max_attempts=10）】\\n1) 第 1 次：HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED，retry_at=2026-10-25T06:42:52.787372Z；started_at 2026-10-25T06:41:52.764Z，observed_at 06:41:52.788Z（transport-a4433345-2321-46aa-9e05-e58228b1ca06）。\\n2) 第 2 次：HTTP 202，failure_code=null，receiver_state=QUEUED，accepted_at=2026-10-25T06:41:52.849Z；started_at 06:41:52.802Z，observed_at 06:41:52.851Z（transport-d5d38636-9fb1-4d0f-ae35-7132b88dd9d3）。\\n当前投递记录：status=ACKNOWLEDGED，attempt_count=2，retry_state=NOT_APPLICABLE，retry_at=null，即此前那次 503 之后的重试已成功被接受，目前没有待执行的重试。\\n\\n【接收方处理状态（关键结论：尚未处理完成）】同 event_id（event-8a0ce81450cb）、delivery_version=3 的接收方记录状态为 QUEUED，accepted_at=2026-10-25T06:41:52.849Z，processing_sla_seconds=300，观测时间 2026-10-25T06:42:02.488Z。按契约 receiver-ack-contract-v2（版本 2.0.0，如《Receiver acknowledgement and processing SLA v2》，合同版本 v2）：HTTP 202 只表示接收方已把事件持久放入队列，并不表示业务处理已完成；在 SLA 内的 QUEUED 事件应继续观测至截止时间（本例截止约为 2026-10-25T06:46:52.849Z，观测时点仍在 SLA 内，剩余约 4 分 50 秒），只有在匹配的队列记录超过可信 SLA 后，才可请接收方运维排查；任何情况下都不应自动重发。\\n\\n【未知项】本次仅有“已记录观测”，传输历史的覆盖为 RECORDED_OBSERVATIONS_ONLY，且存在“发送成功但写库前崩溃”的窗口，因此无记录不等于未发送，也不是完整审计。接收方最终是否会处理完成需在 SLA 截止后再核实同一 event_id 的状态；在此之前不能判定已完成，也不能判定失败。\"\n}\n```",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "26e08db1-aa88-41ef-89ab-802e4ddf7392",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T06:42:22.494027+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "98c5d20214a6a3da9baca0497a3b3e669dde3f3152007ce7a254a04102621da5",
+      "input_token_upper": 27651,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.48015449999999993,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "26e08db1-aa88-41ef-89ab-802e4ddf7392",
+      "experiment": "DEV-P5-QUEUED-A-12-8",
+      "latency_seconds": 6.371947999999975,
+      "usage": {
+        "input_tokens": 8014,
+        "output_tokens": 1188,
+        "total_tokens": 9202,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 301
+        }
+      },
+      "estimated_peak_usd": 0.0038297999999999995,
+      "provider_response_id": "lc_run--01a171cb-c6a2-73db-8297-6ed5f228c6ae-0",
+      "tool_calls": [],
+      "assistant_text": "{\"action\":\"answer\",\"result_state\":\"ANSWERED\",\"answer\":\"已查清该订单 order-1ae813afa160（order_version=1）的回调过程与当前接收方状态。\\n\\n【订单侧】订单快照返回 HTTP 200，业务状态为 COMPLETED（order_version=1，契约版本 2，观察时间 2026-10-25T06:41:55.804Z）。注意：200 只说明读取成功，不单独证明回调完成。\\n\\n【回调事件】event-8a0ce81450cb（同一事件 ID 贯穿两次尝试，未更换事件）。业务事件时间 event_created_at=2026-10-24T06:41:52.764994Z。\\n1) 第 1 次尝试 transport-a4433345-2321-46aa-9e05-e58228b1ca06，实际 HTTP 时间 started_at=2026-10-25T06:41:52.764Z，返回 HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，retry_state=SCHEDULED，retry_at=2026-10-25T06:42:52.787372Z，attempt_count=1/10。这就是“上次失败”的那一次。\\n2) 第 2 次尝试 transport-d5d38636-9fb1-4d0f-ae35-7132b88dd9d3，HTTP 时间 started_at=2026-10-25T06:41:52.802Z，返回 HTTP 202，accepted_at=2026-10-25T06:41:52.849Z，failure_code=null，receiver_state=QUEUED，retry_state=NOT_APPLICABLE，attempt_count=2/10。投递侧状态为 ACKNOWLEDGED（delivery version 3）。\\n\\n【现在是否处理完成】未完成。接收方当前处理状态（event_id=event-8a0ce81450cb，delivery_version=3，version=3，观察时间 2026-10-25T06:42:02.484Z）为 status=QUEUED，accepted_at=2026-10-25T06:41:52.849Z，processing_sla_seconds=300。按绑定契约 receiver-ack-contract-v2（Receiver acknowledgement and processing SLA v2，version 2.0.0，2026-10-01 起生效）：“HTTP 202 仅表示接收方已把事件持久放入队列，不代表业务处理完成”。该事件仍处 SLA 内（截止约 2026-10-25T06:46:52.849Z），应在期限内继续观察同一 event_id 直到状态变化；仅在队列记录超过可信 SLA 仍未处理时，才可请接收方运维排查。不得自动重发。\\n\\n【未知项】接收方是否会在 SLA 内转为已处理，当前无法确定（UNKNOWN）；传输历史为“已记录观测”而非完整审计，缺失记录不等于未发送。\",\"target_event_id\":\"event-8a0ce81450cb\",\"processing_claim\":\"QUEUED\",\"candidate_updates\":[{\"reference\":\"call-40af0d54-2f4c-4c96-bb6d-8eafba68fea3|call_02_OrAem1huE0okwanlp4ty0328\",\"decision\":\"DROP\",\"reason\":\"同一传输历史已由 call_00_iUpGyxd8JnSPqdUU2CLx5572 取回，重复调用无新信息\"},{\"reference\":\"call-c149cad0-8cc9-4e77-a641-ebc18ce56de9|call_01_dkpmE9YVd4bYoH3794ym9558\",\"decision\":\"DROP\",\"reason\":\"同一传输历史已由 call_00_iUpGyxd8JnSPqdUU2CLx5572 取回，重复调用无新信息\"}]}",
+      "status": "OK",
+      "error_class": null
+    }
+  ],
+  "expected_for_offline_review_only": {
+    "identity_boundary": "Never use another Event success or processed state to prove the target Event recovered",
+    "target_current_state": "QUEUED",
+    "history_complete": true,
+    "result": "Explicit facts and gaps; no repair/resend/handoff claims"
+  },
+  "runtime_db": "C:\\Users\\tu me manques\\.codex\\worktrees\\c1-approved-integration-20261025\\agent新项目\\.runtime\\m4-continuous-vs01\\budget-02\\DEV-P5-QUEUED-A-12-8\\domain.sqlite3",
+  "criteria": {
+    "nonempty_delivery": true,
+    "zero_business_writes": true,
+    "business_snapshot_unchanged": true
+  }
+}

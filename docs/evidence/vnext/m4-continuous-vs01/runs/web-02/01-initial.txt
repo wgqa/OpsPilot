@@ -1,0 +1,34 @@
+- main:
+  - strong: OpsPilot
+  - generic: SUPPORT WORKSPACE
+  - generic: SUPPORT
+  - generic: support-a
+  - button "退出"
+  - region "聊天工作区":
+    - text: PERSISTENT SESSION
+    - heading "会话 dbf665ba" [level=1]
+    - paragraph: 消息与运行状态保存在本地 Domain
+    - button "＋ 新建调查任务"
+    - button "显示 Task 检查器": ▤
+    - generic: i
+    - generic: 业务调查使用服务端可信资源绑定。用户描述和关键更正只提供调查线索，真实状态来自当前 MCP Evidence。S3 可把经你确认的人工处理请求交给本地队列；队列接收不表示订单恢复，也不会自动重发回调。
+    - article:
+      - generic: A
+      - strong: support-a
+      - generic: 2026/10/25 14:50:55
+      - generic: 初始故障描述 · 未验证
+      - generic: 订单接口返回 200，但下游说没收到回调。请先核对当前事实。
+    - generic: 当前调查结果 · 持久业务回执
+    - generic: 同一回调事件已由接收方处理完成
+    - paragraph: 核对结果：这条回调已经真实发出，并被下游接收、处理完成，并非“没收到”。 1) 订单侧（get_order_status，观测时间 2026-10-25T06:50:59Z）：order-d4c12a4cded9（order_version=1）状态为 COMPLETED，request_id=bce8f832a32ba40c，contract_version=2。HTTP 200 只是接口受理，但结合交付与接收侧事实，本次订单确实已完成。 2) 传输侧（get_callback_delivery，观测时间 2026-10-25T06:51:00Z，delivery_version=3）：目标事件 event-8ff99f8e4545 状态 ACKNOWLEDGED；transport_request_id=transport-68f43cc2-8400-4202-8c63-a22a50c71d29；attempt_count=1，max_attempts=10；receiver_http_status=202；failure_code=null；retry_state=NOT_APPLICABLE、retry_at=null（无重试安排）。接收方在 accepted_at=2026-10-25T06:49:37.095Z 返回接受，响应体 receiver_state=QUEUED。 3) 接收处理侧（get_receiver_processing，观测时间 2026-10-25T06:51:03Z，receiver_version=3）：同一 event-8ff99f8e4545 的状态已为 PROCESSED，accepted_at 同为 2026-10-25T06:49:37.095Z，processing_sla_seconds=300（未超时）。即 202 之后的异步处理也已完成，不只是“已接受”。 结论与边界：就本事件而言，处理状态可判定为 PROCESSED（依据接收方对该 event_id 的处理状态，而非 HTTP 202）。因此下游“未收到回调”的说法与当前已记录事实不符，建议让对方以 event_id=event-8ff99f8e4545、transport_request_id=transport-68f43cc2-8400-4202-8c63-a22a50c71d29 在其侧日志中核对，而不是重发。 未知项：本次读取未展开该订单的传输尝试全量历史，因此是否存在其他 event_id 或更早的失败尝试为 UNKNOWN；也没有下游系统的内部日志证据来解释其“未收到”的判断来源。未执行任何发送、重试或写操作。
+    - generic: 仅只读诊断；未重发回调，也未宣称业务恢复。回执 s3-diagnosis-42768a80-8bee-400f-bf38-67fea6fee3e0
+    - article:
+      - heading "本次调查答复" [level=2]
+      - generic: 已答复
+      - paragraph: 核对结果：这条回调已经真实发出，并被下游接收、处理完成，并非“没收到”。 1) 订单侧（get_order_status，观测时间 2026-10-25T06:50:59Z）：order-d4c12a4cded9（order_version=1）状态为 COMPLETED，request_id=bce8f832a32ba40c，contract_version=2。HTTP 200 只是接口受理，但结合交付与接收侧事实，本次订单确实已完成。 2) 传输侧（get_callback_delivery，观测时间 2026-10-25T06:51:00Z，delivery_version=3）：目标事件 event-8ff99f8e4545 状态 ACKNOWLEDGED；transport_request_id=transport-68f43cc2-8400-4202-8c63-a22a50c71d29；attempt_count=1，max_attempts=10；receiver_http_status=202；failure_code=null；retry_state=NOT_APPLICABLE、retry_at=null（无重试安排）。接收方在 accepted_at=2026-10-25T06:49:37.095Z 返回接受，响应体 receiver_state=QUEUED。 3) 接收处理侧（get_receiver_processing，观测时间 2026-10-25T06:51:03Z，receiver_version=3）：同一 event-8ff99f8e4545 的状态已为 PROCESSED，accepted_at 同为 2026-10-25T06:49:37.095Z，processing_sla_seconds=300（未超时）。即 202 之后的异步处理也已完成，不只是“已接受”。 结论与边界：就本事件而言，处理状态可判定为 PROCESSED（依据接收方对该 event_id 的处理状态，而非 HTTP 202）。因此下游“未收到回调”的说法与当前已记录事实不符，建议让对方以 event_id=event-8ff99f8e4545、transport_request_id=transport-68f43cc2-8400-4202-8c63-a22a50c71d29 在其侧日志中核对，而不是重发。 未知项：本次读取未展开该订单的传输尝试全量历史，因此是否存在其他 event_id 或更早的失败尝试为 UNKNOWN；也没有下游系统的内部日志证据来解释其“未收到”的判断来源。未执行任何发送、重试或写操作。
+      - generic "查看形成时间与来源（3）"
+    - status: 已确认预注册订单 order-d4c12a4cded9；正在核实订单、投递与接收状态。
+    - textbox "询问当前证据、任务状态，或继续上一轮对话…"
+    - generic: Enter 发送 Shift + Enter 换行 · 模型可识别纠错候选，Task 只在你确认后更新
+    - button "发送消息" [disabled]: ↑
+    - generic: 回答只解释已授权信息。审批、修复和交付需要后续的可信控制流程。

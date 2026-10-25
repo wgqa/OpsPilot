@@ -1,0 +1,42 @@
+......F.                                                                 [100%]
+================================== FAILURES ===================================
+______ test_vs05_real_graph_continues_after_diagnosis_for_the_user_goal _______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-expanded-01/test_vs05_real_graph_continues0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001FD6BF0CA70>
+
+    def test_vs05_real_graph_continues_after_diagnosis_for_the_user_goal(tmp_path, monkeypatch):
+        from opspilot.investigator import run_investigation
+        from opspilot.domain.s3_history import prepare_transport_history_fixture
+        from test_m4_03_s3 import _task
+        db = tmp_path / "graph.sqlite3"
+        reset_fixture(db, "S1_POS")
+        prepare_transport_history_fixture(db, order_id="graph-order", attempts=[
+            {"event_id":"graph-event", "http_status":503}, {"event_id":"graph-event", "http_status":202},
+        ])
+        _, task = _task(db, "graph-order", text="graph-event 上次失败后怎么样？请查实际回调历史。")
+        responses = [AIMessage(content="",tool_calls=[{"id":f"tool-{n}","name":name,"args":{"reason":"verify actual facts"}}])
+                     for n,name in enumerate(("get_order_status","get_callback_delivery","get_receiver_processing","get_callback_transport_history"))]
+        responses.append(AIMessage(content=json.dumps({"action":"answer","result_state":"ANSWERED","answer":"graph-event 两次实际请求依次为 503 和 202，当前接收为 QUEUED，尚不能证明处理完成。",
+                                                       "target_event_id":"graph-event","processing_claim":"QUEUED"},ensure_ascii=False)))
+        model = Model(responses)
+        monkeypatch.setattr("opspilot.investigator.ChatOpenAI", lambda **_kwargs:model)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY","deterministic-no-provider")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME","deterministic-no-provider")
+        result = asyncio.run(run_investigation(str(task["task_id"]),"support-a",db_path=db,
+                             checkpoint_db_path=tmp_path/"checkpoint.sqlite3",run_id=str(task["run_id"])))
+        assert len(model.messages) == 5  # Gate is already DIAGNOSED after the third read, but the goal still needs history
+        with connect(db) as c:
+            tools = [row[0] for row in c.execute("SELECT tool_name FROM d2_tool_observations WHERE task_id=? ORDER BY rowid",(task["task_id"],))]
+        assert tools[-1] == "get_callback_transport_history"
+>       assert "report_ref" in result or result.get("stage") == "complete"
+E       AssertionError: assert ('report_ref' in {'task_id': 'task-08bb2234-8e65-4957-ad4b-0c829b63602e', 'thread_id': 'opspilot-69179391-2297-442c-bf0f-855eb144cbff',...: 'complete', 'scope_clarification_required': False, 'unbound_resource_lookup_required': False, ...}, 'next_nodes': []} or None == 'complete')
+E        +  where None = <built-in method get of dict object at 0x000001FD6F5C2840>('stage')
+E        +    where <built-in method get of dict object at 0x000001FD6F5C2840> = {'task_id': 'task-08bb2234-8e65-4957-ad4b-0c829b63602e', 'thread_id': 'opspilot-69179391-2297-442c-bf0f-855eb144cbff',...: 'complete', 'scope_clarification_required': False, 'unbound_resource_lookup_required': False, ...}, 'next_nodes': []}.get
+
+tests\test_m4_continuous_vs01.py:227: AssertionError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:59488/api/async-orders/async-order?order_id=graph-order "HTTP/1.0 200 OK"
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs05_real_graph_continues_after_diagnosis_for_the_user_goal
+1 failed, 7 passed in 9.53s

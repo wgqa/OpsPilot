@@ -1,0 +1,132 @@
+..........FF.......                                                      [100%]
+================================== FAILURES ===================================
+____________ test_vs04_history_refresh_does_not_borrow_another_run ____________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-expanded-02/test_vs04_history_refresh_does0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000022B3D9A5B20>
+
+    def test_vs04_history_refresh_does_not_borrow_another_run(tmp_path, monkeypatch):
+        from datetime import datetime,timezone,timedelta
+        from opspilot.domain import d2,s3
+        from opspilot.domain.s3_history import get_transport_history_fact
+        from opspilot.domain.task_control import finish_task_run
+        from s3_observation_support import record_s3_observation
+        db, identity, task = _history_task(tmp_path,receiver="QUEUED")
+        clock=[datetime.now(timezone.utc)]
+        monkeypatch.setattr(s3,"_now",lambda:clock[0])
+        monkeypatch.setattr(d2,"utc_now",lambda:clock[0].isoformat().replace("+00:00","Z"))
+        old = record_s3_observation(db,task,"get_callback_transport_history",get_transport_history_fact(db,task["task_id"]))
+        finish_task_run(db,identity,task["run_id"],"SUCCEEDED")
+        clock[0] += timedelta(seconds=301)
+        _, new_run = _start_investigation_run(db,task["session_id"],task["task_id"],suffix="history-refresh")
+        with connect(db) as c:
+            accepted, excluded = s3.current_s3_evidence(c,task["task_id"],[old["evidence_id"]],run_id=new_run)
+        assert not accepted and excluded
+>       new = record_s3_observation(db,{**task,"run_id":new_run},"get_callback_transport_history",get_transport_history_fact(db,task["task_id"]))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_continuous_vs01.py:318: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\s3_observation_support.py:53: in record_s3_observation
+    attempt_id, _ = reserve_attempt(
+opspilot\domain\d2.py:606: in reserve_attempt
+    validate_task_run_context_in_transaction(connection, task_id, task_run_control)
+opspilot\domain\investigation_context.py:505: in validate_task_run_context_in_transaction
+    assert_task_control_in_transaction(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x0000022B3D8EF6A0>
+tenant_id = 'tenant-a', task_id = 'task-05c5b09f-eddd-4dc4-ae07-7091b79b381a'
+expected_control_revision = 0
+run_id = 'run-c1-followup-a06d35f0-ea50-410b-84d9-c395b8f402e4'
+allow_completed = False, allow_pending_for_run = False
+
+    def assert_task_control_in_transaction(
+        connection: sqlite3.Connection,
+        tenant_id: str,
+        task_id: str,
+        expected_control_revision: int | None = None,
+        *,
+        run_id: str | None = None,
+        allow_completed: bool = False,
+        allow_pending_for_run: bool = False,
+    ) -> sqlite3.Row:
+        """Final control check for callers already holding the Domain write transaction.
+    
+        Omitted revision is the deliberately narrow legacy route: it can act only at
+        revision zero. New Runs must supply their persisted run_id.
+        """
+        state = _control(connection, tenant_id, task_id)
+        if str(state["terminal_state"]) != "ACTIVE":
+            raise TaskControlError("TASK_ABORTED")
+        pending = state["pending_critical_message_seq"]
+        if pending is not None and not allow_pending_for_run:
+            raise TaskControlError("TASK_INPUT_PENDING")
+        run: sqlite3.Row | None = None
+        if run_id is not None:
+            run = connection.execute(
+                "SELECT * FROM task_runs WHERE run_id = ? AND tenant_id = ? AND task_id = ?",
+                (run_id, tenant_id, task_id),
+            ).fetchone()
+            if run is None or str(run["status"]) != "RUNNING":
+                raise TaskControlError("TASK_RUN_NOT_ACTIVE")
+            if expected_control_revision is None:
+                expected_control_revision = run["expected_control_revision"]
+        if expected_control_revision is None:
+            expected_control_revision = 0
+        if int(state["control_revision"]) != int(expected_control_revision):
+            raise TaskControlError("TASK_CONTROL_STALE")
+        if not allow_completed and _is_business_complete(connection, tenant_id, task_id):
+>           raise TaskControlError("TASK_ALREADY_TERMINAL")
+E           opspilot.domain.task_control.TaskControlError: TASK_ALREADY_TERMINAL
+
+opspilot\domain\task_control.py:187: TaskControlError
+________ test_vs01_transport_unknown_and_request_receipt_immutability _________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-expanded-02/test_vs01_transport_unknown_an0')
+
+    def test_vs01_transport_unknown_and_request_receipt_immutability(tmp_path):
+        from opspilot.domain.s3_history import prepare_transport_history_fixture,_append
+        db=tmp_path/"unknown.sqlite3"
+        reset_fixture(db,"S1_POS")
+>       prep=prepare_transport_history_fixture(db,order_id="unknown-order",attempts=[{"event_id":"unknown-event","http_status":None}])
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_continuous_vs01.py:329: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\s3_history.py:168: in prepare_transport_history_fixture
+    code, response = received.status_code, received.json()
+                                           ^^^^^^^^^^^^^^^
+..\..\m4-autonomy-c1\agent新项目\.venv\Lib\site-packages\httpx\_models.py:832: in json
+    return jsonlib.loads(self.content, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <json.decoder.JSONDecoder object at 0x0000022B32E65250>, s = '', idx = 0
+
+    def raw_decode(self, s, idx=0):
+        """Decode a JSON document from ``s`` (a ``str`` beginning with
+        a JSON document) and return a 2-tuple of the Python
+        representation and the index in ``s`` where the document ended.
+    
+        This can be used to decode a JSON document from a string that may
+        have extraneous data at the end.
+    
+        """
+        try:
+            obj, end = self.scan_once(s, idx)
+        except StopIteration as err:
+>           raise JSONDecodeError("Expecting value", s, err.value) from None
+E           json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.14-windows-x86_64-none\Lib\json\decoder.py:356: JSONDecodeError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs04_history_refresh_does_not_borrow_another_run
+FAILED tests/test_m4_continuous_vs01.py::test_vs01_transport_unknown_and_request_receipt_immutability
+2 failed, 17 passed in 21.45s

@@ -1,0 +1,76 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__ test_vs11_followup_after_applied_correction_carries_the_trusted_highwater __
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-correction-red-01/test_vs11_followup_after_appli0')
+
+    def test_vs11_followup_after_applied_correction_carries_the_trusted_highwater(tmp_path):
+        from opspilot.domain.task_control import trusted_identity,admit_task_message,claim_task_run,apply_pending_critical_inputs,finish_task_run
+        from opspilot.domain.investigation_context import load_investigation_context
+        from opspilot.domain.s3 import persist_s3_diagnosis
+        db=tmp_path/"corrected-followup.sqlite3"
+        reset_fixture(db,"S1_POS")
+        session,task,_,_=_diagnosed_task(db)
+        identity=trusted_identity(db,"support-a")
+        correction=admit_task_message(db,identity,session_id=session,task_id=task,input_kind="CORRECT_TASK_INPUT",
+            body="更正：请核对 earlier-event 的历史，不要把最新事件当成这次。",idempotency_key="formal-correction")
+        claim_task_run(db,identity,correction["run_id"])
+        apply_pending_critical_inputs(db,identity,correction["run_id"])
+        persist_s3_diagnosis(db,task,correction["run_id"],[])
+        finish_task_run(db,identity,correction["run_id"],"SUCCEEDED")
+        before=_business_only(db,task)
+        for i in range(8): reserve_attempt(db,task,"MODEL",8,call_id=f"spent-corrected-{i}")
+        _,run=_start_investigation_run(db,session,task,suffix="after-correction")
+>       context=load_investigation_context(db,task,run)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_continuous_vs01.py:487: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\investigation_context.py:421: in load_investigation_context
+    return _read_context(connection, task_id, run_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x000001D874317C40>
+task_id = 'task-1e70ea71-2724-4eda-8111-1a10969006bd'
+run_id = 'run-c1-followup-116446f5-8769-49e1-aa15-544298696a83'
+
+    def _read_context(connection: sqlite3.Connection, task_id: str, run_id: str) -> dict[str, Any]:
+        row = connection.execute(
+            """SELECT r.*, b.actor_id AS binding_actor_id, b.service_id, b.integration_id,
+                      b.principal_id, b.tenant_id AS binding_tenant_id,
+                      s.owner_id, c.terminal_state, c.control_revision,
+                      c.pending_critical_message_seq,
+                      c.applied_critical_message_seq AS control_applied_critical_message_seq
+               FROM task_runs r
+               JOIN task_bindings b ON b.task_id = r.task_id AND b.tenant_id = r.tenant_id
+               JOIN sessions s ON s.session_id = r.session_id AND s.tenant_id = r.tenant_id
+               JOIN task_controls c ON c.task_id = r.task_id AND c.tenant_id = r.tenant_id
+               WHERE r.run_id = ? AND r.task_id = ?""",
+            (run_id, task_id),
+        ).fetchone()
+        if row is None:
+            raise InvestigationContextInvalid("INVESTIGATION_RUN_CONTEXT_NOT_FOUND")
+        if str(row["kind"]) not in {"INVESTIGATE", "RESUME", "APPROVAL_RESUME", "RECONCILE"}:
+            raise InvestigationContextInvalid("INVESTIGATION_RUN_KIND_INVALID")
+        if str(row["status"]) != "RUNNING":
+            raise InvestigationContextInvalid("TASK_RUN_NOT_ACTIVE")
+        if str(row["binding_tenant_id"]) != str(row["tenant_id"]) or str(row["owner_id"]) != str(row["binding_actor_id"]):
+            raise InvestigationContextInvalid("INVESTIGATION_RUN_OWNER_MISMATCH")
+        if str(row["terminal_state"]) != "ACTIVE":
+            raise InvestigationContextInvalid("TASK_ABORTED")
+        if row["pending_critical_message_seq"] is not None:
+            raise InvestigationContextInvalid("TASK_INPUT_PENDING")
+        expected_revision = row["expected_control_revision"]
+        if expected_revision is None or int(expected_revision) != int(row["control_revision"]):
+            raise InvestigationContextInvalid("TASK_CONTROL_STALE")
+        applied_highwater = int(row["applied_critical_message_seq"])
+        consumed_highwater = int(row["consumed_message_seq"])
+        if applied_highwater != int(row["control_applied_critical_message_seq"]):
+>           raise InvestigationContextInvalid("TASK_INPUT_HIGHWATER_STALE")
+E           opspilot.domain.investigation_context.InvestigationContextInvalid: TASK_INPUT_HIGHWATER_STALE
+
+opspilot\domain\investigation_context.py:269: InvestigationContextInvalid
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs11_followup_after_applied_correction_carries_the_trusted_highwater
+1 failed in 1.88s

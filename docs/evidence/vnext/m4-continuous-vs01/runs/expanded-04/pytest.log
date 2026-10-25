@@ -1,0 +1,100 @@
+................FF...                                                    [100%]
+================================== FAILURES ===================================
+__ test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance __
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-expanded-04/test_c1_wire_01_s3_model_call_0')
+
+    def test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance(tmp_path: Path) -> None:
+        db = tmp_path / "c1-wire-valid.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, diagnosis_id = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id, suffix="wire-valid")
+        _message_id, run_id = _start_investigation_run(
+            db, session_id, task_id, suffix="wire-valid-current",
+        )
+        before = _business_snapshot(db, task_id)
+        model = CapturingModel()
+        node = _node(db, task_id, run_id, model, readonly_followup=False)
+        explain_node = _node(db, task_id, run_id, model)
+    
+        state = {"evidence_ids": [], "diagnosis_draft": {}}
+        call_id, _calls, _text = asyncio.run(node.model_call(state))
+        explain_call_id, _explain_calls, _explain_text = asyncio.run(
+            explain_node.model_call(state, explain=True),
+        )
+    
+        assert len(model.messages) == 2
+        body = json.loads(str(model.messages[0][-1].content))
+        explain_body = json.loads(str(model.messages[1][-1].content))
+        history = body["prior_readonly_followups"]
+        explain_history = explain_body["prior_readonly_followups"]
+        assert len(history) == 1
+        assert explain_history == history
+        assert "CURRENT_APPLICABLE" in str(model.messages[0][0].content)
+        assert "prior-Run Evidence" in str(model.messages[0][0].content)
+        assert history[0]["run_id"] == prior["run_id"]
+        assert history[0]["result_digest"] == prior["result_digest"]
+        assert "receiver-ack-contract-v2" in history[0]["answer_text"]
+        assert history[0]["source_authority"] == "HISTORICAL_RESULT_ONLY"
+        knowledge_ref = next(ref for ref in history[0]["source_refs"] if ref["kind"] == "KNOWLEDGE")
+        assert knowledge_ref["document_id"] == prior["document_id"]
+        assert knowledge_ref["version"] == prior["document_version"]
+        assert knowledge_ref["digest"] == prior["document_digest"]
+        assert knowledge_ref["currentness"] == "CURRENT_APPLICABLE"
+        old_evidence = next(ref for ref in history[0]["source_refs"] if ref["kind"] == "EVIDENCE")
+>       assert old_evidence["currentness"] == "HISTORICAL_RUN_ONLY"
+E       AssertionError: assert 'INVALID_SOUR...N_ASSOCIATION' == 'HISTORICAL_RUN_ONLY'
+E         
+E         - HISTORICAL_RUN_ONLY
+E         + INVALID_SOURCE_RUN_ASSOCIATION
+
+tests\test_m4_c1_s3_prompt.py:154: AssertionError
+___ test_c1_wire_02_stale_knowledge_is_historical_and_exclusion_is_recorded ___
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-expanded-04/test_c1_wire_02_stale_knowledg0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023BBA67D250>
+
+    def test_c1_wire_02_stale_knowledge_is_historical_and_exclusion_is_recorded(
+        tmp_path: Path, monkeypatch,
+    ) -> None:
+        import opspilot.domain.s3_assets as assets
+    
+        db = tmp_path / "c1-wire-stale.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, _, _ = _diagnosed_task(db)
+        prior = _persist_previous_followup(db, session_id, task_id, suffix="wire-stale")
+        _message_id, run_id = _start_investigation_run(
+            db, session_id, task_id, suffix="wire-stale-current",
+        )
+        before = _business_snapshot(db, task_id)
+        original = assets.load_knowledge(contract_version=2)
+        replaced = [dict(item) for item in original]
+        target = next(item for item in replaced if item["document_id"] == prior["document_id"])
+        target.update({"version": "wire-replacement-v3", "digest": "a" * 64})
+        monkeypatch.setattr(assets, "load_knowledge", lambda *, contract_version=None: replaced)
+        model = CapturingModel()
+    
+        call_id, _calls, _text = asyncio.run(_node(db, task_id, run_id, model).model_call(
+            {"evidence_ids": [], "diagnosis_draft": {}},
+        ))
+    
+        body = json.loads(str(model.messages[0][-1].content))
+        history = body["prior_readonly_followups"][0]
+        assert history["run_id"] == prior["run_id"]
+        assert "receiver-ack-contract-v2" in history["answer_text"]
+        knowledge_ref = next(ref for ref in history["source_refs"] if ref["kind"] == "KNOWLEDGE")
+        assert knowledge_ref["currentness"] == "HISTORICAL_SOURCE_STALE"
+        assert knowledge_ref["reason"] == "KNOWLEDGE_REMOVED_EXPIRED_OR_CHANGED"
+        assert body["retrieved_knowledge_method_only"] == []
+        evidence_ref = next(ref for ref in history["source_refs"] if ref["kind"] == "EVIDENCE")
+>       assert evidence_ref["currentness"] == "HISTORICAL_RUN_ONLY"
+E       AssertionError: assert 'INVALID_SOUR...N_ASSOCIATION' == 'HISTORICAL_RUN_ONLY'
+E         
+E         - HISTORICAL_RUN_ONLY
+E         + INVALID_SOURCE_RUN_ASSOCIATION
+
+tests\test_m4_c1_s3_prompt.py:221: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_c1_s3_prompt.py::test_c1_wire_01_s3_model_call_sends_prior_followup_and_records_provenance
+FAILED tests/test_m4_c1_s3_prompt.py::test_c1_wire_02_stale_knowledge_is_historical_and_exclusion_is_recorded
+2 failed, 19 passed in 23.95s

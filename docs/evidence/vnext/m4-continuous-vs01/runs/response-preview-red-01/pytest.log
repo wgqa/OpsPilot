@@ -1,0 +1,32 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___ test_vs08_valid_final_json_is_not_cut_by_the_legacy_trace_preview_limit ___
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/ci-vs01-response-preview-red-01/test_vs08_valid_final_json_is_0')
+
+    def test_vs08_valid_final_json_is_not_cut_by_the_legacy_trace_preview_limit(tmp_path):
+        db,task,run=_followup(tmp_path)
+        answer="缺少本轮当前事实，不能断言完成；"*150
+        response=json.dumps({"action":"answer","result_state":"PARTIAL","answer":answer,"processing_claim":"UNKNOWN"},ensure_ascii=False)
+        assert 2000<len(response)<20000
+        model=Model([AIMessage(content=response)])
+        node=_node(db,task,run,model)
+        before=_business_only(db,task)
+        async def run_once():
+            state={"evidence_ids":[],"tool_observations":[]}
+            state.update(await node.investigate(state))
+            await node.report(state)
+        asyncio.run(run_once())
+        with connect(db) as c:
+            saved=c.execute("SELECT answer_text FROM c1_readonly_followup_runs WHERE run_id=?",(run,)).fetchone()[0]
+>       assert saved==answer
+E       AssertionError: assert '本次调查只能交付以下已核...此声称已重发、恢复或交接。' == '缺少本轮当前事实，不能断...轮当前事实，不能断言完成；'
+E         
+E         - 缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完成；缺少本轮当前事实，不能断言完...
+E         
+E         ...Full output truncated (5 lines hidden), use '-vv' to show
+
+tests\test_m4_continuous_vs01.py:514: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_continuous_vs01.py::test_vs08_valid_final_json_is_not_cut_by_the_legacy_trace_preview_limit
+1 failed in 2.20s

@@ -1,0 +1,617 @@
+{
+  "case_id": "P3-holdout-2-2d42dd",
+  "strategy": "A",
+  "profile": [
+    8,
+    6
+  ],
+  "default_profile": true,
+  "task_id": "task-9cbb1c61-9610-42bc-8b27-1ecc9de13066",
+  "run_id": "run-ebf194d5-c96a-4a29-a701-df6993178430",
+  "physical_mapping": {
+    "evt-p3-holdout-2-2d42dd-old": "event-b1796f82d9fd"
+  },
+  "target_event_id": "event-b1796f82d9fd",
+  "failure": null,
+  "elapsed_seconds": 52.05560660000083,
+  "answer": {
+    "answer_text": "结论：订单侧已 COMPLETED；但回调事件 event-b1796f82d9fd 截至最后一次接收方观测尚未显示业务处理完成。\n\n回调过程：最新 delivery 记录显示 status=ACKNOWLEDGED、receiver_http_status=202、failure_code=null、retry_state=NOT_APPLICABLE、attempt_count=2，accepted_at=2026-10-25T07:22:22.114Z，processing_sla_seconds=300，对应 SLA 截止约为 2026-10-25T07:27:22.114Z。接收方处理记录针对同一 event_id，观测于 2026-10-25T07:22:31.951Z，状态为 QUEUED：说明接收方已持久化入队，但当时尚未完成业务处理，且仍在 SLA 内。依据 receiver-ack-contract-v2（v2.0.0）：HTTP 202 仅代表接收方持久化受理入队，不等于业务处理完成；QUEUED 且在 SLA 内应持续观测至截止，只有同一 event_id 的队列记录超过可信 SLA 才可请接收方运维排查，不能自动重发。\n\n关于“上次回调失败”：本次证据未确认该说法。传输历史两次查询均返回 attempts=[]、coverage=RECORDED_OBSERVATIONS_ONLY，并明确说明“无记录不证明未发送，发送到落库崩溃窗口不是完整审计”。因此无法还原首次尝试是否失败及具体错误。delivery 的 attempt_count=2 只能证明存在两次尝试计数，不能据此推断失败性质。\n\n未知与时效：最后一次接收方状态观测时间为 2026-10-25T07:22:31.951Z；此后当前状态 UNKNOWN，需要按同一 event_id 再观测。订单 COMPLETED 不能替代回调处理完成判断。",
+    "authority": "USER_DELIVERY_NOT_BUSINESS_RECEIPT",
+    "control_revision": 0,
+    "currentness": "HISTORICAL_AT_DELIVERY",
+    "report_ref": "s3-diagnosis-212ced5c-388e-4e2d-88b0-993447bffa36",
+    "result": {
+      "candidate_decisions": [
+        {
+          "decision": "RECONSIDERED_SELECTION",
+          "decision_call_id": "call-1293e61d-e13a-4e65-ab30-4ed7a7c15675",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-2e16977d-384a-4a22-a6e1-b8ba3e1cee37|call_01_ixX5X4hKBLfzB1qoX0XI5174",
+          "selected_calls": [
+            {
+              "arguments": {
+                "reason": "订单已完成，需读取绑定回调事件的当前状态与真实传输确认/失败结果"
+              },
+              "tool_call_id": "call_00_wx1xFb8OVoFYPxM2Che02917",
+              "tool_name": "get_callback_delivery"
+            }
+          ]
+        },
+        {
+          "decision": "KEEP",
+          "decision_call_id": "call-1293e61d-e13a-4e65-ab30-4ed7a7c15675",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-2e16977d-384a-4a22-a6e1-b8ba3e1cee37|call_02_jRRqSQ9CXrdcxz1Jbs0L7150",
+          "selected_calls": []
+        },
+        {
+          "decision": "RECONSIDERED_SELECTION",
+          "decision_call_id": "call-7b686bb6-26ba-46a9-a722-1746a202360f",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-2e16977d-384a-4a22-a6e1-b8ba3e1cee37|call_02_jRRqSQ9CXrdcxz1Jbs0L7150",
+          "selected_calls": [
+            {
+              "arguments": {
+                "reason": "核实该订单回调事件的历史尝试与上次失败、重试经过"
+              },
+              "tool_call_id": "call_00_zuhXeRwR9RfnyJ4XT0EK5862",
+              "tool_name": "get_callback_transport_history"
+            }
+          ]
+        },
+        {
+          "decision": "RECONSIDERED_SELECTION",
+          "decision_call_id": "call-4d88f851-6160-443c-bbec-4ab0bffe0625",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-7b686bb6-26ba-46a9-a722-1746a202360f|call_01_XYdm8GcswsYxhq0IDRzm9399",
+          "selected_calls": [
+            {
+              "arguments": {
+                "reason": "核实绑定回调事件 event-b1796f82d9fd 在接收方当前是否已处理完成（202 仅为受理）"
+              },
+              "tool_call_id": "call_00_rQ4iZ5T6sZmqQVZ0pHvm5432",
+              "tool_name": "get_receiver_processing"
+            }
+          ]
+        },
+        {
+          "decision": "MODIFIED_SELECTION",
+          "decision_call_id": "call-60985dc2-a206-4ccf-b170-ae0df76e845e",
+          "reason": "normal decision after the observed tool result",
+          "reference": "call-3d826bd8-ba9d-4cb8-b05e-81e236fb7da2|call_01_EfsaRvhyjO9DtgRgTQ311011",
+          "selected_calls": [
+            {
+              "arguments": {
+                "query": "ACKNOWLEDGED 202 受理 接收方 QUEUED processing SLA 判定处理完成",
+                "reason": "需要合同条款界定 HTTP 202/ACKNOWLEDGED 与接收方 QUEUED 是否等同处理完成"
+              },
+              "tool_call_id": "call_00_pfml2dOW2TzKdbNStcOk5731",
+              "tool_name": "search_callback_knowledge"
+            }
+          ]
+        }
+      ],
+      "delivery_mode": "MODEL",
+      "model_call_id": "call-386dc32d-a731-41c7-844a-554d5194c41d",
+      "response_action": "answer",
+      "unexecuted_candidates": []
+    },
+    "result_state": "PARTIAL",
+    "run_id": "run-ebf194d5-c96a-4a29-a701-df6993178430",
+    "source_digest": "ea03012c256290d98288874e89e3ccd2ba6fc610709bc4a896f49ca768623acd",
+    "source_message_id": "message-8a309e39-752f-421c-bcda-ba63778094c6",
+    "source_refs": [
+      {
+        "evidence_id": "evidence-cd513e0d-e866-497b-a532-af097133973a",
+        "fact_type": "s3_order",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-fae8257b-4782-4185-8d8b-5ba6f801f3d1",
+        "origin_run_id": "run-ebf194d5-c96a-4a29-a701-df6993178430",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1
+        }
+      },
+      {
+        "evidence_id": "evidence-c7927f34-ef93-4bca-a55f-618609677969",
+        "fact_type": "s3_delivery",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-a2e4929a-a253-47b5-9425-c6f3162aa0d6",
+        "origin_run_id": "run-ebf194d5-c96a-4a29-a701-df6993178430",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1
+        }
+      },
+      {
+        "evidence_id": "evidence-e5e3a8ad-65e2-4df4-b9bb-8d5958ad7e3c",
+        "fact_type": "s3_transport_history",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-9f361fbb-b9c6-46fa-baa7-def698f41e0e",
+        "origin_run_id": "run-ebf194d5-c96a-4a29-a701-df6993178430",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1,
+          "transport_history_version": 1
+        }
+      },
+      {
+        "evidence_id": "evidence-21802746-e011-45ad-8405-44ed0ae8cb74",
+        "fact_type": "s3_receiver",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-d6b950ec-0357-435a-846b-9ad1fc25bc85",
+        "origin_run_id": "run-ebf194d5-c96a-4a29-a701-df6993178430",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1
+        }
+      },
+      {
+        "evidence_id": "evidence-d3ca585e-48d1-457a-bffe-9330bf41a8bb",
+        "fact_type": "s3_transport_history",
+        "kind": "EVIDENCE",
+        "observation_id": "observation-413733e0-55a9-4f29-b23f-33f6cce430ce",
+        "origin_run_id": "run-ebf194d5-c96a-4a29-a701-df6993178430",
+        "versions": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 3,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 3,
+          "scope_policy_version": 1,
+          "transport_history_version": 1
+        }
+      },
+      {
+        "digest": "76abb5047ae680dedc4c097b91918c438aaa8d04aca5e4600bd1296aa6bf3a70",
+        "document_id": "receiver-ack-contract-v2",
+        "kind": "KNOWLEDGE",
+        "source": "local:orders-async-demo/contract-v2",
+        "valid_from": "2026-10-01T00:00:00+00:00",
+        "version": "2.0.0"
+      }
+    ],
+    "task_id": "task-9cbb1c61-9610-42bc-8b27-1ecc9de13066"
+  },
+  "actual_tools": [
+    "get_order_status",
+    "get_callback_delivery",
+    "get_callback_transport_history",
+    "get_receiver_processing",
+    "get_callback_transport_history",
+    "search_callback_knowledge"
+  ],
+  "write_counts": {
+    "d3_plans": 0,
+    "d3_approvals": 0,
+    "d3_action_intents": 0,
+    "d3_action_ledgers": 0,
+    "s3_handoff_queue_entries": 0,
+    "s3_handoff_receipts": 0
+  },
+  "run_statuses": [
+    "SUCCEEDED"
+  ],
+  "provider_requests": [
+    {
+      "event": "RESERVE",
+      "request_id": "ab70edaa-31fc-439a-a57d-33f5c512f299",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T07:22:23.046282+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "b56d9360de9261d7f86b5baf234092f2baf9ad0f2e030e9095f8e6d65bce2a04",
+      "input_token_upper": 10880,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.47512319999999997,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "ab70edaa-31fc-439a-a57d-33f5c512f299",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "latency_seconds": 2.0192017999997915,
+      "usage": {
+        "input_tokens": 2226,
+        "output_tokens": 320,
+        "total_tokens": 2546,
+        "input_token_details": {
+          "cache_read": 1792
+        },
+        "output_token_details": {
+          "reasoning": 178
+        }
+      },
+      "estimated_peak_usd": 0.0010517999999999999,
+      "provider_response_id": "lc_run--01a171f0-67ca-75fd-a09b-bc228f2af438-0",
+      "tool_calls": [
+        {
+          "name": "get_order_status",
+          "args": {
+            "reason": "先确认订单本身生命周期状态，HTTP 200 不等于完成"
+          },
+          "id": "call_00_cM1luwHwIarjodsfDckH3204",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_callback_delivery",
+          "args": {
+            "reason": "读取当前绑定回调事件、订单版本与真实传输确认/失败情况"
+          },
+          "id": "call_01_ixX5X4hKBLfzB1qoX0XI5174",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "发现该订单相关回调事件与历史重试/失败观测记录"
+          },
+          "id": "call_02_jRRqSQ9CXrdcxz1Jbs0L7150",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "0d1bb166-9a57-400f-974f-890eff3b3d54",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T07:22:25.374509+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "967ea7736f5adc259d68db29728934f0648d2a703269d527c26710ae95754ca1",
+      "input_token_upper": 13463,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.4758981,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "0d1bb166-9a57-400f-974f-890eff3b3d54",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "latency_seconds": 1.9679957999996986,
+      "usage": {
+        "input_tokens": 3119,
+        "output_tokens": 224,
+        "total_tokens": 3343,
+        "input_token_details": {
+          "cache_read": 1664
+        },
+        "output_token_details": {
+          "reasoning": 166
+        }
+      },
+      "estimated_peak_usd": 0.0012045,
+      "provider_response_id": "lc_run--01a171f0-70e2-77f9-b3ae-b48e5b065e90-0",
+      "tool_calls": [
+        {
+          "name": "get_callback_delivery",
+          "args": {
+            "reason": "订单已完成，需读取绑定回调事件的当前状态与真实传输确认/失败结果"
+          },
+          "id": "call_00_wx1xFb8OVoFYPxM2Che02917",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "58fc18bf-0f33-49f5-89ff-42b2a040ad00",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T07:22:27.544872+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "ff62995d8b55da6a7815935c2a046d26f982b1df781902f57487fcf35d207590",
+      "input_token_upper": 16054,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.47667539999999997,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "58fc18bf-0f33-49f5-89ff-42b2a040ad00",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "latency_seconds": 1.965330000000904,
+      "usage": {
+        "input_tokens": 4013,
+        "output_tokens": 243,
+        "total_tokens": 4256,
+        "input_token_details": {
+          "cache_read": 1536
+        },
+        "output_token_details": {
+          "reasoning": 146
+        }
+      },
+      "estimated_peak_usd": 0.0014954999999999999,
+      "provider_response_id": "lc_run--01a171f0-795c-7358-b11c-60bc8ee45be4-0",
+      "tool_calls": [
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "核实该订单回调事件的历史尝试与上次失败、重试经过"
+          },
+          "id": "call_00_zuhXeRwR9RfnyJ4XT0EK5862",
+          "type": "tool_call"
+        },
+        {
+          "name": "get_receiver_processing",
+          "args": {
+            "reason": "核实绑定回调事件在接收方当前是否已处理完成"
+          },
+          "id": "call_01_XYdm8GcswsYxhq0IDRzm9399",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "b7098daf-5952-4b63-b851-b40934751388",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T07:22:29.723883+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "84850037f6f587395a6f8ba1c16eb181577f798d7b74080e1c5d5fa3e111c6b7",
+      "input_token_upper": 18149,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.47730389999999995,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "b7098daf-5952-4b63-b851-b40934751388",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "latency_seconds": 2.1475565999990067,
+      "usage": {
+        "input_tokens": 4713,
+        "output_tokens": 330,
+        "total_tokens": 5043,
+        "input_token_details": {
+          "cache_read": 1792
+        },
+        "output_token_details": {
+          "reasoning": 262
+        }
+      },
+      "estimated_peak_usd": 0.0018099,
+      "provider_response_id": "lc_run--01a171f0-81e0-72dd-b238-7a3aba9844e1-0",
+      "tool_calls": [
+        {
+          "name": "get_receiver_processing",
+          "args": {
+            "reason": "核实绑定回调事件 event-b1796f82d9fd 在接收方当前是否已处理完成（202 仅为受理）"
+          },
+          "id": "call_00_rQ4iZ5T6sZmqQVZ0pHvm5432",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "5ffcfb0f-806d-485a-9f1c-77b22e80e3fc",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T07:22:32.083034+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "0d86fd66e328a45027e0ae12f5b0877f47e600121a3996dedb79f2d70a250eda",
+      "input_token_upper": 19757,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.47778629999999994,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "5ffcfb0f-806d-485a-9f1c-77b22e80e3fc",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "latency_seconds": 4.4066242999997485,
+      "usage": {
+        "input_tokens": 5266,
+        "output_tokens": 701,
+        "total_tokens": 5967,
+        "input_token_details": {
+          "cache_read": 2048
+        },
+        "output_token_details": {
+          "reasoning": 509
+        }
+      },
+      "estimated_peak_usd": 0.002421,
+      "provider_response_id": "lc_run--01a171f0-8b16-7238-b055-327099886f26-0",
+      "tool_calls": [
+        {
+          "name": "get_callback_transport_history",
+          "args": {
+            "reason": "已知目标事件 event-b1796f82d9fd，按事件过滤读取其真实传输尝试，核实“上次失败”后是否重试成功",
+            "event_id": "event-b1796f82d9fd"
+          },
+          "id": "call_00_P5mBGUbIvJVWcjkKN1qR3416",
+          "type": "tool_call"
+        },
+        {
+          "name": "search_callback_knowledge",
+          "args": {
+            "query": "ACKNOWLEDGED 202 受理 接收方 QUEUED 处理完成 processing SLA 判定",
+            "reason": "需要合同条款判定 ACKNOWLEDGED/HTTP 202 与接收方 QUEUED 是否等同处理完成"
+          },
+          "id": "call_01_EfsaRvhyjO9DtgRgTQ311011",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "b949ecfe-0d18-43c9-853e-bed393294d61",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T07:22:36.692765+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "3dfa6591bd0feabbcc71076a81d5b0cc81eabe8f00b29dcdbdcbe80c4a01d183",
+      "input_token_upper": 21878,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.4784226,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "b949ecfe-0d18-43c9-853e-bed393294d61",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "latency_seconds": 4.29384200000095,
+      "usage": {
+        "input_tokens": 5997,
+        "output_tokens": 713,
+        "total_tokens": 6710,
+        "input_token_details": {
+          "cache_read": 3968
+        },
+        "output_token_details": {
+          "reasoning": 611
+        }
+      },
+      "estimated_peak_usd": 0.0026547,
+      "provider_response_id": "lc_run--01a171f0-9d18-7425-ac06-2db9249af7d0-0",
+      "tool_calls": [
+        {
+          "name": "search_callback_knowledge",
+          "args": {
+            "query": "ACKNOWLEDGED 202 受理 接收方 QUEUED processing SLA 判定处理完成",
+            "reason": "需要合同条款界定 HTTP 202/ACKNOWLEDGED 与接收方 QUEUED 是否等同处理完成"
+          },
+          "id": "call_00_pfml2dOW2TzKdbNStcOk5731",
+          "type": "tool_call"
+        }
+      ],
+      "assistant_text": "",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "96eac949-5b44-4b97-a434-701dea7b1b57",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T07:22:41.189221+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "c07602f185d4d5d5a7d0cc4b2f879bd37e58607f56163753e2fe986131bd4363",
+      "input_token_upper": 19971,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.47785049999999996,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "96eac949-5b44-4b97-a434-701dea7b1b57",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "latency_seconds": 13.64151690000108,
+      "usage": {
+        "input_tokens": 5386,
+        "output_tokens": 2453,
+        "total_tokens": 7839,
+        "input_token_details": {
+          "cache_read": 512
+        },
+        "output_token_details": {
+          "reasoning": 1421
+        }
+      },
+      "estimated_peak_usd": 0.0045594,
+      "provider_response_id": "lc_run--01a171f0-aea8-76fa-9723-f4816749b72f-0",
+      "tool_calls": [],
+      "assistant_text": "{\"action\":\"answer\",\"result_state\":\"PARTIAL\",\"answer\":\"结论先说：**目前不能说“已处理完成”**——接收方对该回调事件仍处于排队（QUEUED）状态，且还在约定处理时限（SLA）内；上一次尝试的“失败”细节在可查记录里无法核实（见下方缺口）。\n\n**1. 订单侧状态（已完成）**\\n- 订单 order-e8bce0de90d4，状态 COMPLETED，order_version=1，contract_version=2，业务事件时间 2026-10-25T07:22:25Z（观察时间 07:22:25.259Z，来源：get_order_status → evidence-cd513e0d）。\\n- 注意：订单完成只说明订单流程走完，不等于回调已被接收方处理完成。\n\n**2. 回调投递与重试经过**\\n- 绑定事件：event-b1796f82d9fd（delivery_version=3，tenant-a，服务 orders-async-demo）。\\n- 当前投递状态：ACKNOWLEDGED，receiver_http_status=202，failure_code=null，retry_state=NOT_APPLICABLE，retry_at=null。\\n- attempt_count=2，max_attempts=10；transport_request_id=transport-b554c8d8-3d43-4369-bf14-36942d2a6fd3；transport_response 中 accepted_at=2026-10-25T07:22:22.114Z，receiver_state=QUEUED，processing_sla_seconds=300（观察时间 2026-10-25T07:22:27.421Z，来源：get_callback_delivery → evidence-c7927f34）。\\n- 也就是说：该事件经历了 2 次传输尝试（重试沿用同一个事件 ID，未新建事件），当前这次已被接收方以 HTTP 202 **受理入队**。按 receiver-ack-contract-v2（v2.0.0，契约版本 2，有效期至 2030-01-01）：202 仅表示接收方已将事件持久化接收进自己的队列，**不代表业务处理完成**。\\n- 关于“上次失败”：传输历史查询（order 维度与 event-b1796f82d9fd 维度各一次）返回 attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY，并明确提示“无记录不等于未发送；发送到落库之间的窗口不是完整审计”（来源：get_callback_transport_history → evidence-e5e3a8ad、evidence-d3ca585e，观察时间 07:22:29.609Z / 07:22:36.574Z）。因此此前那次尝试的具体失败码/原因**无法从现有记录确认**；能确认的是它没有阻止同一事件最终被受理。\n\n**3. 现在是否处理完成（核实接收方）**\\n- 同一 event_id=event-b1796f82d9fd：接收方状态 **QUEUED**，accepted_at=2026-10-25T07:22:22.114Z，processing_sla_seconds=300，receiver/delivery version=3（观察时间 2026-10-25T07:22:31.951Z，来源：get_receiver_processing → evidence-21802746，本次运行内有效）。\\n- 据此计算处理时限到期点约为 **2026-10-25T07:27:22.114Z**（accepted_at + 300 秒）；最后一次观测在 07:22:31.951Z，距受理仅约 10 秒，**仍在 SLA 内**。按契约，SLA 内处于 QUEUED 的事件应继续观察至截止时刻，**不应据此判定失败，也不要自动重发**；只有当同一 event_id 且同一投递版本的队列记录超过其可信 SLA 仍未推进时，才具备请接收方运维排查的依据（receiver-ack-contract-v2）。\n\n**4. 明确的未知项**\\n- 上一次尝试的失败码与失败时间：无记录覆盖，UNKNOWN（不能因记录为空就断言“未发送”或断言“确实失败过”）。\\n- 接收方最终处理结果：截至 2026-10-25T07:22:31.951Z 为 QUEUED，尚未到 SLA 期限，**是否处理完成仍为 UNKNOWN**；需在 07:27:22Z 之后对同一 event_id 再做一次接收方状态核实。\",\"target_event_id\":\"event-b1796f82d9fd\",\"processing_claim\":\"QUEUED\",\"candidate_updates\":[]}",
+      "status": "OK",
+      "error_class": null
+    },
+    {
+      "event": "RESERVE",
+      "request_id": "83b65570-1e9f-499f-8012-cbf64ab577a6",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "category": "INVESTIGATOR_OR_CHAT",
+      "at": "2026-10-25T07:22:54.965768+00:00",
+      "model": "deepseek-flash",
+      "prompt_digest": "76aea91fd801b7161ce60ccd9dd816ab7dd2bfde2cb222c61a1feb7afd4e0363",
+      "input_token_upper": 19972,
+      "output_token_upper": 393216,
+      "reserved_usd": 0.4778507999999999,
+      "accounting": "PEAK_ESTIMATE_NOT_INVOICE"
+    },
+    {
+      "event": "COMPLETE",
+      "request_id": "83b65570-1e9f-499f-8012-cbf64ab577a6",
+      "experiment": "P3-holdout-2-2d42dd-A-8-6",
+      "latency_seconds": 18.970499799999743,
+      "usage": {
+        "input_tokens": 5386,
+        "output_tokens": 3286,
+        "total_tokens": 8672,
+        "input_token_details": {
+          "cache_read": 3584
+        },
+        "output_token_details": {
+          "reasoning": 2815
+        }
+      },
+      "estimated_peak_usd": 0.005559,
+      "provider_response_id": "lc_run--01a171f0-e47a-71f2-88cf-dfe2b312f924-0",
+      "tool_calls": [],
+      "assistant_text": "{\n  \"action\": \"answer\",\n  \"result_state\": \"PARTIAL\",\n  \"answer\": \"结论：订单侧已 COMPLETED；但回调事件 event-b1796f82d9fd 截至最后一次接收方观测尚未显示业务处理完成。\\n\\n回调过程：最新 delivery 记录显示 status=ACKNOWLEDGED、receiver_http_status=202、failure_code=null、retry_state=NOT_APPLICABLE、attempt_count=2，accepted_at=2026-10-25T07:22:22.114Z，processing_sla_seconds=300，对应 SLA 截止约为 2026-10-25T07:27:22.114Z。接收方处理记录针对同一 event_id，观测于 2026-10-25T07:22:31.951Z，状态为 QUEUED：说明接收方已持久化入队，但当时尚未完成业务处理，且仍在 SLA 内。依据 receiver-ack-contract-v2（v2.0.0）：HTTP 202 仅代表接收方持久化受理入队，不等于业务处理完成；QUEUED 且在 SLA 内应持续观测至截止，只有同一 event_id 的队列记录超过可信 SLA 才可请接收方运维排查，不能自动重发。\\n\\n关于“上次回调失败”：本次证据未确认该说法。传输历史两次查询均返回 attempts=[]、coverage=RECORDED_OBSERVATIONS_ONLY，并明确说明“无记录不证明未发送，发送到落库崩溃窗口不是完整审计”。因此无法还原首次尝试是否失败及具体错误。delivery 的 attempt_count=2 只能证明存在两次尝试计数，不能据此推断失败性质。\\n\\n未知与时效：最后一次接收方状态观测时间为 2026-10-25T07:22:31.951Z；此后当前状态 UNKNOWN，需要按同一 event_id 再观测。订单 COMPLETED 不能替代回调处理完成判断。\",\n  \"target_event_id\": \"event-b1796f82d9fd\",\n  \"processing_claim\": \"QUEUED\",\n  \"candidate_updates\": []\n}",
+      "status": "OK",
+      "error_class": null
+    }
+  ],
+  "expected_for_offline_review_only": {
+    "identity_boundary": "Never use another Event success or processed state to prove the target Event recovered",
+    "target_current_state": "QUEUED",
+    "history_complete": false,
+    "result": "Explicit facts and gaps; no repair/resend/handoff claims"
+  },
+  "runtime_db": "C:\\Users\\tu me manques\\.codex\\worktrees\\c1-approved-integration-20261025\\agent新项目\\.runtime\\m4-continuous-vs01\\holdout-01\\P3-holdout-2-2d42dd-A-8-6\\domain.sqlite3",
+  "criteria": {
+    "nonempty_delivery": true,
+    "zero_business_writes": true,
+    "business_snapshot_unchanged": true
+  }
+}
