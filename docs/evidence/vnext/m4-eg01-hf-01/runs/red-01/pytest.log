@@ -1,0 +1,116 @@
+F..                                                                      [100%]
+================================== FAILURES ===================================
+_ test_chat_context_preserves_only_current_run_s3_observations[None-INCONCLUSIVE-EVIDENCE_INSUFFICIENT] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/opspilot-hf01-red01-519e1981347f450c92713969e603b3c3/test_chat_context_preserves_on0')
+receiver_status = None, expected_gate_outcome = 'INCONCLUSIVE'
+expected_direction = 'EVIDENCE_INSUFFICIENT'
+
+    @pytest.mark.parametrize(
+        ("receiver_status", "expected_gate_outcome", "expected_direction"),
+        [
+            (None, "INCONCLUSIVE", "EVIDENCE_INSUFFICIENT"),
+            ("PROCESSED", "RECEIVER_PROCESSED", "NO_FURTHER_ACTION"),
+            ("QUEUED", "RECEIVER_PROCESSING_UNCONFIRMED", "WAIT_FOR_RECEIVER_PROCESSING"),
+        ],
+    )
+    def test_chat_context_preserves_only_current_run_s3_observations(
+        tmp_path: Path,
+        receiver_status: str | None,
+        expected_gate_outcome: str,
+        expected_direction: str,
+    ) -> None:
+        """Exercise real local HTTP + in-process MCP facts through the Chat provider input boundary."""
+        import os as os_module
+    
+        from opspilot.domain.api import make_server
+        from opspilot.domain.s3 import evaluate_s3_gate, persist_s3_diagnosis
+        from opspilot.domain.s3_mcp import build_s3_server
+        from opspilot.domain.task_control import (
+            admit_task_message, apply_pending_critical_inputs, claim_task_run,
+            finish_task_run, register_worker_owner, trusted_identity,
+        )
+    
+        order_id = f"hf01-{receiver_status or 'unknown'}-{uuid4().hex[:8]}"
+        db, identity, task = _prepared_task(
+            tmp_path, "DELIVERED_PENDING", order_id, queue_age_seconds=60,
+            processing_sla_seconds=300,
+        )
+        if receiver_status is not None:
+            with connect(db) as connection:
+                connection.execute("UPDATE s3_receivers SET status=? WHERE order_id=?", (receiver_status, order_id))
+    
+        api = make_server(db, "tenant-a", "127.0.0.1", 0)
+        thread = threading.Thread(target=api.serve_forever, daemon=True)
+        thread.start()
+        try:
+            task_id, run_id = str(task["task_id"]), str(task["run_id"])
+            claim_task_run(db, identity, run_id)
+            apply_pending_critical_inputs(db, identity, run_id)
+            mcp = build_s3_server(db, task_id, f"http://127.0.0.1:{api.server_port}")
+            observations = [
+                _observe_s3_tool(db, task, run_id, mcp, "get_order_status"),
+                _observe_s3_tool(db, task, run_id, mcp, "get_callback_delivery"),
+            ]
+            if receiver_status is not None:
+                observations.append(_observe_s3_tool(db, task, run_id, mcp, "get_receiver_processing"))
+            evidence_ids = [str(item["evidence_id"]) for item in observations]
+            gate = evaluate_s3_gate(db, task_id, evidence_ids, run_id=run_id)
+            diagnosis = persist_s3_diagnosis(
+                db, task_id, run_id, evidence_ids,
+                stop_reason="HF01_CURRENT_RECEIVER_NOT_OBSERVED" if receiver_status is None else None,
+            )
+            finish_task_run(db, identity, run_id, "SUCCEEDED")
+    
+            register_worker_owner(db, "hf01-chat-worker", os_module.getpid())
+            accepted = admit_task_message(
+                db, identity, session_id=str(task["session_id"]), task_id=task_id,
+                input_kind="CHAT_READONLY", body="同一事件现在是否处理完成？",
+                idempotency_key=f"hf01-chat-{order_id}",
+            )
+            chat_run = str(accepted["run_id"])
+            claim_task_run(db, identity, chat_run)
+            from opspilot.domain.chat import prepare_chat_attempt
+    
+            business_before_chat = _business_snapshot(db, task_id)
+            prepared = prepare_chat_attempt(db, chat_run, "hf01-chat-worker", "hf01-context-capture")
+            facts = _current_facts_from_messages(prepared["messages"])
+            diagnosis_body = json.loads(str(diagnosis["body_json"]))
+            record = {
+                "case_id": f"HF01-{receiver_status or '202-UNKNOWN'}",
+                "task_id": task_id, "investigation_run_id": run_id, "chat_run_id": chat_run,
+                "evidence_observations": observations,
+                "http_order_status": next(item["facts"]["http_status"] for item in observations if item["fact_type"] == "s3_order"),
+                "delivery_http_status": next(item["facts"]["receiver_http_status"] for item in observations if item["fact_type"] == "s3_delivery"),
+                "event_id": next(item["facts"]["event_id"] for item in observations if item["fact_type"] == "s3_delivery"),
+                "transport_request_id": next(item["facts"]["transport_request_id"] for item in observations if item["fact_type"] == "s3_delivery"),
+                "gate": gate, "frozen_diagnosis_gate": diagnosis_body["gate"],
+                "chat_evidence_refs": prepared["evidence_refs"],
+                "chat_fact_types": [item["fact_type"] for item in facts],
+                "chat_fact_evidence_ids": [item["evidence_id"] for item in facts],
+                "business_snapshot_before_chat": business_before_chat,
+                "business_snapshot_after_chat": _business_snapshot(db, task_id),
+                "provider_call": "NOT_RUN; prepare_chat_attempt output is the exact provider-input payload, no Provider was invoked by this test",
+            }
+            _trace(record)
+    
+            assert next(item["facts"]["http_status"] for item in observations if item["fact_type"] == "s3_order") == 200
+            delivery = next(item for item in observations if item["fact_type"] == "s3_delivery")
+            assert delivery["facts"]["receiver_http_status"] == 202
+            assert gate["decision"] == ("NEED_MORE" if receiver_status is None else "DIAGNOSED")
+            assert diagnosis_body["gate"]["outcome"] == expected_gate_outcome
+            assert diagnosis_body["gate"]["handling_direction"] == expected_direction
+>           assert {item["fact_type"] for item in facts} == {item["fact_type"] for item in observations}, (
+                "Chat must preserve every current same-Run observation, including valid partial facts not used by Gate"
+            )
+E           AssertionError: Chat must preserve every current same-Run observation, including valid partial facts not used by Gate
+E           assert {'s3_order'} == {'s3_delivery', 's3_order'}
+E             
+E             Extra items in the right set:
+E             's3_delivery'
+E             Use -v to get more diff
+
+tests\test_m4_eg01_hf01.py:212: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_eg01_hf01.py::test_chat_context_preserves_only_current_run_s3_observations[None-INCONCLUSIVE-EVIDENCE_INSUFFICIENT]
+1 failed, 2 passed in 4.73s
