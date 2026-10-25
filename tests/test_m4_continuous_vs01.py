@@ -445,3 +445,12 @@ def test_vs10_experiment_caps_and_opaque_ids_do_not_leak_gold(tmp_path):
     db,_,task=_history_task(tmp_path)
     traced=export_trace(db,task["task_id"])
     assert traced["task_runs"][0]["run_id"] == task["run_id"] and len(traced["transport"]) == 2
+
+
+def test_vs08_a_single_fenced_final_answer_is_reusable_without_another_call():
+    from opspilot.s3_delivery import parse_response
+    # Actual development Provider format: a short preface, followed by one JSON block.
+    result={"action":"answer","result_state":"PARTIAL","answer":"当前只证实已受理，处理结果未知。","processing_claim":"UNKNOWN"}
+    wrapped="**查询已完成，不需要再调用工具。**\n\n```json\n"+json.dumps(result,ensure_ascii=False)+"\n```"
+    assert parse_response(wrapped) == result
+    assert parse_response("```json\n{}\n```\n```json\n"+json.dumps(result)+"\n```") is None

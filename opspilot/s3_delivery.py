@@ -7,8 +7,12 @@ import re
 
 def parse_response(text):
     raw = str(text or "").strip()
+    blocks=re.findall(r"```(?:json)?\s*\n(.*?)```",raw,flags=re.DOTALL|re.IGNORECASE)
+    if len(blocks)>1:
+        return None
+    payload=blocks[0].strip() if blocks else raw
     try:
-        value = json.loads(raw.removeprefix("```json").removesuffix("```").strip())
+        value = json.loads(payload)
         if isinstance(value, dict) and value.get("action") in {"answer", "clarify"} and isinstance(value.get("answer"), str) and value["answer"].strip():
             return {**value, "answer": value["answer"].strip(), "result_state": "PARTIAL" if value["action"] == "clarify" else value.get("result_state", "PARTIAL")}
     except (ValueError, TypeError):

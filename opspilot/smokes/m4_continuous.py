@@ -68,11 +68,19 @@ class ProviderMeter:
         # UTF8 bytes plus schema and framing is a conservative input-token reservation.
         raw=json.dumps([m.model_dump(mode="json") for m in messages],ensure_ascii=False,default=str)
         input_upper=len(raw.encode())+len(json.dumps(kwargs.get("tools",[]),ensure_ascii=False,default=str).encode())+2048
-        output_upper=int(getattr(model,"max_tokens",None) or 2048)
+        # The real provider returned more than the SDK's nominal 512 output tokens.
+        # Use its documented absolute 384K output maximum for in-flight exposure.
+        output_upper=393216
         reserved=(input_upper*.30+output_upper*1.20)/1_000_000
         with self.lock:
             reservations=[row for row in self.rows() if row["event"]=="RESERVE"]
-            if len(reservations)>=180 or sum(row["reserved_usd"] for row in reservations)+reserved>3:
+            completions={row["request_id"]:row for row in self.rows() if row["event"]=="COMPLETE"}
+            exposure=0.0
+            for row in reservations:
+                settled=completions.get(row.get("request_id"),{})
+                actual=settled.get("estimated_peak_usd")
+                exposure += actual if actual is not None else max(row["reserved_usd"],(row.get("input_token_upper",0)*.30+393216*1.20)/1_000_000)
+            if len(reservations)>=180 or exposure+reserved>3:
                 raise RuntimeError("EXPERIMENT_PROVIDER_CAP_REACHED")
             system=str(messages[0].content)[:250] if messages else ""
             category="CLASSIFIER" if "classif" in system.lower() or "follow_up_action" in raw[:1600] else "H_NORMALIZER" if system.startswith("Interpret the untrusted") else "INVESTIGATOR_OR_CHAT"
@@ -142,6 +150,7 @@ def export_trace(db,task_id):
 
 async def execute(case,strategy,profile,release,meter):
     from opspilot.investigator import run_investigation
+    from opspilot.smokes.m4_02 import business_snapshot
     label=f"{case['case_id']}-{strategy}-{profile[0]}-{profile[1]}"
     directory=EVIDENCE/"runs"/release/label
     directory.mkdir(parents=True,exist_ok=False)
@@ -159,6 +168,7 @@ async def execute(case,strategy,profile,release,meter):
                                         ticket_id="CI-VS01-LOCAL",initial_message=physical_case["message"],idempotency_key=label,s3_order_id=physical_case["order_id"])
     if profile!=(8,6):
         configure_s3_experiment_budget(db,created["task_id"],*profile)
+    before=business_snapshot(db)
     started=time.perf_counter()
     failure=None
     token=LABEL.set(label)
@@ -171,6 +181,8 @@ async def execute(case,strategy,profile,release,meter):
     finally:
         LABEL.reset(token)
     raw=export_trace(db,created["task_id"])
+    raw["business_snapshot_before"]=before
+    raw["business_snapshot_after"]=business_snapshot(db)
     write_json(directory/"TRACE.json",raw)
     answer=json.loads(raw["s3_run_answers"][-1]["body_json"]) if raw["s3_run_answers"] else {}
     result={"case_id":case["case_id"],"strategy":strategy,"profile":profile,"default_profile":profile==(8,6),"task_id":created["task_id"],
@@ -180,7 +192,8 @@ async def execute(case,strategy,profile,release,meter):
             "run_statuses":[row["status"] for row in raw["task_runs"]],"provider_requests":[row for row in meter.rows() if row.get("experiment")==label],
             "expected_for_offline_review_only":case.get("expected"),"runtime_db":str(db),
             "criteria":{"nonempty_delivery":bool(answer.get("answer_text"," ").strip()) if answer else False,
-                        "zero_business_writes":not any(raw["write_counts"].values())}}
+                        "zero_business_writes":not any(raw["write_counts"].values()),
+                        "business_snapshot_unchanged":before==raw["business_snapshot_after"]}}
     write_json(directory/"RESULT.json",result)
     print(json.dumps({key:result[key] for key in ("case_id","strategy","profile","failure","actual_tools","criteria")},ensure_ascii=False),flush=True)
     return result

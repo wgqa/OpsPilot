@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -81,6 +82,16 @@ def _prior_followup_provenance(histories, exclusions):
                 "reason": str(item.get("reason") or "PRIOR_READONLY_FOLLOWUP_EXCLUDED"),
             })
     return summary_refs, stale_sources
+
+
+def _parse_readonly_followup_answer(text: str) -> tuple[str, str]:
+    """Compatibility parser for the frozen C1 result-label contract."""
+    answer = str(text or "").strip()
+    first, separator, rest = answer.partition("\n")
+    match = re.fullmatch(r"RESULT:\s*(ANSWERED|PARTIAL)", first.strip(), flags=re.IGNORECASE)
+    if match is None:
+        return "PARTIAL", answer
+    return match.group(1).upper(), rest.strip() if separator else ""
 
 
 def s3_catalog(tools):

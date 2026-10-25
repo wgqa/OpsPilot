@@ -24,4 +24,3 @@ def redact_text(value: str) -> str:
         if secret:
             value = value.replace(secret, "[REDACTED]")
     return re.sub(r"(?i)(bearer\s+)[^\s'\",}]+|sk-[A-Za-z0-9_-]{8,}", "[REDACTED]", value)[:2000]
-
