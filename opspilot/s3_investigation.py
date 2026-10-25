@@ -276,7 +276,11 @@ class S3Nodes:
             model = self.llm if normalize or explain or not specs else self.llm.bind_tools(specs,tool_choice="auto",parallel_tool_calls=False)
             response = await model.ainvoke(messages)
             calls = list(response.tool_calls or [])
-            text = redact_text(content_text(response.content))
+            raw_text = content_text(response.content)
+            if len(raw_text)>20000:
+                raise ValueError("S3_MODEL_RESPONSE_EXCEEDS_RESULT_BOUND")
+            # Parse the bounded user result, not the legacy 2000-char trace preview.
+            text = redact_text(raw_text, limit=20000)
             valid = all(x.get("name") in TOOLS and isinstance(x.get("args"),dict) and isinstance(x.get("id"),str) for x in calls)
             status = "MODEL_TOOL_CALL_INVALID" if not valid else "PARALLEL_TOOL_CALLS_REDUCED_TO_ONE" if len(calls) > 1 else "OK"
             provider = response.response_metadata.get("id") or response.id

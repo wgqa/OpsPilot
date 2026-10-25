@@ -494,3 +494,22 @@ def test_vs11_followup_after_applied_correction_carries_the_trusted_highwater(tm
     with connect(db) as c:
         row=c.execute("SELECT answer_text,result_state FROM c1_readonly_followup_runs WHERE run_id=?",(run,)).fetchone()
     assert row[0].strip() and row[1]=="PARTIAL"
+
+
+def test_vs08_valid_final_json_is_not_cut_by_the_legacy_trace_preview_limit(tmp_path):
+    db,task,run=_followup(tmp_path)
+    answer="缺少本轮当前事实，不能断言完成；"*150
+    response=json.dumps({"action":"answer","result_state":"PARTIAL","answer":answer,"processing_claim":"UNKNOWN"},ensure_ascii=False)
+    assert 2000<len(response)<20000
+    model=Model([AIMessage(content=response)])
+    node=_node(db,task,run,model)
+    before=_business_only(db,task)
+    async def run_once():
+        state={"evidence_ids":[],"tool_observations":[]}
+        state.update(await node.investigate(state))
+        await node.report(state)
+    asyncio.run(run_once())
+    with connect(db) as c:
+        saved=c.execute("SELECT answer_text FROM c1_readonly_followup_runs WHERE run_id=?",(run,)).fetchone()[0]
+    assert saved==answer
+    assert len(model.messages)==1 and _business_only(db,task)==before

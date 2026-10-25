@@ -101,6 +101,7 @@ class ProviderMeter:
         estimated=None if input_tokens is None or output_tokens is None else (input_tokens*.30+output_tokens*1.20)/1_000_000
         self.append({"event":"COMPLETE","request_id":request_id,"experiment":LABEL.get(),"latency_seconds":time.perf_counter()-began,
                      "usage":tokens or "UNKNOWN","estimated_peak_usd":estimated,"provider_response_id":getattr(response,"id",None),
+                     "provider_completion_id":metadata.get("id"),
                      "tool_calls":getattr(response,"tool_calls",None),"assistant_text":getattr(response,"content",None),
                      "status":"ERROR" if error else "OK","error_class":type(error).__name__ if error else None})
 

@@ -18,9 +18,9 @@ def content_text(content: object) -> str:
     return str(content) if content is not None else ""
 
 
-def redact_text(value: str) -> str:
+def redact_text(value: str, *, limit: int = 2000) -> str:
     for secret_name in (MODEL_API_KEY,):
         secret = os.environ.get(secret_name, "")
         if secret:
             value = value.replace(secret, "[REDACTED]")
-    return re.sub(r"(?i)(bearer\s+)[^\s'\",}]+|sk-[A-Za-z0-9_-]{8,}", "[REDACTED]", value)[:2000]
+    return re.sub(r"(?i)(bearer\s+)[^\s'\",}]+|sk-[A-Za-z0-9_-]{8,}", "[REDACTED]", value)[:limit]
