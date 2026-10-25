@@ -192,139 +192,13 @@ def _model_error_text(error: Exception) -> str:
     return canonical_json(safe_error_details(error))
 
 
-def _content_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        chunks: list[str] = []
-        for item in content:
-            if isinstance(item, dict) and isinstance(item.get("text"), str):
-                chunks.append(str(item["text"]))
-            elif isinstance(item, str):
-                chunks.append(item)
-        return "\n".join(chunks)
-    return str(content) if content is not None else ""
+from opspilot.model_io import content_text as _content_text
 
 
-def _investigator_context_budget(
-    messages: list[SystemMessage | HumanMessage], model_id: str,
-    tool_specs: list[dict[str, object]], metadata: dict[str, object],
-) -> dict[str, object]:
-    serialized_messages = [
-        {"role": str(message.type), "content": str(message.content)} for message in messages
-    ]
-    budget = context_budget_for_model(model_id)
-    prompt_tokens = estimate_messages_tokens(serialized_messages)
-    tool_tokens = estimate_text_tokens(canonical_json(tool_specs)) if tool_specs else 0
-    estimated = prompt_tokens + tool_tokens + 8
-    input_limit = int(budget["input_budget_tokens"])
-    if estimated > input_limit:
-        raise ContextBudgetExceeded(
-            "INVESTIGATOR_CONTEXT_EXCEEDS_BUDGET",
-            required_tokens=estimated, input_budget_tokens=input_limit,
-        )
-    input_refs = metadata.get("selected_input_messages", [])
-    evidence_ids = metadata.get("evidence_ids", [])
-    memories = metadata.get("selected_memories", [])
-    knowledge = metadata.get("selected_knowledge", [])
-    prior_followups = metadata.get("prior_readonly_followups", [])
-    component_estimates = metadata.get("context_component_estimates", {})
-    component_estimates = component_estimates if isinstance(component_estimates, dict) else {}
-    selected_inputs = [
-        str(item.get("message_id")) for item in input_refs
-        if isinstance(item, dict) and item.get("message_id")
-    ]
-    task_run_control = metadata.get("task_run_control", {})
-    task_state_refs = [
-        str(task_run_control.get(key)) for key in ("run_id", "source_message_id")
-        if isinstance(task_run_control, dict) and task_run_control.get(key)
-    ]
-    selected_skill = metadata.get("selected_skill")
-    external_refs = [
-        str(item.get("memory_id")) for item in memories
-        if isinstance(item, dict) and item.get("memory_id")
-    ] + [
-        str(item.get("document_id")) for item in knowledge
-        if isinstance(item, dict) and item.get("document_id")
-    ]
-    if isinstance(selected_skill, dict) and selected_skill.get("name"):
-        external_refs.append(str(selected_skill["name"]))
-    prior_followup_refs = [
-        str(value)
-        for item in prior_followups if isinstance(item, dict)
-        for value in (item.get("run_id"), item.get("result_digest"), item.get("source_message_id"))
-        if value
-    ]
-    blocks = [
-        {
-            "block_id": "investigator-trusted-control", "category": "TRUSTED_CONTROL",
-            "authority": "APPLICATION_DEFINED_SAFETY_POLICY", "status": "SELECTED",
-            "estimated_tokens": int(component_estimates.get("trusted_control", prompt_tokens)),
-            "source_refs": [],
-        },
-        {
-            "block_id": "investigator-current-task-state", "category": "CURRENT_TASK_STATE",
-            "authority": "TRUSTED_TASK_BINDING_AND_RUN_CONTROL", "status": "SELECTED",
-            "estimated_tokens": int(component_estimates.get("current_task_state", 0)),
-            "source_refs": task_state_refs,
-        },
-        {
-            "block_id": "investigator-current-facts", "category": "CURRENT_FACTS",
-            "authority": "TASK_SCOPED_MCP_EVIDENCE_AND_OBSERVATIONS", "status": "SELECTED",
-            "estimated_tokens": int(component_estimates.get("current_facts", 0)),
-            "source_refs": [str(item) for item in evidence_ids],
-        },
-        {
-            "block_id": "investigator-recent-interaction", "category": "RECENT_INTERACTION",
-            "authority": "UNTRUSTED_USER_INPUT", "status": "SELECTED",
-            "estimated_tokens": int(component_estimates.get("recent_interaction", 0)),
-            "source_refs": selected_inputs,
-        },
-        {
-            "block_id": "investigator-historical-summary", "category": "HISTORICAL_SUMMARY",
-            "authority": "NONE_IN_INVESTIGATION_RUN", "status": "NOT_APPLICABLE",
-            "estimated_tokens": 0, "source_refs": [],
-        },
-        {
-            "block_id": "investigator-external-guidance", "category": "EXTERNAL_GUIDANCE",
-            "authority": "HISTORICAL_METHOD_HINT_AND_VERSIONED_KNOWLEDGE",
-            "status": "SELECTED" if external_refs else "EMPTY",
-            "estimated_tokens": int(component_estimates.get("external_guidance", 0)),
-            "source_refs": external_refs,
-        },
-        {
-            "block_id": "investigator-prior-readonly-followups", "category": "PRIOR_READONLY_FOLLOWUP",
-            "authority": "HISTORICAL_RESULT_ONLY",
-            "status": "SELECTED" if prior_followup_refs else "EMPTY",
-            "estimated_tokens": int(component_estimates.get("prior_readonly_followups", 0)),
-            "source_refs": prior_followup_refs,
-        },
-        {
-            "block_id": "read-only-mcp-tool-schemas", "category": "TOOL_SCHEMA",
-            "authority": "APPLICATION_DEFINED_READ_ONLY_TOOLS", "status": "SELECTED",
-            "estimated_tokens": tool_tokens, "source_refs": [],
-        },
-    ]
-    result = {
-        **budget, "strategy": "FAIL_CLOSED_NO_HISTORY_COMPRESSION",
-        "estimated_input_tokens": estimated, "prompt_estimated_tokens": prompt_tokens,
-        "tool_schema_estimated_tokens": tool_tokens,
-        "input_budget_tokens": input_limit,
-        "utilization": round(estimated / input_limit, 4) if input_limit else 1.0,
-    }
-    metadata["context_budget"] = result
-    metadata["context_blocks"] = blocks
-    metadata.setdefault("summary_refs", [])
-    metadata.setdefault("excluded_sources", [])
-    return result
+from opspilot.domain.context_engineering import investigator_context_budget as _investigator_context_budget
 
 
-def _redact_text(value: str) -> str:
-    for secret_name in (MODEL_API_KEY,):
-        secret = os.environ.get(secret_name, "")
-        if secret:
-            value = value.replace(secret, "[REDACTED]")
-    return re.sub(r"(?i)(bearer\s+)[^\s'\",}]+|sk-[A-Za-z0-9_-]{8,}", "[REDACTED]", value)[:2000]
+from opspilot.model_io import redact_text as _redact_text
 
 
 def _requires_scope_clarification(inputs: list[dict[str, object]]) -> bool:
@@ -2331,13 +2205,7 @@ def build_investigation_graph(
             return "execute_read_tools" if state.get("pending_call_refs") or state.get("policy_tool_call") else "evidence_gate"
         def after_tool_execution(state):
             return "evidence_gate"
-        def after_gate(state):
-            counts = attempt_counts(db_path, task_id)
-            return "report" if (
-                state.get("gate_decision", {}).get("decision") == "DIAGNOSED"
-                or counts["MCP"] >= MAX_MCP_ATTEMPTS or counts["MODEL"] >= MAX_MODEL_CALLS
-                or state.get("last_investigation_action") in {"MODEL_NO_TOOL","MODEL_NO_PROGRESS","MCP_NO_PROGRESS","POLICY_NO_ACTION","BUDGET_EXHAUSTED"}
-            ) else "investigate"
+        after_gate = s3.next_step
     graph = StateGraph(InvestigatorState)
     graph.add_node("intake", intake)
     graph.add_node("clarify_scope", clarify_scope)
@@ -2548,6 +2416,11 @@ async def run_investigation(
     if approval_resume_link is not None:
         checkpoint_thread_id = str(approval_resume_link["source_checkpoint_thread_id"])
     config = {"configurable": {"thread_id": checkpoint_thread_id} }
+    if s3_mode:
+        from opspilot.domain.d2 import task_attempt_limits
+        # Accommodate the bounded node transitions, not a replacement for the
+        # durable attempt policy. Every normal decision still spends MODEL.
+        config["recursion_limit"] = 3 * sum(task_attempt_limits(resolved_db, task_id).values()) + 8
     os.environ["LANGGRAPH_STRICT_MSGPACK"] = "true"
     api_server = None
     api_thread = None

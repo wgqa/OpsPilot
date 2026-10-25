@@ -337,6 +337,8 @@ CREATE TABLE IF NOT EXISTS task_execution_budgets (
     deadline_ms INTEGER NOT NULL CHECK (deadline_ms > 0),
     deadline_reached_at TEXT,
     updated_at TEXT NOT NULL,
+    model_limit INTEGER NOT NULL DEFAULT 8,
+    mcp_limit INTEGER NOT NULL DEFAULT 6,
     FOREIGN KEY (task_id, tenant_id) REFERENCES task_bindings(task_id, tenant_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ix_task_execution_budget_tenant ON task_execution_budgets(tenant_id, task_id);
@@ -1074,9 +1076,11 @@ def initialize(path: str | Path) -> None:
         # versioned compatibility backfill commit or roll back together.
         from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
         from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
-        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA)
+        from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+        from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 15:
+        if version > 16:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1422,6 +1426,13 @@ def initialize(path: str | Path) -> None:
                     "ADD COLUMN follow_up_action TEXT NOT NULL DEFAULT 'EXPLAIN'"
                 )
             connection.execute("PRAGMA user_version = 15")
+            version = 15
+        if version < 16:
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(task_execution_budgets)")}
+            for name, default in (("model_limit", 8), ("mcp_limit", 6)):
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE task_execution_budgets ADD COLUMN {name} INTEGER NOT NULL DEFAULT {default}")
+            connection.execute("PRAGMA user_version = 16")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
@@ -1437,7 +1448,11 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
         connection.execute("DROP TRIGGER IF EXISTS s3_task_resources_immutable_delete")
         connection.execute("DROP TRIGGER IF EXISTS s3_handoff_receipt_immutable_update")
         connection.execute("DROP TRIGGER IF EXISTS s3_handoff_receipt_immutable_delete")
+        connection.execute("DROP TRIGGER IF EXISTS s3_transport_immutable_delete")
+        connection.execute("DROP TRIGGER IF EXISTS s3_run_answer_no_delete")
         for table in (
+            "s3_run_answers",
+            "s3_transport_attempts",
             "s3_handoff_receipts",
             "s3_handoff_queue_entries",
             "s3_model_contexts",

@@ -73,20 +73,23 @@ def load_prior_readonly_followups(
            ORDER BY m.sequence DESC,f.run_id DESC LIMIT ?""",
         (tenant_id, session_id, task_id, int(before_sequence), bounded_limit),
     ).fetchall()
+    from opspilot.domain.s3_answers import prior_answer_rows
+    initial_rows, initial_exclusions = prior_answer_rows(connection,tenant_id,session_id,task_id,int(before_sequence),bounded_limit)
+    rows = sorted([dict(row) for row in rows] + initial_rows, key=lambda row:(int(row["source_sequence"]),str(row["run_id"])), reverse=True)[:bounded_limit]
     if not rows:
-        return [], []
+        return [], initial_exclusions
 
     from opspilot.domain.s3 import get_s3_binding
 
     try:
         current_binding = get_s3_binding(connection, task_id)
     except Exception:
-        return [], [{"source_id": str(row["run_id"]), "reason": "CURRENT_S3_AUTHORIZATION_UNAVAILABLE"}
+        return [], initial_exclusions + [{"source_id": str(row["run_id"]), "reason": "CURRENT_S3_AUTHORIZATION_UNAVAILABLE"}
                     for row in rows]
     from opspilot.domain.s3_assets import refresh_asset_refs
 
     records: list[dict[str, Any]] = []
-    excluded: list[dict[str, str]] = []
+    excluded: list[dict[str, str]] = list(initial_exclusions)
     for row in reversed(rows):
         run_id = str(row["run_id"])
         if (
@@ -96,7 +99,7 @@ def load_prior_readonly_followups(
             or int(row["run_consumed_message_seq"]) != int(row["source_sequence"])
             or int(row["source_sequence"]) >= int(before_sequence)
             or str(row["source_role"]) != "USER"
-            or str(row["source_input_kind"]) != "CHAT_READONLY"
+            or str(row["source_input_kind"]) not in ({"CHAT_READONLY","CORRECT_TASK_INPUT"} if row.get("result_storage")=="S3_RUN_ANSWER" else {"CHAT_READONLY"})
             or str(row["source_session_id"]) != session_id
             or str(row["source_tenant_id"]) != tenant_id
             or str(row["source_digest"]) != str(row["actual_source_digest"])
@@ -177,8 +180,9 @@ def load_prior_readonly_followups(
                        JOIN task_runs r ON r.run_id=a.run_id AND r.task_id=a.task_id
                        WHERE o.task_id=? AND o.evidence_id=? AND o.status='OK'
                          AND a.kind='MCP' AND a.status='OK' AND r.tenant_id=?
+                         AND (? IS NULL OR a.run_id=?)
                          AND o.created_at<=? ORDER BY o.created_at DESC LIMIT 1""",
-                    (task_id, evidence_id, tenant_id, str(row["completed_at"])),
+                    (task_id, evidence_id, tenant_id, ref.get("origin_run_id"), ref.get("origin_run_id"), str(row["completed_at"])),
                 ).fetchone()
                 item["currentness"] = "HISTORICAL_RUN_ONLY" if observation is not None else "INVALID_SOURCE_RUN_ASSOCIATION"
                 item["reason"] = None if observation is not None else "EVIDENCE_NOT_OBSERVED_BY_SOURCE_RUN"
@@ -224,6 +228,8 @@ def load_prior_readonly_followups(
             "source_refs": resolved_refs,
             "completed_at": str(row["completed_at"]),
             "source_authority": "HISTORICAL_RESULT_ONLY",
+            "result_storage": row.get("result_storage", "C1_READONLY_FOLLOWUP"),
+            "storage_digest": row.get("storage_digest", row["result_digest"]),
         })
     return records, excluded
 

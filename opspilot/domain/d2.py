@@ -706,6 +706,40 @@ def attempt_counts(path: str | Path, task_id: str) -> dict[str, int]:
     return counts
 
 
+def _task_attempt_limits(connection, task_id):
+    row = connection.execute("SELECT model_limit,mcp_limit FROM task_execution_budgets WHERE task_id=?", (task_id,)).fetchone()
+    pair = (row[0], row[1]) if row else (MAX_MODEL_CALLS, MAX_MCP_ATTEMPTS)
+    if any(type(value) is not int for value in pair) or pair not in {(8, 6), (12, 8), (16, 10)}:
+        raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
+    return {"MODEL": pair[0], "MCP": pair[1]}
+
+
+def task_attempt_limits(path, task_id):
+    with connect(path) as connection:
+        return _task_attempt_limits(connection, task_id)
+
+
+def configure_s3_experiment_budget(path, task_id, model_limit, mcp_limit):
+    """Trusted isolated experiment setup only. Not a Web/MCP/model capability."""
+    if any(type(value) is not int for value in (model_limit, mcp_limit)) or (model_limit, mcp_limit) not in {(8, 6), (12, 8), (16, 10)}:
+        raise ValueError("Unapproved experiment configuration")
+    from opspilot.domain.s3 import get_s3_binding
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        get_s3_binding(connection, task_id)
+        current = _task_attempt_limits(connection, task_id)
+        if current == {"MODEL": model_limit, "MCP": mcp_limit}:
+            return current
+        if connection.execute("SELECT 1 FROM d2_attempts WHERE task_id=? LIMIT 1", (task_id,)).fetchone():
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+        if current != {"MODEL": 8, "MCP": 6}:
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED")
+        changed = connection.execute("UPDATE task_execution_budgets SET model_limit=?,mcp_limit=? WHERE task_id=?", (model_limit, mcp_limit, task_id))
+        if changed.rowcount != 1:
+            raise ValueError("A persistent controlled Task is required")
+    return {"MODEL": model_limit, "MCP": mcp_limit}
+
+
 def save_model_trace(
     path: str | Path,
     *,

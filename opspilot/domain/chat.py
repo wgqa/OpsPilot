@@ -2360,6 +2360,8 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
         elif identity.role != "SUPPORT":
             raise TaskControlError("TASK_SCOPE_DENIED")
         trusted_state, _ = _trusted_state(connection, task_id)
+        from opspilot.domain.s3_answers import answers_in_transaction
+        investigation_answers = answers_in_transaction(connection, task_id)
         evidence = _current_evidence(connection, task_id, trusted_state)
         plan_history = connection.execute(
             """SELECT p.plan_hash, p.plan_version, a.eligibility,
@@ -2531,6 +2533,7 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
         "evidence": evidence,
         "observations": [{key: row[key] for key in row.keys()} for row in observations],
         "runs": [{key: row[key] for key in row.keys()} for row in runs],
+        "investigation_answers": investigation_answers,
         "readonly_followups": [{
             "run_id": str(row["run_id"]),
             "source_message_id": str(row["source_message_id"]),

@@ -299,7 +299,7 @@ def test_c1_wire_04_knowledge_change_after_prompt_blocks_provider_call(tmp_path:
 
 
 def test_c1_wire_05_prior_followup_growth_stays_inside_context_budget(tmp_path: Path, monkeypatch) -> None:
-    import opspilot.investigator as investigator
+    import opspilot.domain.context_engineering as context_engineering
 
     db = tmp_path / "c1-wire-budget.sqlite3"
     reset_fixture(db, "S1_POS")
@@ -326,7 +326,7 @@ def test_c1_wire_05_prior_followup_growth_stays_inside_context_budget(tmp_path: 
     input_budget = (full_required + baseline_required) // 2
     assert baseline_required <= input_budget < full_required
     monkeypatch.setattr(
-        investigator,
+        context_engineering,
         "context_budget_for_model",
         lambda model_id: {"model_id": model_id, "input_budget_tokens": input_budget},
     )

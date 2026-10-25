@@ -1298,10 +1298,23 @@ onBeforeUnmount(() => {
           </article>
           <div v-if="inspector && inspector.trusted_state.s3_outcome" class="s3-result-card" data-testid="s3-diagnosis"><span>当前调查结果 · 持久业务回执</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
           <article v-for="followup in [...(inspector?.readonly_followups ?? [])].reverse()" :key="followup.run_id" class="readonly-followup-card" :data-testid="`readonly-followup-${followup.run_id}`" :data-source-message-id="followup.source_message_id">
-            <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">READONLY TASK FOLLOW-UP</span><h2>同一 Task 的只读补查</h2></div><span class="status-badge" :class="followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ followup.result_state ?? followup.run_status }}</span></div>
+            <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">READONLY TASK FOLLOW-UP</span><h2>同一任务的连续调查</h2></div><span class="status-badge" :class="followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ followup.result_state === 'ANSWERED' ? '已答复' : followup.result_state === 'PARTIAL' ? '结果与待核实事项' : followup.result_state === 'NOT_COMPLETED' ? '需要补充' : '调查中' }}</span></div>
             <p>{{ followup.answer_text || '本次补查尚未形成可展示的回答。' }}</p>
-            <small>Run {{ followup.run_id }} · 来源消息 {{ followup.source_message_id }} · 控制版本 {{ followup.expected_control_revision }} · 来源 {{ followup.source_refs.map((ref) => `${String(ref.kind)}:${String(ref.evidence_id ?? ref.document_id ?? ref.message_id ?? '')}`).join('、') || '暂无' }}</small>
-            <small v-if="followup.reason_code">结果状态：{{ followup.reason_code }}</small>
+            <details class="followup-sources"><summary>查看来源与调查记录（{{ followup.source_refs.length }}）</summary>
+              <ul><li v-for="(ref, index) in followup.source_refs" :key="index"><code>{{ JSON.stringify(ref) }}</code></li></ul>
+              <small>Run {{ followup.run_id }} · 来源消息 {{ followup.source_message_id }} · 控制版本 {{ followup.expected_control_revision }}</small>
+              <small v-if="followup.reason_code">结果说明：{{ followup.reason_code }}</small>
+              <small v-if="followup.result.delivery_mode">交付来源：{{ followup.result.delivery_mode === 'MODEL' ? '模型依据当前来源回答' : '可信事实与未知事项汇总' }}</small>
+            </details>
+          </article>
+          <article v-for="answer in [...(inspector?.investigation_answers ?? [])].reverse()" :key="answer.run_id" class="readonly-followup-card" :data-testid="`investigation-answer-${answer.run_id}`" :data-source-message-id="answer.source_message_id">
+            <div class="update-proposal-heading"><h2>本次调查答复</h2><span class="status-badge" :class="answer.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ answer.result_state === 'ANSWERED' ? '已答复' : '事实与待核实事项' }}</span></div>
+            <p>{{ answer.answer_text }}</p>
+            <details class="followup-sources"><summary>查看形成时间与来源（{{ answer.source_refs.length }}）</summary>
+              <small>{{ dateLabel(answer.created_at) }} · {{ answer.result.delivery_mode === 'MODEL' ? '模型依据当时有效来源回答' : '可信事实与未知事项汇总' }}；这是对话答复，不授予业务操作资格。</small>
+              <ul><li v-for="(ref, index) in answer.source_refs" :key="index"><code>{{ JSON.stringify(ref) }}</code></li></ul>
+              <small>来源消息 {{ answer.source_message_id }} · Run {{ answer.run_id }}</small>
+            </details>
           </article>
           <section
             v-for="assessment in pendingInvestigationUpdates"

@@ -26,8 +26,8 @@ ROUTE = "/api/async-orders/async-order"
 ORDER = "async-order"
 PROBLEM = "async_callback"
 POLICY = "s3-callback-evidence-v1"
-FACT_TO_TOOL = {"s3_order": "get_order_status", "s3_delivery": "get_callback_delivery", "s3_receiver": "get_receiver_processing"}
-SOURCES = {"s3_order": "http:loopback-async-orders", "s3_delivery": "sqlite:s3_deliveries", "s3_receiver": "sqlite:s3_receivers"}
+FACT_TO_TOOL = {"s3_order": "get_order_status", "s3_delivery": "get_callback_delivery", "s3_receiver": "get_receiver_processing", "s3_transport_history": "get_callback_transport_history"}
+SOURCES = {"s3_order": "http:loopback-async-orders", "s3_delivery": "sqlite:s3_deliveries", "s3_receiver": "sqlite:s3_receivers", "s3_transport_history": "sqlite:s3_transport_attempts"}
 OUTCOMES = {"ORDER_PROCESSING", "CALLBACK_DELIVERY_FAILED", "RECEIVER_PROCESSING_UNCONFIRMED", "RECEIVER_PROCESSED"}
 
 
@@ -644,6 +644,12 @@ def current_s3_evidence(
         try:
             facts, versions = json.loads(e["facts_json"]), json.loads(e["observed_versions_json"])
             fact_type = str(e["fact_type"])
+            expected_versions = current_versions
+            history_facts = None
+            if fact_type == "s3_transport_history" and isinstance(facts, dict):
+                from opspilot.domain.s3_history import history_snapshot
+                history_facts, history_revision = history_snapshot(connection, binding, facts.get("requested_event_id"))
+                expected_versions = {**current_versions, "transport_history_version": history_revision}
             if fact_type not in FACT_TO_TOOL or not isinstance(facts, dict) or not isinstance(versions, dict):
                 reason = "S3_MALFORMED_EVIDENCE"
             payload = {"tenant_id": e["tenant_id"], "task_id": task_id, "fact_type": fact_type,
@@ -693,11 +699,14 @@ def current_s3_evidence(
                 elif age > S3_EVIDENCE_TTL_SECONDS:
                     reason = "S3_EVIDENCE_EXPIRED"
             if reason is None and (
-                set(versions) != set(current_versions)
+                set(versions) != set(expected_versions)
                 or any(type(value) is not int or value < 1 for value in versions.values())
-                or (not historical and versions != current_versions)
+                or (not historical and versions != expected_versions)
             ):
                 reason = "S3_CURRENT_VERSION_MISMATCH"
+            elif reason is None and not historical and fact_type == "s3_transport_history":
+                if facts != history_facts:
+                    reason = "S3_CURRENT_FACT_MISMATCH"
             elif reason is None and fact_type == "s3_order":
                 body = facts.get("body", {})
                 http = connection.execute(
@@ -737,7 +746,7 @@ def current_s3_evidence(
                     "result_digest": str(selected_observation["result_digest"]),
                 }
                 current.append({**e, "facts": facts, "observed_versions": versions, "_observation": observation_meta})
-        except (ValueError, TypeError, KeyError):
+        except (ValueError, TypeError, KeyError, ScopeDenied):
             reason = "S3_MALFORMED_EVIDENCE"
         if reason:
             excluded.append({"source_id": e["evidence_id"], "reason": reason})

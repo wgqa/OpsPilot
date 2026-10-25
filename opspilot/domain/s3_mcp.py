@@ -15,7 +15,7 @@ from opspilot.domain.s3 import (
 from opspilot.domain.s3_assets import search_knowledge, load_s3_skill
 from opspilot.domain.schemas import D2ToolFact
 
-TOOLS = {"get_order_status", "get_callback_delivery", "get_receiver_processing", "search_callback_knowledge", "load_callback_skill"}
+TOOLS = {"get_order_status", "get_callback_delivery", "get_receiver_processing", "search_callback_knowledge", "load_callback_skill", "get_callback_transport_history"}
 Reason = Annotated[StrictStr, Field(min_length=1,max_length=400,description="A brief reason for this next query, at most 160 characters recommended.")]
 Query = Annotated[StrictStr, Field(min_length=1,max_length=300)]
 
@@ -52,6 +52,17 @@ def build_s3_server(db_path, task_id, api_url):
         """Read current processing state for the bound callback event. ACK is not completed processing."""
         validate(reason,ctx,{"reason"})
         return D2ToolFact.model_validate(get_receiver_processing_fact(db_path, task_id))
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+    def get_callback_transport_history(reason: Reason, ctx: Context, event_id: Annotated[StrictStr,Field(min_length=1,max_length=128)] | None = None) -> D2ToolFact:
+        """Read up to 12 actual callback Transport Attempts for the bound order. Omit event_id to discover related Events; an event_id filter must belong to this order. Records are known observations, not a complete audit or current receiver processing. A different Event success never proves the target Event success. No sends or writes."""
+        from opspilot.domain.s3_history import get_transport_history_fact
+        raw = ctx._input_params.arguments if ctx._input_params else {}
+        validate(reason,ctx,{"reason","event_id"} if "event_id" in raw else {"reason"})
+        try:
+            return D2ToolFact.model_validate(get_transport_history_fact(db_path, task_id, event_id))
+        except ScopeDenied:
+            raise ToolError("S3_EVENT_NOT_AVAILABLE_WITHIN_BOUND_ORDER") from None
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def search_callback_knowledge(query: Query, reason: Reason, ctx: Context) -> dict[str, object]:
