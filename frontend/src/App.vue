@@ -100,7 +100,15 @@ const latestSelectedSemanticMemories = computed(() => latestSelectedMemories.val
   (item) => item.memory_type === 'SEMANTIC',
 ));
 const sourceMemoryExists = computed(() => (taskMemoryContext.value?.source_memories ?? []).length > 0);
-const sourceMemoryEligible = computed(() => ['DELIVERED', 'DIAGNOSED', 'SCOPE_ESCALATED'].includes(String(taskOutcome.value?.business_outcome ?? '')));
+const sourceMemoryEligible = computed(() => {
+  if (['DELIVERED', 'DIAGNOSED', 'SCOPE_ESCALATED'].includes(String(taskOutcome.value?.business_outcome ?? ''))) return true;
+  const s3Outcome = inspector.value?.trusted_state.s3_outcome;
+  if (!s3Outcome || typeof s3Outcome !== 'object') return false;
+  const result = s3Outcome as Record<string, unknown>;
+  return result.currentness === 'CURRENT'
+    && ['ORDER_PROCESSING', 'CALLBACK_DELIVERY_FAILED', 'RECEIVER_PROCESSING_UNCONFIRMED', 'RECEIVER_PROCESSED']
+      .includes(String(result.outcome ?? ''));
+});
 const semanticSourceMessageId = computed(() => [...messages.value].reverse().find((item) =>
   item.task_id === taskId.value && item.role === 'USER' && ['CHAT_READONLY', 'CORRECT_TASK_INPUT'].includes(String(item.input_kind)),
 )?.message_id ?? '');

@@ -1,0 +1,1177 @@
+{
+  "release_id": "memory-paired-20261025T100556Z",
+  "git_sha": "0c142e91f04ec1278b0cf547aeeeb480466466c8",
+  "provider_model": "deepseek-flash",
+  "knowledge_manifest_sha256": null,
+  "memory_enabled_flag": "existing _memory_enabled_for_test switch; no runtime policy change",
+  "default_budget": {
+    "model_requests": 8,
+    "mcp_calls": 6
+  },
+  "provider_request_max": 40,
+  "case_plan": [
+    "E1_ON",
+    "E1_OFF",
+    "E2_CONFLICT",
+    "E3_IRRELEVANT",
+    "E4_REVOKED"
+  ],
+  "target_input_identical_for_e1": true,
+  "status": "PASS",
+  "source_task_id": "task-b3e049b6-b936-41e3-8525-19332a203863",
+  "memory_id": "episodic-cd0e5f83-0400-407e-846f-37844d1464ea",
+  "memory_state_after_revoke": "REVOKED",
+  "memory_digest": "9888d86e80521ddb8ad5b377d928f8c9b3a8ad621196a926b6f254047898253a",
+  "task_b_on_id": "task-f32ab0e9-aab0-4b5c-9580-a7264cd8bb7e",
+  "task_b_off_id": "task-24ab1a78-adb9-461b-ab33-fda0f1361bf3",
+  "on_and_off_use_distinct_tasks": true,
+  "on_selected_memory": true,
+  "off_excluded_memory": true,
+  "e2_current_evidence_overrode_memory": true,
+  "e3_irrelevant_memory_excluded": true,
+  "e4_revoked_memory_excluded": true,
+  "provider_requests": 26,
+  "provider_requests_max": 40,
+  "total_tokens": 0,
+  "case_summary": {
+    "E1_ON": {
+      "outcome": {
+        "receipt_id": "s3-diagnosis-08a99ab3-59f7-4576-9cca-8ae6c5e41b11",
+        "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "currentness": "CURRENT",
+        "recovered": false,
+        "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+        "handoff_allowed": false,
+        "explanation": "核实结果（本 Task 自身的当前事件，全部为只读查询，未重发、未做任何写入）：\n\n1) 订单侧：GET /api/async-orders/async-order 返回 HTTP 200，body.status=COMPLETED，order_id=eg01-memory-target，order_version=1，request_id=8d9d333a9a2b3f7f（观测时间 2026-10-25T10:06:02.977Z，源时间 10:06:02.971Z）。HTTP 200 与 COMPLETED 只说明订单侧状态，不等于回调已被下游处理完成，所以我另行核对了绑定事件。\n\n2) 绑定回调事件 event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740（order_version=1，delivery_version=1）：delivery status=ACKNOWLEDGED，receiver_http_status=202，transport_request_id=transport-befe95c7-25ad-41be-b9ca-f46c643fd151，failure_code=null，retry_state=NOT_APPLICABLE，retry_at=null，attempt_count=0，max_attempts=3（观测时间 10:06:04.153Z）。也就是说：该事件确实已被实际发出，并被下游端点以 202 接受，不是“未发出／被拒收”。\n\n3) 同一事件的接收端处理状态：status=QUEUED，accepted_at=2026-10-25T10:04:57.412878Z，processing_sla_seconds=300（观测时间 10:06:07.013Z）。当时它仍在接收端队列中，距 SLA 到期（约 10:09:57Z）还有时间，不构成处理失败。\n\n4) 传输历史：按该事件查询返回 attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY，truncated=false，并明确 unknowns：无记录不等于没发送，发送成功与写入记录之间存在崩溃窗口，且这些记录不是完整审计。因此空列表不能用来推翻第 2 条的实际 202 事实。\n\n5) 协议依据：callback-ack-contract v1（document_id=callback-ack-contract，version 1.0.0，active/applicable，valid_from 2026-10-01，expires 2030-01-01）：ACKNOWLEDGED + 实际 HTTP 202 只表示“已接受进入接收队队”，QUEUED 不等于 PROCESSED；只有带实",
+        "explanation_currentness": "CURRENT",
+        "explanation_excluded_sources": [],
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-17b3280c-a2c3-4403-a458-0e19e0522bf1",
+            "evidence-17b3280c-a2c3-4403-a458-0e19e0522bf1",
+            "evidence-319dc8b3-2b86-43fa-8537-befec3f2f614",
+            "evidence-e0c93d29-5e5f-4174-b085-6a9414eb7dc8"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+          "handoff_allowed": false,
+          "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": [],
+          "valid_until": "2026-10-25T10:09:57.412878Z"
+        },
+        "body": {
+          "business_writes": 0,
+          "control_revision": 0,
+          "evidence": [
+            {
+              "digest": "a3548023e16c2dca334aca20797d8836e4e184391109a243099b1b186bb22391",
+              "fact_type": "s3_order",
+              "facts": {
+                "body": {
+                  "authn_event_id": 2,
+                  "contract_version": 1,
+                  "order_id": "eg01-memory-target",
+                  "order_version": 1,
+                  "request_id": "8d9d333a9a2b3f7f",
+                  "status": "COMPLETED"
+                },
+                "http_status": 200,
+                "versions_after": {
+                  "config_version": 1,
+                  "contract_version": 1,
+                  "delivery_version": 1,
+                  "grant_version": 1,
+                  "order_version": 1,
+                  "policy_version": 1,
+                  "principal_version": 1,
+                  "receiver_version": 1,
+                  "scope_policy_version": 1
+                },
+                "versions_before": {
+                  "config_version": 1,
+                  "contract_version": 1,
+                  "delivery_version": 1,
+                  "grant_version": 1,
+                  "order_version": 1,
+                  "policy_version": 1,
+                  "principal_version": 1,
+                  "receiver_version": 1,
+                  "scope_policy_version": 1
+                }
+              },
+              "id": "evidence-17b3280c-a2c3-4403-a458-0e19e0522bf1",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 1,
+                "grant_version": 1,
+                "order_version": 1,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 1,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "348b5fc0ca817e4821d98a3cf298a203f4f39e1ac42da7bb491f80021feaf2b9",
+              "fact_type": "s3_delivery",
+              "facts": {
+                "attempt_count": 0,
+                "event_id": "event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740",
+                "failure_code": null,
+                "max_attempts": 3,
+                "order_id": "eg01-memory-target",
+                "order_version": 1,
+                "receiver_http_status": 202,
+                "response_digest": "98d89e959154499a5709202bf73239bb259f0969fa4e8c8c4478e4c219f76f27",
+                "retry_at": null,
+                "retry_state": "NOT_APPLICABLE",
+                "service_id": "orders-async-demo",
+                "status": "ACKNOWLEDGED",
+                "tenant_id": "tenant-a",
+                "transport_request_id": "transport-befe95c7-25ad-41be-b9ca-f46c643fd151",
+                "transport_response_json": "{\"accepted_at\":\"2026-10-25T10:04:57.412878Z\",\"attempt_count\":0,\"event_id\":\"event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740\",\"failure_code\":null,\"max_attempts\":3,\"order_id\":\"eg01-memory-target\",\"processing_sla_seconds\":300,\"receiver_state\":\"QUEUED\",\"request_id\":\"transport-befe95c7-25ad-41be-b9ca-f46c643fd151\",\"retry_at\":null,\"retry_state\":\"NOT_APPLICABLE\"}",
+                "version": 1
+              },
+              "id": "evidence-319dc8b3-2b86-43fa-8537-befec3f2f614",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 1,
+                "grant_version": 1,
+                "order_version": 1,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 1,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "3cbb4f6c25266fe7b49d914d08d865cfc8d275b666485e301226d796f7cc6e34",
+              "fact_type": "s3_receiver",
+              "facts": {
+                "accepted_at": "2026-10-25T10:04:57.412878Z",
+                "delivery_version": 1,
+                "event_id": "event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740",
+                "order_id": "eg01-memory-target",
+                "processing_sla_seconds": 300,
+                "service_id": "orders-async-demo",
+                "status": "QUEUED",
+                "tenant_id": "tenant-a",
+                "version": 1
+              },
+              "id": "evidence-e0c93d29-5e5f-4174-b085-6a9414eb7dc8",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 1,
+                "grant_version": 1,
+                "order_version": 1,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 1,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "2c99af83436da73f7f95d15b5c16feceb743d76591cd3a66f4d3928f281436e7",
+              "fact_type": "s3_transport_history",
+              "facts": {
+                "attempts": [],
+                "coverage": "RECORDED_OBSERVATIONS_ONLY",
+                "order_id": "eg01-memory-target",
+                "processing_authority": "Transport responses describe that attempt, not the target Event current processing state.",
+                "requested_event_id": "event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740",
+                "truncated": false,
+                "unknowns": [
+                  "No record does not prove no send; the send-to-persist crash window is not a complete audit."
+                ]
+              },
+              "id": "evidence-025c04f3-f427-415d-9d2e-70a780aa18e9",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 1,
+                "grant_version": 1,
+                "order_version": 1,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 1,
+                "scope_policy_version": 1,
+                "transport_history_version": 1
+              }
+            }
+          ],
+          "explanation_call_id": "call-bdb85f8f-44d8-4f7a-8681-0eee22fd6718",
+          "gate": {
+            "checked_fact_ids": [
+              "evidence-17b3280c-a2c3-4403-a458-0e19e0522bf1",
+              "evidence-17b3280c-a2c3-4403-a458-0e19e0522bf1",
+              "evidence-319dc8b3-2b86-43fa-8537-befec3f2f614",
+              "evidence-e0c93d29-5e5f-4174-b085-6a9414eb7dc8"
+            ],
+            "decision": "DIAGNOSED",
+            "excluded_sources": [],
+            "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+            "handoff_allowed": false,
+            "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+            "policy": "s3-callback-evidence-v1",
+            "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+            "recovered": false,
+            "required_facts": [],
+            "side_effects": [],
+            "valid_until": "2026-10-25T10:09:57.412878Z"
+          },
+          "model_summary_untrusted": "核实结果（本 Task 自身的当前事件，全部为只读查询，未重发、未做任何写入）：\n\n1) 订单侧：GET /api/async-orders/async-order 返回 HTTP 200，body.status=COMPLETED，order_id=eg01-memory-target，order_version=1，request_id=8d9d333a9a2b3f7f（观测时间 2026-10-25T10:06:02.977Z，源时间 10:06:02.971Z）。HTTP 200 与 COMPLETED 只说明订单侧状态，不等于回调已被下游处理完成，所以我另行核对了绑定事件。\n\n2) 绑定回调事件 event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740（order_version=1，delivery_version=1）：delivery status=ACKNOWLEDGED，receiver_http_status=202，transport_request_id=transport-befe95c7-25ad-41be-b9ca-f46c643fd151，failure_code=null，retry_state=NOT_APPLICABLE，retry_at=null，attempt_count=0，max_attempts=3（观测时间 10:06:04.153Z）。也就是说：该事件确实已被实际发出，并被下游端点以 202 接受，不是“未发出／被拒收”。\n\n3) 同一事件的接收端处理状态：status=QUEUED，accepted_at=2026-10-25T10:04:57.412878Z，processing_sla_seconds=300（观测时间 10:06:07.013Z）。当时它仍在接收端队列中，距 SLA 到期（约 10:09:57Z）还有时间，不构成处理失败。\n\n4) 传输历史：按该事件查询返回 attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY，truncated=false，并明确 unknowns：无记录不等于没发送，发送成功与写入记录之间存在崩溃窗口，且这些记录不是完整审计。因此空列表不能用来推翻第 2 条的实际 202 事实。\n\n5) 协议依据：callback-ack-contract v1（document_id=callback-ack-contract，version 1.0.0，active/applicable，valid_from 2026-10-01，expires 2030-01-01）：ACKNOWLEDGED + 实际 HTTP 202 只表示“已接受进入接收队队”，QUEUED 不等于 PROCESSED；只有带实",
+          "observation_pins": {
+            "evidence-025c04f3-f427-415d-9d2e-70a780aa18e9": "observation-7ce2e819-61b5-4fc6-b71a-563354addf73",
+            "evidence-17b3280c-a2c3-4403-a458-0e19e0522bf1": "observation-4114f96c-9b59-4170-bb29-53d387c95118",
+            "evidence-319dc8b3-2b86-43fa-8537-befec3f2f614": "observation-6f5cc829-c329-4dbc-a07c-eab61140ce56",
+            "evidence-e0c93d29-5e5f-4174-b085-6a9414eb7dc8": "observation-bae13b65-b3e1-4e13-a88d-a3f351be091f"
+          },
+          "observations": [
+            {
+              "attempt_id": "attempt-5936284b-403d-46c8-995c-f1328b4740ab",
+              "evidence_id": "evidence-17b3280c-a2c3-4403-a458-0e19e0522bf1",
+              "observation_id": "observation-4114f96c-9b59-4170-bb29-53d387c95118",
+              "observed_at": "2026-10-25T10:06:02.977000+00:00",
+              "result_digest": "350bad6ded3f285c945f43e02420cd7da367fce7b5255d89bc4a25e70fb96e56",
+              "run_id": "run-1db18cb9-5ea3-4fbb-92a6-a74110474787",
+              "source_observed_at": "2026-10-25T10:06:02.971+00:00",
+              "tool_name": "get_order_status"
+            },
+            {
+              "attempt_id": "attempt-93a6b1ca-a176-4e1c-91cd-46674f5e68ff",
+              "evidence_id": "evidence-319dc8b3-2b86-43fa-8537-befec3f2f614",
+              "observation_id": "observation-6f5cc829-c329-4dbc-a07c-eab61140ce56",
+              "observed_at": "2026-10-25T10:06:04.153000+00:00",
+              "result_digest": "0ad6408dfd79aadf2b24cd7d771d75f0acdc0f3477594248525b4324b0dc9bab",
+              "run_id": "run-1db18cb9-5ea3-4fbb-92a6-a74110474787",
+              "source_observed_at": "2026-10-25T10:06:04.148+00:00",
+              "tool_name": "get_callback_delivery"
+            },
+            {
+              "attempt_id": "attempt-3720d570-230a-44a1-b3a0-fa5f8644e017",
+              "evidence_id": "evidence-e0c93d29-5e5f-4174-b085-6a9414eb7dc8",
+              "observation_id": "observation-bae13b65-b3e1-4e13-a88d-a3f351be091f",
+              "observed_at": "2026-10-25T10:06:07.013000+00:00",
+              "result_digest": "2f61868d1320a1112619251d530d3f20c1ddc1cbaf9ba79dd2d597f34ea7b3fe",
+              "run_id": "run-1db18cb9-5ea3-4fbb-92a6-a74110474787",
+              "source_observed_at": "2026-10-25T10:06:07.008+00:00",
+              "tool_name": "get_receiver_processing"
+            },
+            {
+              "attempt_id": "attempt-bcc8f394-e80c-4ff7-acf2-a176896ef768",
+              "evidence_id": "evidence-025c04f3-f427-415d-9d2e-70a780aa18e9",
+              "observation_id": "observation-7ce2e819-61b5-4fc6-b71a-563354addf73",
+              "observed_at": "2026-10-25T10:06:12.373000+00:00",
+              "result_digest": "8e34799b806010a553bd73aca0a35fd0fa6468b8934e11877916e437d05a8a98",
+              "run_id": "run-1db18cb9-5ea3-4fbb-92a6-a74110474787",
+              "source_observed_at": "2026-10-25T10:06:12.367+00:00",
+              "tool_name": "get_callback_transport_history"
+            }
+          ],
+          "recovered": false,
+          "run_id": "run-1db18cb9-5ea3-4fbb-92a6-a74110474787",
+          "schema": "s3-callback-evidence-v1",
+          "task_id": "task-f32ab0e9-aab0-4b5c-9580-a7264cd8bb7e"
+        }
+      },
+      "tools": [
+        "get_order_status",
+        "get_callback_delivery",
+        "get_receiver_processing",
+        "get_callback_transport_history",
+        "search_callback_knowledge"
+      ],
+      "tokens": 33249,
+      "latency_seconds": 31.086,
+      "failure": null
+    },
+    "E1_OFF": {
+      "outcome": {
+        "receipt_id": "s3-diagnosis-471718c0-f8dc-49f6-82e8-0cfb6882d574",
+        "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "currentness": "CURRENT",
+        "recovered": false,
+        "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+        "handoff_allowed": false,
+        "explanation": "核查结论：**“下游完全没收到回调”这个前提本身不成立**——传输层已把该 Task 的回调投递给下游并被受理（HTTP 202），但下游接收方目前仍只是“排队中”，尚未处理完成。\n\n1) 订单侧（get_order_status，本 Run 观察时间 2026-10-25T10:06:33Z）：order_id=eg01-memory-target，order_version=1，status=COMPLETED，HTTP 200。因此这条链路的订单状态是已完成；HTTP 200 本身并不代表回调已经完成，只代表订单业务已完成。\n\n2) 绑定回调事件（get_callback_delivery，观察时间 2026-10-25T10:06:34Z）：event_id=event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740，order_version=1，delivery version=1，status=ACKNOWLEDGED，receiver_http_status=202，transport_request_id=transport-befe95c7-25ad-41be-b9ca-f46c643fd151，accepted_at=2026-10-25T10:04:57.412878Z，attempt_count=0，max_attempts=3，failure_code=null，retry_state=NOT_APPLICABLE。也就是说，这次投递是一次成功受理，既不是 503，也不是失败，也没有重试在排队。\n\n3) 同一 event_id 的接收方处理状态（get_receiver_processing，观察时间 2026-10-25T10:06:36Z）：status=QUEUED，version=1，processing_sla_seconds=300，accepted_at 与上面一致。**同一事件的接收方状态是 QUEUED，不是 PROCESSED**，所以下游“业务上还没消费/处理完”，但它是“已入队尚未处理”，不是“没有收到”。\n\n4) 传输历史（get_callback_transport_history，按该 event_id 过滤，观察时间 2026-10-25T10:06:38Z）：attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY，truncated=false，并明确给出未知项“无记录不等于没有发送，发送到持久化之间的崩溃窗口不是完整审计”。所以这段空记录只能说明观察记录有限，不能用它反推“从未发送”，也不能用它否定上面那条 202 受理记录。\n\n协议依据（Knowledge 检索命中并适用：callback-ack-contract v1，ver",
+        "explanation_currentness": "CURRENT",
+        "explanation_excluded_sources": [],
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-56f2d0cb-5bd7-4331-b303-6d28e302b309",
+            "evidence-56f2d0cb-5bd7-4331-b303-6d28e302b309",
+            "evidence-71f6e64b-bf3c-42b4-8c0b-2e0a843ee39c",
+            "evidence-8f99def9-1c3a-471e-95dd-fb659c6289c1"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+          "handoff_allowed": false,
+          "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": [],
+          "valid_until": "2026-10-25T10:09:57.412878Z"
+        },
+        "body": {
+          "business_writes": 0,
+          "control_revision": 0,
+          "evidence": [
+            {
+              "digest": "d869652803951b43dbe3279f5d746ebfd54557392ec8c93b7bb893d712b0d01d",
+              "fact_type": "s3_order",
+              "facts": {
+                "body": {
+                  "authn_event_id": 2,
+                  "contract_version": 1,
+                  "order_id": "eg01-memory-target",
+                  "order_version": 1,
+                  "request_id": "9072d6d0dd1b8510",
+                  "status": "COMPLETED"
+                },
+                "http_status": 200,
+                "versions_after": {
+                  "config_version": 1,
+                  "contract_version": 1,
+                  "delivery_version": 1,
+                  "grant_version": 1,
+                  "order_version": 1,
+                  "policy_version": 1,
+                  "principal_version": 1,
+                  "receiver_version": 1,
+                  "scope_policy_version": 1
+                },
+                "versions_before": {
+                  "config_version": 1,
+                  "contract_version": 1,
+                  "delivery_version": 1,
+                  "grant_version": 1,
+                  "order_version": 1,
+                  "policy_version": 1,
+                  "principal_version": 1,
+                  "receiver_version": 1,
+                  "scope_policy_version": 1
+                }
+              },
+              "id": "evidence-56f2d0cb-5bd7-4331-b303-6d28e302b309",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 1,
+                "grant_version": 1,
+                "order_version": 1,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 1,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "9a887d713d756585950d3c6b8a9413cdef49500559107a1485c497b88e66ded1",
+              "fact_type": "s3_delivery",
+              "facts": {
+                "attempt_count": 0,
+                "event_id": "event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740",
+                "failure_code": null,
+                "max_attempts": 3,
+                "order_id": "eg01-memory-target",
+                "order_version": 1,
+                "receiver_http_status": 202,
+                "response_digest": "98d89e959154499a5709202bf73239bb259f0969fa4e8c8c4478e4c219f76f27",
+                "retry_at": null,
+                "retry_state": "NOT_APPLICABLE",
+                "service_id": "orders-async-demo",
+                "status": "ACKNOWLEDGED",
+                "tenant_id": "tenant-a",
+                "transport_request_id": "transport-befe95c7-25ad-41be-b9ca-f46c643fd151",
+                "transport_response_json": "{\"accepted_at\":\"2026-10-25T10:04:57.412878Z\",\"attempt_count\":0,\"event_id\":\"event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740\",\"failure_code\":null,\"max_attempts\":3,\"order_id\":\"eg01-memory-target\",\"processing_sla_seconds\":300,\"receiver_state\":\"QUEUED\",\"request_id\":\"transport-befe95c7-25ad-41be-b9ca-f46c643fd151\",\"retry_at\":null,\"retry_state\":\"NOT_APPLICABLE\"}",
+                "version": 1
+              },
+              "id": "evidence-71f6e64b-bf3c-42b4-8c0b-2e0a843ee39c",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 1,
+                "grant_version": 1,
+                "order_version": 1,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 1,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "cb94893f7cebbd073a6848c412de134515a8f6fe1178e86735182f417eeea93f",
+              "fact_type": "s3_receiver",
+              "facts": {
+                "accepted_at": "2026-10-25T10:04:57.412878Z",
+                "delivery_version": 1,
+                "event_id": "event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740",
+                "order_id": "eg01-memory-target",
+                "processing_sla_seconds": 300,
+                "service_id": "orders-async-demo",
+                "status": "QUEUED",
+                "tenant_id": "tenant-a",
+                "version": 1
+              },
+              "id": "evidence-8f99def9-1c3a-471e-95dd-fb659c6289c1",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 1,
+                "grant_version": 1,
+                "order_version": 1,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 1,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "bcee6e682d17068bceab447a555821b166371355a1dbd9c09e149fcccefeabde",
+              "fact_type": "s3_transport_history",
+              "facts": {
+                "attempts": [],
+                "coverage": "RECORDED_OBSERVATIONS_ONLY",
+                "order_id": "eg01-memory-target",
+                "processing_authority": "Transport responses describe that attempt, not the target Event current processing state.",
+                "requested_event_id": "event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740",
+                "truncated": false,
+                "unknowns": [
+                  "No record does not prove no send; the send-to-persist crash window is not a complete audit."
+                ]
+              },
+              "id": "evidence-ef618490-4865-4164-b90c-911c7cea2fa0",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 1,
+                "grant_version": 1,
+                "order_version": 1,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 1,
+                "scope_policy_version": 1,
+                "transport_history_version": 1
+              }
+            }
+          ],
+          "explanation_call_id": "call-a1baa53f-be23-47b8-9736-17b425e41494",
+          "gate": {
+            "checked_fact_ids": [
+              "evidence-56f2d0cb-5bd7-4331-b303-6d28e302b309",
+              "evidence-56f2d0cb-5bd7-4331-b303-6d28e302b309",
+              "evidence-71f6e64b-bf3c-42b4-8c0b-2e0a843ee39c",
+              "evidence-8f99def9-1c3a-471e-95dd-fb659c6289c1"
+            ],
+            "decision": "DIAGNOSED",
+            "excluded_sources": [],
+            "handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+            "handoff_allowed": false,
+            "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+            "policy": "s3-callback-evidence-v1",
+            "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+            "recovered": false,
+            "required_facts": [],
+            "side_effects": [],
+            "valid_until": "2026-10-25T10:09:57.412878Z"
+          },
+          "model_summary_untrusted": "核查结论：**“下游完全没收到回调”这个前提本身不成立**——传输层已把该 Task 的回调投递给下游并被受理（HTTP 202），但下游接收方目前仍只是“排队中”，尚未处理完成。\n\n1) 订单侧（get_order_status，本 Run 观察时间 2026-10-25T10:06:33Z）：order_id=eg01-memory-target，order_version=1，status=COMPLETED，HTTP 200。因此这条链路的订单状态是已完成；HTTP 200 本身并不代表回调已经完成，只代表订单业务已完成。\n\n2) 绑定回调事件（get_callback_delivery，观察时间 2026-10-25T10:06:34Z）：event_id=event-91f9f9d4-cbaa-453b-9cf5-737cc5e68740，order_version=1，delivery version=1，status=ACKNOWLEDGED，receiver_http_status=202，transport_request_id=transport-befe95c7-25ad-41be-b9ca-f46c643fd151，accepted_at=2026-10-25T10:04:57.412878Z，attempt_count=0，max_attempts=3，failure_code=null，retry_state=NOT_APPLICABLE。也就是说，这次投递是一次成功受理，既不是 503，也不是失败，也没有重试在排队。\n\n3) 同一 event_id 的接收方处理状态（get_receiver_processing，观察时间 2026-10-25T10:06:36Z）：status=QUEUED，version=1，processing_sla_seconds=300，accepted_at 与上面一致。**同一事件的接收方状态是 QUEUED，不是 PROCESSED**，所以下游“业务上还没消费/处理完”，但它是“已入队尚未处理”，不是“没有收到”。\n\n4) 传输历史（get_callback_transport_history，按该 event_id 过滤，观察时间 2026-10-25T10:06:38Z）：attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY，truncated=false，并明确给出未知项“无记录不等于没有发送，发送到持久化之间的崩溃窗口不是完整审计”。所以这段空记录只能说明观察记录有限，不能用它反推“从未发送”，也不能用它否定上面那条 202 受理记录。\n\n协议依据（Knowledge 检索命中并适用：callback-ack-contract v1，ver",
+          "observation_pins": {
+            "evidence-56f2d0cb-5bd7-4331-b303-6d28e302b309": "observation-e6bfee6d-c22e-40f9-8903-a8b5def19f3c",
+            "evidence-71f6e64b-bf3c-42b4-8c0b-2e0a843ee39c": "observation-a47a638e-b73a-45d2-8982-6b49b3562b71",
+            "evidence-8f99def9-1c3a-471e-95dd-fb659c6289c1": "observation-76a5b01b-7578-4dde-b37d-5c97d3e7ed5e",
+            "evidence-ef618490-4865-4164-b90c-911c7cea2fa0": "observation-c669fe03-120a-49a1-8033-add856bdfcfd"
+          },
+          "observations": [
+            {
+              "attempt_id": "attempt-a6f89a77-85a2-4f29-8a53-5fc49bc6a689",
+              "evidence_id": "evidence-56f2d0cb-5bd7-4331-b303-6d28e302b309",
+              "observation_id": "observation-e6bfee6d-c22e-40f9-8903-a8b5def19f3c",
+              "observed_at": "2026-10-25T10:06:33.394000+00:00",
+              "result_digest": "53ff7298ffdf3603f73690e16967892787a5f5554d2b97cf1641107341f5afb9",
+              "run_id": "run-6dec3e77-7c49-4edf-81f9-a0a8755add3a",
+              "source_observed_at": "2026-10-25T10:06:33.388+00:00",
+              "tool_name": "get_order_status"
+            },
+            {
+              "attempt_id": "attempt-022c8d37-6da2-4540-a17e-706eb77fa6a3",
+              "evidence_id": "evidence-71f6e64b-bf3c-42b4-8c0b-2e0a843ee39c",
+              "observation_id": "observation-a47a638e-b73a-45d2-8982-6b49b3562b71",
+              "observed_at": "2026-10-25T10:06:34.767000+00:00",
+              "result_digest": "c5d82d3dbf5402c8c2167ee1e31c09fe0b761be5801827c7d3f8183b81944e77",
+              "run_id": "run-6dec3e77-7c49-4edf-81f9-a0a8755add3a",
+              "source_observed_at": "2026-10-25T10:06:34.761+00:00",
+              "tool_name": "get_callback_delivery"
+            },
+            {
+              "attempt_id": "attempt-c71a237f-f2b2-492a-ac3e-3153da270b1f",
+              "evidence_id": "evidence-8f99def9-1c3a-471e-95dd-fb659c6289c1",
+              "observation_id": "observation-76a5b01b-7578-4dde-b37d-5c97d3e7ed5e",
+              "observed_at": "2026-10-25T10:06:36.481000+00:00",
+              "result_digest": "0e98412d2d9c9c17bb37d11f4599e51809a447f173e247941068d020f94329bf",
+              "run_id": "run-6dec3e77-7c49-4edf-81f9-a0a8755add3a",
+              "source_observed_at": "2026-10-25T10:06:36.476+00:00",
+              "tool_name": "get_receiver_processing"
+            },
+            {
+              "attempt_id": "attempt-9e5e70eb-33e8-4711-8712-0dbe6bd29997",
+              "evidence_id": "evidence-ef618490-4865-4164-b90c-911c7cea2fa0",
+              "observation_id": "observation-c669fe03-120a-49a1-8033-add856bdfcfd",
+              "observed_at": "2026-10-25T10:06:38.631000+00:00",
+              "result_digest": "3e34ccfabddbbbf330a909e1a51d9bd76ac62e05e3d27d018a2f91c245088f77",
+              "run_id": "run-6dec3e77-7c49-4edf-81f9-a0a8755add3a",
+              "source_observed_at": "2026-10-25T10:06:38.627+00:00",
+              "tool_name": "get_callback_transport_history"
+            }
+          ],
+          "recovered": false,
+          "run_id": "run-6dec3e77-7c49-4edf-81f9-a0a8755add3a",
+          "schema": "s3-callback-evidence-v1",
+          "task_id": "task-24ab1a78-adb9-461b-ab33-fda0f1361bf3"
+        }
+      },
+      "tools": [
+        "get_order_status",
+        "get_callback_delivery",
+        "get_receiver_processing",
+        "get_callback_transport_history",
+        "search_callback_knowledge"
+      ],
+      "tokens": 30895,
+      "latency_seconds": 23.584,
+      "failure": null
+    },
+    "E2": {
+      "outcome": {
+        "receipt_id": "s3-diagnosis-fc4ddc17-8d1c-451a-99cd-5fae8d556e9d",
+        "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "currentness": "CURRENT",
+        "recovered": false,
+        "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+        "handoff_allowed": true,
+        "explanation": "结论：本 Task 的订单 API 返回 HTTP 200 且订单已 COMPLETED；绑定回调事件已被接收方以 HTTP 202 受理并进入接收队列（QUEUED），但接收方尚未处理完成（不是 PROCESSED）。因此要区分两种“下游没收到”：若指业务处理完成，则确实尚未完成；若指传输送达，则接收方已明确受理，不能说完全没有发送。\n\n当前证据：\n1) 订单：eg01-memory-target，order_version=2，status=COMPLETED，HTTP 200，observed_at=2026-10-25T10:06:57Z。\n2) 本 Task 绑定事件：event-f46d461d-a476-4494-8e18-eeddbfb5cdfe；delivery 状态 ACKNOWLEDGED，receiver_http_status=202，transport_request_id=transport-4ca23b57-74f0-40f9-8e08-e44d6242c356，accepted_at=2026-10-25T09:51:54.305166Z，attempt_count=0，max_attempts=3，retry_state=NOT_APPLICABLE，observed_at=2026-10-25T10:07:00Z。\n3) 接收方处理状态：同一 event_id 为 QUEUED，processing_sla_seconds=300，observed_at=2026-10-25T10:07:02Z。自 accepted_at 到该观察点约 908 秒，已超过 300 秒处理 SLA 约 608 秒，但状态仍是 QUEUED，不是 PROCESSED。\n4) 传输历史查询返回 attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY；这只能说明没有记录到更多尝试，不能据此断言“绝对没发过”，也不能覆盖“发送成功但记录未落盘”的窗口。\n5) 协议依据：callback-ack-contract v1（active）：HTTP 202 仅表示接收方队列已受理；QUEUED 不等于 PROCESSED；不得自动重发。\n\n未知项：接收方最终何时处理完成、最终业务处理结果为何，当前证据没有给出；截至 2026-10-25T10:07:02Z 仅有 QUEUED 的快照。历史记忆中“投递失败”的旧结论与本 Task 当前事件状态冲突，未作为当前事实采用。未执行重发或任何写操作；建议按接收方处理超 SLA 仍未完成进行只读运维跟进，而不是自动重发。",
+        "explanation_currentness": "CURRENT",
+        "explanation_excluded_sources": [],
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-0870368e-194b-4bc4-bae3-f272abba251a",
+            "evidence-0870368e-194b-4bc4-bae3-f272abba251a",
+            "evidence-bde173c4-458e-4c5a-aa04-ec84233032bd",
+            "evidence-7b5b172e-7468-461b-9ea4-7bb7197d792d"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+          "handoff_allowed": true,
+          "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": [],
+          "valid_until": "2026-10-25T09:56:54.305166Z"
+        },
+        "body": {
+          "business_writes": 0,
+          "control_revision": 0,
+          "evidence": [
+            {
+              "digest": "1433189c635392746c49f8b18ccd52d691b9d9ef7fac5473df60b79a6badb846",
+              "fact_type": "s3_order",
+              "facts": {
+                "body": {
+                  "authn_event_id": 3,
+                  "contract_version": 1,
+                  "order_id": "eg01-memory-target",
+                  "order_version": 2,
+                  "request_id": "24e6915ddc51713a",
+                  "status": "COMPLETED"
+                },
+                "http_status": 200,
+                "versions_after": {
+                  "config_version": 1,
+                  "contract_version": 1,
+                  "delivery_version": 2,
+                  "grant_version": 1,
+                  "order_version": 2,
+                  "policy_version": 1,
+                  "principal_version": 1,
+                  "receiver_version": 2,
+                  "scope_policy_version": 1
+                },
+                "versions_before": {
+                  "config_version": 1,
+                  "contract_version": 1,
+                  "delivery_version": 2,
+                  "grant_version": 1,
+                  "order_version": 2,
+                  "policy_version": 1,
+                  "principal_version": 1,
+                  "receiver_version": 2,
+                  "scope_policy_version": 1
+                }
+              },
+              "id": "evidence-0870368e-194b-4bc4-bae3-f272abba251a",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "24fb26398c313efc4c405e2cbc813ee5f69098593bfab4e7b6aa06fb011765cd",
+              "fact_type": "s3_delivery",
+              "facts": {
+                "attempt_count": 0,
+                "event_id": "event-f46d461d-a476-4494-8e18-eeddbfb5cdfe",
+                "failure_code": null,
+                "max_attempts": 3,
+                "order_id": "eg01-memory-target",
+                "order_version": 2,
+                "receiver_http_status": 202,
+                "response_digest": "b9cdd01d31c544cae2a03f52f091f06aa083d63dc79a4b8df5cb26ff160ed57b",
+                "retry_at": null,
+                "retry_state": "NOT_APPLICABLE",
+                "service_id": "orders-async-demo",
+                "status": "ACKNOWLEDGED",
+                "tenant_id": "tenant-a",
+                "transport_request_id": "transport-4ca23b57-74f0-40f9-8e08-e44d6242c356",
+                "transport_response_json": "{\"accepted_at\":\"2026-10-25T09:51:54.305166Z\",\"attempt_count\":0,\"event_id\":\"event-f46d461d-a476-4494-8e18-eeddbfb5cdfe\",\"failure_code\":null,\"max_attempts\":3,\"order_id\":\"eg01-memory-target\",\"processing_sla_seconds\":300,\"receiver_state\":\"QUEUED\",\"request_id\":\"transport-4ca23b57-74f0-40f9-8e08-e44d6242c356\",\"retry_at\":null,\"retry_state\":\"NOT_APPLICABLE\"}",
+                "version": 2
+              },
+              "id": "evidence-bde173c4-458e-4c5a-aa04-ec84233032bd",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "9fcaa30d9349947f60a24dc82f178a439411bf6b5e11798dfd488a9538f23491",
+              "fact_type": "s3_receiver",
+              "facts": {
+                "accepted_at": "2026-10-25T09:51:54.305166Z",
+                "delivery_version": 2,
+                "event_id": "event-f46d461d-a476-4494-8e18-eeddbfb5cdfe",
+                "order_id": "eg01-memory-target",
+                "processing_sla_seconds": 300,
+                "service_id": "orders-async-demo",
+                "status": "QUEUED",
+                "tenant_id": "tenant-a",
+                "version": 2
+              },
+              "id": "evidence-7b5b172e-7468-461b-9ea4-7bb7197d792d",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "9c897dfe0b57569add039ea7890cc7191fc2d9101a93f1e5db2186c7f1f38bc9",
+              "fact_type": "s3_transport_history",
+              "facts": {
+                "attempts": [],
+                "coverage": "RECORDED_OBSERVATIONS_ONLY",
+                "order_id": "eg01-memory-target",
+                "processing_authority": "Transport responses describe that attempt, not the target Event current processing state.",
+                "requested_event_id": "event-f46d461d-a476-4494-8e18-eeddbfb5cdfe",
+                "truncated": false,
+                "unknowns": [
+                  "No record does not prove no send; the send-to-persist crash window is not a complete audit."
+                ]
+              },
+              "id": "evidence-652b1fda-b687-429b-9f71-606c8eb09f4e",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1,
+                "transport_history_version": 1
+              }
+            },
+            {
+              "digest": "f7f91d1d2122f7b0e3be052b26bb520f15a23c1163331e51508a64637eb32be9",
+              "fact_type": "s3_transport_history",
+              "facts": {
+                "attempts": [],
+                "coverage": "RECORDED_OBSERVATIONS_ONLY",
+                "order_id": "eg01-memory-target",
+                "processing_authority": "Transport responses describe that attempt, not the target Event current processing state.",
+                "requested_event_id": null,
+                "truncated": false,
+                "unknowns": [
+                  "No record does not prove no send; the send-to-persist crash window is not a complete audit."
+                ]
+              },
+              "id": "evidence-d0c0946b-e7f7-4acc-8a21-2400ab3d7a66",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1,
+                "transport_history_version": 1
+              }
+            }
+          ],
+          "explanation_call_id": "call-5c8e3d90-d207-48ec-b037-7f8446c56858",
+          "gate": {
+            "checked_fact_ids": [
+              "evidence-0870368e-194b-4bc4-bae3-f272abba251a",
+              "evidence-0870368e-194b-4bc4-bae3-f272abba251a",
+              "evidence-bde173c4-458e-4c5a-aa04-ec84233032bd",
+              "evidence-7b5b172e-7468-461b-9ea4-7bb7197d792d"
+            ],
+            "decision": "DIAGNOSED",
+            "excluded_sources": [],
+            "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+            "handoff_allowed": true,
+            "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+            "policy": "s3-callback-evidence-v1",
+            "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+            "recovered": false,
+            "required_facts": [],
+            "side_effects": [],
+            "valid_until": "2026-10-25T09:56:54.305166Z"
+          },
+          "model_summary_untrusted": "结论：本 Task 的订单 API 返回 HTTP 200 且订单已 COMPLETED；绑定回调事件已被接收方以 HTTP 202 受理并进入接收队列（QUEUED），但接收方尚未处理完成（不是 PROCESSED）。因此要区分两种“下游没收到”：若指业务处理完成，则确实尚未完成；若指传输送达，则接收方已明确受理，不能说完全没有发送。\n\n当前证据：\n1) 订单：eg01-memory-target，order_version=2，status=COMPLETED，HTTP 200，observed_at=2026-10-25T10:06:57Z。\n2) 本 Task 绑定事件：event-f46d461d-a476-4494-8e18-eeddbfb5cdfe；delivery 状态 ACKNOWLEDGED，receiver_http_status=202，transport_request_id=transport-4ca23b57-74f0-40f9-8e08-e44d6242c356，accepted_at=2026-10-25T09:51:54.305166Z，attempt_count=0，max_attempts=3，retry_state=NOT_APPLICABLE，observed_at=2026-10-25T10:07:00Z。\n3) 接收方处理状态：同一 event_id 为 QUEUED，processing_sla_seconds=300，observed_at=2026-10-25T10:07:02Z。自 accepted_at 到该观察点约 908 秒，已超过 300 秒处理 SLA 约 608 秒，但状态仍是 QUEUED，不是 PROCESSED。\n4) 传输历史查询返回 attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY；这只能说明没有记录到更多尝试，不能据此断言“绝对没发过”，也不能覆盖“发送成功但记录未落盘”的窗口。\n5) 协议依据：callback-ack-contract v1（active）：HTTP 202 仅表示接收方队列已受理；QUEUED 不等于 PROCESSED；不得自动重发。\n\n未知项：接收方最终何时处理完成、最终业务处理结果为何，当前证据没有给出；截至 2026-10-25T10:07:02Z 仅有 QUEUED 的快照。历史记忆中“投递失败”的旧结论与本 Task 当前事件状态冲突，未作为当前事实采用。未执行重发或任何写操作；建议按接收方处理超 SLA 仍未完成进行只读运维跟进，而不是自动重发。",
+          "observation_pins": {
+            "evidence-0870368e-194b-4bc4-bae3-f272abba251a": "observation-59d02870-2c8c-4361-99ec-48c4d32933ea",
+            "evidence-652b1fda-b687-429b-9f71-606c8eb09f4e": "observation-d0585353-bcf2-4838-8ae2-34ecb2491d47",
+            "evidence-7b5b172e-7468-461b-9ea4-7bb7197d792d": "observation-e6d3a14b-5600-4715-b7f6-158397095650",
+            "evidence-bde173c4-458e-4c5a-aa04-ec84233032bd": "observation-78e05124-fe01-4b35-b4a6-d32ca11a6333",
+            "evidence-d0c0946b-e7f7-4acc-8a21-2400ab3d7a66": "observation-e50734b9-525a-4271-a0d8-ae7b989c2117"
+          },
+          "observations": [
+            {
+              "attempt_id": "attempt-2150d6ce-a02a-4352-b27a-b5948b2ebbea",
+              "evidence_id": "evidence-0870368e-194b-4bc4-bae3-f272abba251a",
+              "observation_id": "observation-59d02870-2c8c-4361-99ec-48c4d32933ea",
+              "observed_at": "2026-10-25T10:06:57.422000+00:00",
+              "result_digest": "fea4aafff09fdff997f1d77990544c2de3ca861aaea8b79e4bf14a8d64605570",
+              "run_id": "run-75c51f74-c361-410c-9d7a-f38b0eb2e563",
+              "source_observed_at": "2026-10-25T10:06:57.416+00:00",
+              "tool_name": "get_order_status"
+            },
+            {
+              "attempt_id": "attempt-179fc975-e869-4e90-8c58-951cc4788363",
+              "evidence_id": "evidence-bde173c4-458e-4c5a-aa04-ec84233032bd",
+              "observation_id": "observation-78e05124-fe01-4b35-b4a6-d32ca11a6333",
+              "observed_at": "2026-10-25T10:07:00.032000+00:00",
+              "result_digest": "d291cc0a1487804b1c3fb81b36dd4ea0c4662c4a83c86c8bca2717a250fc9de1",
+              "run_id": "run-75c51f74-c361-410c-9d7a-f38b0eb2e563",
+              "source_observed_at": "2026-10-25T10:07:00.025+00:00",
+              "tool_name": "get_callback_delivery"
+            },
+            {
+              "attempt_id": "attempt-776b57bb-36bf-4e4d-a8e0-822e2487c386",
+              "evidence_id": "evidence-7b5b172e-7468-461b-9ea4-7bb7197d792d",
+              "observation_id": "observation-e6d3a14b-5600-4715-b7f6-158397095650",
+              "observed_at": "2026-10-25T10:07:02.162000+00:00",
+              "result_digest": "86f24c45ab15d1f94454debd0b77d7c3408cb614132a3ed73fc666a8145f9ef8",
+              "run_id": "run-75c51f74-c361-410c-9d7a-f38b0eb2e563",
+              "source_observed_at": "2026-10-25T10:07:02.157+00:00",
+              "tool_name": "get_receiver_processing"
+            },
+            {
+              "attempt_id": "attempt-09c1d9d2-0dee-4deb-8c59-ba75cc7ba22b",
+              "evidence_id": "evidence-652b1fda-b687-429b-9f71-606c8eb09f4e",
+              "observation_id": "observation-d0585353-bcf2-4838-8ae2-34ecb2491d47",
+              "observed_at": "2026-10-25T10:07:05.887000+00:00",
+              "result_digest": "d03c8ea6979330c4897789252c4a77daaaa662d1017af7af82dd062a5c2b6c83",
+              "run_id": "run-75c51f74-c361-410c-9d7a-f38b0eb2e563",
+              "source_observed_at": "2026-10-25T10:07:05.881+00:00",
+              "tool_name": "get_callback_transport_history"
+            },
+            {
+              "attempt_id": "attempt-69e42da1-d7a1-4b42-afe7-ec854728ce69",
+              "evidence_id": "evidence-d0c0946b-e7f7-4acc-8a21-2400ab3d7a66",
+              "observation_id": "observation-e50734b9-525a-4271-a0d8-ae7b989c2117",
+              "observed_at": "2026-10-25T10:07:21.167000+00:00",
+              "result_digest": "d91c7f62e9d6e7267e3841d12b290411d65a590c5f44cc74997265419728e7a9",
+              "run_id": "run-75c51f74-c361-410c-9d7a-f38b0eb2e563",
+              "source_observed_at": "2026-10-25T10:07:21.164+00:00",
+              "tool_name": "get_callback_transport_history"
+            }
+          ],
+          "recovered": false,
+          "run_id": "run-75c51f74-c361-410c-9d7a-f38b0eb2e563",
+          "schema": "s3-callback-evidence-v1",
+          "task_id": "task-ffc5d907-865e-4b22-850b-266be5f0ac95"
+        }
+      },
+      "tools": [
+        "get_order_status",
+        "get_callback_delivery",
+        "get_receiver_processing",
+        "get_callback_transport_history",
+        "search_callback_knowledge",
+        "get_callback_transport_history"
+      ],
+      "tokens": 38156,
+      "latency_seconds": 39.921,
+      "failure": null
+    },
+    "E3": {
+      "outcome": {
+        "receipt_id": "s3-diagnosis-db38a932-a396-456f-a161-c207fedcdc7a",
+        "outcome": "INCONCLUSIVE",
+        "currentness": "CURRENT",
+        "recovered": false,
+        "handling_direction": "EVIDENCE_INSUFFICIENT",
+        "handoff_allowed": false,
+        "explanation": "",
+        "explanation_currentness": "CURRENT",
+        "explanation_excluded_sources": [],
+        "gate": {
+          "checked_fact_ids": [],
+          "decision": "INCONCLUSIVE",
+          "excluded_sources": [],
+          "handling_direction": "EVIDENCE_INSUFFICIENT",
+          "handoff_allowed": false,
+          "outcome": "INCONCLUSIVE",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "MODEL_NO_TOOL",
+          "recovered": false,
+          "required_facts": [
+            "s3_order"
+          ],
+          "side_effects": [],
+          "valid_until": null
+        },
+        "body": {
+          "business_writes": 0,
+          "control_revision": 0,
+          "evidence": [],
+          "explanation_call_id": "call-7e9f44b2-16d3-4635-89c5-5cad76395e52",
+          "gate": {
+            "checked_fact_ids": [],
+            "decision": "INCONCLUSIVE",
+            "excluded_sources": [],
+            "handling_direction": "EVIDENCE_INSUFFICIENT",
+            "handoff_allowed": false,
+            "outcome": "INCONCLUSIVE",
+            "policy": "s3-callback-evidence-v1",
+            "reason_code": "MODEL_NO_TOOL",
+            "recovered": false,
+            "required_facts": [
+              "s3_order"
+            ],
+            "side_effects": [],
+            "valid_until": null
+          },
+          "model_summary_untrusted": "",
+          "observation_pins": {},
+          "observations": [],
+          "recovered": false,
+          "run_id": "run-0f43257d-7bfb-49eb-8638-b8093f2796a0",
+          "schema": "s3-callback-evidence-v1",
+          "task_id": "task-c5895902-397d-402c-a8a3-9bae5cb712cc"
+        }
+      },
+      "tools": [],
+      "tokens": 6507,
+      "latency_seconds": 13.683,
+      "failure": null
+    },
+    "E4": {
+      "outcome": {
+        "receipt_id": "s3-diagnosis-5b3e0dc8-be8e-4e86-bf30-1123c70e8ca8",
+        "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+        "currentness": "CURRENT",
+        "recovered": false,
+        "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+        "handoff_allowed": true,
+        "explanation": "已核实本 Task（ta[REDACTED]，服务 orders-async-demo，订单 eg01-memory-target，订单版本 2）自己的当前事件，未做任何写操作或重发。\n\n一、订单侧：订单状态 COMPLETED（order_version=2，contract_version=1，读取时间 2026-10-25T10:07:51.707Z，来源：get_order_status / evidence-fa9e6f81）。但订单 200/COMPLETED 只说明订单本身已完结，不能证明下游已处理回调。\n\n二、回调投递侧：目标事件 event-f46d461d-a476-4494-8e18-eeddbfb5cdfe（delivery_version=2）当前状态为 ACKNOWLEDGED，receiver_http_status=202，transport_request_id=transport-4ca23b57-74f0-40f9-8e08-e44d6242c356，failure_code 为空，attempt_count=0，max_attempts=3，retry_state=NOT_APPLICABLE，retry_at 为空（读取时间 2026-10-25T10:07:53.849Z，来源：get_callback_delivery / evidence-337ff7e6）。即：这次回调的传输确实拿到了接收方的 HTTP 202 受理，没有失败码、也没有重试待办。202 只是“已受理”，不等于处理完成。\n\n三、接收方处理侧：同一 event_id 的接收方状态仍为 QUEUED，accepted_at=2026-10-25T09:51:54.305Z，声明的 processing_sla_seconds=300（读取时间 2026-10-25T10:07:57.969Z，来源：get_receiver_processing / evidence-dcbb91af）。按实际 HTTP 时间计算，从受理到本次核实时已过去约 16 分钟（≈963 秒），已超过该事件声明的 300 秒处理 SLA，且没有任何 PROCESSED/处理完成的证据。因此“下游没收到”的观感更可能对应“下游尚未落库/尚未处理完”，而不是“根本没发出去”。\n\n四、传输历史：本次查询的已知传输尝试记录为空（attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY，truncated=false，读取时间 2026-10-25T10:08:01.670Z，来源：get_callback_transport_history / evidence-03112fd3）。该工具明确提示“无记录不等于未发送，发送到落库之间存在崩溃窗口",
+        "explanation_currentness": "CURRENT",
+        "explanation_excluded_sources": [],
+        "gate": {
+          "checked_fact_ids": [
+            "evidence-fa9e6f81-e101-4157-86a6-6188c88c11b3",
+            "evidence-fa9e6f81-e101-4157-86a6-6188c88c11b3",
+            "evidence-337ff7e6-a3dc-4d10-915e-ab3e1ea183dc",
+            "evidence-dcbb91af-120d-438c-8bf6-537243134967"
+          ],
+          "decision": "DIAGNOSED",
+          "excluded_sources": [],
+          "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+          "handoff_allowed": true,
+          "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "policy": "s3-callback-evidence-v1",
+          "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+          "recovered": false,
+          "required_facts": [],
+          "side_effects": [],
+          "valid_until": "2026-10-25T09:56:54.305166Z"
+        },
+        "body": {
+          "business_writes": 0,
+          "control_revision": 0,
+          "evidence": [
+            {
+              "digest": "7753426bdbb3d2a7986cd734a3d2d0d0e1b0ffc79c0e43b4233d9cf2ff882d0c",
+              "fact_type": "s3_order",
+              "facts": {
+                "body": {
+                  "authn_event_id": 4,
+                  "contract_version": 1,
+                  "order_id": "eg01-memory-target",
+                  "order_version": 2,
+                  "request_id": "dd97730afc0e8ac4",
+                  "status": "COMPLETED"
+                },
+                "http_status": 200,
+                "versions_after": {
+                  "config_version": 1,
+                  "contract_version": 1,
+                  "delivery_version": 2,
+                  "grant_version": 1,
+                  "order_version": 2,
+                  "policy_version": 1,
+                  "principal_version": 1,
+                  "receiver_version": 2,
+                  "scope_policy_version": 1
+                },
+                "versions_before": {
+                  "config_version": 1,
+                  "contract_version": 1,
+                  "delivery_version": 2,
+                  "grant_version": 1,
+                  "order_version": 2,
+                  "policy_version": 1,
+                  "principal_version": 1,
+                  "receiver_version": 2,
+                  "scope_policy_version": 1
+                }
+              },
+              "id": "evidence-fa9e6f81-e101-4157-86a6-6188c88c11b3",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "4669e07c91edb23e88fb978f0d5404297f9882284bf741243fa9a332f50a4d50",
+              "fact_type": "s3_delivery",
+              "facts": {
+                "attempt_count": 0,
+                "event_id": "event-f46d461d-a476-4494-8e18-eeddbfb5cdfe",
+                "failure_code": null,
+                "max_attempts": 3,
+                "order_id": "eg01-memory-target",
+                "order_version": 2,
+                "receiver_http_status": 202,
+                "response_digest": "b9cdd01d31c544cae2a03f52f091f06aa083d63dc79a4b8df5cb26ff160ed57b",
+                "retry_at": null,
+                "retry_state": "NOT_APPLICABLE",
+                "service_id": "orders-async-demo",
+                "status": "ACKNOWLEDGED",
+                "tenant_id": "tenant-a",
+                "transport_request_id": "transport-4ca23b57-74f0-40f9-8e08-e44d6242c356",
+                "transport_response_json": "{\"accepted_at\":\"2026-10-25T09:51:54.305166Z\",\"attempt_count\":0,\"event_id\":\"event-f46d461d-a476-4494-8e18-eeddbfb5cdfe\",\"failure_code\":null,\"max_attempts\":3,\"order_id\":\"eg01-memory-target\",\"processing_sla_seconds\":300,\"receiver_state\":\"QUEUED\",\"request_id\":\"transport-4ca23b57-74f0-40f9-8e08-e44d6242c356\",\"retry_at\":null,\"retry_state\":\"NOT_APPLICABLE\"}",
+                "version": 2
+              },
+              "id": "evidence-337ff7e6-a3dc-4d10-915e-ab3e1ea183dc",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "65611dcc871955adf0bf42a13fec45638007a999f8f23f1974e20333d426cc55",
+              "fact_type": "s3_receiver",
+              "facts": {
+                "accepted_at": "2026-10-25T09:51:54.305166Z",
+                "delivery_version": 2,
+                "event_id": "event-f46d461d-a476-4494-8e18-eeddbfb5cdfe",
+                "order_id": "eg01-memory-target",
+                "processing_sla_seconds": 300,
+                "service_id": "orders-async-demo",
+                "status": "QUEUED",
+                "tenant_id": "tenant-a",
+                "version": 2
+              },
+              "id": "evidence-dcbb91af-120d-438c-8bf6-537243134967",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1
+              }
+            },
+            {
+              "digest": "370324ffa8692ca417ffa00d77f2ee5fd9366c76e24f3456d976a5e57e9af0d2",
+              "fact_type": "s3_transport_history",
+              "facts": {
+                "attempts": [],
+                "coverage": "RECORDED_OBSERVATIONS_ONLY",
+                "order_id": "eg01-memory-target",
+                "processing_authority": "Transport responses describe that attempt, not the target Event current processing state.",
+                "requested_event_id": null,
+                "truncated": false,
+                "unknowns": [
+                  "No record does not prove no send; the send-to-persist crash window is not a complete audit."
+                ]
+              },
+              "id": "evidence-03112fd3-c538-4849-baf2-fb5e5ff2d351",
+              "versions": {
+                "config_version": 1,
+                "contract_version": 1,
+                "delivery_version": 2,
+                "grant_version": 1,
+                "order_version": 2,
+                "policy_version": 1,
+                "principal_version": 1,
+                "receiver_version": 2,
+                "scope_policy_version": 1,
+                "transport_history_version": 1
+              }
+            }
+          ],
+          "explanation_call_id": "call-ab184c35-59ed-4bd9-9c18-72b1594445d5",
+          "gate": {
+            "checked_fact_ids": [
+              "evidence-fa9e6f81-e101-4157-86a6-6188c88c11b3",
+              "evidence-fa9e6f81-e101-4157-86a6-6188c88c11b3",
+              "evidence-337ff7e6-a3dc-4d10-915e-ab3e1ea183dc",
+              "evidence-dcbb91af-120d-438c-8bf6-537243134967"
+            ],
+            "decision": "DIAGNOSED",
+            "excluded_sources": [],
+            "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+            "handoff_allowed": true,
+            "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+            "policy": "s3-callback-evidence-v1",
+            "reason_code": "RECEIVER_PROCESSING_UNCONFIRMED",
+            "recovered": false,
+            "required_facts": [],
+            "side_effects": [],
+            "valid_until": "2026-10-25T09:56:54.305166Z"
+          },
+          "model_summary_untrusted": "已核实本 Task（ta[REDACTED]，服务 orders-async-demo，订单 eg01-memory-target，订单版本 2）自己的当前事件，未做任何写操作或重发。\n\n一、订单侧：订单状态 COMPLETED（order_version=2，contract_version=1，读取时间 2026-10-25T10:07:51.707Z，来源：get_order_status / evidence-fa9e6f81）。但订单 200/COMPLETED 只说明订单本身已完结，不能证明下游已处理回调。\n\n二、回调投递侧：目标事件 event-f46d461d-a476-4494-8e18-eeddbfb5cdfe（delivery_version=2）当前状态为 ACKNOWLEDGED，receiver_http_status=202，transport_request_id=transport-4ca23b57-74f0-40f9-8e08-e44d6242c356，failure_code 为空，attempt_count=0，max_attempts=3，retry_state=NOT_APPLICABLE，retry_at 为空（读取时间 2026-10-25T10:07:53.849Z，来源：get_callback_delivery / evidence-337ff7e6）。即：这次回调的传输确实拿到了接收方的 HTTP 202 受理，没有失败码、也没有重试待办。202 只是“已受理”，不等于处理完成。\n\n三、接收方处理侧：同一 event_id 的接收方状态仍为 QUEUED，accepted_at=2026-10-25T09:51:54.305Z，声明的 processing_sla_seconds=300（读取时间 2026-10-25T10:07:57.969Z，来源：get_receiver_processing / evidence-dcbb91af）。按实际 HTTP 时间计算，从受理到本次核实时已过去约 16 分钟（≈963 秒），已超过该事件声明的 300 秒处理 SLA，且没有任何 PROCESSED/处理完成的证据。因此“下游没收到”的观感更可能对应“下游尚未落库/尚未处理完”，而不是“根本没发出去”。\n\n四、传输历史：本次查询的已知传输尝试记录为空（attempts=[]，coverage=RECORDED_OBSERVATIONS_ONLY，truncated=false，读取时间 2026-10-25T10:08:01.670Z，来源：get_callback_transport_history / evidence-03112fd3）。该工具明确提示“无记录不等于未发送，发送到落库之间存在崩溃窗口",
+          "observation_pins": {
+            "evidence-03112fd3-c538-4849-baf2-fb5e5ff2d351": "observation-727e5239-ee76-42c9-b60c-8ee78f1bac98",
+            "evidence-337ff7e6-a3dc-4d10-915e-ab3e1ea183dc": "observation-f8fddedc-f4d5-43c2-8986-b8a569554799",
+            "evidence-dcbb91af-120d-438c-8bf6-537243134967": "observation-b946186c-adf7-4462-a346-6e74b4630a83",
+            "evidence-fa9e6f81-e101-4157-86a6-6188c88c11b3": "observation-e664d052-d877-413b-b6fd-c45bb4875547"
+          },
+          "observations": [
+            {
+              "attempt_id": "attempt-9a19b9a3-7ff2-4415-a8a6-524033d0f974",
+              "evidence_id": "evidence-fa9e6f81-e101-4157-86a6-6188c88c11b3",
+              "observation_id": "observation-e664d052-d877-413b-b6fd-c45bb4875547",
+              "observed_at": "2026-10-25T10:07:51.707000+00:00",
+              "result_digest": "24404c3e94d60d1ab36b2cba53c330d17855aebad2a0b8a67ff4f8e43cd41325",
+              "run_id": "run-2f4ab5a7-468f-4d8c-962c-c6fe54546503",
+              "source_observed_at": "2026-10-25T10:07:51.702+00:00",
+              "tool_name": "get_order_status"
+            },
+            {
+              "attempt_id": "attempt-e8c857b8-176e-4f8d-9304-fab97f9766d9",
+              "evidence_id": "evidence-337ff7e6-a3dc-4d10-915e-ab3e1ea183dc",
+              "observation_id": "observation-f8fddedc-f4d5-43c2-8986-b8a569554799",
+              "observed_at": "2026-10-25T10:07:53.849000+00:00",
+              "result_digest": "40b0bee84338af54875d1b5462fa1aecdae244cdd4d54377458aee854be1c3c7",
+              "run_id": "run-2f4ab5a7-468f-4d8c-962c-c6fe54546503",
+              "source_observed_at": "2026-10-25T10:07:53.844+00:00",
+              "tool_name": "get_callback_delivery"
+            },
+            {
+              "attempt_id": "attempt-6a66bd3f-a20e-4198-9ccf-b3e6d9da6c43",
+              "evidence_id": "evidence-dcbb91af-120d-438c-8bf6-537243134967",
+              "observation_id": "observation-b946186c-adf7-4462-a346-6e74b4630a83",
+              "observed_at": "2026-10-25T10:07:57.969000+00:00",
+              "result_digest": "c8a85910b28c43285c92a553e500b4d230c70fb45f7f009f532c7ac0e151631e",
+              "run_id": "run-2f4ab5a7-468f-4d8c-962c-c6fe54546503",
+              "source_observed_at": "2026-10-25T10:07:57.964+00:00",
+              "tool_name": "get_receiver_processing"
+            },
+            {
+              "attempt_id": "attempt-6fd61d92-1436-4aa6-a95b-0a21265d51d9",
+              "evidence_id": "evidence-03112fd3-c538-4849-baf2-fb5e5ff2d351",
+              "observation_id": "observation-727e5239-ee76-42c9-b60c-8ee78f1bac98",
+              "observed_at": "2026-10-25T10:08:01.670000+00:00",
+              "result_digest": "6bd8dae1f2fea649fa8a5f3eb593e28263e1004dcfddd28ca2061536a2241db1",
+              "run_id": "run-2f4ab5a7-468f-4d8c-962c-c6fe54546503",
+              "source_observed_at": "2026-10-25T10:08:01.665+00:00",
+              "tool_name": "get_callback_transport_history"
+            }
+          ],
+          "recovered": false,
+          "run_id": "run-2f4ab5a7-468f-4d8c-962c-c6fe54546503",
+          "schema": "s3-callback-evidence-v1",
+          "task_id": "task-09f8ca38-47e7-49f8-bf2b-7897f9076716"
+        }
+      },
+      "tools": [
+        "get_order_status",
+        "get_callback_delivery",
+        "get_receiver_processing",
+        "get_callback_transport_history"
+      ],
+      "tokens": 25135,
+      "latency_seconds": 28.287,
+      "failure": null
+    }
+  },
+  "business_snapshot_unchanged": false,
+  "evidence_dir": "docs\\evidence\\vnext\\m4-eg-01\\runs\\memory-paired-20261025T100556Z"
+}

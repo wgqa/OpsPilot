@@ -1226,6 +1226,14 @@ def _prepare_context(
         "Scope is still not authorized, the API is not restored, and the user should not submit it again."
         "For S3, a persisted s3_handoff with business_outcome HANDOFF_ACCEPTED proves only that the local human queue accepted the request; it does not prove the order or callback recovered. If that receipt is present, never deny its existence."
     )
+    if state is not None and state.get("service_id") == "orders-async-demo":
+        trusted_control += (
+            " For S3, same-event current PROCESSED proves completion even before the SLA deadline. "
+            "SLA applies only to a same-event receiver that is still QUEUED: before its trusted deadline, continue observing; "
+            "after the deadline, recommend contacting the receiver operator without claiming business failure. "
+            "HTTP 202 alone proves acceptance only; without current same-event receiver evidence, state is UNKNOWN. "
+            "Do not borrow another Event's state."
+        )
     task_state_message = {
         "role": "system",
         "content": f"TRUSTED TASK STATE (read-only): {_canonical(state) if state is not None else 'No Task is linked.'}",

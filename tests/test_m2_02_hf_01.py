@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -227,9 +228,14 @@ def test_hf_b_stale_gate_stops_after_no_tool_progress(
         sys.executable, "-X", "utf8", str(worker), "--db", str(demo_db),
         "--checkpoint-db", str(checkpoint_path), "--task-id", task_id, "--run-id", run_id,
     ]
+    worker_env = os.environ.copy()
+    # The worker replaces ChatOpenAI with NoToolModel; these placeholders only
+    # satisfy run_investigation's configuration guard and can never call a Provider.
+    worker_env[MODEL_API_KEY] = "deterministic-no-provider"
+    worker_env[MODEL_NAME] = "deterministic-no-provider"
     pause = subprocess.run(
         [*common, "--phase", "pause"], cwd=ROOT, capture_output=True,
-        text=True, encoding="utf-8", timeout=120,
+        text=True, encoding="utf-8", timeout=120, env=worker_env,
     )
     (process_log_dir / "worker-pause.stdout.txt").write_text(pause.stdout, encoding="utf-8")
     (process_log_dir / "worker-pause.stderr.txt").write_text(pause.stderr, encoding="utf-8")
@@ -240,7 +246,7 @@ def test_hf_b_stale_gate_stops_after_no_tool_progress(
 
     resumed = subprocess.run(
         [*common, "--phase", "resume"], cwd=ROOT, capture_output=True,
-        text=True, encoding="utf-8", timeout=120,
+        text=True, encoding="utf-8", timeout=120, env=worker_env,
     )
     (process_log_dir / "worker-resume.stdout.txt").write_text(resumed.stdout, encoding="utf-8")
     (process_log_dir / "worker-resume.stderr.txt").write_text(resumed.stderr, encoding="utf-8")

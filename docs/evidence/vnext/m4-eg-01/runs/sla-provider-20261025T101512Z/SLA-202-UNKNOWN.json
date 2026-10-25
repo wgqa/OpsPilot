@@ -1,0 +1,98 @@
+{
+  "task_id": "task-810a639b-9dbe-4023-a2be-51d8ef55b1e4",
+  "run_id": "run-48d0ea5c-e233-4df1-b2ed-07b0e5d1e26a",
+  "diagnosis_run_id": "run-70e338dc-3b2d-4752-a702-4f3366229f28",
+  "run_status": "SUCCEEDED",
+  "model_id": "deepseek-flash",
+  "provider_response_id": "65846153feed8473e0cc8f032eeeef79",
+  "input_tokens": 1109,
+  "output_tokens": 1080,
+  "total_tokens": 2189,
+  "answer": "**不能确认同一事件在下游已处理完成；当前状态为 UNKNOWN（不确定），Task 结论为 INCONCLUSIVE。**\n\n依据当前可信事实：\n\n- 已有证据：`evidence-4b1c7e43-add7-446f-af85-a5b363ccbad5`，事实类型为 `s3_order`。\n- 该证据显示订单 `eg01-sla-4` 的请求返回 HTTP `200`，订单侧状态为 `COMPLETED`。\n- 但 S3 证据门禁要求的关键事实 `s3_receiver` 缺失，原因码为 `EG01_NO_CURRENT_RECEIVER_STATE`，即**没有同一事件的当前接收方处理状态证据**。\n\n因此：\n\n1. **HTTP 200 和订单侧 `COMPLETED` 只能证明订单接口侧的成功/完成状态**，不能证明下游接收方已经收到并处理了同一异步回调。\n2. 目前没有同一事件当前的接收方 `PROCESSED` 状态或其他接收方处理证据，所以不能认定回调已恢复，也不能认定业务失败。\n3. 按接入协议，当前只能表述为：**下游回调处理状态未知，Task 证据不足，结论为 INCONCLUSIVE。**",
+  "expected_direction": "EVIDENCE_INSUFFICIENT",
+  "gate_outcome": "INCONCLUSIVE",
+  "evidence_refs": [
+    {
+      "digest": "19ef31bac0d2faeb539943c12ff162765e123c7b703a359934da379f79e6d754",
+      "evidence_id": "evidence-4b1c7e43-add7-446f-af85-a5b363ccbad5",
+      "fact_type": "s3_order",
+      "facts": {
+        "body": {
+          "authn_event_id": 1,
+          "contract_version": 2,
+          "order_id": "eg01-sla-4",
+          "order_version": 1,
+          "request_id": "4f11f754d232b06f",
+          "status": "COMPLETED"
+        },
+        "http_status": 200,
+        "versions_after": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 1,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 1,
+          "scope_policy_version": 1
+        },
+        "versions_before": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 1,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 1,
+          "scope_policy_version": 1
+        }
+      },
+      "fetched_at": "2026-10-25T10:16:06.901+00:00",
+      "versions": {
+        "config_version": 1,
+        "contract_version": 2,
+        "delivery_version": 1,
+        "grant_version": 1,
+        "order_version": 1,
+        "policy_version": 1,
+        "principal_version": 1,
+        "receiver_version": 1,
+        "scope_policy_version": 1
+      },
+      "versions_digest": "378b25f078d71e244162d9c0f45fd31939e25139a6b2f10b8e556c01efbd8edc"
+    }
+  ],
+  "excluded_sources": [],
+  "trusted_state_digest": "b7c63450a00dfd1641b9a3f385d25055a5464a5c666f5e4029a071c0e0bcefa8",
+  "case_id": "SLA-202-UNKNOWN",
+  "expected_handling_direction": "EVIDENCE_INSUFFICIENT",
+  "fixture_preparation": {
+    "order_id": "eg01-sla-4",
+    "receiver_status": null,
+    "queue_age_seconds": 60,
+    "sla_seconds": 300,
+    "contract_version": 2,
+    "source_task_run": "run-70e338dc-3b2d-4752-a702-4f3366229f28"
+  },
+  "elapsed_seconds": 8.971,
+  "semantic_review": {
+    "manual_review_required": true,
+    "expected_answer_contract": "EVIDENCE_INSUFFICIENT",
+    "automated_semantic_pass_claim": false
+  },
+  "pre_chat_business_outcome": {
+    "outcome": "INCONCLUSIVE",
+    "handling_direction": "EVIDENCE_INSUFFICIENT",
+    "receipt_id": "s3-diagnosis-9f3acc0e-141e-4958-b862-180d83ee3e67",
+    "business_writes": 0
+  },
+  "actual_http_reads": [
+    {
+      "request_id": "4f11f754d232b06f",
+      "route": "/api/async-orders/async-order",
+      "http_status": 200
+    }
+  ]
+}

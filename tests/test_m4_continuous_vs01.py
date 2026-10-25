@@ -259,7 +259,7 @@ def test_vs08_response_source_change_is_not_reused(tmp_path, monkeypatch):
     state = {"evidence_ids":[],"diagnosis_draft":draft}
     state.update(asyncio.run(node.investigate(state)))
     # Modify only the isolated asset copy after the actual model response.
-    target = copied / "receiver-ack-contract-v2.md"
+    target = copied / doc["file"]
     target.write_text(target.read_text(encoding="utf-8")+"\nchanged after answer\n",encoding="utf-8")
     asyncio.run(node.report(state))
     with connect(db) as c:

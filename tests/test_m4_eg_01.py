@@ -122,7 +122,7 @@ def test_sla_chat_outbound_context_carries_correct_same_event_rule(
     assert "SLA applies only to a same-event receiver that is still QUEUED" in prompt
     assert "same-event current PROCESSED proves completion even before the SLA deadline" in prompt
     assert "HTTP 202 alone proves acceptance only; without current same-event receiver evidence, state is UNKNOWN" in prompt
-    assert "do not borrow another Event's state" in prompt
+    assert "do not borrow another event's state" in prompt.casefold()
 
 
 def test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule() -> None:
@@ -134,8 +134,8 @@ def test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule() -> N
     )
     assert document["version"] == "2.1.0"
     content = str(document["content"])
-    assert "PROCESSED is sufficient to prove completion even before the SLA deadline" in content
-    assert "SLA only sets the handling direction for a same-event receiver that remains QUEUED" in content
+    assert "`PROCESSED` is sufficient to prove completion even before the SLA deadline" in content
+    assert "SLA only sets the handling direction for a same-event receiver that remains `QUEUED`" in content
     assert "HTTP 202 alone" in content and "UNKNOWN" in content
 
 

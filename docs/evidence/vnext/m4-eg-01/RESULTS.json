@@ -1,0 +1,323 @@
+{
+  "schema": "opspilot-m4-eg-01-results-v1",
+  "status": "ACCEPTANCE_CANDIDATE_WITH_KNOWN_FAILURE",
+  "implementation_base_sha": "0c142e91f04ec1278b0cf547aeeeb480466466c8",
+  "freeze_plan_commit": "18e9b0e0b7b5112befd767a3f9bef53ec43d1ac9",
+  "task_card_sha256": "D07194A0914BF0D7C74C34AC882451A1725DD9F73FA200C94DB46E90E15EADA0",
+  "remote_main_at_implementation_start": "0c142e91f04ec1278b0cf547aeeeb480466466c8",
+  "environment": {
+    "python": "3.12.14",
+    "pytest": "9.1.1",
+    "fastapi": "0.137.1",
+    "langgraph": "1.2.16",
+    "langchain_openai": "1.7.2",
+    "mcp": "2.3.0",
+    "node": "v24.16.0",
+    "npm": "11.13.0",
+    "vue": "3.5.44",
+    "vite": "8.3.4",
+    "typescript": "5.9.3"
+  },
+  "provider_budget": {
+    "model": "deepseek-flash",
+    "requests_used": 37,
+    "planned_max": 40,
+    "hard_max": 80,
+    "total_input_tokens": 155671,
+    "total_output_tokens": 33682,
+    "total_tokens": 189353,
+    "estimated_high_side_usd": 0.0871197,
+    "estimate_basis": "All input charged as peak cache-miss and output at published peak prices; not an account bill or exact charge.",
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/"
+  },
+  "runs": [
+    {
+      "name": "frozen-red-sla-05",
+      "command": "& python -m pytest tests/test_m4_eg_01.py -q --basetemp=.pytest-tmp\\m4-eg-01-red-sla-05",
+      "exit_code": 1,
+      "result": "5 failed, 1 passed",
+      "classification": "Expected RED before implementation",
+      "log": "runs/red-sla-05/pytest.log",
+      "command_file": "runs/red-sla-05/COMMAND.txt"
+    },
+    {
+      "name": "deterministic-green-05",
+      "command": "C:\\Users\\tu me manques\\.codex\\worktrees\\m4-autonomy-c1\\agent新项目\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q tests/test_m4_eg_01.py --basetemp docs/evidence/vnext/m4-eg-01/runs/green-deterministic-05/basetemp",
+      "exit_code": 0,
+      "result": "6 passed in 9.07s",
+      "log": "runs/green-deterministic-05/pytest.log",
+      "command_file": "runs/green-deterministic-05/COMMAND.txt"
+    },
+    {
+      "name": "m2-hf-stale-gate-regression",
+      "command": "C:\\Users\\tu me manques\\.codex\\worktrees\\m4-autonomy-c1\\agent新项目\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q tests/test_m2_02_hf_01.py -k stale_gate_stops_after_no_tool_progress --basetemp docs/evidence/vnext/m4-eg-01/runs/regression-fix-m2-hf-01/basetemp",
+      "exit_code": 0,
+      "result": "1 passed",
+      "log": "runs/regression-fix-m2-hf-01/pytest.log",
+      "command_file": "runs/regression-fix-m2-hf-01/COMMAND.txt"
+    },
+    {
+      "name": "vs08-knowledge-invalidation-regression",
+      "command": "C:\\Users\\tu me manques\\.codex\\worktrees\\m4-autonomy-c1\\agent新项目\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q tests/test_m4_continuous_vs01.py::test_vs08_response_source_change_is_not_reused --basetemp docs/evidence/vnext/m4-eg-01/runs/regression-fix-vs08/basetemp",
+      "exit_code": 0,
+      "result": "1 passed",
+      "log": "runs/regression-fix-vs08/pytest.log",
+      "command_file": "runs/regression-fix-vs08/COMMAND.txt"
+    },
+    {
+      "name": "full-pytest-01",
+      "command": "C:\\Users\\tu me manques\\.codex\\worktrees\\m4-autonomy-c1\\agent新项目\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q --basetemp docs/evidence/vnext/m4-eg-01/runs/full-pytest-01/basetemp",
+      "exit_code": 1,
+      "result": "368 passed, 3 failed in 339.65s",
+      "failures": [
+        "tests/test_m2_02_hf_01.py::test_hf_b_stale_gate_stops_after_no_tool_progress (deterministic worker lacked test-only config values)",
+        "tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix (known C1 RED; out of scope)",
+        "tests/test_m4_continuous_vs01.py::test_vs08_response_source_change_is_not_reused (test hard-coded obsolete Knowledge asset path)"
+      ],
+      "log": "runs/full-pytest-01/pytest.log",
+      "command_file": "runs/full-pytest-01/COMMAND.txt"
+    },
+    {
+      "name": "full-pytest-02",
+      "command": "C:\\Users\\tu me manques\\.codex\\worktrees\\m4-autonomy-c1\\agent新项目\\.venv\\Scripts\\python.exe -X utf8 -m pytest -q --basetemp docs/evidence/vnext/m4-eg-01/runs/full-pytest-02/basetemp",
+      "exit_code": 1,
+      "result": "370 passed, 1 failed in 348.36s",
+      "failures": [
+        "tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix (known C1 READONLY_FOLLOWUP RED, HTTP 502 INVALID_MODEL_CLASSIFICATION; not changed here)"
+      ],
+      "log": "runs/full-pytest-02/pytest.log",
+      "historical_trace_side_effects_archived_and_original_files_restored": true,
+      "command_file": "runs/full-pytest-02/COMMAND.txt",
+      "historical_trace_side_effects_archived": false,
+      "historical_trace_note": "Run 02 appended rows to tracked C1 trace files; an initial line-ending-aware archive attempt failed and the files were restored. Equivalent isolated rerun rows are preserved separately, not represented as the exact run 02 rows."
+    },
+    {
+      "name": "frontend-build",
+      "command": "npm run build",
+      "exit_code": 0,
+      "result": "vue-tsc and Vite 8.3.4 production build succeeded",
+      "log": "runs/web-memory-20261025T102107Z/frontend-build.log",
+      "command_file": "runs/web-memory-20261025T102107Z/frontend-build-command.txt"
+    },
+    {
+      "name": "real-sla-provider-chat",
+      "exit_code": 0,
+      "provider_requests": 4,
+      "token_count": 14019,
+      "result": "Provider calls completed; implementer manually reviewed answers against frozen directions. Stored semantic_review.manual_review_required remains true; no automated semantic PASS asserted.",
+      "log": "runs/sla-provider-20261025T101512Z/RESULTS.json",
+      "command_file": "runs/sla-provider-20261025T101512Z/COMMAND.txt",
+      "command": "C:\\Users\\tu me manques\\.codex\\worktrees\\m4-autonomy-c1\\agent新项目\\.venv\\Scripts\\python.exe docs/evidence/vnext/m4-eg-01/scripts/sla_provider_answers.py (PYTHONPATH=repo root; provider vars loaded from local .env, values excluded)"
+    },
+    {
+      "name": "real-memory-on-off-provider-mcp",
+      "exit_code": 0,
+      "provider_requests": 26,
+      "input_tokens": 113249,
+      "output_tokens": 20693,
+      "total_tokens": 133942,
+      "mcp_observations": 20,
+      "result": "E1 ON/OFF matched outcome and tool sequence; current facts overrode conflicting memory; irrelevant and revoked memory excluded.",
+      "warning": "Original raw RESULTS.json aggregate total_tokens=0 was not edited; counts were recomputed from 26 actual TRACE usage records.",
+      "command_file": "runs/memory-paired-20261025T100556Z/COMMAND.txt",
+      "command": "C:\\Users\\tu me manques\\.codex\\worktrees\\m4-autonomy-c1\\agent新项目\\.venv\\Scripts\\python.exe docs/evidence/vnext/m4-eg-01/scripts/memory_provider_comparison.py (PYTHONPATH=repo root; provider vars from local .env, values excluded)"
+    },
+    {
+      "name": "real-browser-task-a-to-task-b",
+      "exit_code": 1,
+      "provider_requests": 7,
+      "input_tokens": 35683,
+      "output_tokens": 5709,
+      "total_tokens": 41392,
+      "mcp_observations": 6,
+      "http_statuses": {
+        "memory_candidate": 201,
+        "approver_confirmation": 200,
+        "task_b_acceptance": 202
+      },
+      "task_b_run_status": "SUCCEEDED",
+      "browser_script_failure": "Post-run locator expected Task A memory to remain selected in the latest call; DB proves it was selected in an earlier call and later excluded after current evidence conflict.",
+      "read_only_revisit_exit_code": 0,
+      "revisit_model_calls": 0,
+      "revisit_currentness": "INVALIDATED_BY_CURRENT_FACTS",
+      "evidence": "runs/web-memory-green-02/WEB-JOURNEY-RECONCILIATION.json"
+    },
+    {
+      "name": "c1-existing-red-isolated-replay",
+      "command": "cwd=C:\\Users\\tu me manques\\.codex\\worktrees\\c1-approved-integration-20261025\\agent新项目\n\"C:\\Users\\tu me manques\\.codex\\worktrees\\m4-autonomy-c1\\agent新项目\\.venv\\Scripts\\python.exe\" -X utf8 -m pytest -q tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix tests/test_m4_autonomy_c1_followup_red.py::test_follow_up_request_for_bound_protocol_is_routed_to_same_task_readonly_investigation --basetemp \"C:\\Users\\tu me manques\\.codex\\worktrees\\c1-approved-integration-20261025\\agent新项目\\docs\\evidence\\vnext\\m4-eg-01\\runs\\historical-trace-rerun-20261025\\pytest-temp\"",
+      "exit_code": 1,
+      "result": "1 failed, 1 passed; appended trace rows archived and historical tracked files restored",
+      "log": "runs/historical-trace-rerun-20261025/pytest.log",
+      "command_file": "runs/historical-trace-rerun-20261025/COMMAND.txt"
+    },
+    {
+      "name": "web-harness-syntax-check",
+      "exit_code": 0,
+      "result": "Both browser automation scripts passed Node syntax validation after credentials were moved to process environment.",
+      "log": "runs/harness-syntax-check/COMMAND.txt",
+      "command_file": "runs/harness-syntax-check/COMMAND.txt",
+      "validation_command_error": "runs/harness-syntax-check/incorrect-node-python-check.log"
+    },
+    {
+      "name": "trace-index-build",
+      "command": "python -X utf8 docs/evidence/vnext/m4-eg-01/scripts/build_trace_index.py",
+      "exit_code": 0,
+      "result": "68 rows indexed from recorded Provider, MCP, HTTP and browser observations; raw source artifacts are linked in evidence_source fields.",
+      "command_file": "runs/trace-index-build/COMMAND.txt"
+    }
+  ],
+  "memory_e1_comparison": {
+    "same_current_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+    "same_tool_sequence": [
+      "get_order_status",
+      "get_callback_delivery",
+      "get_receiver_processing",
+      "get_callback_transport_history",
+      "search_callback_knowledge"
+    ],
+    "on_tokens": 33249,
+    "off_tokens": 30895,
+    "on_extra_tokens": 2354,
+    "on_relative_increase_percent": 7.62,
+    "observed_outcome_or_tool_advantage": false
+  },
+  "business_write_counts_for_web_task_b": {
+    "s3_handoff_queue_entries": 0,
+    "s3_handoff_receipts": 0,
+    "d3_action_intents": 0,
+    "d3_action_ledgers": 0,
+    "d3_delivery_records": 0
+  },
+  "known_unresolved_gate": "Existing C1 READONLY_FOLLOWUP red test fails; this candidate does not claim full suite PASS.",
+  "evidence_index": "TRACE.jsonl",
+  "sla_cases": [
+    {
+      "case_id": "SLA-PROCESSED-EARLY",
+      "provider_response_id": "c71608780778e9b4f477386e5fe66eba",
+      "input_tokens": 1839,
+      "output_tokens": 1656,
+      "total_tokens": 3495,
+      "expected_handling_direction": "NO_FURTHER_ACTION",
+      "actual_gate_outcome": "RECEIVER_PROCESSED",
+      "fixture_preparation": {
+        "order_id": "eg01-sla-1",
+        "receiver_status": "PROCESSED",
+        "queue_age_seconds": 60,
+        "sla_seconds": 300,
+        "contract_version": 2,
+        "source_task_run": "run-f8421299-ffd9-49e4-a53e-79b6fd991de2"
+      },
+      "semantic_review_required": true
+    },
+    {
+      "case_id": "SLA-QUEUED-IN-WINDOW",
+      "provider_response_id": "1e5f658312683fc38db9adc18b56db37",
+      "input_tokens": 1886,
+      "output_tokens": 2378,
+      "total_tokens": 4264,
+      "expected_handling_direction": "WAIT_FOR_RECEIVER_PROCESSING",
+      "actual_gate_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "fixture_preparation": {
+        "order_id": "eg01-sla-2",
+        "receiver_status": "QUEUED",
+        "queue_age_seconds": 60,
+        "sla_seconds": 300,
+        "contract_version": 2,
+        "source_task_run": "run-2a3bd565-3e9c-4f86-9faa-9ddabd97fc29"
+      },
+      "semantic_review_required": true
+    },
+    {
+      "case_id": "SLA-QUEUED-OVERDUE",
+      "provider_response_id": "b2b9280adc82fca1112afd0b43f99d3c",
+      "input_tokens": 1905,
+      "output_tokens": 2166,
+      "total_tokens": 4071,
+      "expected_handling_direction": "CONTACT_RECEIVER_OPERATOR",
+      "actual_gate_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+      "fixture_preparation": {
+        "order_id": "eg01-sla-3",
+        "receiver_status": "QUEUED",
+        "queue_age_seconds": 360,
+        "sla_seconds": 300,
+        "contract_version": 2,
+        "source_task_run": "run-1deee04b-a5fb-421f-a6f1-dcea916f52ea"
+      },
+      "semantic_review_required": true
+    },
+    {
+      "case_id": "SLA-202-UNKNOWN",
+      "provider_response_id": "65846153feed8473e0cc8f032eeeef79",
+      "input_tokens": 1109,
+      "output_tokens": 1080,
+      "total_tokens": 2189,
+      "expected_handling_direction": "EVIDENCE_INSUFFICIENT",
+      "actual_gate_outcome": "INCONCLUSIVE",
+      "fixture_preparation": {
+        "order_id": "eg01-sla-4",
+        "receiver_status": null,
+        "queue_age_seconds": 60,
+        "sla_seconds": 300,
+        "contract_version": 2,
+        "source_task_run": "run-70e338dc-3b2d-4752-a702-4f3366229f28"
+      },
+      "semantic_review_required": true
+    }
+  ],
+  "memory_experiments": {
+    "memory_id": "episodic-cd0e5f83-0400-407e-846f-37844d1464ea",
+    "source_task_id": "task-b3e049b6-b936-41e3-8525-19332a203863",
+    "target_task_b_on_id": "task-f32ab0e9-aab0-4b5c-9580-a7264cd8bb7e",
+    "target_task_b_off_id": "task-24ab1a78-adb9-461b-ab33-fda0f1361bf3",
+    "e1_on_selected_memory": true,
+    "e1_off_excluded_memory": true,
+    "e2_current_evidence_overrode_memory": true,
+    "e3_irrelevant_memory_excluded": true,
+    "e4_revoked_memory_excluded": true,
+    "memory_state_after_revoke": "REVOKED",
+    "raw_results_total_tokens_bug": 0,
+    "recomputed_from_actual_provider_trace": {
+      "input_tokens": 113249,
+      "output_tokens": 20693,
+      "total_tokens": 133942
+    }
+  },
+  "browser_run_reconciliation": "runs/web-memory-green-02/WEB-JOURNEY-RECONCILIATION.json",
+  "final_commit_sha_note": "The final delivery SHA is the Git commit that contains this file and is reported in the handoff; it is omitted here to avoid a self-referential hash.",
+  "integrity_checks": {
+    "sealed_holdout_sha256": "3eb52f49b3449b9f77691d12d0ea8e90135ff84c40c0b15549aaa0dfada0f8e1",
+    "sealed_holdout_verified_against_frozen_sha_file": true,
+    "active_knowledge_manifest_digest_verified": true,
+    "trace_index_rows": 68,
+    "secret_scan": "No model keys, bearer tokens, or hard-coded password values found in staged evidence after browser scripts were changed to environment-based credentials.",
+    "frozen_documents_unchanged_from_freeze_commit": true,
+    "temporary_pytest_databases_not_committed": {
+      "bytes": 783423588,
+      "reason": "Disposable pytest basetemp fixtures; raw logs and traces retained."
+    },
+    "historical_c1_traces_restored_to_head": true,
+    "full_pytest_01_appended_rows_archived": true,
+    "full_pytest_02_appended_rows_exactly_archived": false,
+    "isolated_replay_rows_archived": true
+  },
+  "credential_handling": "OPSPILOT_EG01_SUPPORT_PASSWORD and OPSPILOT_EG01_APPROVER_PASSWORD are read from process environment; values are excluded from repository evidence.",
+  "preflight_document_reads": {
+    "commit": "0c142e91f04ec1278b0cf547aeeeb480466466c8",
+    "PROJECT_NORTH_STAR.md": {
+      "blob": "1f737712c7a36ceb34433ac09c3fbba3c3305542",
+      "status": "read from target commit"
+    },
+    "AGENTS.md": {
+      "blob": "30319000ed0054007e9b7b6b46bf98b1493c8179",
+      "status": "read from prompt and verified against target commit"
+    },
+    "ACCEPTANCE_PLAN.md": {
+      "blob": "949938a3c269cf8069f0fb526930a9947e80e786",
+      "freeze_commit": "18e9b0e0b7b5112befd767a3f9bef53ec43d1ac9"
+    },
+    "GOLD.json": {
+      "blob": "9ef662173c3bcbdae05a20d24fe3673cd2dd8cbf",
+      "unchanged": true
+    }
+  }
+}

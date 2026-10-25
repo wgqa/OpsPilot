@@ -1,0 +1,163 @@
+{
+  "task_id": "task-ea4523cf-6749-492b-ac0c-cd681e4f4c80",
+  "run_id": "run-faa3a862-5f9c-49e8-95f8-e6b803e193cb",
+  "diagnosis_run_id": "run-1deee04b-a5fb-421f-a6f1-dcea916f52ea",
+  "run_status": "SUCCEEDED",
+  "model_id": "deepseek-flash",
+  "provider_response_id": "b2b9280adc82fca1112afd0b43f99d3c",
+  "input_tokens": 1905,
+  "output_tokens": 2166,
+  "total_tokens": 4071,
+  "answer": "## 结论\n\n**未确认处理完成，状态为 UNKNOWN（接收方处理未确认）。** 既不能判定“下游已处理完成”，也不能判定“业务失败”。\n\n## 依据的当前可信证据（同一事件 event-5b57ee48-5aa8-4fda-8289-8b6dcc0169df）\n\n| 证据 ID | 事实 | 关键内容 |\n|---|---|---|\n| evidence-4ee29f85-6ef5-43b4-955a-eae9e254c2ae | s3_order | order_id `eg01-sla-3`，status `COMPLETED`，HTTP 200，order_version 1 |\n| evidence-8fcdbd22-8c01-4b75-939a-6086a8ffde6e | s3_delivery | 同一 event_id，status `ACKNOWLEDGED`，receiver_http_status **202**，attempt_count 0，retry_state `NOT_APPLICABLE`，包含 transport_request_id `transport-97d665e1-e071-47af-84ec-7af5d619557c` |\n| evidence-c157ef7b-468b-4ba4-825a-79235b26872e | s3_receiver | 同一 event_id / order_id，status **`QUEUED`**，accepted_at `2026-10-25T10:09:47.940750Z`，processing_sla_seconds 300 |\n\n三条证据均为同一 event、order_version 1 / delivery_version 1 / receiver version 1，currentness 为 CURRENT，彼此一致。\n\n## 协议解释\n\n- **202 只代表接收方接受（ACCEPTED/ACKNOWLEDGED）**，不证明已处理。投递记录止于 `ACKNOWLEDGED`，不是 processed。\n- 接收方状态仍是 **`QUEUED`**，没有同一 event 的 `PROCESSED` 证据。因此不能回答“已完成”。\n- **SLA 期限**：accepted_at `10:09:47.940750Z` + 300s = `10:14:47.940750Z`。证据抓取时间为 `10:15:48Z`，该 trusted deadline 已经过去，而接收方仍为 `QUEUED`。\n- 按 `s3-callback-evidence-v1`：SLA 仅适用于“同一事件仍在 QUEUED 的接收方”；过期限后应**联系接收方运维**核查，**不得据此宣称业务失败**。\n- 会话中的诊断回执 `s3-diagnosis-354aa82c-cb7d-45a0-8b65-25e42d5e2c30` 与此一致：outcome `RECEIVER_PROCESSING_UNCONFIRMED`，reason_code `RECEIVER_PROCESSING_UNCONFIRMED`，handling_direction `CONTACT_RECEIVER_OPERATOR`，recovered `false`，valid_until `2026-10-25T10:14:47.940750Z`（已过有效期窗口）。\n\n## 需要避免的误读\n\n- 订单侧 `status: COMPLETED` 属于订单域事实，**不能**拿来推断下游 receiver 已处理该回调；两者证据域不同，不能互相借用。\n- “接口返回 200”同样不构成接收方已处理的证据。\n\n## 当前缺口与建议\n\n- 缺失：同一 event_id 的**当前 receiver `PROCESSED`** 证据，或接收方的失败/重试事实。无此证据即维持 UNKNOWN。\n- 不存在 `s3_handoff` 且 `HANDOFF_ACCEPTED` 的收据；任务为 `WAITING_HANDOFF`，即仍在等待交接，并未提交/受理。\n- 建议：以 `event_id`、`order_id`、`transport_request_id` 三项联系接收方（receiver）运维核对排队情况；同时继续观察同一事件的 receiver 状态是否转为 `PROCESSED`，一旦出现即可改判为完成。",
+  "expected_direction": "CONTACT_RECEIVER_OPERATOR",
+  "gate_outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+  "evidence_refs": [
+    {
+      "digest": "28b5dda690c25104d7403195eadd3adbadb3e72da864a7f3f88b49abc18b2aad",
+      "evidence_id": "evidence-4ee29f85-6ef5-43b4-955a-eae9e254c2ae",
+      "fact_type": "s3_order",
+      "facts": {
+        "body": {
+          "authn_event_id": 1,
+          "contract_version": 2,
+          "order_id": "eg01-sla-3",
+          "order_version": 1,
+          "request_id": "86748ea77ddf4784",
+          "status": "COMPLETED"
+        },
+        "http_status": 200,
+        "versions_after": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 1,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 1,
+          "scope_policy_version": 1
+        },
+        "versions_before": {
+          "config_version": 1,
+          "contract_version": 2,
+          "delivery_version": 1,
+          "grant_version": 1,
+          "order_version": 1,
+          "policy_version": 1,
+          "principal_version": 1,
+          "receiver_version": 1,
+          "scope_policy_version": 1
+        }
+      },
+      "fetched_at": "2026-10-25T10:15:48.018+00:00",
+      "versions": {
+        "config_version": 1,
+        "contract_version": 2,
+        "delivery_version": 1,
+        "grant_version": 1,
+        "order_version": 1,
+        "policy_version": 1,
+        "principal_version": 1,
+        "receiver_version": 1,
+        "scope_policy_version": 1
+      },
+      "versions_digest": "378b25f078d71e244162d9c0f45fd31939e25139a6b2f10b8e556c01efbd8edc"
+    },
+    {
+      "digest": "73bdfd23a68ff73d14127c712b4d8cb456d81c9ca8c74f96095a90c497d43dfe",
+      "evidence_id": "evidence-8fcdbd22-8c01-4b75-939a-6086a8ffde6e",
+      "fact_type": "s3_delivery",
+      "facts": {
+        "attempt_count": 0,
+        "event_id": "event-5b57ee48-5aa8-4fda-8289-8b6dcc0169df",
+        "failure_code": null,
+        "max_attempts": 3,
+        "order_id": "eg01-sla-3",
+        "order_version": 1,
+        "receiver_http_status": 202,
+        "response_digest": "700e6955d9ec10bbf03b56eb15485c182670c908d47b326b2ecf07c78d854a2b",
+        "retry_at": null,
+        "retry_state": "NOT_APPLICABLE",
+        "service_id": "orders-async-demo",
+        "status": "ACKNOWLEDGED",
+        "tenant_id": "tenant-a",
+        "transport_request_id": "transport-97d665e1-e071-47af-84ec-7af5d619557c",
+        "transport_response_json": "{\"accepted_at\":\"2026-10-25T10:09:47.940750Z\",\"attempt_count\":0,\"event_id\":\"event-5b57ee48-5aa8-4fda-8289-8b6dcc0169df\",\"failure_code\":null,\"max_attempts\":3,\"order_id\":\"eg01-sla-3\",\"processing_sla_seconds\":300,\"receiver_state\":\"QUEUED\",\"request_id\":\"transport-97d665e1-e071-47af-84ec-7af5d619557c\",\"retry_at\":null,\"retry_state\":\"NOT_APPLICABLE\"}",
+        "version": 1
+      },
+      "fetched_at": "2026-10-25T10:15:48.019+00:00",
+      "versions": {
+        "config_version": 1,
+        "contract_version": 2,
+        "delivery_version": 1,
+        "grant_version": 1,
+        "order_version": 1,
+        "policy_version": 1,
+        "principal_version": 1,
+        "receiver_version": 1,
+        "scope_policy_version": 1
+      },
+      "versions_digest": "378b25f078d71e244162d9c0f45fd31939e25139a6b2f10b8e556c01efbd8edc"
+    },
+    {
+      "digest": "cc26a2a1124d724bb41aebd585f60fc2aacc1c98dc6e08e0ac30add8218bf82a",
+      "evidence_id": "evidence-c157ef7b-468b-4ba4-825a-79235b26872e",
+      "fact_type": "s3_receiver",
+      "facts": {
+        "accepted_at": "2026-10-25T10:09:47.940750Z",
+        "delivery_version": 1,
+        "event_id": "event-5b57ee48-5aa8-4fda-8289-8b6dcc0169df",
+        "order_id": "eg01-sla-3",
+        "processing_sla_seconds": 300,
+        "service_id": "orders-async-demo",
+        "status": "QUEUED",
+        "tenant_id": "tenant-a",
+        "version": 1
+      },
+      "fetched_at": "2026-10-25T10:15:48.021+00:00",
+      "versions": {
+        "config_version": 1,
+        "contract_version": 2,
+        "delivery_version": 1,
+        "grant_version": 1,
+        "order_version": 1,
+        "policy_version": 1,
+        "principal_version": 1,
+        "receiver_version": 1,
+        "scope_policy_version": 1
+      },
+      "versions_digest": "378b25f078d71e244162d9c0f45fd31939e25139a6b2f10b8e556c01efbd8edc"
+    }
+  ],
+  "excluded_sources": [],
+  "trusted_state_digest": "b604f6866c38a758345a25f34269377f2c4e830cc392557db8dc4566de243eda",
+  "case_id": "SLA-QUEUED-OVERDUE",
+  "expected_handling_direction": "CONTACT_RECEIVER_OPERATOR",
+  "fixture_preparation": {
+    "order_id": "eg01-sla-3",
+    "receiver_status": "QUEUED",
+    "queue_age_seconds": 360,
+    "sla_seconds": 300,
+    "contract_version": 2,
+    "source_task_run": "run-1deee04b-a5fb-421f-a6f1-dcea916f52ea"
+  },
+  "elapsed_seconds": 17.381,
+  "semantic_review": {
+    "manual_review_required": true,
+    "expected_answer_contract": "CONTACT_RECEIVER_OPERATOR",
+    "automated_semantic_pass_claim": false
+  },
+  "pre_chat_business_outcome": {
+    "outcome": "RECEIVER_PROCESSING_UNCONFIRMED",
+    "handling_direction": "CONTACT_RECEIVER_OPERATOR",
+    "receipt_id": "s3-diagnosis-354aa82c-cb7d-45a0-8b65-25e42d5e2c30",
+    "business_writes": 0
+  },
+  "actual_http_reads": [
+    {
+      "request_id": "86748ea77ddf4784",
+      "route": "/api/async-orders/async-order",
+      "http_status": 200
+    }
+  ]
+}

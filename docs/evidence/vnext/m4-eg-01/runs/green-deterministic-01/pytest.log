@@ -1,0 +1,20 @@
+....F.                                                                   [100%]
+================================== FAILURES ===================================
+____ test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule ____
+
+    def test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule() -> None:
+        from opspilot.domain.s3_assets import load_knowledge
+    
+        document = next(
+            item for item in load_knowledge(contract_version=2)
+            if item["document_id"] == "receiver-ack-contract-v2"
+        )
+        assert document["version"] == "2.1.0"
+        content = str(document["content"])
+>       assert "PROCESSED is sufficient to prove completion even before the SLA deadline" in content
+E       assert 'PROCESSED is sufficient to prove completion even before the SLA deadline' in "# Receiver acknowledgement and processing SLA v2.1\n\nAn HTTP 202 from the receiver proves durable acceptance into it...t's state from elapsed time, a different event, an order snapshot, or historical advice. Never resend automatically.\n"
+
+tests\test_m4_eg_01.py:137: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_eg_01.py::test_receiver_ack_knowledge_has_unambiguous_processed_before_sla_rule
+1 failed, 5 passed in 9.20s
