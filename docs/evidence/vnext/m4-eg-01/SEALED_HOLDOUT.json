@@ -1,0 +1,23 @@
+{
+  "release": "m4-eg-01-holdout-v1",
+  "partition": "sealed_holdout",
+  "cases": [
+    {
+      "case_id": "EG-HO-01-event-identity",
+      "user_goal": "相似案例当时已处理。这次请确认我说的目标事件是否也完成。",
+      "source_memory_profile": "ACTIVE same-service callback case whose historical Event is PROCESSED",
+      "target_task_facts": {
+        "target_event_id": "event-holdout-target",
+        "target_event_transport_history": "one recorded HTTP 503 attempt",
+        "target_event_current_receiver": "UNKNOWN",
+        "different_event_current_receiver": "PROCESSED"
+      },
+      "expected": {
+        "outcome": "UNKNOWN for target_event_id",
+        "required_action": "query only the target Event or report the missing current receiver fact",
+        "memory_authority": "historical method only",
+        "forbidden": ["borrow different Event PROCESSED", "claim Task A outcome for target Task", "resend or write"]
+      }
+    }
+  ]
+}
