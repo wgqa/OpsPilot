@@ -23,6 +23,8 @@ def _followup(tmp_path: Path):
     db = tmp_path / "continuous.sqlite3"
     reset_fixture(db, "S1_POS")
     session, task, _, _ = _diagnosed_task(db)
+    from tests.legacy_budget_support import use_legacy_s3_budget_fixture
+    use_legacy_s3_budget_fixture(db, task)  # Preserve the frozen VS01 legacy budget cases.
     _, run = _start_investigation_run(db, session, task, suffix="continuous")
     return db, task, run
 
@@ -353,12 +355,14 @@ def test_vs09_schema_v15_migration_preserves_existing_business(tmp_path):
     with connect(db) as c:
         c.execute("ALTER TABLE task_execution_budgets DROP COLUMN model_limit")
         c.execute("ALTER TABLE task_execution_budgets DROP COLUMN mcp_limit")
+        c.execute("ALTER TABLE task_execution_budgets DROP COLUMN policy_version")
+        c.execute("ALTER TABLE task_execution_budgets DROP COLUMN aux_provider_limit")
         c.execute("PRAGMA user_version=15")
     initialize(db)
     assert _business_only(db,task["task_id"]) == before
     assert task_attempt_limits(db,task["task_id"]) == {"MODEL":8,"MCP":6}
     with connect(db) as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 17
 
 
 def test_vs09_budget_exhaustion_delivers_explicit_nonblank_gap_without_writes(tmp_path):
@@ -474,6 +478,8 @@ def test_vs11_followup_after_applied_correction_carries_the_trusted_highwater(tm
     db=tmp_path/"corrected-followup.sqlite3"
     reset_fixture(db,"S1_POS")
     session,task,_,_=_diagnosed_task(db)
+    from tests.legacy_budget_support import use_legacy_s3_budget_fixture
+    use_legacy_s3_budget_fixture(db,task)
     identity=trusted_identity(db,"support-a")
     correction=admit_task_message(db,identity,session_id=session,task_id=task,input_kind="CORRECT_TASK_INPUT",
         body="更正：请核对 earlier-event 的历史，不要把最新事件当成这次。",idempotency_key="formal-correction")

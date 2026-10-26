@@ -147,22 +147,34 @@ def test_a02_two_connections_cannot_overfill_run(tmp_path):
     assert sum(x["accepted"] for x in outcomes) == 1
 
 
-def test_a02_task_limit_survives_many_distinct_followups_and_race(tmp_path):
+@pytest.mark.parametrize("kind,first_count,run_cap,task_cap",[("MODEL",7,4,24),("MCP",5,3,18)])
+def test_a02_task_limit_survives_many_distinct_followups_and_race(tmp_path,kind,first_count,run_cap,task_cap):
     db, identity, task = new_task(tmp_path)
     tid, run = str(task["task_id"]), str(task["run_id"])
-    for _ in range(7): reserve(db,tid,run,limit=8)
+    for _ in range(first_count): reserve(db,tid,run,kind)
     finish_task_run(db,identity,run,"WAITING_INPUT")
     for i in range(4):
         _, routed = route(db,identity,task,f"intent-{i}")
         run=str(routed["investigation_run_id"]); claim_task_run(db,identity,run)
-        for _ in range(4): reserve(db,tid,run)
+        for _ in range(run_cap): reserve(db,tid,run,kind)
         finish_task_run(db,identity,run,"WAITING_INPUT")
     _, routed = route(db,identity,task,"last-intent")
     run=str(routed["investigation_run_id"]); claim_task_run(db,identity,run)
-    outcomes=_race(db,tid,run)
+    outcomes=_race(db,tid,run,kind)
     emit("A02-TASK-RACE",outcomes=outcomes,ledger=ledger(db,tid))
-    assert sum(x["accepted"] for x in outcomes)==1 and attempt_counts(db,tid)["MODEL"]==24
-    assert next(x for x in outcomes if not x["accepted"])["reason"]=="TASK_MODEL_LIMIT"
+    assert sum(x["accepted"] for x in outcomes)==1 and attempt_counts(db,tid)[kind]==task_cap
+    assert next(x for x in outcomes if not x["accepted"])["reason"]==f"TASK_{kind}_LIMIT"
+    from opspilot.s3_investigation import S3Nodes
+    node=S3Nodes(db,tid,run,None,"no-provider",None,[],strategy="R",readonly_followup=True,memory_enabled=False)
+    async def bounded_delivery():
+        state={"evidence_ids":[],"tool_observations":[]}
+        state.update(await node.investigate(state))
+        await node.report(state)
+    asyncio.run(bounded_delivery())
+    with connect(db) as c:
+        answer=dict(c.execute("SELECT answer_text,result_state,reason_code FROM c1_readonly_followup_runs WHERE run_id=?",(run,)).fetchone())
+    assert answer["result_state"]=="PARTIAL" and answer["reason_code"]==f"TASK_{kind}_LIMIT" and answer["answer_text"].strip()
+    emit("A02-TASK-LIMIT-DELIVERY",kind=kind,answer=answer)
 
 
 def test_a03_migration_does_not_upgrade_existing_task_and_s1_stays_legacy(tmp_path):
@@ -183,6 +195,11 @@ def test_a03_migration_does_not_upgrade_existing_task_and_s1_stays_legacy(tmp_pa
         assert after["aux_provider_limit"] is None
         assert all(after[k]==v for k,v in before.items())
     assert task_attempt_limits(db,tid)=={"MODEL":8,"MCP":6}
+    replay=create_task_with_initial_run(db,identity,session_id=str(task["session_id"]),service_id="orders-async-demo",
+        integration_id="async-integration-a",ticket_id="CONTUX-A",s3_order_id="async-order",
+        initial_message="订单 200 但回调尚未完成，请核对。",idempotency_key="initial")
+    assert replay["task_id"]==tid and replay["replayed"]
+    assert task_attempt_limits(db,tid)=={"MODEL":8,"MCP":6}
     session=create_session(db,identity)
     s1=create_task_with_initial_run(db,identity,session_id=str(session["session_id"]),service_id="orders-demo",
          integration_id="integration-a",ticket_id="LEGACY",initial_message="401",idempotency_key="s1")
@@ -199,6 +216,8 @@ def test_a03_cross_task_and_missing_run_cannot_spend_new_policy(tmp_path):
         c.execute("UPDATE task_execution_budgets SET model_limit=25 WHERE task_id=?",(tid,))
     with pytest.raises(ScopeDenied): reserve(db,tid,str(task["run_id"]))
     assert attempt_counts(db,tid)=={"MODEL":0,"MCP":0}
+    with connect(db) as c: c.execute("DELETE FROM task_execution_budgets WHERE task_id=?",(tid,))
+    with pytest.raises(ScopeDenied): reserve(db,tid,str(task["run_id"]))
 
 
 def test_a04_auxiliary_classifiers_include_reserved_failures_and_stop_durably(tmp_path):
@@ -468,3 +487,159 @@ def test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model(tmp_pa
                  observations=observations,chat_manifests=manifests,ledger=ledger(db,tid),protected_before=before,protected_after=after,
                  paid_provider_calls=0,token_usage="NOT_AVAILABLE_FOR_DETERMINISTIC_DOUBLE",preparation=preparation)
         finally: worker.release()
+
+
+def test_a03_http_response_loss_replays_one_message_assessment_and_run(tmp_path,monkeypatch):
+    from fastapi.testclient import TestClient
+    from opspilot.web.app import create_app
+    db,identity,task=new_task(tmp_path)
+    finish_task_run(db,identity,str(task["run_id"]),"WAITING_INPUT")
+    tid,sid=str(task["task_id"]),str(task["session_id"])
+    actual_classifications=[]
+    def classify(**kwargs):
+        actual_classifications.append(kwargs["prepared"])
+        return {"intent":"FOLLOW_UP","change_summary":"","readonly_action":"INVESTIGATE"}
+    monkeypatch.setattr("opspilot.domain.investigation_updates.classify_input",classify)
+    app=create_app(db_path=db,start_worker=False,credentials={"support-a":"contux-password"},expected_origin="http://testserver")
+    class LoseFirstMessageResponse:
+        dropped=False
+        async def __call__(self,scope,receive,send):
+            drop=scope.get("type")=="http" and scope.get("method")=="POST" and scope.get("path")==f"/api/sessions/{sid}/messages" and not self.dropped
+            async def transmit(message):
+                if drop and message["type"]=="http.response.start":
+                    self.dropped=True
+                    raise ConnectionResetError("DETERMINISTIC_RESPONSE_LOSS_AFTER_DOMAIN_COMMIT")
+                await send(message)
+            await app(scope,receive,transmit)
+    proxy=LoseFirstMessageResponse()
+    with TestClient(proxy,raise_server_exceptions=False) as client:
+        login=client.post("/api/auth/login",headers={"Origin":"http://testserver"},json={"actor_id":"support-a","password":"contux-password"})
+        headers={"Origin":"http://testserver","X-CSRF-Token":login.json()["csrf_token"]}
+        data={"task_id":tid,"input_kind":"CHAT_READONLY","body":"请复核当前事实。"}
+        lost=client.post(f"/api/sessions/{sid}/messages",headers={**headers,"Idempotency-Key":"lost-operation"},json=data)
+        assert proxy.dropped and lost.status_code==500
+        with connect(db) as c:
+            committed=json.loads(c.execute("SELECT result_json FROM commands WHERE idempotency_key='lost-operation'").fetchone()[0])
+        first=client.post(f"/api/sessions/{sid}/messages",headers={**headers,"Idempotency-Key":"lost-operation"},json=data)
+        assert first.status_code==202 and first.json()["message_id"]==committed["message_id"] and first.json()["run_id"]==committed["run_id"]
+        mid=str(first.json()["message_id"])
+        def assess(): return client.post(f"/api/tasks/{tid}/investigation-updates/proposals",headers={**headers,"Idempotency-Key":mid},json={"source_message_id":mid})
+        one,two=assess(),assess()
+        assert one.status_code==two.status_code==200
+        assert one.json()["investigation_run_id"]==two.json()["investigation_run_id"]
+        assert len(actual_classifications)==1
+        conflict=client.post(f"/api/sessions/{sid}/messages",headers={**headers,"Idempotency-Key":"lost-operation"},json={**data,"body":"different payload"})
+        assert conflict.status_code==409
+        new=client.post(f"/api/sessions/{sid}/messages",headers={**headers,"Idempotency-Key":"intentional-second-operation"},json=data)
+        assert new.status_code==202 and new.json()["message_id"]!=mid
+        with connect(db) as c:
+            assert c.execute("SELECT COUNT(*) FROM investigation_update_attempts").fetchone()[0]==1
+        emit("A03-LOST-HTTP",response_lost=True,replay=first.json(),assessment=one.json(),new_intent=new.json(),ledger=ledger(db,tid))
+
+
+def test_a05_chat_retry_limit_is_durable_nonmodel_notice(tmp_path):
+    from opspilot.domain.chat import prepare_chat_attempt,fail_chat_attempt
+    db,identity,task=new_task(tmp_path)
+    finish_task_run(db,identity,str(task["run_id"]),"WAITING_INPUT")
+    source,_=route(db,identity,task,"chat-retries",action="EXPLAIN",text="请解释已有结果。")
+    run=str(source["run_id"]);worker="chat-retry-worker";register_worker_owner(db,worker,os.getpid())
+    attempts=[]
+    for _ in range(3):
+        claim_task_run(db,identity,run)
+        attempt=prepare_chat_attempt(db,run,worker,"deterministic-no-provider")
+        attempts.append(attempt["attempt_id"])
+        result=fail_chat_attempt(db,worker,attempt["attempt_id"],"NETWORK_OUTCOME_UNKNOWN")
+    assert result["status"]=="FAILED"
+    with connect(db) as c:
+        notice=c.execute("SELECT body FROM messages WHERE command_id=?",(f"budget-notice:{run}",)).fetchone()
+        assert notice and "CHAT_ATTEMPTS_EXHAUSTED" in notice[0]
+        assert c.execute("SELECT COUNT(*) FROM chat_run_answers WHERE run_id=?",(run,)).fetchone()[0]==0
+    emit("A05-CHAT-RETRY",run_id=run,attempt_ids=attempts,result=result,notice=notice[0])
+
+
+def test_a05_active_deadline_is_not_extended_and_has_explicit_result(tmp_path):
+    from opspilot.domain.execution_budget import begin_execution_interval,heartbeat_execution_interval,end_execution_interval
+    from opspilot.s3_investigation import S3Nodes
+    db,identity,task=new_task(tmp_path)
+    finish_task_run(db,identity,str(task["run_id"]),"WAITING_INPUT")
+    _,r=route(db,identity,task,"time-limited")
+    run,tid=str(r["investigation_run_id"]),str(task["task_id"]);claim_task_run(db,identity,run)
+    assert begin_execution_interval(db,tid,now_ms=1000000)==300000
+    for i in range(1,61): heartbeat_execution_interval(db,tid,now_ms=1000000+i*5000)
+    clock=end_execution_interval(db,tid,now_ms=1300000)
+    class NoProvider:
+        async def ainvoke(self,_): raise AssertionError("deadline must stop Provider I/O")
+    node=S3Nodes(db,tid,run,NoProvider(),"no-provider",None,[],readonly_followup=True,memory_enabled=False)
+    asyncio.run(node.report({"evidence_ids":[],"tool_observations":[]}))
+    with connect(db) as c:
+        answer=dict(c.execute("SELECT * FROM c1_readonly_followup_runs WHERE run_id=?",(run,)).fetchone())
+    assert answer["reason_code"]=="ACTIVE_TIME_LIMIT" and answer["answer_text"].strip()
+    assert attempt_counts(db,tid)=={"MODEL":0,"MCP":0} and clock["deadline_ms"]==300000
+    emit("A05-TIME",answer=answer,clock=clock)
+
+
+def test_a07_confirmed_correction_gets_initial_run_cap_without_task_reset(tmp_path):
+    from opspilot.domain.investigation_updates import confirm_assessment
+    from opspilot.domain.task_control import apply_pending_critical_inputs
+    db,identity,task=new_task(tmp_path)
+    tid,initial=str(task["task_id"]),str(task["run_id"])
+    for _ in range(8): reserve(db,tid,initial,limit=8)
+    finish_task_run(db,identity,initial,"WAITING_INPUT")
+    source=admit_task_message(db,identity,session_id=str(task["session_id"]),task_id=tid,input_kind="CHAT_READONLY",
+          body="刚才描述错了，请按今天的回调重新调查。",idempotency_key="correct-proposal",defer_task_chat_until_classified=True)
+    mid=str(source["message_id"])
+    prepared=reserve_assessment(db,identity,task_id=tid,source_message_id=mid,idempotency_key=mid,model_id="no-provider")["prepared"]
+    proposal=complete_assessment(db,identity=identity,assessment_id=prepared["assessment_id"],attempt_id=prepared["attempt_id"],
+        classification={"intent":"CRITICAL_CORRECTION","change_summary":"纠正调查时点","readonly_action":"EXPLAIN"})
+    assert proposal["status"]=="PENDING_CONFIRMATION"
+    with connect(db) as c: assert c.execute("SELECT control_revision FROM task_controls WHERE task_id=?",(tid,)).fetchone()[0]==0
+    accepted=confirm_assessment(db,identity,task_id=tid,proposal_id=proposal["proposal_id"],expected_control_revision=0,
+       operation_id=proposal["operation_id"],idempotency_key=proposal["operation_id"])
+    run=str(accepted["run_id"]);claim_task_run(db,identity,run);apply_pending_critical_inputs(db,identity,run)
+    ids=[reserve(db,tid,run)[0] for _ in range(8)]
+    with pytest.raises(BudgetExhausted,match="RUN_MODEL_LIMIT"): reserve(db,tid,run)
+    assert attempt_counts(db,tid)["MODEL"]==16
+    emit("A07",proposal=proposal,confirmation=accepted,new_run_attempts=ids,ledger=ledger(db,tid))
+
+
+@pytest.mark.parametrize("first_source",["knowledge","receiver"])
+def test_a07_compound_followup_reuses_final_answer_at_exact_run_cap(tmp_path,monkeypatch,first_source):
+    from langchain_core.messages import AIMessage
+    from opspilot.investigator import run_investigation
+    import opspilot.investigator as investigator
+    db,identity,task=new_task(tmp_path)
+    tid=str(task["task_id"])
+    finish_task_run(db,identity,str(task["run_id"]),"WAITING_INPUT")
+    _,routed=route(db,identity,task,"compound",text="同时核对回调受理、当前接收状态和当前协议含义，给出来源。")
+    run=str(routed["investigation_run_id"]);inputs=[]
+    class Model:
+        def __init__(self,**_): pass
+        def bind_tools(self,*_,**__): return self
+        async def ainvoke(self,messages):
+            body=json.loads(messages[-1].content);inputs.append(body)
+            by_type={item["type"]:item for item in body["current_mcp_evidence"]}
+            selected=body["retrieved_knowledge_method_only"]
+            available={"knowledge":bool(selected),"receiver":"s3_receiver" in by_type,"delivery":"s3_delivery" in by_type}
+            preferred=[first_source,"receiver" if first_source=="knowledge" else "knowledge","delivery"]
+            choice=next((name for name in preferred if not available[name]),None)
+            if choice:
+                name={"knowledge":"search_callback_knowledge","receiver":"get_receiver_processing","delivery":"get_callback_delivery"}[choice]
+                args={"reason":"this source is needed for a component of the actual compound request"}
+                if choice=="knowledge": args["query"]="HTTP 202 receiver acknowledgement"
+                return AIMessage(content="",tool_calls=[{"id":f"compound-{len(inputs)}","name":name,"args":args}])
+            receiver=by_type["s3_receiver"];doc=next(x for x in selected if x["document_id"]=="receiver-ack-contract-v2")
+            return AIMessage(content=json.dumps({"action":"answer","result_state":"ANSWERED",
+                "target_event_id":receiver["facts"]["event_id"],"processing_claim":receiver["facts"]["status"],
+                "answer":f"本轮投递 HTTP 202 表示受理；同事件接收状态 {receiver['facts']['status']}。协议来源 {doc['document_id']}@{doc['version']}，当前状态来源 {receiver['id']}。"},ensure_ascii=False))
+    monkeypatch.setattr(investigator,"ChatOpenAI",Model)
+    monkeypatch.setenv("OPSPILOT_MODEL_API_KEY","deterministic-no-paid-provider")
+    monkeypatch.setenv("OPSPILOT_MODEL_NAME","deterministic-no-paid-provider")
+    asyncio.run(run_investigation(tid,"support-a",db_path=db,checkpoint_db_path=tmp_path/"compound-checkpoint.sqlite3",run_id=run))
+    with connect(db) as c:
+        answer=dict(c.execute("SELECT answer_text,result_state,result_json FROM c1_readonly_followup_runs WHERE run_id=?",(run,)).fetchone())
+        assert c.execute("SELECT COUNT(*) FROM s3_diagnoses").fetchone()[0]==0
+        assert c.execute("SELECT COUNT(*) FROM d3_action_intents").fetchone()[0]==0
+    assert len(inputs)==4 and answer["result_state"]=="ANSWERED"
+    assert attempt_counts(db,tid)=={"MODEL":4,"MCP":3}
+    assert json.loads(answer["result_json"])["delivery_mode"]=="MODEL"
+    emit("A07-COMPOUND",first_source=first_source,actual_inputs=inputs,answer=answer,ledger=ledger(db,tid),paid_provider_calls=0)

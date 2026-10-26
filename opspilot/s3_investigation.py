@@ -114,6 +114,10 @@ class S3Nodes:
     def limits(self):
         return task_attempt_limits(self.db, self.task)
 
+    def budget(self):
+        from opspilot.domain.execution_budget import investigation_budget_snapshot
+        return investigation_budget_snapshot(self.db,self.task,self.run)
+
     @staticmethod
     def _source_signature(metadata):
         return digest_json({key: metadata.get(key) for key in (
@@ -151,8 +155,7 @@ class S3Nodes:
     def next_step(self, state):
         """User delivery/continuation, separate from Domain diagnosis sufficiency."""
         draft = state.get("diagnosis_draft", {})
-        counts = attempt_counts(self.db, self.task)
-        if draft.get("s3_response") or counts["MODEL"] >= self.limits()["MODEL"]:
+        if draft.get("s3_response") or not self.budget()["remaining_attempts"]["MODEL"]:
             return "report"
         if state.get("last_investigation_action") in {"BUDGET_EXHAUSTED", "POLICY_NO_ACTION"} or draft.get("s3_error"):
             return "report"
@@ -192,6 +195,7 @@ class S3Nodes:
             prior_followups, prior_followup_exclusions,
         )
         excluded.extend(fact_excluded + memory_excluded + prior_excluded_sources)
+        attempt_budget = self.budget()
         body = {
             "trusted_binding":{"task_id":self.task,"service_id":SERVICE,"route":ROUTE,"contract_version":contract_version},
             "untrusted_user_inputs":context["inputs"],
@@ -209,7 +213,8 @@ class S3Nodes:
             "unexecuted_candidates":draft.get("s3_remaining_candidates", []),
             "candidate_decisions":draft.get("s3_candidate_decisions", [])[-12:],
             "decision_feedback":state.get("last_investigation_action"),
-            "remaining_attempts":{k:limit-attempt_counts(self.db,self.task)[k] for k,limit in self.limits().items()},
+            "remaining_attempts":attempt_budget["remaining_attempts"],
+            "attempt_budget":attempt_budget,
         }
         system = (FOLLOWUP_PROMPT if self.readonly_followup else PROMPT) if not normalize else (
             "Interpret the untrusted user symptom for a read-only asynchronous order investigation. Return only JSON: "
@@ -252,7 +257,7 @@ class S3Nodes:
 
     async def model_call(self, state, *, normalize=False, explain=False):
         messages, metadata = self.prompt(state, normalize=normalize, explain=explain)
-        specs = [] if normalize or explain or attempt_counts(self.db,self.task)["MCP"] >= self.limits()["MCP"] else self.specs
+        specs = [] if normalize or explain or not self.budget()["remaining_attempts"]["MCP"] else self.specs
         metadata["context_component_estimates"] = {
             "prior_readonly_followups": estimate_text_tokens(
                 canonical_json(metadata["prior_readonly_followups"]),
@@ -308,9 +313,11 @@ class S3Nodes:
 
     async def investigate(self, state):
         draft = dict(state.get("diagnosis_draft", {}))
-        counts = attempt_counts(self.db,self.task)
-        if counts["MODEL"] >= self.limits()["MODEL"] or (self.strategy in {"R","H"} and counts["MCP"] >= self.limits()["MCP"]):
-            return {"pending_call_refs":[],"policy_tool_call":{},"last_investigation_action":"BUDGET_EXHAUSTED"}
+        budget = self.budget()
+        remaining = budget["remaining_attempts"]
+        if not remaining["MODEL"] or (self.strategy in {"R","H"} and not remaining["MCP"]):
+            draft["s3_budget_reason"] = budget["limit_reasons"]["MODEL"] or budget["limit_reasons"]["MCP"]
+            return {"pending_call_refs":[],"policy_tool_call":{},"last_investigation_action":"BUDGET_EXHAUSTED","diagnosis_draft":draft}
         if self.strategy in {"R","H"}:
             normalized_call = draft.get("s3_normalization_call_id")
             if self.strategy == "H" and not draft.get("s3_normalized"):
@@ -352,8 +359,9 @@ class S3Nodes:
                     "pending_call_refs":[],"diagnosis_draft":draft,"last_investigation_action":"POLICY_TOOL_SELECTED" if name else "POLICY_NO_ACTION"}
         try:
             call_id, calls, text = await self.model_call(state)
-        except BudgetExhausted:
-            return {"pending_call_refs":[],"last_investigation_action":"BUDGET_EXHAUSTED"}
+        except BudgetExhausted as error:
+            draft["s3_budget_reason"] = error.reason_code
+            return {"pending_call_refs":[],"last_investigation_action":"BUDGET_EXHAUSTED","diagnosis_draft":draft}
         except Exception as error:
             draft["s3_error"] = type(error).__name__
             return {"pending_call_refs":[],"last_investigation_action":"MODEL_NO_PROGRESS","diagnosis_draft":draft}
@@ -413,13 +421,15 @@ class S3Nodes:
             return {"pending_call_refs":[],"policy_tool_call":{},"evidence_ids":ids,
                     "diagnosis_draft":draft,"tool_observations":observations,
                     "last_investigation_action":"MCP_NO_PROGRESS"}
-        if attempt_counts(self.db,self.task)["MCP"] >= self.limits()["MCP"]:
+        try:
+            attempt,_ = reserve_attempt(self.db,self.task,"MCP",self.limits()["MCP"],call_id=call_id,tool_call_id=tool_id,
+                                       tool_name=name,argument_digest=argument_digest,run_id=self.run,
+                                       task_run_control=load_investigation_context(self.db,self.task,self.run)["task_run_control"])
+        except BudgetExhausted as error:
             if ref:
                 complete_pending_tool_call(self.db,self.task,call_id,tool_id,"BUDGET_REJECTED")
-            return {"pending_call_refs":[],"policy_tool_call":{},"last_investigation_action":"BUDGET_EXHAUSTED"}
-        attempt,_ = reserve_attempt(self.db,self.task,"MCP",self.limits()["MCP"],call_id=call_id,tool_call_id=tool_id,
-                                   tool_name=name,argument_digest=argument_digest,run_id=self.run,
-                                   task_run_control=load_investigation_context(self.db,self.task,self.run)["task_run_control"])
+            draft["s3_budget_reason"] = error.reason_code
+            return {"pending_call_refs":[],"policy_tool_call":{},"diagnosis_draft":draft,"last_investigation_action":"BUDGET_EXHAUSTED"}
         try:
             result = await asyncio.wait_for(self.client.call_tool(name,args),timeout=12)
             if result.is_error:
@@ -525,7 +535,7 @@ class S3Nodes:
                 response, summary_call = candidate, cached.get("call_id")
         # A current final response never needs an unconditional report model call.
         # Legacy explanation-only paths may still request one bounded explanation.
-        if response is None and not cached and self.strategy == "A" and attempt_counts(self.db,self.task)["MODEL"] < self.limits()["MODEL"]:
+        if response is None and not cached and self.strategy == "A" and self.budget()["remaining_attempts"]["MODEL"]:
             try:
                 call, _, text = await self.model_call(state, explain=True)
                 candidate = parse_response(text)
@@ -535,7 +545,10 @@ class S3Nodes:
                     response, summary_call = candidate, call
             except Exception as error:
                 draft["s3_error"] = type(error).__name__
-        reason = "FOLLOWUP_BUDGET_OR_PROVIDER_EXHAUSTED" if attempt_counts(self.db,self.task)["MODEL"] >= self.limits()["MODEL"] else "FOLLOWUP_SOURCE_INSUFFICIENT"
+        budget = self.budget()
+        reason = draft.get("s3_budget_reason") or budget["limit_reasons"]["MODEL"] or "FOLLOWUP_SOURCE_INSUFFICIENT"
+        if budget["policy_version"] == "LEGACY_V1" and reason == "TASK_MODEL_LIMIT":
+            reason = "FOLLOWUP_BUDGET_OR_PROVIDER_EXHAUSTED"
         if cached and response is None:
             reason = "FOLLOWUP_RESPONSE_SOURCE_OR_EVENT_INVALIDATED"
         source_refs = []
@@ -553,6 +566,9 @@ class S3Nodes:
                 reason, result_state = "FOLLOWUP_CLARIFICATION_REQUIRED", "PARTIAL"
         else:
             summary, delivery = factual_partial(evidence, knowledge, context["inputs"], "RULE_BASELINE" if self.strategy in {"R","H"} else reason)
+            if budget["policy_version"] == "CONTUX_S3_V1" and reason.endswith("_LIMIT"):
+                summary += f"\n停止原因：{reason}；Task 累计 {budget['task_used']}，本 Run 累计 {budget['run_used']}。"
+                summary += "以上业务事实来自本 Run 的有效工具观察。" if evidence else "本轮未取得有效业务观察，未将历史观察当作本次新取证。"
             frame = event_frame(evidence, context["inputs"])
             result_state = "ANSWERED" if self.strategy in {"R","H"} and evidence and frame["target_event_id"] else "PARTIAL"
         if self.readonly_followup:
@@ -562,6 +578,7 @@ class S3Nodes:
                 result={"task_id":self.task,"source_message_id":context["task_run_control"]["source_message_id"],
                         "gate":gate,"excluded_sources":excluded,"observation_ids":[row["observation_id"] for row in observations],
                         "diagnosis_persisted":False,"readonly_followup":True,**delivery,
+                        "attempt_budget":budget,
                         "candidate_decisions":draft.get("s3_candidate_decisions",[]),
                         "unexecuted_candidates":draft.get("s3_remaining_candidates",[])},
                 reason_code=None if result_state == "ANSWERED" else reason,

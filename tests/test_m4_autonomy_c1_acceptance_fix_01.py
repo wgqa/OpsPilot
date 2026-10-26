@@ -25,6 +25,8 @@ def _readonly_run(tmp_path: Path, monkeypatch) -> tuple[Path, str, str, str, str
     db = tmp_path / "c1-acceptance-fix.sqlite3"
     reset_fixture(db, "S1_POS")
     session_id, task_id, diagnosis_run_id, diagnosis_id = _diagnosed_task(db)
+    from tests.legacy_budget_support import use_legacy_s3_budget_fixture
+    use_legacy_s3_budget_fixture(db, task_id)  # Original FIX-01 targets an existing 8/6 Task.
     app = create_app(
         db_path=db,
         start_worker=False,

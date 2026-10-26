@@ -411,6 +411,8 @@ def test_sla_gate_exact_deadline_is_wait_before_contact_at_and_after(tmp_path: P
     db, identity, task = _prepared_task(
         tmp_path, "DELIVERED_PENDING", "async-order-2", processing_sla_seconds=300,
     )
+    from tests.legacy_budget_support import use_legacy_s3_budget_fixture
+    use_legacy_s3_budget_fixture(db,str(task["task_id"]))  # Historical nine-read clock experiment.
     now = datetime.now(timezone.utc).replace(microsecond=0)
 
     class FrozenDateTime(datetime):

@@ -331,6 +331,21 @@ def reserve_assessment(
             ],
             "prior_readonly_followup_exclusions": prior_followup_exclusions,
         })
+        from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
+
+        auxiliary = auxiliary_budget_in_transaction(connection,task_id)
+        if auxiliary["reason_code"]:
+            # Persist the route decision without inventing a Provider attempt.
+            connection.execute(
+                "UPDATE investigation_update_assessments SET status='FAILED',failure_code=?,completed_at=? WHERE assessment_id=?",
+                (auxiliary["reason_code"],now,assessment_id),
+            )
+            from opspilot.domain.chat import record_chat_limit_in_transaction
+
+            record_chat_limit_in_transaction(connection,str(source_chat["run_id"]),auxiliary["reason_code"])
+            row = connection.execute("SELECT * FROM investigation_update_assessments WHERE assessment_id=?",(assessment_id,)).fetchone()
+            return {**_public_assessment(connection,row),"should_call_model":False,
+                    "fallback_reason":auxiliary["reason_code"],"auxiliary_budget":auxiliary}
         connection.execute(
             """INSERT INTO investigation_update_attempts
                (attempt_id, assessment_id, attempt_no, model_id, prompt_digest, input_digest,

@@ -1627,7 +1627,55 @@ def _chat_attempt_counts(connection: sqlite3.Connection, run_id: str) -> tuple[i
     return answer_count, compression_count
 
 
+def record_chat_limit_in_transaction(connection: sqlite3.Connection, run_id: str, reason: str) -> None:
+    """A durable non-model limit notice, never a successful Provider answer.
+
+    Called only by existing trusted admission/reservation/failure transactions.
+    No fake attempt, ContextManifest or current business fact is manufactured.
+    """
+    run = connection.execute("SELECT * FROM task_runs WHERE run_id=? AND kind='CHAT_READONLY'",(run_id,)).fetchone()
+    if run is None or run["status"] in {"SUCCEEDED","BLOCKED"}:
+        return
+    now = _now_text()
+    command_id = f"budget-notice:{run_id}"
+    if connection.execute("SELECT 1 FROM messages WHERE command_id=?",(command_id,)).fetchone() is None:
+        text = f"本次解释未完成：{reason}。这是程序生成的限制说明，未提交模型最终答复；此前已预留或失败的调用仍计入额度。本说明未重新取得业务事实，历史结论不能冒充本次新调查结果。Task 和既有业务授权保持不变。"
+        sequence = int(connection.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM messages WHERE session_id=?",(run["session_id"],)).fetchone()[0])
+        mid = f"message-{uuid.uuid4()}"
+        connection.execute(
+            """INSERT INTO messages (message_id,tenant_id,session_id,task_id,sequence,role,input_kind,body,body_digest,command_id,created_at)
+               VALUES (?,?,?,?,?,'ASSISTANT','CHAT_READONLY',?,?,?,?)""",
+            (mid,run["tenant_id"],run["session_id"],run["task_id"],sequence,text,_digest(text),command_id,now),
+        )
+        source = connection.execute("SELECT body_digest FROM messages WHERE message_id=?",(run["source_message_id"],)).fetchone()
+        if source:
+            connection.execute(
+                "INSERT INTO chat_message_sources (message_id,source_kind,source_ref,source_digest) VALUES (?,'MESSAGE',?,?)",
+                (mid,run["source_message_id"],source["body_digest"]),
+            )
+        write_outbox_event(connection,tenant_id=str(run["tenant_id"]),task_id=run["task_id"],
+            session_id=str(run["session_id"]),source_kind="RUN",source_id=run_id,event_kind="CHAT_BUDGET_STOP",
+            payload={"run_id":run_id,"answer_message_id":mid,"reason_code":reason,"model_generated":False},created_at=now)
+    connection.execute("UPDATE task_runs SET status='FAILED',blocked_reason=?,ended_at=? WHERE run_id=?",(reason,now,run_id))
+    write_outbox_event(connection,tenant_id=str(run["tenant_id"]),task_id=run["task_id"],
+        session_id=str(run["session_id"]),source_kind="RUN",source_id=run_id,event_kind="RUN_STATUS_FAILED",
+        payload={"run_id":run_id,"run_status":"FAILED","reason_code":reason},created_at=now)
+
+
+def _stop_at_auxiliary_limit(connection, run):
+    from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
+    budget = auxiliary_budget_in_transaction(connection,run["task_id"])
+    if budget["reason_code"]:
+        record_chat_limit_in_transaction(connection,str(run["run_id"]),budget["reason_code"])
+        return {"error":budget["reason_code"],"run_id":str(run["run_id"]),"auxiliary_budget":budget}
+    return None
+
+
 def _fail_exhausted_chat_run(connection: sqlite3.Connection, run: sqlite3.Row, run_id: str, attempt_count: int) -> None:
+    from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
+    if auxiliary_budget_in_transaction(connection,run["task_id"])["limit"] is not None:
+        record_chat_limit_in_transaction(connection,run_id,"CHAT_ATTEMPTS_EXHAUSTED")
+        return
     now = _now_text()
     connection.execute(
         "UPDATE task_runs SET status = 'FAILED', blocked_reason = 'CHAT_ATTEMPTS_EXHAUSTED', ended_at = ? WHERE run_id = ? AND status = 'RUNNING'",
@@ -1671,6 +1719,9 @@ def prepare_chat_compression_attempt(
             raise TaskControlError("SESSION_SCOPE_DENIED")
         actor = trusted_identity(path, str(owner["owner_id"]))
         _verify_identity(connection, actor)
+        stopped = _stop_at_auxiliary_limit(connection,run)
+        if stopped:
+            return stopped
         prepared = _prepare_context(connection, run, model_id, path)
         if not prepared.get("needs_compression"):
             return None
@@ -1886,6 +1937,9 @@ def fail_chat_compression_attempt(
                 "attempt_id": attempt_id, "reason_code": reason}, created_at=now,
         )
         if not retryable:
+            from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
+            if auxiliary_budget_in_transaction(connection,attempt["task_id"])["limit"] is not None:
+                record_chat_limit_in_transaction(connection,str(attempt["run_id"]),reason)
             run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (attempt["run_id"],)).fetchone()
             write_outbox_event(
                 connection, tenant_id=str(run["tenant_id"]), task_id=str(run["task_id"]) if run["task_id"] else None,
@@ -1950,6 +2004,9 @@ def prepare_chat_attempt(path: str | Path, run_id: str, worker_id: str, model_id
             raise TaskControlError("SESSION_SCOPE_DENIED")
         actor = trusted_identity(path, str(owner["owner_id"]))
         _verify_identity(connection, actor)
+        stopped = _stop_at_auxiliary_limit(connection,run)
+        if stopped:
+            return stopped
         prepared = _prepare_context(connection, run, model_id, path)
         if prepared.get("needs_compression"):
             return {"error": "CHAT_CONTEXT_COMPRESSION_REQUIRED", "run_id": run_id}
@@ -2238,6 +2295,9 @@ def fail_chat_attempt(path: str | Path, worker_id: str, attempt_id: str, error_c
                 "model_attempt_id": attempt_id, "status": "FAILED", "reason_code": reason}, created_at=now,
         )
         if status == "FAILED":
+            from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
+            if auxiliary_budget_in_transaction(connection,attempt["task_id"])["limit"] is not None:
+                record_chat_limit_in_transaction(connection,str(run["run_id"]),reason)
             write_outbox_event(
                 connection, tenant_id=str(run["tenant_id"]), task_id=str(run["task_id"]) if run["task_id"] else None,
                 session_id=str(run["session_id"]), source_kind="RUN", source_id=str(run["run_id"]),

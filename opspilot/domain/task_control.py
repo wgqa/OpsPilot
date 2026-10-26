@@ -1056,9 +1056,14 @@ def create_task_with_initial_run(
         connection.execute(
             """INSERT INTO task_execution_budgets
                (task_id, tenant_id, active_elapsed_ms, active_started_at, heartbeat_at,
-                deadline_ms, deadline_reached_at, updated_at)
-               VALUES (?, ?, 0, NULL, NULL, ?, NULL, ?)""",
-            (task_id, identity.tenant_id, deadline_ms, now),
+                deadline_ms, deadline_reached_at, updated_at, policy_version,
+                model_limit, mcp_limit, aux_provider_limit)
+               VALUES (?, ?, 0, NULL, NULL, ?, NULL, ?, ?, ?, ?, ?)""",
+            (task_id, identity.tenant_id, deadline_ms, now,
+             "CONTUX_S3_V1" if service_id == "orders-async-demo" else "LEGACY_V1",
+             24 if service_id == "orders-async-demo" else 8,
+             18 if service_id == "orders-async-demo" else 6,
+             8 if service_id == "orders-async-demo" else None),
         )
         _insert_outbox(
             connection, identity.tenant_id, task_id, session_id, "COMMAND", command_id,

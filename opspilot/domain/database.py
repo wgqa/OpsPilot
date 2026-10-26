@@ -339,6 +339,8 @@ CREATE TABLE IF NOT EXISTS task_execution_budgets (
     updated_at TEXT NOT NULL,
     model_limit INTEGER NOT NULL DEFAULT 8,
     mcp_limit INTEGER NOT NULL DEFAULT 6,
+    policy_version TEXT NOT NULL DEFAULT 'LEGACY_V1',
+    aux_provider_limit INTEGER,
     FOREIGN KEY (task_id, tenant_id) REFERENCES task_bindings(task_id, tenant_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS ix_task_execution_budget_tenant ON task_execution_budgets(tenant_id, task_id);
@@ -1080,7 +1082,7 @@ def initialize(path: str | Path) -> None:
         from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 16:
+        if version > 17:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1433,6 +1435,15 @@ def initialize(path: str | Path) -> None:
                 if name not in columns:
                     connection.execute(f"ALTER TABLE task_execution_budgets ADD COLUMN {name} INTEGER NOT NULL DEFAULT {default}")
             connection.execute("PRAGMA user_version = 16")
+            version = 16
+        if version < 17:
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(task_execution_budgets)")}
+            if "policy_version" not in columns:
+                connection.execute("ALTER TABLE task_execution_budgets ADD COLUMN policy_version TEXT NOT NULL DEFAULT 'LEGACY_V1'")
+            if "aux_provider_limit" not in columns:
+                connection.execute("ALTER TABLE task_execution_budgets ADD COLUMN aux_provider_limit INTEGER")
+            # Existing tasks keep their exact counters, limits and legacy behavior.
+            connection.execute("PRAGMA user_version = 17")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:

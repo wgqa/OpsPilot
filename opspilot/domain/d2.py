@@ -27,8 +27,9 @@ class ScopeDenied(D2Error):
 
 
 class BudgetExhausted(D2Error):
-    def __init__(self, kind: str, used: int, limit: int):
-        super().__init__(f"{kind} attempt budget exhausted ({used}/{limit}).")
+    def __init__(self, kind: str, used: int, limit: int, *, reason_code: str | None = None):
+        self.reason_code = reason_code or f"TASK_{kind}_LIMIT"
+        super().__init__(f"{self.reason_code}: {kind} attempt budget exhausted ({used}/{limit}).")
         self.kind = kind
         self.used = used
         self.limit = limit
@@ -592,7 +593,7 @@ def reserve_attempt(
     task_run_control: dict[str, object] | None = None,
     run_id: str | None = None,
 ) -> tuple[str, int]:
-    if kind not in {"MODEL", "MCP"} or limit < 1:
+    if kind not in {"MODEL", "MCP"} or type(limit) is not int or limit < 1:
         raise ValueError("Invalid D2 attempt kind or limit.")
     attempt_id = f"attempt-{uuid.uuid4()}"
     with connect(path) as connection:
@@ -619,12 +620,22 @@ def reserve_attempt(
                 or str(run["kind"]) == "CHAT_READONLY" or str(run["status"]) != "RUNNING"
             ):
                 raise ScopeDenied("Attempt Run is not an active business Run for this TaskBinding.")
-        used = int(
-            connection.execute(
-                "SELECT COUNT(*) AS n FROM d2_attempts WHERE task_id = ? AND kind = ?",
-                (task_id, kind),
-            ).fetchone()["n"]
-        )
+        from opspilot.domain.execution_budget import investigation_budget_in_transaction
+
+        budget = investigation_budget_in_transaction(connection, task_id, run_id)
+        if budget["policy_version"] == "CONTUX_S3_V1":
+            from opspilot.domain.task_control import assert_task_control_in_transaction
+
+            if task_run_control is not None and task_run_control.get("run_id") != run_id:
+                raise ScopeDenied("TASK_ATTEMPT_RUN_CONTEXT_MISMATCH")
+            owner = connection.execute("SELECT tenant_id FROM task_bindings WHERE task_id=?",(task_id,)).fetchone()
+            assert_task_control_in_transaction(connection,str(owner["tenant_id"]),task_id,run_id=run_id)
+        used = budget["task_used"][kind]
+        reason = budget["limit_reasons"][kind]
+        if reason and budget["policy_version"] == "CONTUX_S3_V1":
+            run_limit = budget["run_limits"][kind] if budget["run_limits"] else budget["task_limits"][kind]
+            raise BudgetExhausted(kind, budget["run_used"][kind] if reason.startswith("RUN_") else used,
+                                  run_limit if reason.startswith("RUN_") else budget["task_limits"][kind], reason_code=reason)
         if used >= limit:
             raise BudgetExhausted(kind, used, limit)
         connection.execute(
@@ -707,11 +718,9 @@ def attempt_counts(path: str | Path, task_id: str) -> dict[str, int]:
 
 
 def _task_attempt_limits(connection, task_id):
-    row = connection.execute("SELECT model_limit,mcp_limit FROM task_execution_budgets WHERE task_id=?", (task_id,)).fetchone()
-    pair = (row[0], row[1]) if row else (MAX_MODEL_CALLS, MAX_MCP_ATTEMPTS)
-    if any(type(value) is not int for value in pair) or pair not in {(8, 6), (12, 8), (16, 10)}:
-        raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
-    return {"MODEL": pair[0], "MCP": pair[1]}
+    from opspilot.domain.execution_budget import attempt_policy_in_transaction
+    policy = attempt_policy_in_transaction(connection, task_id)
+    return {"MODEL":policy["MODEL"], "MCP":policy["MCP"]}
 
 
 def task_attempt_limits(path, task_id):
@@ -732,9 +741,15 @@ def configure_s3_experiment_budget(path, task_id, model_limit, mcp_limit):
             return current
         if connection.execute("SELECT 1 FROM d2_attempts WHERE task_id=? LIMIT 1", (task_id,)).fetchone():
             raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
-        if current != {"MODEL": 8, "MCP": 6}:
+        from opspilot.domain.execution_budget import auxiliary_attempt_counts_in_transaction, attempt_policy_in_transaction
+        policy = attempt_policy_in_transaction(connection,task_id)
+        if sum(auxiliary_attempt_counts_in_transaction(connection,task_id).values()):
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+        if current != {"MODEL": 8, "MCP": 6} and policy["version"] != "CONTUX_S3_V1":
             raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED")
-        changed = connection.execute("UPDATE task_execution_budgets SET model_limit=?,mcp_limit=? WHERE task_id=?", (model_limit, mcp_limit, task_id))
+        # Preserve the explicit, pre-execution historical experiment setup API.
+        # It is never exposed to Web/MCP/model inputs or used by normal creation.
+        changed = connection.execute("UPDATE task_execution_budgets SET model_limit=?,mcp_limit=?,policy_version='LEGACY_V1',aux_provider_limit=NULL WHERE task_id=?", (model_limit, mcp_limit, task_id))
         if changed.rowcount != 1:
             raise ValueError("A persistent controlled Task is required")
     return {"MODEL": model_limit, "MCP": mcp_limit}
