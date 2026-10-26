@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { projectConversation, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -15,7 +16,6 @@ const messages = ref<MessageItem[]>([]);
 const sessionHistoryReady = ref(false);
 const taskId = ref('');
 const investigationUpdates = ref<InvestigationUpdateAssessment[]>([]);
-const pendingAssessmentMessageIds = ref<Set<string>>(new Set());
 const investigationKind = ref<'AUTH_INCIDENT' | 'ASYNC_CALLBACK'>('AUTH_INCIDENT');
 const s3OrderResources = ref<S3OrderResource[]>([]);
 const selectedS3OrderId = ref('');
@@ -60,30 +60,17 @@ let seenEventSeq = new Set<number>();
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const isApprover = computed(() => user.value?.role === 'APPROVER');
 const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run.kind !== 'CHAT_READONLY') ?? null);
-const pendingInvestigationUpdates = computed(() => investigationUpdates.value.filter(
-  (item) => item.proposal !== null && item.status === 'PENDING_CONFIRMATION',
-));
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
-const investigatedFollowupMessageIds = computed(() => new Set(
-  investigationUpdates.value
-    .filter((item) => item.intent === 'FOLLOW_UP' && item.follow_up_action === 'INVESTIGATE')
-    .map((item) => item.source_message_id),
-));
-const suppressedChatAnswerMessageIds = computed(() => new Set([
-  ...pendingAssessmentMessageIds.value,
-  ...investigatedFollowupMessageIds.value,
-]));
-const displayMessages = computed(() => messages.value.filter((message) => {
-  if (message.role !== 'ASSISTANT' || !message.task_id) return true;
-  if (!sessionHistoryReady.value) return false;
-  const source = [...messages.value].reverse().find((candidate) =>
-    candidate.role === 'USER' && candidate.task_id === message.task_id && candidate.sequence < message.sequence,
-  );
-  return !source || !suppressedChatAnswerMessageIds.value.has(source.message_id);
+const conversationProjection = computed(() => projectConversation({
+  messages: sessionHistoryReady.value ? messages.value : [],
+  runs: (inspector.value?.runs ?? []) as unknown as ConversationRun[],
+  investigationAnswers: (inspector.value?.investigation_answers ?? []) as ConversationAnswer[],
+  readonlyFollowups: (inspector.value?.readonly_followups ?? []) as ConversationFollowup[],
+  assessments: investigationUpdates.value as unknown as ConversationAssessment[],
+  activeChatRun: activeChatRun.value as unknown as ConversationRun | null,
+  chunks: chunks.value,
+  s3Outcome: inspector.value?.trusted_state.s3_outcome as Record<string, unknown> | null,
 }));
-const displayStream = computed(() => activeChatRun.value?.status === 'RUNNING'
-  && chunks.value.length > 0
-  && !suppressedChatAnswerMessageIds.value.has(String(activeChatRun.value.source_message_id ?? '')));
 const latestContextProvenance = computed(() => inspector.value?.investigator_context_provenance[0] ?? null);
 const activeChatContext = computed(() => inspector.value?.chat_context_provenance.find(
   (item) => item.run_id === activeChatRun.value?.run_id,
@@ -540,7 +527,6 @@ async function sendMessage(): Promise<void> {
   const body = draft.value.trim();
   if (!sessionId.value || !body || !csrf.value || busy.value) return;
   busy.value = true;
-  let pendingMessageId: string | null = null;
   let fallbackChatRunId: string | null = null;
   errorMessage.value = '';
   notice.value = '';
@@ -550,10 +536,6 @@ async function sendMessage(): Promise<void> {
     const accepted = await api.send(sessionId.value, body, taskId.value || null, csrf.value);
     fallbackChatRunId = taskId.value ? accepted.run_id : null;
     draft.value = '';
-    if (taskId.value) {
-      pendingMessageId = accepted.message_id;
-      pendingAssessmentMessageIds.value = new Set([...pendingAssessmentMessageIds.value, accepted.message_id]);
-    }
     activeChatRun.value = await api.run(accepted.run_id);
     await refreshSessionMessagesOnly();
     if (taskId.value) {
@@ -592,11 +574,6 @@ async function sendMessage(): Promise<void> {
       errorMessage.value = explainError(error);
     }
   } finally {
-    if (pendingMessageId) {
-      const pending = new Set(pendingAssessmentMessageIds.value);
-      pending.delete(pendingMessageId);
-      pendingAssessmentMessageIds.value = pending;
-    }
     busy.value = false;
   }
 }
@@ -916,6 +893,16 @@ function readableUpdateStatus(value: unknown): string {
     NO_UPDATE: '只解释，不更新 Task',
     FAILED: '模型判断失败，未更新 Task',
   } as Record<string, string>)[String(value)] ?? String(value ?? '未知');
+}
+
+function readableS3Outcome(value: unknown): string {
+  return ({
+    ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障',
+    CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败',
+    RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理',
+    RECEIVER_PROCESSED: '同一回调事件已由接收方处理完成',
+    INCONCLUSIVE: '当前证据不足，需要继续核实',
+  } as Record<string, string>)[String(value)] ?? '调查结果';
 }
 
 function readableGate(value: unknown): string {
@@ -1299,61 +1286,83 @@ onBeforeUnmount(() => {
           <div v-else-if="messages.length === 0 && !loading" class="empty-conversation">
             <div class="message-orb">✳</div><h2>开始一段新的调查对话</h2><p>提出问题；回答会由配置的模型根据当前可访问事实生成。</p>
           </div>
-          <article v-for="message in displayMessages" :key="message.message_id" class="message-row" :class="message.role.toLowerCase()" :data-message-id="message.message_id">
-            <div class="message-avatar">{{ message.role === 'USER' ? user.actor_id.slice(-1).toUpperCase() : '✳' }}</div>
-            <div class="message-content">
-              <div class="message-meta"><strong>{{ message.role === 'USER' ? user.actor_id : 'OpsPilot' }}</strong><span>{{ dateLabel(message.created_at) }}</span><span v-if="sourceKind(message)" class="message-task">{{ readableInputKind(sourceKind(message)) }} · 未验证</span><span v-else-if="message.role === 'USER' && message.task_id" class="message-task">只读对话</span></div>
-              <div class="message-bubble">{{ message.body }}</div>
-            </div>
-          </article>
-          <div v-if="inspector && inspector.trusted_state.s3_outcome" class="s3-result-card" data-testid="s3-diagnosis"><span>{{ (inspector.trusted_state.s3_outcome as Record<string, unknown>).currentness === 'CURRENT' ? '当前调查结果 · 持久业务回执' : '历史调查结果 · 当前性已失效' }}</span><b>{{ ({ ORDER_PROCESSING: '订单仍在处理，尚不能认定回调故障', CALLBACK_DELIVERY_FAILED: '订单已完成，回调投递失败', RECEIVER_PROCESSING_UNCONFIRMED: '回调已被接收，接收方仍在排队处理', RECEIVER_PROCESSED: '同一回调事件已由接收方处理完成', INCONCLUSIVE: '当前证据不足，需要继续核实' } as Record<string, string>)[String((inspector.trusted_state.s3_outcome as Record<string, unknown>).outcome)] }}</b><p v-if="(inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation && !(inspector.investigation_answers ?? []).some(item => item.report_ref === (inspector!.trusted_state.s3_outcome as Record<string, unknown>).receipt_id)">{{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).explanation) }}</p><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String((inspector.trusted_state.s3_outcome as Record<string, unknown>).receipt_id) }}</small></div>
-          <article v-for="followup in [...(inspector?.readonly_followups ?? [])].reverse()" :key="followup.run_id" class="readonly-followup-card" :data-testid="`readonly-followup-${followup.run_id}`" :data-source-message-id="followup.source_message_id">
-            <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">READONLY TASK FOLLOW-UP</span><h2>同一任务的连续调查</h2></div><span class="status-badge" :class="followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ followup.result_state === 'ANSWERED' ? '已答复' : followup.result_state === 'PARTIAL' ? '结果与待核实事项' : followup.result_state === 'NOT_COMPLETED' ? '需要补充' : '调查中' }}</span></div>
-            <p>{{ followup.answer_text || '本次补查尚未形成可展示的回答。' }}</p>
-            <details class="followup-sources"><summary>查看来源与调查记录（{{ followup.source_refs.length }}）</summary>
-              <ul><li v-for="(sourceRef, index) in followup.source_refs" :key="index"><code>{{ JSON.stringify(sourceRef) }}</code></li></ul>
-              <small>Run {{ followup.run_id }} · 来源消息 {{ followup.source_message_id }} · 控制版本 {{ followup.expected_control_revision }}</small>
-              <small v-if="followup.reason_code">结果说明：{{ followup.reason_code }}</small>
-              <small v-if="followup.result.delivery_mode">交付来源：{{ followup.result.delivery_mode === 'MODEL' ? '模型依据当前来源回答' : '可信事实与未知事项汇总' }}</small>
-            </details>
-          </article>
-          <article v-for="answer in [...(inspector?.investigation_answers ?? [])].reverse()" :key="answer.run_id" class="readonly-followup-card" :data-testid="`investigation-answer-${answer.run_id}`" :data-source-message-id="answer.source_message_id">
-            <div class="update-proposal-heading"><h2>本次调查答复</h2><span class="status-badge" :class="answer.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ answer.result_state === 'ANSWERED' ? '已答复' : '事实与待核实事项' }}</span></div>
-            <small>形成于 {{ dateLabel(answer.created_at) }}。以下是该 Run 当时的观察；刷新页面不会重新取证。</small>
-            <p>{{ answer.answer_text }}</p>
-            <details class="followup-sources"><summary>查看形成时间与来源（{{ answer.source_refs.length }}）</summary>
-              <small>{{ dateLabel(answer.created_at) }} · {{ answer.result.delivery_mode === 'MODEL' ? '模型依据当时有效来源回答' : '可信事实与未知事项汇总' }}；这是对话答复，不授予业务操作资格。</small>
-              <ul><li v-for="(sourceRef, index) in answer.source_refs" :key="index"><code>{{ JSON.stringify(sourceRef) }}</code></li></ul>
-              <small>来源消息 {{ answer.source_message_id }} · Run {{ answer.run_id }}</small>
-            </details>
-          </article>
-          <section
-            v-for="assessment in pendingInvestigationUpdates"
-            :key="assessment.assessment_id"
-            class="update-proposal-card"
-            :data-testid="`investigation-update-${assessment.assessment_id}`"
-            :data-source-message-id="assessment.source_message_id"
-          >
-            <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">TASK INPUT PROPOSAL</span><h2>这条消息可能是关键纠错</h2></div><span class="status-badge warm">等待你确认</span></div>
-            <p class="update-proposal-summary">模型摘要：{{ assessment.proposal?.change_summary }}。这是对话意图判断，不是业务事实或授权。</p>
-            <div class="update-diff-grid">
-              <div><span>当前 Task 调查输入</span><pre>{{ assessment.proposal?.current_input || '暂无已提交的正式更正' }}</pre></div>
-              <div><span>确认后加入的原始消息</span><pre>{{ assessment.proposal?.proposed_input }}</pre></div>
-            </div>
-            <div class="update-proposal-meta">Task {{ assessment.proposal?.target_task_id }} · 控制版本 {{ assessment.proposal?.expected_control_revision }} · 来源 {{ assessment.proposal?.source_message_id }} · USER_INPUT_UNTRUSTED</div>
-            <div class="update-proposal-actions">
-              <button class="outline-button" type="button" :disabled="busy || !csrf" @click="cancelInvestigationUpdate(assessment.proposal!)">取消提议</button>
-              <button class="primary-button" type="button" :disabled="busy || !csrf" @click="confirmInvestigationUpdate(assessment.proposal!)">确认并重新调查 <span>→</span></button>
-            </div>
+          <section v-for="thread in conversationProjection.threads" :key="thread.anchor.message_id" class="conversation-thread" :data-source-message-id="thread.anchor.message_id">
+            <article class="message-row user" :data-message-id="thread.anchor.message_id">
+              <div class="message-avatar">{{ user.actor_id.slice(-1).toUpperCase() }}</div>
+              <div class="message-content">
+                <div class="message-meta"><strong>{{ user.actor_id }}</strong><span>{{ dateLabel(thread.anchor.created_at) }}</span><span v-if="sourceKind(thread.anchor)" class="message-task">{{ readableInputKind(sourceKind(thread.anchor)) }} · 未验证</span><span v-else-if="thread.anchor.task_id" class="message-task">只读对话</span></div>
+                <div class="message-bubble">{{ thread.anchor.body }}</div>
+              </div>
+            </article>
+            <template v-for="item in thread.items" :key="item.id">
+              <article v-if="item.kind === 'CHAT_MESSAGE' && item.message" class="message-row assistant" :data-message-id="item.message.message_id" :data-run-id="item.runId">
+                <div class="message-avatar">✳</div><div class="message-content">
+                  <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(item.message.created_at) }}</span><span class="message-task">{{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序限制说明 · 非模型答复' : '聊天答复' }}</span></div>
+                  <div class="message-bubble">{{ item.message.body }}</div>
+                  <small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }}</small>
+                </div>
+              </article>
+              <article v-else-if="item.kind === 'INVESTIGATION_ANSWER' && item.answer" class="readonly-followup-card" :data-testid="`investigation-answer-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
+                <div class="update-proposal-heading"><h2>本次调查答复</h2><span class="status-badge" :class="item.answer.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.answer.result_state === 'ANSWERED' ? '已答复' : '事实与待核实事项' }}</span><span v-if="item.answer.currentness && item.answer.currentness !== 'CURRENT'" class="status-badge neutral">历史结果</span></div>
+                <small>形成于 {{ dateLabel(item.answer.created_at) }}。这是该 Run 的持久结果；刷新页面不会重新取证。</small>
+                <p>{{ item.answer.answer_text }}</p>
+                <div v-if="item.diagnosis" class="s3-result-card" data-testid="s3-diagnosis"><span>{{ item.diagnosis.currentness === 'CURRENT' ? '当前调查结果 · 持久业务回执' : '历史调查结果 · 当前性已失效' }}</span><b>{{ readableS3Outcome(item.diagnosis.outcome) }}</b><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String(item.diagnosis.receipt_id) }}</small></div>
+                <details class="followup-sources"><summary>查看形成时间与来源（{{ item.answer.source_refs.length }}）</summary>
+                  <small>{{ dateLabel(item.answer.created_at) }} · {{ item.answer.result?.delivery_mode === 'MODEL' ? '模型依据当时有效来源回答' : '可信事实与未知事项汇总' }}；这是对话答复，不授予业务操作资格。</small>
+                  <ul><li v-for="(sourceRef, index) in item.answer.source_refs" :key="index"><code>{{ JSON.stringify(sourceRef) }}</code></li></ul>
+                  <small>来源消息 {{ item.answer.source_message_id }} · Run {{ item.answer.run_id }}</small>
+                </details>
+              </article>
+              <article v-else-if="item.kind === 'READONLY_FOLLOWUP' && item.followup" class="readonly-followup-card" :data-testid="`readonly-followup-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
+                <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">READONLY TASK FOLLOW-UP</span><h2>同一任务的连续调查</h2></div><span class="status-badge" :class="item.followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.followup.result_state === 'ANSWERED' ? '已答复' : item.followup.result_state === 'PARTIAL' ? '结果与待核实事项' : item.followup.result_state === 'NOT_COMPLETED' ? '需要补充' : '调查中' }}</span></div>
+                <p>{{ item.followup.answer_text || '本次补查尚未形成可展示的回答。' }}</p>
+                <details class="followup-sources"><summary>查看来源与调查记录（{{ item.followup.source_refs.length }}）</summary>
+                  <ul><li v-for="(sourceRef, index) in item.followup.source_refs" :key="index"><code>{{ JSON.stringify(sourceRef) }}</code></li></ul>
+                  <small>Run {{ item.followup.run_id }} · 来源消息 {{ item.followup.source_message_id }} · 控制版本 {{ item.followup.expected_control_revision }}</small>
+                  <small v-if="item.followup.reason_code">结果说明：{{ item.followup.reason_code }}</small>
+                  <small v-if="item.followup.result.delivery_mode">交付来源：{{ item.followup.result.delivery_mode === 'MODEL' ? '模型依据当前来源回答' : '可信事实与未知事项汇总' }}</small>
+                </details>
+              </article>
+              <section v-else-if="item.kind === 'CORRECTION_ASSESSMENT' && item.assessment" class="update-proposal-card" :data-testid="`investigation-update-${item.assessment.assessment_id}`" :data-source-message-id="thread.anchor.message_id">
+                <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">TASK INPUT PROPOSAL</span><h2>{{ item.assessment.intent === 'CRITICAL_CORRECTION' ? '关键纠错状态' : '本条消息的处理结果' }}</h2></div><span class="status-badge" :class="item.assessment.status === 'PENDING_CONFIRMATION' ? 'warm' : 'neutral'">{{ readableUpdateStatus(item.assessment.status) }}</span></div>
+                <p class="update-proposal-summary">{{ readableUpdateIntent(item.assessment.intent) }}<template v-if="item.assessment.change_summary">：{{ item.assessment.change_summary }}</template>。判断文本不构成业务事实或授权。</p>
+                <div v-if="item.assessment.proposal && item.assessment.intent === 'CRITICAL_CORRECTION' && item.assessment.status === 'PENDING_CONFIRMATION'" class="update-diff-grid">
+                  <div><span>当前 Task 调查输入</span><pre>{{ String(item.assessment.proposal.current_input ?? '暂无已提交的正式更正') }}</pre></div>
+                  <div><span>等待确认的用户输入</span><pre>{{ String(item.assessment.proposal.proposed_input ?? item.assessment.original_message) }}</pre></div>
+                </div>
+                <div v-if="item.correctionMessage" class="update-proposal-meta">TaskControl 更正消息 {{ item.correctionMessage.message_id }} · {{ item.correctionMessage.application_state === 'APPLIED_TO_RUN' ? '已应用到新 Run' : '已受理，等待调查应用' }} · Run {{ item.correctionMessage.applied_run_id ?? item.assessment.investigation_run_id ?? '尚未创建' }}</div>
+                <div v-else class="update-proposal-meta">来源消息 {{ item.assessment.source_message_id }} · Task {{ item.assessment.target_task_id ?? item.assessment.task_id ?? '—' }} · USER_INPUT_UNTRUSTED</div>
+                <div v-if="item.assessment.proposal && item.assessment.status === 'PENDING_CONFIRMATION'" class="update-proposal-actions">
+                  <button class="outline-button" type="button" :disabled="busy || !csrf" @click="cancelInvestigationUpdate(item.assessment.proposal as unknown as InvestigationUpdateProposal)">取消提议</button>
+                  <button class="primary-button" type="button" :disabled="busy || !csrf" @click="confirmInvestigationUpdate(item.assessment.proposal as unknown as InvestigationUpdateProposal)">确认并重新调查 <span>→</span></button>
+                </div>
+                <small v-if="item.assessment.investigation_run_id">重新调查 Run {{ item.assessment.investigation_run_id }}</small>
+              </section>
+              <article v-else-if="item.kind === 'RUN_STATUS' && item.run" class="readonly-followup-card" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
+                <div class="update-proposal-heading"><h2>{{ item.run.kind === 'CHAT_READONLY' ? '只读回答' : '调查运行' }}</h2><span class="status-badge" :class="statusTone(item.run.status)">{{ readableStatus(item.run.status) }}</span></div>
+                <p v-if="item.run.status === 'QUEUED'">本条消息对应的工作已进入持久队列。</p>
+                <p v-else-if="item.run.status === 'RUNNING'">本条消息对应的工作正在执行。</p>
+                <p v-else-if="item.run.status === 'INTERRUPTED_RECOVERABLE'">进程中断留下可恢复状态；暂存片段不等于最终答复。</p>
+                <p v-else-if="item.run.status === 'FAILED' || item.run.status === 'BLOCKED'">本次工作未完成：{{ readableRunReason(item.run.blocked_reason ?? item.run.waiting_reason ?? '未提供原因') }}。</p>
+                <small>Run {{ item.run.run_id }} · {{ dateLabel(item.run.started_at ?? item.run.created_at) }} · 来源问题 {{ thread.anchor.message_id }}</small>
+              </article>
+              <div v-else-if="item.kind === 'STREAM' && item.run" class="streaming-row" data-testid="live-stream" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
+                <div class="message-avatar assistant-avatar">✳</div><div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label"><i></i>正在生成 · 暂存片段</span></div>
+                  <div class="stream-bubble" data-testid="stream-chunk">{{ (item.chunks ?? []).map((chunk) => chunk.body).join('') }}<span class="typing-cursor"></span></div>
+                </div>
+              </div>
+            </template>
           </section>
-          <div v-if="displayStream" class="streaming-row" data-testid="live-stream">
-            <div class="message-avatar assistant-avatar">✳</div>
-            <div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label"><i></i>正在生成 · 暂存片段</span></div>
-              <div class="stream-bubble" data-testid="stream-chunk">{{ chunks.map((chunk) => chunk.body).join('') }}<span class="typing-cursor"></span></div>
-            </div>
-          </div>
-          <div v-else-if="activeChatRun && ['QUEUED', 'RUNNING'].includes(activeChatRun.status)" class="pending-row" data-testid="run-pending"><div class="loader"></div><span>{{ activeChatRun.status === 'QUEUED' ? '回答已进入持久队列…' : '模型正在组织回答…' }}</span></div>
-          <div v-if="activeChatRun?.status === 'INTERRUPTED_RECOVERABLE'" class="alert warm-alert">回答在进程中断时留下了已保存的暂存片段，系统将在退避后恢复。片段不等同于最终回答。</div>
+          <section v-if="conversationProjection.unassociatedItems.length" class="unassociated-results" data-testid="unassociated-results">
+            <h3>未能关联到已加载问题的记录</h3><p>系统保留这些持久记录，但没有根据相邻消息猜测归属。</p>
+            <article v-for="item in conversationProjection.unassociatedItems" :key="item.id" class="readonly-followup-card" :data-record-id="item.id">
+              <p v-if="item.message">{{ item.message.body }}</p>
+              <p v-else-if="item.answer">{{ item.answer.answer_text }}</p>
+              <p v-else-if="item.followup">{{ item.followup.answer_text || '补查尚未完成。' }}</p>
+              <p v-else>Run {{ item.run?.run_id ?? item.runId }} · {{ readableStatus(item.run?.status ?? item.kind) }} · {{ readableRunReason(item.run?.blocked_reason ?? '来源问题暂不可见') }}</p>
+              <small v-if="item.answer">来源 {{ item.answer.source_message_id }} · Run {{ item.answer.run_id }}</small>
+            </article>
+          </section>
           <div ref="conversationEnd"></div>
         </div>
 

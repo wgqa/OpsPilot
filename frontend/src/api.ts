@@ -20,6 +20,9 @@ export interface MessageItem {
   created_at: string;
   application_state: string | null;
   applied_run_id: string | null;
+  answer_run_id?: string | null;
+  answer_source_message_id?: string | null;
+  answer_kind?: 'CHAT_MODEL' | 'PROGRAM_LIMIT' | null;
 }
 
 export interface InvestigationUpdateProposal {

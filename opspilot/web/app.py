@@ -645,7 +645,7 @@ def create_app(
         require_session_owner(context.identity, session_id)
         with connect(resolved_db) as connection:
             rows = connection.execute(
-                """SELECT message_id, task_id, sequence, role, input_kind, body, created_at,
+                """SELECT message_id, task_id, sequence, role, input_kind, body, created_at, command_id,
                           application_state, applied_run_id
                    FROM messages WHERE session_id = ? AND tenant_id = ? AND sequence > ?
                    ORDER BY sequence LIMIT ?""",
@@ -654,9 +654,54 @@ def create_app(
             items = []
             for row in rows:
                 item = {key: row[key] for key in row.keys()}
+                item["answer_run_id"] = None
+                item["answer_source_message_id"] = None
+                item["answer_kind"] = None
                 if str(row["role"]) == "ASSISTANT" or str(row["input_kind"]) == "CHAT_READONLY":
                     item["application_state"] = None
                     item["applied_run_id"] = None
+                if str(row["role"]) == "ASSISTANT":
+                    association = connection.execute(
+                        """SELECT run_id, source_message_id, answer_kind FROM (
+                           SELECT r.run_id, r.source_message_id, 'CHAT_MODEL' AS answer_kind, 0 AS priority
+                           FROM chat_run_answers a
+                           JOIN task_runs r ON r.run_id = a.run_id
+                           JOIN chat_attempts ca ON ca.attempt_id = a.attempt_id
+                             AND ca.run_id = r.run_id AND ca.status = 'SUCCEEDED'
+                           JOIN messages source ON source.message_id = r.source_message_id
+                             AND source.tenant_id = r.tenant_id AND source.session_id = r.session_id
+                             AND source.task_id IS r.task_id AND source.role = 'USER'
+                             AND source.sequence < ?
+                           JOIN chat_message_sources ms ON ms.message_id = a.message_id
+                             AND ms.source_kind = 'MESSAGE' AND ms.source_ref = source.message_id
+                             AND ms.source_digest = source.body_digest
+                           WHERE a.message_id = ? AND r.tenant_id = ? AND r.session_id = ?
+                             AND r.task_id IS ? AND r.kind = 'CHAT_READONLY'
+                             AND source.input_kind IN ('CHAT_READONLY', 'CORRECT_TASK_INPUT')
+                           UNION ALL
+                           SELECT r.run_id, r.source_message_id, 'PROGRAM_LIMIT' AS answer_kind, 1 AS priority
+                           FROM task_runs r
+                           JOIN messages source ON source.message_id = r.source_message_id
+                             AND source.tenant_id = r.tenant_id AND source.session_id = r.session_id
+                             AND source.task_id IS r.task_id AND source.role = 'USER'
+                             AND source.sequence < ?
+                           JOIN chat_message_sources ms ON ms.message_id = ?
+                             AND ms.source_kind = 'MESSAGE' AND ms.source_ref = source.message_id
+                             AND ms.source_digest = source.body_digest
+                           WHERE r.kind = 'CHAT_READONLY' AND r.tenant_id = ? AND r.session_id = ?
+                             AND r.task_id IS ? AND r.run_id = substr(?, length('budget-notice:') + 1)
+                             AND ? = 'budget-notice:' || r.run_id
+                             AND source.input_kind IN ('CHAT_READONLY', 'CORRECT_TASK_INPUT')
+                           ) ORDER BY priority LIMIT 1""",
+                        (int(row["sequence"]), str(row["message_id"]), context.identity.tenant_id,
+                         session_id, row["task_id"], int(row["sequence"]), str(row["message_id"]),
+                         context.identity.tenant_id, session_id, row["task_id"], str(row["command_id"]),
+                         str(row["command_id"])),
+                    ).fetchone()
+                    if association is not None:
+                        item["answer_run_id"] = str(association["run_id"])
+                        item["answer_source_message_id"] = str(association["source_message_id"])
+                        item["answer_kind"] = str(association["answer_kind"])
                 if str(row["role"]) == "ASSISTANT" and row["task_id"]:
                     task = connection.execute(
                         "SELECT actor_id,service_id FROM task_bindings WHERE tenant_id=? AND task_id=?",
@@ -677,6 +722,10 @@ def create_app(
                                 authorized = False
                         if not authorized:
                             item["body"] = "[S3 受限历史回答已隐藏：当前授权不可用]"
+                            item["answer_run_id"] = None
+                            item["answer_source_message_id"] = None
+                            item["answer_kind"] = None
+                item.pop("command_id", None)
                 items.append(item)
         return {"items": items}
 

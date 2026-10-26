@@ -27,7 +27,7 @@ test('groups interleaved results under exact source messages and keeps late answ
   });
 
   assert.deepEqual(projection.threads.map((thread) => thread.anchor.message_id), ['q1', 'q2', 'q3']);
-  assert.deepEqual(projection.threads[0]?.items.map((item) => item.id), ['run:investigate-r1', 'investigation:investigate-r1']);
+  assert.deepEqual(projection.threads[0]?.items.map((item) => item.id), ['investigation:investigate-r1']);
   assert.equal(projection.threads[0]?.items.at(-1)?.createdAt, '2026-01-01T00:04:00Z');
   assert.deepEqual(projection.threads[1]?.items.map((item) => item.id), ['message:a2']);
   assert.equal(projection.threads[1]?.items[0]?.message?.body, 'second answer');
@@ -51,7 +51,7 @@ test('does not guess a missing source, preserves same-text operations, and filte
   assert.deepEqual(projection.threads[0]?.items, []);
   assert.equal(projection.threads[1]?.items[0]?.id, 'run:business-failed');
   assert.equal(projection.threads[1]?.items[0]?.kind, 'RUN_STATUS');
-  assert.deepEqual(projection.unassociated.map((message) => message.message_id), ['orphan']);
+  assert.deepEqual(projection.unassociatedItems.map((item) => item.message?.message_id), ['orphan']);
 });
 
 test('links a confirmed correction and its new run under the exact originating message once', () => {
@@ -71,4 +71,22 @@ test('links a confirmed correction and its new run under the exact originating m
   assert.deepEqual(projection.threads.map((thread) => thread.anchor.message_id), ['q1', 'q2']);
   assert.deepEqual(projection.threads[1]?.items.map((item) => item.id), ['assessment:assessment-1', 'run:new-run']);
   assert.equal(projection.threads[1]?.items[0]?.correctionMessage?.message_id, 'correction-clone');
+});
+
+test('deduplicates replayed stable ids and renders only the active source run chunks', () => {
+  const anchor = user('q1', 1, '2026-01-01T00:00:00Z');
+  const projection = projectConversation({
+    messages: [anchor, anchor],
+    activeChatRun: { run_id: 'chat-r1', task_id: 'task-a', source_message_id: 'q1', kind: 'CHAT_READONLY',
+      status: 'RUNNING', created_at: '2026-01-01T00:00:01Z' },
+    chunks: [
+      { chunk_id: 'chunk-1', chunk_seq: 1, body: 'hello', body_digest: 'd1', created_at: '2026-01-01T00:00:02Z', attempt_id: 'attempt-1' },
+      { chunk_id: 'chunk-1', chunk_seq: 1, body: 'hello', body_digest: 'd1', created_at: '2026-01-01T00:00:02Z', attempt_id: 'attempt-1' },
+      { chunk_id: 'chunk-2', chunk_seq: 2, body: ' world', body_digest: 'd2', created_at: '2026-01-01T00:00:03Z', attempt_id: 'attempt-1' },
+    ],
+  });
+
+  assert.equal(projection.threads.length, 1);
+  assert.deepEqual(projection.threads[0]?.items.map((item) => item.id), ['stream:chat-r1']);
+  assert.deepEqual(projection.threads[0]?.items[0]?.chunks?.map((chunk) => chunk.body), ['hello', ' world']);
 });

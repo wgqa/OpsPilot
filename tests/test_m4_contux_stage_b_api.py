@@ -19,7 +19,7 @@ ORIGIN = "http://testserver"
 @pytest.fixture
 def web_client(demo_db: Path):
     app = create_app(db_path=demo_db, start_worker=False, credentials=PASSWORDS, expected_origin=ORIGIN)
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with TestClient(app, raise_server_exceptions=True) as client:
         yield client
 
 
@@ -73,6 +73,7 @@ def test_stage_b_api_exposes_only_exact_chat_and_durable_limit_source_relations(
     answer = by_id[str(answer_result["message_id"])]
     notice = by_id[notice_id]
 
+    assert "command_id" not in answer and "command_id" not in notice
     assert (answer["answer_run_id"], answer["answer_source_message_id"], answer["answer_kind"]) == (
         first.json()["run_id"], first.json()["message_id"], "CHAT_MODEL",
     )
@@ -80,6 +81,20 @@ def test_stage_b_api_exposes_only_exact_chat_and_durable_limit_source_relations(
         limit_run, second.json()["message_id"], "PROGRAM_LIMIT",
     )
     assert "模型最终答复" in notice["body"]
+
+    with connect(demo_db) as connection:
+        source = connection.execute("SELECT body_digest FROM messages WHERE message_id=?",
+                                    (second.json()["message_id"],)).fetchone()
+        connection.execute(
+            "UPDATE chat_message_sources SET source_ref=?, source_digest=? WHERE message_id=? AND source_kind='MESSAGE' AND source_ref=?",
+            (second.json()["message_id"], source["body_digest"], answer_result["message_id"], first.json()["message_id"]),
+        )
+    mismatched = web_client.get(f"/api/sessions/{session_id}/messages", headers=headers)
+    assert mismatched.status_code == 200, mismatched.text
+    mismatched_answer = next(item for item in mismatched.json()["items"] if item["message_id"] == answer_result["message_id"])
+    assert mismatched_answer["answer_run_id"] is None
+    assert mismatched_answer["answer_source_message_id"] is None
+    assert mismatched_answer["answer_kind"] is None
 
 
 def test_stage_b_api_redacts_s3_answer_and_its_association_after_scope_revocation(
