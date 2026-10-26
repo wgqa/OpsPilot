@@ -1,0 +1,87 @@
+{
+  "schema": "opspilot-m4-cont-ux-stage-b-supplement-02-results-v1",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "stage_b_overall_status": "NOT_ACCEPTED_BROWSER_REQUIRED",
+  "repository": "wgqa/OpsPilot",
+  "base_main_sha": "4c891cbd5e28c8b43391ac99ca886f8c8af2ef44",
+  "freeze_commit_sha": "7862c086ab92ff972d647c93af34c82a7ef8dbb2",
+  "implementation_commit_sha": "cb32e2ee995674de7f1784e784972bfe4e63c671",
+  "gold_modified": false,
+  "provider_calls": 0,
+  "browser_or_computer_use_calls": 0,
+  "environment": {
+    "os": "Windows",
+    "node": "v24.16.0",
+    "npm": "11.13.0",
+    "frontend_package_versions_from_lock": {
+      "vue": "3.5.44",
+      "typescript": "5.9.3",
+      "vite": "8.3.4",
+      "vue-tsc": "3.3.13",
+      "eslint": "10.0.1"
+    }
+  },
+  "runs": [
+    {
+      "id": "controlled-promise-red",
+      "command": "node --experimental-strip-types --test test/conversation.test.ts",
+      "working_directory": "frontend/",
+      "result": "RED_REPRODUCED",
+      "passed": 7,
+      "failed": 2,
+      "exit_code": 1,
+      "raw_log": "runs/red-race-02/node-test.log"
+    },
+    {
+      "id": "controlled-promise-green-final",
+      "command": "node --experimental-strip-types --test test/conversation.test.ts",
+      "working_directory": "frontend/",
+      "result": "PASS",
+      "passed": 11,
+      "failed": 0,
+      "exit_code": 0,
+      "raw_log": "runs/green-race-04/node-test.log"
+    },
+    {
+      "id": "frontend-typecheck-final",
+      "command": "npm run typecheck",
+      "working_directory": "frontend/",
+      "result": "PASS",
+      "exit_code": 0,
+      "raw_log": "runs/green-race-04/typecheck.log"
+    },
+    {
+      "id": "frontend-build-final",
+      "command": "npm run build",
+      "working_directory": "frontend/",
+      "result": "PASS",
+      "exit_code": 0,
+      "raw_log": "runs/green-race-04/build.log"
+    },
+    {
+      "id": "frontend-scoped-eslint-final",
+      "command": "npx eslint src/App.vue src/conversation.ts test/conversation.test.ts",
+      "working_directory": "frontend/",
+      "result": "PASS",
+      "exit_code": 0,
+      "raw_log": "runs/green-race-04/eslint.log"
+    },
+    {
+      "id": "source-diff-whitespace-check",
+      "command": "git diff --cached --check",
+      "result": "PASS",
+      "exit_code": 0,
+      "details": "Passed before source implementation commit; final evidence diff is rechecked before commit."
+    }
+  ],
+  "not_run": [
+    "backend/API regression; no backend source changed, previous 402-pass report preserved but not repeated",
+    "real browser DOM/refresh/SSE journey per explicit Computer Use stop boundary",
+    "Provider"
+  ],
+  "historical_evidence_preserved": [
+    "Stage B Supplement 01 402-pass short-path pytest log",
+    "Stage B Supplement 01 20 deep-path Windows checkpoint setup failures",
+    "historical obsolete-intent C1 RED"
+  ]
+}
