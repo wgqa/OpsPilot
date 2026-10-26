@@ -1,0 +1,71 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_stage_b_api_exposes_only_exact_chat_and_durable_limit_source_relations _
+
+web_client = <starlette.testclient.TestClient object at 0x00000183899E6660>
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/docs/evidence/vnext/m4-cont-ux-01/stage-b/runs/green-01/basetemp/test_stage_b_api_exposes_only_0/domain.sqlite3')
+
+    def test_stage_b_api_exposes_only_exact_chat_and_durable_limit_source_relations(
+        web_client: TestClient, demo_db: Path
+    ) -> None:
+        headers, _ = _login(web_client)
+        session_id = _new_session(web_client, headers)
+        first = web_client.post(f"/api/sessions/{session_id}/messages", headers={**headers, "Idempotency-Key": "stage-b-chat"},
+                                json={"input_kind": "CHAT_READONLY", "body": "first"})
+        assert first.status_code == 202, first.text
+        answer_result = _complete_chat(demo_db, str(first.json()["run_id"]))
+    
+        second = web_client.post(f"/api/sessions/{session_id}/messages", headers={**headers, "Idempotency-Key": "stage-b-limit"},
+                                 json={"input_kind": "CHAT_READONLY", "body": "second"})
+        assert second.status_code == 202, second.text
+        limit_run = str(second.json()["run_id"])
+        with connect(demo_db) as connection:
+            record_chat_limit_in_transaction(connection, limit_run, "CHAT_ATTEMPTS_EXHAUSTED")
+            notice_id = str(connection.execute("SELECT message_id FROM messages WHERE command_id=?",
+                                               (f"budget-notice:{limit_run}",)).fetchone()[0])
+    
+        messages = web_client.get(f"/api/sessions/{session_id}/messages", headers=headers)
+>       assert messages.status_code == 200, messages.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_contux_stage_b_api.py:71: AssertionError
+_ test_stage_b_api_redacts_s3_answer_and_its_association_after_scope_revocation _
+
+web_client = <starlette.testclient.TestClient object at 0x0000018389BDCA50>
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent����Ŀ/docs/evidence/vnext/m4-cont-ux-01/stage-b/runs/green-01/basetemp/test_stage_b_api_redacts_s3_an0/domain.sqlite3')
+
+    def test_stage_b_api_redacts_s3_answer_and_its_association_after_scope_revocation(
+        web_client: TestClient, demo_db: Path
+    ) -> None:
+        headers, _ = _login(web_client)
+        session_id = _new_session(web_client, headers)
+        task = web_client.post(f"/api/sessions/{session_id}/tasks", headers={**headers, "Idempotency-Key": "stage-b-s3-task"},
+                               json={"initial_message": "Order callback investigation", "investigation_kind": "ASYNC_CALLBACK",
+                                     "s3_order_id": "async-order"})
+        assert task.status_code == 202, task.text
+        accepted = task.json()
+        from opspilot.domain.task_control import admit_task_message
+    
+        identity = trusted_identity(demo_db, "support-a")
+        chat = admit_task_message(demo_db, identity, session_id=session_id, task_id=str(accepted["task_id"]),
+                                  input_kind="CHAT_READONLY", body="what is current?", idempotency_key="stage-b-s3-chat")
+        answer_result = _complete_chat(demo_db, str(chat["run_id"]))
+        visible = web_client.get(f"/api/sessions/{session_id}/messages", headers=headers)
+>       assert visible.status_code == 200, visible.text
+E       AssertionError: {"code":"INTERNAL_ERROR"}
+E       assert 500 == 200
+E        +  where 500 = <Response [500 Internal Server Error]>.status_code
+
+tests\test_m4_contux_stage_b_api.py:102: AssertionError
+============================== warnings summary ===============================
+D:\python\Lib\site-packages\fastapi\testclient.py:1
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_m4_contux_stage_b_api.py::test_stage_b_api_exposes_only_exact_chat_and_durable_limit_source_relations
+FAILED tests/test_m4_contux_stage_b_api.py::test_stage_b_api_redacts_s3_answer_and_its_association_after_scope_revocation
+2 failed, 1 warning in 1.11s

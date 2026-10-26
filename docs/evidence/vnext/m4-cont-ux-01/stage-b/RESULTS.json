@@ -1,0 +1,94 @@
+{
+  "schema": "opspilot-m4-cont-ux-stage-b-results-v1",
+  "status": "INTERMEDIATE_IMPLEMENTATION",
+  "acceptance_candidate": false,
+  "browser": {
+    "status": "NOT_RUN",
+    "reason": "BLOCKED_BY_TOOL_ENVIRONMENT",
+    "computer_use": "explicitly prohibited for this execution; no alternate browser automation used"
+  },
+  "repository": "wgqa/OpsPilot",
+  "remote": "origin",
+  "base_main_sha": "0453d6c75fbe244ad7a4e401cf2b07066a2979f5",
+  "frozen_plan_commit": "5a33f3e",
+  "red_test_commit": "3549b18",
+  "red_log_commit": "d2f1c09",
+  "implementation_commit": "da7d3255ec8359b7745302987d3215d5ac678b65",
+  "environment": {
+    "python": "isolated worktree venv created from requirements.lock.txt",
+    "node": "Node supports --experimental-strip-types; exact version not captured in the preserved command output",
+    "provider_calls": 0,
+    "computer_use_calls": 0
+  },
+  "runs": [
+    {
+      "id": "final-focused-api",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_contux_stage_b_api.py -q --basetemp=docs/evidence/vnext/m4-cont-ux-01/stage-b/runs/final-01/api-basetemp",
+      "result": "PASS",
+      "passed": 2,
+      "failed": 0,
+      "exit_code": 0,
+      "raw_log": "runs/final-01/api-pytest.log"
+    },
+    {
+      "id": "final-projection-unit",
+      "command": "node --experimental-strip-types --test test/conversation.test.ts (working directory: frontend)",
+      "result": "PASS",
+      "passed": 4,
+      "failed": 0,
+      "exit_code": 0,
+      "raw_log": "runs/final-01/projection-node-test.log"
+    },
+    {
+      "id": "final-frontend-build",
+      "command": "npm run build (working directory: frontend; includes vue-tsc --noEmit)",
+      "result": "PASS",
+      "exit_code": 0,
+      "raw_log": "runs/final-01/frontend-build.log"
+    },
+    {
+      "id": "final-eslint",
+      "command": "npx eslint src/App.vue src/api.ts src/conversation.ts (working directory: frontend)",
+      "result": "PASS",
+      "exit_code": 0,
+      "raw_log": "runs/final-01/eslint.log"
+    },
+    {
+      "id": "safety-regression",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m1_web_api.py tests/test_m1_chat.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_03_s3.py tests/test_m4_autonomy_c1_followup_red.py tests/test_m4_c1_hf_01.py tests/test_m4_cont_ux_stage_a.py tests/test_m4_continuous_vs01.py tests/test_m4_eg01_hf01.py -q --basetemp=docs/evidence/vnext/m4-cont-ux-01/stage-b/runs/regression-02/basetemp",
+      "result": "PASS",
+      "passed": 149,
+      "failed": 0,
+      "exit_code": 0,
+      "raw_log": "runs/regression-02/pytest.log"
+    },
+    {
+      "id": "full-pytest",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest --basetemp=docs/evidence/vnext/m4-cont-ux-01/stage-b/runs/full-01/basetemp -q --deselect=tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix",
+      "result": "PASS_WITH_HISTORICAL_CASE_DESELECTED",
+      "passed": 401,
+      "failed": 0,
+      "deselected": 1,
+      "exit_code": 0,
+      "raw_log": "runs/full-01/pytest.log"
+    },
+    {
+      "id": "historical-c1-red-recheck",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_autonomy_c1_red.py -q --basetemp=docs/evidence/vnext/m4-cont-ux-01/stage-b/runs/historical-c1-red-01/basetemp",
+      "result": "EXPECTED_HISTORICAL_FAILURE_RETIRED_INTENT",
+      "passed": 0,
+      "failed": 1,
+      "exit_code": 1,
+      "raw_log": "runs/historical-c1-red-01/pytest.log"
+    }
+  ],
+  "historical_evidence": {
+    "old_c1_trace_files_restored_after_test_side_effect": true,
+    "details": "The historical RED test appended records to two tracked C1 JSONL files. Those paths were clean before the run, the appended rows were verified, and both paths were restored to their pre-run HEAD contents. The failing raw test log is retained here."
+  },
+  "limitations": [
+    "No browser DOM, screenshot, refresh, or live SSE reconnection was run.",
+    "No real Provider interaction or paid model call was run.",
+    "Non-browser evidence is not a Stage B acceptance substitute."
+  ]
+}
