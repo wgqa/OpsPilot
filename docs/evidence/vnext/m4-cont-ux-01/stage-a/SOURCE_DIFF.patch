@@ -1,0 +1,532 @@
+diff --git a/opspilot/domain/chat.py b/opspilot/domain/chat.py
+index 742b5d5..012a419 100644
+--- a/opspilot/domain/chat.py
++++ b/opspilot/domain/chat.py
+@@ -1627,7 +1627,55 @@ def _chat_attempt_counts(connection: sqlite3.Connection, run_id: str) -> tuple[i
+     return answer_count, compression_count
+ 
+ 
++def record_chat_limit_in_transaction(connection: sqlite3.Connection, run_id: str, reason: str) -> None:
++    """A durable non-model limit notice, never a successful Provider answer.
++
++    Called only by existing trusted admission/reservation/failure transactions.
++    No fake attempt, ContextManifest or current business fact is manufactured.
++    """
++    run = connection.execute("SELECT * FROM task_runs WHERE run_id=? AND kind='CHAT_READONLY'",(run_id,)).fetchone()
++    if run is None or run["status"] in {"SUCCEEDED","BLOCKED"}:
++        return
++    now = _now_text()
++    command_id = f"budget-notice:{run_id}"
++    if connection.execute("SELECT 1 FROM messages WHERE command_id=?",(command_id,)).fetchone() is None:
++        text = f"本次解释未完成：{reason}。这是程序生成的限制说明，未提交模型最终答复；此前已预留或失败的调用仍计入额度。本说明未重新取得业务事实，历史结论不能冒充本次新调查结果。Task 和既有业务授权保持不变。"
++        sequence = int(connection.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM messages WHERE session_id=?",(run["session_id"],)).fetchone()[0])
++        mid = f"message-{uuid.uuid4()}"
++        connection.execute(
++            """INSERT INTO messages (message_id,tenant_id,session_id,task_id,sequence,role,input_kind,body,body_digest,command_id,created_at)
++               VALUES (?,?,?,?,?,'ASSISTANT','CHAT_READONLY',?,?,?,?)""",
++            (mid,run["tenant_id"],run["session_id"],run["task_id"],sequence,text,_digest(text),command_id,now),
++        )
++        source = connection.execute("SELECT body_digest FROM messages WHERE message_id=?",(run["source_message_id"],)).fetchone()
++        if source:
++            connection.execute(
++                "INSERT INTO chat_message_sources (message_id,source_kind,source_ref,source_digest) VALUES (?,'MESSAGE',?,?)",
++                (mid,run["source_message_id"],source["body_digest"]),
++            )
++        write_outbox_event(connection,tenant_id=str(run["tenant_id"]),task_id=run["task_id"],
++            session_id=str(run["session_id"]),source_kind="RUN",source_id=run_id,event_kind="CHAT_BUDGET_STOP",
++            payload={"run_id":run_id,"answer_message_id":mid,"reason_code":reason,"model_generated":False},created_at=now)
++    connection.execute("UPDATE task_runs SET status='FAILED',blocked_reason=?,ended_at=? WHERE run_id=?",(reason,now,run_id))
++    write_outbox_event(connection,tenant_id=str(run["tenant_id"]),task_id=run["task_id"],
++        session_id=str(run["session_id"]),source_kind="RUN",source_id=run_id,event_kind="RUN_STATUS_FAILED",
++        payload={"run_id":run_id,"run_status":"FAILED","reason_code":reason},created_at=now)
++
++
++def _stop_at_auxiliary_limit(connection, run):
++    from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
++    budget = auxiliary_budget_in_transaction(connection,run["task_id"])
++    if budget["reason_code"]:
++        record_chat_limit_in_transaction(connection,str(run["run_id"]),budget["reason_code"])
++        return {"error":budget["reason_code"],"run_id":str(run["run_id"]),"auxiliary_budget":budget}
++    return None
++
++
+ def _fail_exhausted_chat_run(connection: sqlite3.Connection, run: sqlite3.Row, run_id: str, attempt_count: int) -> None:
++    from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
++    if auxiliary_budget_in_transaction(connection,run["task_id"])["limit"] is not None:
++        record_chat_limit_in_transaction(connection,run_id,"CHAT_ATTEMPTS_EXHAUSTED")
++        return
+     now = _now_text()
+     connection.execute(
+         "UPDATE task_runs SET status = 'FAILED', blocked_reason = 'CHAT_ATTEMPTS_EXHAUSTED', ended_at = ? WHERE run_id = ? AND status = 'RUNNING'",
+@@ -1671,6 +1719,9 @@ def prepare_chat_compression_attempt(
+             raise TaskControlError("SESSION_SCOPE_DENIED")
+         actor = trusted_identity(path, str(owner["owner_id"]))
+         _verify_identity(connection, actor)
++        stopped = _stop_at_auxiliary_limit(connection,run)
++        if stopped:
++            return stopped
+         prepared = _prepare_context(connection, run, model_id, path)
+         if not prepared.get("needs_compression"):
+             return None
+@@ -1886,6 +1937,9 @@ def fail_chat_compression_attempt(
+                 "attempt_id": attempt_id, "reason_code": reason}, created_at=now,
+         )
+         if not retryable:
++            from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
++            if auxiliary_budget_in_transaction(connection,attempt["task_id"])["limit"] is not None:
++                record_chat_limit_in_transaction(connection,str(attempt["run_id"]),reason)
+             run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (attempt["run_id"],)).fetchone()
+             write_outbox_event(
+                 connection, tenant_id=str(run["tenant_id"]), task_id=str(run["task_id"]) if run["task_id"] else None,
+@@ -1950,6 +2004,9 @@ def prepare_chat_attempt(path: str | Path, run_id: str, worker_id: str, model_id
+             raise TaskControlError("SESSION_SCOPE_DENIED")
+         actor = trusted_identity(path, str(owner["owner_id"]))
+         _verify_identity(connection, actor)
++        stopped = _stop_at_auxiliary_limit(connection,run)
++        if stopped:
++            return stopped
+         prepared = _prepare_context(connection, run, model_id, path)
+         if prepared.get("needs_compression"):
+             return {"error": "CHAT_CONTEXT_COMPRESSION_REQUIRED", "run_id": run_id}
+@@ -2238,6 +2295,9 @@ def fail_chat_attempt(path: str | Path, worker_id: str, attempt_id: str, error_c
+                 "model_attempt_id": attempt_id, "status": "FAILED", "reason_code": reason}, created_at=now,
+         )
+         if status == "FAILED":
++            from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
++            if auxiliary_budget_in_transaction(connection,attempt["task_id"])["limit"] is not None:
++                record_chat_limit_in_transaction(connection,str(run["run_id"]),reason)
+             write_outbox_event(
+                 connection, tenant_id=str(run["tenant_id"]), task_id=str(run["task_id"]) if run["task_id"] else None,
+                 session_id=str(run["session_id"]), source_kind="RUN", source_id=str(run["run_id"]),
+diff --git a/opspilot/domain/d2.py b/opspilot/domain/d2.py
+index ca36d96..f61dc01 100644
+--- a/opspilot/domain/d2.py
++++ b/opspilot/domain/d2.py
+@@ -27,8 +27,9 @@ class ScopeDenied(D2Error):
+ 
+ 
+ class BudgetExhausted(D2Error):
+-    def __init__(self, kind: str, used: int, limit: int):
+-        super().__init__(f"{kind} attempt budget exhausted ({used}/{limit}).")
++    def __init__(self, kind: str, used: int, limit: int, *, reason_code: str | None = None):
++        self.reason_code = reason_code or f"TASK_{kind}_LIMIT"
++        super().__init__(f"{self.reason_code}: {kind} attempt budget exhausted ({used}/{limit}).")
+         self.kind = kind
+         self.used = used
+         self.limit = limit
+@@ -592,7 +593,7 @@ def reserve_attempt(
+     task_run_control: dict[str, object] | None = None,
+     run_id: str | None = None,
+ ) -> tuple[str, int]:
+-    if kind not in {"MODEL", "MCP"} or limit < 1:
++    if kind not in {"MODEL", "MCP"} or type(limit) is not int or limit < 1:
+         raise ValueError("Invalid D2 attempt kind or limit.")
+     attempt_id = f"attempt-{uuid.uuid4()}"
+     with connect(path) as connection:
+@@ -619,12 +620,22 @@ def reserve_attempt(
+                 or str(run["kind"]) == "CHAT_READONLY" or str(run["status"]) != "RUNNING"
+             ):
+                 raise ScopeDenied("Attempt Run is not an active business Run for this TaskBinding.")
+-        used = int(
+-            connection.execute(
+-                "SELECT COUNT(*) AS n FROM d2_attempts WHERE task_id = ? AND kind = ?",
+-                (task_id, kind),
+-            ).fetchone()["n"]
+-        )
++        from opspilot.domain.execution_budget import investigation_budget_in_transaction
++
++        budget = investigation_budget_in_transaction(connection, task_id, run_id)
++        if budget["policy_version"] == "CONTUX_S3_V1":
++            from opspilot.domain.task_control import assert_task_control_in_transaction
++
++            if task_run_control is not None and task_run_control.get("run_id") != run_id:
++                raise ScopeDenied("TASK_ATTEMPT_RUN_CONTEXT_MISMATCH")
++            owner = connection.execute("SELECT tenant_id FROM task_bindings WHERE task_id=?",(task_id,)).fetchone()
++            assert_task_control_in_transaction(connection,str(owner["tenant_id"]),task_id,run_id=run_id)
++        used = budget["task_used"][kind]
++        reason = budget["limit_reasons"][kind]
++        if reason and budget["policy_version"] == "CONTUX_S3_V1":
++            run_limit = budget["run_limits"][kind] if budget["run_limits"] else budget["task_limits"][kind]
++            raise BudgetExhausted(kind, budget["run_used"][kind] if reason.startswith("RUN_") else used,
++                                  run_limit if reason.startswith("RUN_") else budget["task_limits"][kind], reason_code=reason)
+         if used >= limit:
+             raise BudgetExhausted(kind, used, limit)
+         connection.execute(
+@@ -707,11 +718,9 @@ def attempt_counts(path: str | Path, task_id: str) -> dict[str, int]:
+ 
+ 
+ def _task_attempt_limits(connection, task_id):
+-    row = connection.execute("SELECT model_limit,mcp_limit FROM task_execution_budgets WHERE task_id=?", (task_id,)).fetchone()
+-    pair = (row[0], row[1]) if row else (MAX_MODEL_CALLS, MAX_MCP_ATTEMPTS)
+-    if any(type(value) is not int for value in pair) or pair not in {(8, 6), (12, 8), (16, 10)}:
+-        raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
+-    return {"MODEL": pair[0], "MCP": pair[1]}
++    from opspilot.domain.execution_budget import attempt_policy_in_transaction
++    policy = attempt_policy_in_transaction(connection, task_id)
++    return {"MODEL":policy["MODEL"], "MCP":policy["MCP"]}
+ 
+ 
+ def task_attempt_limits(path, task_id):
+@@ -732,9 +741,15 @@ def configure_s3_experiment_budget(path, task_id, model_limit, mcp_limit):
+             return current
+         if connection.execute("SELECT 1 FROM d2_attempts WHERE task_id=? LIMIT 1", (task_id,)).fetchone():
+             raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+-        if current != {"MODEL": 8, "MCP": 6}:
++        from opspilot.domain.execution_budget import auxiliary_attempt_counts_in_transaction, attempt_policy_in_transaction
++        policy = attempt_policy_in_transaction(connection,task_id)
++        if sum(auxiliary_attempt_counts_in_transaction(connection,task_id).values()):
++            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
++        if current != {"MODEL": 8, "MCP": 6} and policy["version"] != "CONTUX_S3_V1":
+             raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED")
+-        changed = connection.execute("UPDATE task_execution_budgets SET model_limit=?,mcp_limit=? WHERE task_id=?", (model_limit, mcp_limit, task_id))
++        # Preserve the explicit, pre-execution historical experiment setup API.
++        # It is never exposed to Web/MCP/model inputs or used by normal creation.
++        changed = connection.execute("UPDATE task_execution_budgets SET model_limit=?,mcp_limit=?,policy_version='LEGACY_V1',aux_provider_limit=NULL WHERE task_id=?", (model_limit, mcp_limit, task_id))
+         if changed.rowcount != 1:
+             raise ValueError("A persistent controlled Task is required")
+     return {"MODEL": model_limit, "MCP": mcp_limit}
+diff --git a/opspilot/domain/database.py b/opspilot/domain/database.py
+index 5448aa5..c4667e3 100644
+--- a/opspilot/domain/database.py
++++ b/opspilot/domain/database.py
+@@ -339,6 +339,8 @@ CREATE TABLE IF NOT EXISTS task_execution_budgets (
+     updated_at TEXT NOT NULL,
+     model_limit INTEGER NOT NULL DEFAULT 8,
+     mcp_limit INTEGER NOT NULL DEFAULT 6,
++    policy_version TEXT NOT NULL DEFAULT 'LEGACY_V1',
++    aux_provider_limit INTEGER,
+     FOREIGN KEY (task_id, tenant_id) REFERENCES task_bindings(task_id, tenant_id) ON DELETE CASCADE
+ );
+ CREATE INDEX IF NOT EXISTS ix_task_execution_budget_tenant ON task_execution_budgets(tenant_id, task_id);
+@@ -1080,7 +1082,7 @@ def initialize(path: str | Path) -> None:
+         from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+-        if version > 16:
++        if version > 17:
+             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+         if version < 1:
+             # A pre-vNext Task is safe to initialize at revision 0 only when the new
+@@ -1433,6 +1435,15 @@ def initialize(path: str | Path) -> None:
+                 if name not in columns:
+                     connection.execute(f"ALTER TABLE task_execution_budgets ADD COLUMN {name} INTEGER NOT NULL DEFAULT {default}")
+             connection.execute("PRAGMA user_version = 16")
++            version = 16
++        if version < 17:
++            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(task_execution_budgets)")}
++            if "policy_version" not in columns:
++                connection.execute("ALTER TABLE task_execution_budgets ADD COLUMN policy_version TEXT NOT NULL DEFAULT 'LEGACY_V1'")
++            if "aux_provider_limit" not in columns:
++                connection.execute("ALTER TABLE task_execution_budgets ADD COLUMN aux_provider_limit INTEGER")
++            # Existing tasks keep their exact counters, limits and legacy behavior.
++            connection.execute("PRAGMA user_version = 17")
+ 
+ 
+ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
+diff --git a/opspilot/domain/execution_budget.py b/opspilot/domain/execution_budget.py
+index 7f38449..ad0c894 100644
+--- a/opspilot/domain/execution_budget.py
++++ b/opspilot/domain/execution_budget.py
+@@ -7,6 +7,115 @@ from typing import Callable
+ from opspilot.domain.database import connect
+ 
+ 
++def attempt_policy_in_transaction(connection, task_id):
++    """Trusted fixed policies; legacy rows are never implicitly upgraded."""
++    from opspilot.domain.d2 import ScopeDenied
++
++    row = connection.execute(
++        "SELECT * FROM task_execution_budgets WHERE task_id=?", (task_id,),
++    ).fetchone()
++    if row is None:
++        binding = connection.execute("SELECT service_id FROM task_bindings WHERE task_id=?",(task_id,)).fetchone()
++        if binding and binding["service_id"] == "orders-async-demo":
++            raise ScopeDenied("TASK_ATTEMPT_POLICY_MISSING")
++        return {"version":"LEGACY_V1", "MODEL":8, "MCP":6, "AUX":None}
++    version = row["policy_version"]
++    pair = (row["model_limit"], row["mcp_limit"])
++    if any(type(n) is not int for n in pair):
++        raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
++    if version == "CONTUX_S3_V1":
++        binding = connection.execute(
++            "SELECT service_id,tenant_id FROM task_bindings WHERE task_id=?", (task_id,),
++        ).fetchone()
++        if (binding is None or binding["service_id"] != "orders-async-demo"
++                or binding["tenant_id"] != row["tenant_id"] or pair != (24,18)
++                or type(row["aux_provider_limit"]) is not int or row["aux_provider_limit"] != 8):
++            raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
++        return {"version":version, "MODEL":24, "MCP":18, "AUX":8}
++    if version != "LEGACY_V1" or pair not in {(8,6),(12,8),(16,10)} or row["aux_provider_limit"] is not None:
++        raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
++    return {"version":version, "MODEL":pair[0], "MCP":pair[1], "AUX":None}
++
++
++def auxiliary_attempt_counts_in_transaction(connection, task_id):
++    """Count all durable reservations, including failed and unknown outcomes."""
++    return {
++        "CLASSIFIER": int(connection.execute(
++            """SELECT COUNT(*) FROM investigation_update_attempts a
++               JOIN investigation_update_assessments s ON s.assessment_id=a.assessment_id
++               WHERE s.task_id=?""", (task_id,),
++        ).fetchone()[0]),
++        "CHAT": int(connection.execute("SELECT COUNT(*) FROM chat_attempts WHERE task_id=?",(task_id,)).fetchone()[0]),
++        "COMPRESSION": int(connection.execute("SELECT COUNT(*) FROM context_compression_attempts WHERE task_id=?",(task_id,)).fetchone()[0]),
++    }
++
++
++def auxiliary_budget_in_transaction(connection, task_id):
++    if task_id is None:
++        return {"limit":None, "used":0, "remaining":None, "reason_code":None}
++    policy = attempt_policy_in_transaction(connection, task_id)
++    counts = auxiliary_attempt_counts_in_transaction(connection, task_id)
++    used = sum(counts.values())
++    cap = policy["AUX"]
++    return {"limit":cap, "used":used, "by_kind":counts,
++            "remaining":max(0,cap-used) if cap is not None else None,
++            "reason_code":"TASK_AUX_PROVIDER_LIMIT" if cap is not None and used >= cap else None}
++
++
++def investigation_budget_in_transaction(connection, task_id, run_id=None):
++    """Project two-level remaining capacity from existing immutable Attempt rows.
++
++    Reservation callers hold BEGIN IMMEDIATE while using this and inserting.
++    No allocation counter is reset or granted by a checkpoint or caller limit.
++    """
++    from opspilot.domain.d2 import ScopeDenied
++
++    policy = attempt_policy_in_transaction(connection, task_id)
++    task_used = {"MODEL":0,"MCP":0}
++    task_used.update({r["kind"]:int(r["n"]) for r in connection.execute(
++        "SELECT kind,COUNT(*) AS n FROM d2_attempts WHERE task_id=? GROUP BY kind",(task_id,))})
++    run_used = {"MODEL":0,"MCP":0}
++    run_limits = None
++    if run_id is not None:
++        run = connection.execute(
++            "SELECT task_id,tenant_id,kind FROM task_runs WHERE run_id=?",(run_id,),
++        ).fetchone()
++        if run is None or run["task_id"] != task_id or run["kind"] == "CHAT_READONLY":
++            raise ScopeDenied("TASK_ATTEMPT_RUN_INVALID")
++        run_used.update({r["kind"]:int(r["n"]) for r in connection.execute(
++            "SELECT kind,COUNT(*) AS n FROM d2_attempts WHERE task_id=? AND run_id=? GROUP BY kind",(task_id,run_id))})
++        if policy["version"] == "CONTUX_S3_V1":
++            followup = connection.execute(
++                "SELECT 1 FROM c1_readonly_followup_runs WHERE run_id=? AND task_id=? AND tenant_id=?",
++                (run_id,task_id,run["tenant_id"]),
++            ).fetchone()
++            run_limits = {"MODEL":4,"MCP":3} if followup else {"MODEL":8,"MCP":6}
++    elif policy["version"] == "CONTUX_S3_V1":
++        raise ScopeDenied("TASK_ATTEMPT_RUN_REQUIRED")
++    task_limits = {kind:policy[kind] for kind in ("MODEL","MCP")}
++    remaining, reasons = {}, {}
++    for kind in task_limits:
++        remaining[kind] = max(0,task_limits[kind]-task_used[kind])
++        reasons[kind] = f"TASK_{kind}_LIMIT" if not remaining[kind] else None
++        if run_limits:
++            run_remaining = max(0,run_limits[kind]-run_used[kind])
++            remaining[kind] = min(remaining[kind],run_remaining)
++            if not run_remaining and reasons[kind] is None:
++                reasons[kind] = f"RUN_{kind}_LIMIT"
++    clock = connection.execute("SELECT active_elapsed_ms,deadline_ms FROM task_execution_budgets WHERE task_id=?",(task_id,)).fetchone()
++    if policy["version"] == "CONTUX_S3_V1" and clock and clock["active_elapsed_ms"] >= clock["deadline_ms"]:
++        remaining = {"MODEL":0,"MCP":0}
++        reasons = {"MODEL":"ACTIVE_TIME_LIMIT","MCP":"ACTIVE_TIME_LIMIT"}
++    return {"policy_version":policy["version"], "task_limits":task_limits,"run_limits":run_limits,
++            "task_used":task_used,"run_used":run_used,"remaining_attempts":remaining,"limit_reasons":reasons}
++
++
++def investigation_budget_snapshot(path, task_id, run_id):
++    with connect(path) as connection:
++        return {**investigation_budget_in_transaction(connection,task_id,run_id),
++                "auxiliary":auxiliary_budget_in_transaction(connection,task_id)}
++
++
+ def _utc_from_ms(value: int) -> str:
+     return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat(timespec="milliseconds")
+ 
+diff --git a/opspilot/domain/investigation_updates.py b/opspilot/domain/investigation_updates.py
+index 625297a..d7f64e2 100644
+--- a/opspilot/domain/investigation_updates.py
++++ b/opspilot/domain/investigation_updates.py
+@@ -331,6 +331,21 @@ def reserve_assessment(
+             ],
+             "prior_readonly_followup_exclusions": prior_followup_exclusions,
+         })
++        from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
++
++        auxiliary = auxiliary_budget_in_transaction(connection,task_id)
++        if auxiliary["reason_code"]:
++            # Persist the route decision without inventing a Provider attempt.
++            connection.execute(
++                "UPDATE investigation_update_assessments SET status='FAILED',failure_code=?,completed_at=? WHERE assessment_id=?",
++                (auxiliary["reason_code"],now,assessment_id),
++            )
++            from opspilot.domain.chat import record_chat_limit_in_transaction
++
++            record_chat_limit_in_transaction(connection,str(source_chat["run_id"]),auxiliary["reason_code"])
++            row = connection.execute("SELECT * FROM investigation_update_assessments WHERE assessment_id=?",(assessment_id,)).fetchone()
++            return {**_public_assessment(connection,row),"should_call_model":False,
++                    "fallback_reason":auxiliary["reason_code"],"auxiliary_budget":auxiliary}
+         connection.execute(
+             """INSERT INTO investigation_update_attempts
+                (attempt_id, assessment_id, attempt_no, model_id, prompt_digest, input_digest,
+diff --git a/opspilot/domain/task_control.py b/opspilot/domain/task_control.py
+index 0bafa31..4d58bae 100644
+--- a/opspilot/domain/task_control.py
++++ b/opspilot/domain/task_control.py
+@@ -1056,9 +1056,14 @@ def create_task_with_initial_run(
+         connection.execute(
+             """INSERT INTO task_execution_budgets
+                (task_id, tenant_id, active_elapsed_ms, active_started_at, heartbeat_at,
+-                deadline_ms, deadline_reached_at, updated_at)
+-               VALUES (?, ?, 0, NULL, NULL, ?, NULL, ?)""",
+-            (task_id, identity.tenant_id, deadline_ms, now),
++                deadline_ms, deadline_reached_at, updated_at, policy_version,
++                model_limit, mcp_limit, aux_provider_limit)
++               VALUES (?, ?, 0, NULL, NULL, ?, NULL, ?, ?, ?, ?, ?)""",
++            (task_id, identity.tenant_id, deadline_ms, now,
++             "CONTUX_S3_V1" if service_id == "orders-async-demo" else "LEGACY_V1",
++             24 if service_id == "orders-async-demo" else 8,
++             18 if service_id == "orders-async-demo" else 6,
++             8 if service_id == "orders-async-demo" else None),
+         )
+         _insert_outbox(
+             connection, identity.tenant_id, task_id, session_id, "COMMAND", command_id,
+diff --git a/opspilot/s3_investigation.py b/opspilot/s3_investigation.py
+index 68fe820..6577f76 100644
+--- a/opspilot/s3_investigation.py
++++ b/opspilot/s3_investigation.py
+@@ -114,6 +114,10 @@ class S3Nodes:
+     def limits(self):
+         return task_attempt_limits(self.db, self.task)
+ 
++    def budget(self):
++        from opspilot.domain.execution_budget import investigation_budget_snapshot
++        return investigation_budget_snapshot(self.db,self.task,self.run)
++
+     @staticmethod
+     def _source_signature(metadata):
+         return digest_json({key: metadata.get(key) for key in (
+@@ -151,8 +155,7 @@ class S3Nodes:
+     def next_step(self, state):
+         """User delivery/continuation, separate from Domain diagnosis sufficiency."""
+         draft = state.get("diagnosis_draft", {})
+-        counts = attempt_counts(self.db, self.task)
+-        if draft.get("s3_response") or counts["MODEL"] >= self.limits()["MODEL"]:
++        if draft.get("s3_response") or not self.budget()["remaining_attempts"]["MODEL"]:
+             return "report"
+         if state.get("last_investigation_action") in {"BUDGET_EXHAUSTED", "POLICY_NO_ACTION"} or draft.get("s3_error"):
+             return "report"
+@@ -192,6 +195,7 @@ class S3Nodes:
+             prior_followups, prior_followup_exclusions,
+         )
+         excluded.extend(fact_excluded + memory_excluded + prior_excluded_sources)
++        attempt_budget = self.budget()
+         body = {
+             "trusted_binding":{"task_id":self.task,"service_id":SERVICE,"route":ROUTE,"contract_version":contract_version},
+             "untrusted_user_inputs":context["inputs"],
+@@ -209,7 +213,8 @@ class S3Nodes:
+             "unexecuted_candidates":draft.get("s3_remaining_candidates", []),
+             "candidate_decisions":draft.get("s3_candidate_decisions", [])[-12:],
+             "decision_feedback":state.get("last_investigation_action"),
+-            "remaining_attempts":{k:limit-attempt_counts(self.db,self.task)[k] for k,limit in self.limits().items()},
++            "remaining_attempts":attempt_budget["remaining_attempts"],
++            "attempt_budget":attempt_budget,
+         }
+         system = (FOLLOWUP_PROMPT if self.readonly_followup else PROMPT) if not normalize else (
+             "Interpret the untrusted user symptom for a read-only asynchronous order investigation. Return only JSON: "
+@@ -252,7 +257,7 @@ class S3Nodes:
+ 
+     async def model_call(self, state, *, normalize=False, explain=False):
+         messages, metadata = self.prompt(state, normalize=normalize, explain=explain)
+-        specs = [] if normalize or explain or attempt_counts(self.db,self.task)["MCP"] >= self.limits()["MCP"] else self.specs
++        specs = [] if normalize or explain or not self.budget()["remaining_attempts"]["MCP"] else self.specs
+         metadata["context_component_estimates"] = {
+             "prior_readonly_followups": estimate_text_tokens(
+                 canonical_json(metadata["prior_readonly_followups"]),
+@@ -308,9 +313,11 @@ class S3Nodes:
+ 
+     async def investigate(self, state):
+         draft = dict(state.get("diagnosis_draft", {}))
+-        counts = attempt_counts(self.db,self.task)
+-        if counts["MODEL"] >= self.limits()["MODEL"] or (self.strategy in {"R","H"} and counts["MCP"] >= self.limits()["MCP"]):
+-            return {"pending_call_refs":[],"policy_tool_call":{},"last_investigation_action":"BUDGET_EXHAUSTED"}
++        budget = self.budget()
++        remaining = budget["remaining_attempts"]
++        if not remaining["MODEL"] or (self.strategy in {"R","H"} and not remaining["MCP"]):
++            draft["s3_budget_reason"] = budget["limit_reasons"]["MODEL"] or budget["limit_reasons"]["MCP"]
++            return {"pending_call_refs":[],"policy_tool_call":{},"last_investigation_action":"BUDGET_EXHAUSTED","diagnosis_draft":draft}
+         if self.strategy in {"R","H"}:
+             normalized_call = draft.get("s3_normalization_call_id")
+             if self.strategy == "H" and not draft.get("s3_normalized"):
+@@ -352,8 +359,9 @@ class S3Nodes:
+                     "pending_call_refs":[],"diagnosis_draft":draft,"last_investigation_action":"POLICY_TOOL_SELECTED" if name else "POLICY_NO_ACTION"}
+         try:
+             call_id, calls, text = await self.model_call(state)
+-        except BudgetExhausted:
+-            return {"pending_call_refs":[],"last_investigation_action":"BUDGET_EXHAUSTED"}
++        except BudgetExhausted as error:
++            draft["s3_budget_reason"] = error.reason_code
++            return {"pending_call_refs":[],"last_investigation_action":"BUDGET_EXHAUSTED","diagnosis_draft":draft}
+         except Exception as error:
+             draft["s3_error"] = type(error).__name__
+             return {"pending_call_refs":[],"last_investigation_action":"MODEL_NO_PROGRESS","diagnosis_draft":draft}
+@@ -413,13 +421,15 @@ class S3Nodes:
+             return {"pending_call_refs":[],"policy_tool_call":{},"evidence_ids":ids,
+                     "diagnosis_draft":draft,"tool_observations":observations,
+                     "last_investigation_action":"MCP_NO_PROGRESS"}
+-        if attempt_counts(self.db,self.task)["MCP"] >= self.limits()["MCP"]:
++        try:
++            attempt,_ = reserve_attempt(self.db,self.task,"MCP",self.limits()["MCP"],call_id=call_id,tool_call_id=tool_id,
++                                       tool_name=name,argument_digest=argument_digest,run_id=self.run,
++                                       task_run_control=load_investigation_context(self.db,self.task,self.run)["task_run_control"])
++        except BudgetExhausted as error:
+             if ref:
+                 complete_pending_tool_call(self.db,self.task,call_id,tool_id,"BUDGET_REJECTED")
+-            return {"pending_call_refs":[],"policy_tool_call":{},"last_investigation_action":"BUDGET_EXHAUSTED"}
+-        attempt,_ = reserve_attempt(self.db,self.task,"MCP",self.limits()["MCP"],call_id=call_id,tool_call_id=tool_id,
+-                                   tool_name=name,argument_digest=argument_digest,run_id=self.run,
+-                                   task_run_control=load_investigation_context(self.db,self.task,self.run)["task_run_control"])
++            draft["s3_budget_reason"] = error.reason_code
++            return {"pending_call_refs":[],"policy_tool_call":{},"diagnosis_draft":draft,"last_investigation_action":"BUDGET_EXHAUSTED"}
+         try:
+             result = await asyncio.wait_for(self.client.call_tool(name,args),timeout=12)
+             if result.is_error:
+@@ -525,7 +535,7 @@ class S3Nodes:
+                 response, summary_call = candidate, cached.get("call_id")
+         # A current final response never needs an unconditional report model call.
+         # Legacy explanation-only paths may still request one bounded explanation.
+-        if response is None and not cached and self.strategy == "A" and attempt_counts(self.db,self.task)["MODEL"] < self.limits()["MODEL"]:
++        if response is None and not cached and self.strategy == "A" and self.budget()["remaining_attempts"]["MODEL"]:
+             try:
+                 call, _, text = await self.model_call(state, explain=True)
+                 candidate = parse_response(text)
+@@ -535,7 +545,10 @@ class S3Nodes:
+                     response, summary_call = candidate, call
+             except Exception as error:
+                 draft["s3_error"] = type(error).__name__
+-        reason = "FOLLOWUP_BUDGET_OR_PROVIDER_EXHAUSTED" if attempt_counts(self.db,self.task)["MODEL"] >= self.limits()["MODEL"] else "FOLLOWUP_SOURCE_INSUFFICIENT"
++        budget = self.budget()
++        reason = draft.get("s3_budget_reason") or budget["limit_reasons"]["MODEL"] or "FOLLOWUP_SOURCE_INSUFFICIENT"
++        if budget["policy_version"] == "LEGACY_V1" and reason == "TASK_MODEL_LIMIT":
++            reason = "FOLLOWUP_BUDGET_OR_PROVIDER_EXHAUSTED"
+         if cached and response is None:
+             reason = "FOLLOWUP_RESPONSE_SOURCE_OR_EVENT_INVALIDATED"
+         source_refs = []
+@@ -553,6 +566,9 @@ class S3Nodes:
+                 reason, result_state = "FOLLOWUP_CLARIFICATION_REQUIRED", "PARTIAL"
+         else:
+             summary, delivery = factual_partial(evidence, knowledge, context["inputs"], "RULE_BASELINE" if self.strategy in {"R","H"} else reason)
++            if budget["policy_version"] == "CONTUX_S3_V1" and reason.endswith("_LIMIT"):
++                summary += f"\n停止原因：{reason}；Task 累计 {budget['task_used']}，本 Run 累计 {budget['run_used']}。"
++                summary += "以上业务事实来自本 Run 的有效工具观察。" if evidence else "本轮未取得有效业务观察，未将历史观察当作本次新取证。"
+             frame = event_frame(evidence, context["inputs"])
+             result_state = "ANSWERED" if self.strategy in {"R","H"} and evidence and frame["target_event_id"] else "PARTIAL"
+         if self.readonly_followup:
+@@ -562,6 +578,7 @@ class S3Nodes:
+                 result={"task_id":self.task,"source_message_id":context["task_run_control"]["source_message_id"],
+                         "gate":gate,"excluded_sources":excluded,"observation_ids":[row["observation_id"] for row in observations],
+                         "diagnosis_persisted":False,"readonly_followup":True,**delivery,
++                        "attempt_budget":budget,
+                         "candidate_decisions":draft.get("s3_candidate_decisions",[]),
+                         "unexecuted_candidates":draft.get("s3_remaining_candidates",[])},
+                 reason_code=None if result_state == "ANSWERED" else reason,

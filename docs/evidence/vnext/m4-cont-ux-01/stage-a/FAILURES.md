@@ -15,3 +15,7 @@
 - `full-unfiltered-01`：399 passed / 1 failed。唯一失败是原 `test_m4_autonomy_c1_red.py` 使用废弃 `READONLY_FOLLOWUP` 分类 Intent，而当前合法契约是 `FOLLOW_UP + readonly_action=INVESTIGATE`。原断言、旧 RED 和本次失败日志均保留；没有在生产分类器加入旧 Intent 兼容分支。
 - `full-active-01`：399 passed / 1 deselected，仅排除上项历史契约 RED。其结果只证明当时的测试断言，不自动证明每句用户答复都正确。
 - `fixture-version-red-01`：最终逐句阅读实际持久答复发现，四轮旅程的 Chat 模型替身硬写了 `receiver-ack-contract-v2@2.0.0`，实际输入来源和上一轮引用为 `2.1.0`。增加精确版本断言后两种合法工具次序均失败（2 failed / 23 deselected）。这是测试替身内容缺陷与此前断言不足，不是生产 Context 来源丢失，也不是 Provider 真实误答。保留此前全部轨迹，不能将先前两条旅程计算为答复质量完整成功。替身改为从实际出站 `CURRENT_APPLICABLE` Knowledge 引用读取版本，正式源码保持不变；用新运行证据重新计算旅程结果。
+- `fixture-version-green-01`：2 passed / 23 deselected。两个完整旅程的代词解释均准确引用实际出站当前协议版本；此前错误轨迹不改。
+- `full-active-02`：最终测试目标 `fcfb8f99e8b9209d61a737ab1e7b4af696f58595`，399 passed / 1 deselected，exit 0；25 项阶段 A 新测试全部通过。唯一排除仍是已保留的废弃分类契约 RED。所有业务源码仍为 `27a96c1e7ffbb4e836cec15421d24b731dff13b0` 的相同内容，未为答复替身问题扩大生产修复范围。
+- 证据打包首次执行因早期四次 COMMAND 没有 `head_at_start` 字段而停止（`KeyError`）。原运行日志/元数据不修改；汇总改为明确 `null / NOT_CAPTURED_IN_EARLY_RUN_METADATA_DO_NOT_BACKFILL`，不事后猜填旧 HEAD。最终全量的 HEAD/工作树 hash 已在调用前真实采集。该失败属于证据打包兼容问题，不是业务或测试运行失败。
+- 暂存检查发现未过滤全量 JUnit 的历史失败栈含原始缩进空白。保留 XML 原字节，不清洗失败栈；与原始 `.log` 同样将本任务 `runs/*.xml` 标为 `-text -whitespace`，源码和文档仍执行正常 diff 检查。此处是证据工件空白检查问题，没有修改测试结果或隐藏业务失败。

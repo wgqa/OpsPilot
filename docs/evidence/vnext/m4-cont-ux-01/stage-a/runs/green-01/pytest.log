@@ -1,0 +1,682 @@
+FFFFFFFFFFFFFFFFFF
+================================== FAILURES ===================================
+_______ test_a01_new_followup_after_initial_limit_and_operation_replay ________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a01_new_followup_after_in0')
+
+    def test_a01_new_followup_after_initial_limit_and_operation_replay(tmp_path):
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:84: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a01_new_followup_after_in0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+______ test_a02_run_limit_is_trusted_not_the_caller_limit[False-MODEL-8] ______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_run_limit_is_trusted_0')
+followup = False, kind = 'MODEL', cap = 8
+
+    @pytest.mark.parametrize("followup,kind,cap", [(False,"MODEL",8),(False,"MCP",6),(True,"MODEL",4),(True,"MCP",3)])
+    def test_a02_run_limit_is_trusted_not_the_caller_limit(tmp_path, followup, kind, cap):
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_run_limit_is_trusted_0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_______ test_a02_run_limit_is_trusted_not_the_caller_limit[False-MCP-6] _______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_run_limit_is_trusted_1')
+followup = False, kind = 'MCP', cap = 6
+
+    @pytest.mark.parametrize("followup,kind,cap", [(False,"MODEL",8),(False,"MCP",6),(True,"MODEL",4),(True,"MCP",3)])
+    def test_a02_run_limit_is_trusted_not_the_caller_limit(tmp_path, followup, kind, cap):
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_run_limit_is_trusted_1/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+______ test_a02_run_limit_is_trusted_not_the_caller_limit[True-MODEL-4] _______
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_run_limit_is_trusted_2')
+followup = True, kind = 'MODEL', cap = 4
+
+    @pytest.mark.parametrize("followup,kind,cap", [(False,"MODEL",8),(False,"MCP",6),(True,"MODEL",4),(True,"MCP",3)])
+    def test_a02_run_limit_is_trusted_not_the_caller_limit(tmp_path, followup, kind, cap):
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_run_limit_is_trusted_2/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_______ test_a02_run_limit_is_trusted_not_the_caller_limit[True-MCP-3] ________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_run_limit_is_trusted_3')
+followup = True, kind = 'MCP', cap = 3
+
+    @pytest.mark.parametrize("followup,kind,cap", [(False,"MODEL",8),(False,"MCP",6),(True,"MODEL",4),(True,"MCP",3)])
+    def test_a02_run_limit_is_trusted_not_the_caller_limit(tmp_path, followup, kind, cap):
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_run_limit_is_trusted_3/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+________________ test_a02_two_connections_cannot_overfill_run _________________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_two_connections_canno0')
+
+    def test_a02_two_connections_cannot_overfill_run(tmp_path):
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:139: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_two_connections_canno0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+________ test_a02_task_limit_survives_many_distinct_followups_and_race ________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_task_limit_survives_m0')
+
+    def test_a02_task_limit_survives_many_distinct_followups_and_race(tmp_path):
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:151: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a02_task_limit_survives_m0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+____ test_a03_migration_does_not_upgrade_existing_task_and_s1_stays_legacy ____
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a03_migration_does_not_up0')
+
+    def test_a03_migration_does_not_upgrade_existing_task_and_s1_stays_legacy(tmp_path):
+>       db, identity, task = new_task(tmp_path, claim=False)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a03_migration_does_not_up0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_________ test_a03_cross_task_and_missing_run_cannot_spend_new_policy _________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a03_cross_task_and_missin0')
+
+    def test_a03_cross_task_and_missing_run_cannot_spend_new_policy(tmp_path):
+>       db, _, task = new_task(tmp_path)
+                      ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:194: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a03_cross_task_and_missin0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+__ test_a04_auxiliary_classifiers_include_reserved_failures_and_stop_durably __
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a04_auxiliary_classifiers0')
+
+    def test_a04_auxiliary_classifiers_include_reserved_failures_and_stop_durably(tmp_path):
+        from opspilot.domain.investigation_updates import fail_assessment
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:206: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a04_auxiliary_classifiers0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_______ test_a05_run_exhaustion_has_nonempty_precise_readonly_delivery ________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a05_run_exhaustion_has_no0')
+
+    def test_a05_run_exhaustion_has_nonempty_precise_readonly_delivery(tmp_path):
+        from opspilot.s3_investigation import S3Nodes
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:237: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a05_run_exhaustion_has_no0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_________ test_a04_all_auxiliary_categories_share_one_atomic_task_cap _________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a04_all_auxiliary_categor0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000242C2EFA900>
+
+    def test_a04_all_auxiliary_categories_share_one_atomic_task_cap(tmp_path, monkeypatch):
+        import opspilot.domain.chat as chat
+>       db, identity, task = new_task(tmp_path)
+                             ^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:257: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a04_all_auxiliary_categor0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_ test_a06_real_os_crash_restores_same_run_without_new_allowance[before_checkpoint-False] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a06_real_os_crash_restore0')
+followup = False, window = 'before_checkpoint'
+
+    @pytest.mark.parametrize("followup",[False,True])
+    @pytest.mark.parametrize("window",["before_checkpoint","after_observation"])
+    def test_a06_real_os_crash_restores_same_run_without_new_allowance(tmp_path, followup, window):
+        import subprocess, sys
+>       db,identity,task=new_task(tmp_path,claim=False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:306: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a06_real_os_crash_restore0/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_ test_a06_real_os_crash_restores_same_run_without_new_allowance[before_checkpoint-True] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a06_real_os_crash_restore1')
+followup = True, window = 'before_checkpoint'
+
+    @pytest.mark.parametrize("followup",[False,True])
+    @pytest.mark.parametrize("window",["before_checkpoint","after_observation"])
+    def test_a06_real_os_crash_restores_same_run_without_new_allowance(tmp_path, followup, window):
+        import subprocess, sys
+>       db,identity,task=new_task(tmp_path,claim=False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:306: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a06_real_os_crash_restore1/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_ test_a06_real_os_crash_restores_same_run_without_new_allowance[after_observation-False] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a06_real_os_crash_restore2')
+followup = False, window = 'after_observation'
+
+    @pytest.mark.parametrize("followup",[False,True])
+    @pytest.mark.parametrize("window",["before_checkpoint","after_observation"])
+    def test_a06_real_os_crash_restores_same_run_without_new_allowance(tmp_path, followup, window):
+        import subprocess, sys
+>       db,identity,task=new_task(tmp_path,claim=False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:306: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a06_real_os_crash_restore2/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_ test_a06_real_os_crash_restores_same_run_without_new_allowance[after_observation-True] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a06_real_os_crash_restore3')
+followup = True, window = 'after_observation'
+
+    @pytest.mark.parametrize("followup",[False,True])
+    @pytest.mark.parametrize("window",["before_checkpoint","after_observation"])
+    def test_a06_real_os_crash_restores_same_run_without_new_allowance(tmp_path, followup, window):
+        import subprocess, sys
+>       db,identity,task=new_task(tmp_path,claim=False)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:306: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m4_cont_ux_stage_a.py:38: in new_task
+    reset_fixture(db, "S1_POS")
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a06_real_os_crash_restore3/budget.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_ test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model[knowledge] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a08_four_api_requests_wit0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000242C3182D80>
+protocol_first = 'knowledge'
+
+    @pytest.mark.parametrize("protocol_first",["knowledge","delivery"])
+    def test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model(tmp_path, monkeypatch, protocol_first):
+        from fastapi.testclient import TestClient
+        from langchain_core.messages import AIMessage, AIMessageChunk
+        from opspilot.web.app import create_app
+        from opspilot.web.worker import SingleInstanceWorker, _dispatch_run
+        from opspilot.domain.execution_budget import execution_budget_snapshot
+        from test_m4_c1_s3_prompt import _business_snapshot
+        import opspilot.investigator as investigator
+        import langchain_openai
+        db=tmp_path/"four-requests.sqlite3"
+>       reset_fixture(db,"S1_POS"); preparation=prepare_s3_fixture(db,"DELIVERED_PENDING",contract_version=2,queue_age_seconds=1)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:354: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a08_four_api_requests_wit0/four-requests.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+_ test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model[delivery] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a08_four_api_requests_wit1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000242C5B3AEA0>
+protocol_first = 'delivery'
+
+    @pytest.mark.parametrize("protocol_first",["knowledge","delivery"])
+    def test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model(tmp_path, monkeypatch, protocol_first):
+        from fastapi.testclient import TestClient
+        from langchain_core.messages import AIMessage, AIMessageChunk
+        from opspilot.web.app import create_app
+        from opspilot.web.worker import SingleInstanceWorker, _dispatch_run
+        from opspilot.domain.execution_budget import execution_budget_snapshot
+        from test_m4_c1_s3_prompt import _business_snapshot
+        import opspilot.investigator as investigator
+        import langchain_openai
+        db=tmp_path/"four-requests.sqlite3"
+>       reset_fixture(db,"S1_POS"); preparation=prepare_s3_fixture(db,"DELIVERED_PENDING",contract_version=2,queue_age_seconds=1)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m4_cont_ux_stage_a.py:354: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\database.py:1625: in reset_fixture
+    initialize(path)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/green-01/basetemp/test_a08_four_api_requests_wit1/four-requests.sqlite3')
+
+    def initialize(path: str | Path) -> None:
+        with connect(path) as connection:
+            # executescript normally commits any open transaction before executing.
+            # Put the transaction opener inside the script so schema creation and the
+            # versioned compatibility backfill commit or roll back together.
+            from opspilot.domain.s3 import SCHEMA as S3_SCHEMA
+            from opspilot.domain.s3_handoff import SCHEMA as S3_HANDOFF_SCHEMA
+            from opspilot.domain.s3_history import SCHEMA as S3_HISTORY_SCHEMA
+            from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
+            connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA)
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > 16:
+>               raise RuntimeError(f"Unsupported Domain schema version: {version}.")
+E               RuntimeError: Unsupported Domain schema version: 17.
+
+opspilot\domain\database.py:1086: RuntimeError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a01_new_followup_after_initial_limit_and_operation_replay
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a02_run_limit_is_trusted_not_the_caller_limit[False-MODEL-8]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a02_run_limit_is_trusted_not_the_caller_limit[False-MCP-6]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a02_run_limit_is_trusted_not_the_caller_limit[True-MODEL-4]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a02_run_limit_is_trusted_not_the_caller_limit[True-MCP-3]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a02_two_connections_cannot_overfill_run
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a02_task_limit_survives_many_distinct_followups_and_race
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a03_migration_does_not_upgrade_existing_task_and_s1_stays_legacy
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a03_cross_task_and_missing_run_cannot_spend_new_policy
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a04_auxiliary_classifiers_include_reserved_failures_and_stop_durably
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a05_run_exhaustion_has_nonempty_precise_readonly_delivery
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a04_all_auxiliary_categories_share_one_atomic_task_cap
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a06_real_os_crash_restores_same_run_without_new_allowance[before_checkpoint-False]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a06_real_os_crash_restores_same_run_without_new_allowance[before_checkpoint-True]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a06_real_os_crash_restores_same_run_without_new_allowance[after_observation-False]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a06_real_os_crash_restores_same_run_without_new_allowance[after_observation-True]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model[knowledge]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model[delivery]
+18 failed in 4.04s
