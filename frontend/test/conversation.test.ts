@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { projectConversation } from '../src/conversation.ts';
+import { clearS3RestrictedResultCache, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable,
+  type CachedS3Inspector } from '../src/conversation.ts';
 
 const user = (message_id: string, sequence: number, created_at: string, body = message_id) => ({
   message_id, task_id: 'task-a', sequence, role: 'USER' as const, input_kind: 'CHAT_READONLY',
@@ -147,4 +148,94 @@ test('keeps waiting and failed outcomes visible without duplicating an ordinary 
   assert.deepEqual(itemIds('failed-question'), ['run:failed-run']);
   assert.equal(projection.threads.find((thread) => thread.anchor.message_id === 'limit-question')
     ?.items[0]?.message?.answer_kind, 'PROGRAM_LIMIT');
+});
+
+test('clears revoked S3 result caches without removing unrelated conversation messages', () => {
+  const priorAnswer = { run_id: 'initial-run', source_message_id: 's3-question',
+    answer_text: 'restricted initial S3 answer', result_state: 'ANSWERED', source_refs: [], result: {},
+    created_at: '2026-01-01T00:00:01Z', report_ref: 'restricted-receipt' };
+  const priorFollowup = { run_id: 'followup-run', source_message_id: 's3-followup-question',
+    expected_control_revision: 0, result_state: 'ANSWERED', answer_text: 'restricted C1 Follow-up answer',
+    source_refs: [{ evidence_id: 'restricted-evidence' }], result: { private_detail: 'restricted-result' },
+    created_at: '2026-01-01T00:01:01Z', run_status: 'SUCCEEDED' };
+  const inspector: CachedS3Inspector = {
+    task: { task_id: 'task-s3', service_id: 'orders-async-demo' },
+    trusted_state: { s3_outcome: { receipt_id: 'restricted-receipt', outcome: 'RECEIVER_PROCESSED' },
+      s3_handoff: { receipt_id: 'restricted-handoff' } },
+    current_gate: { decision: 'DIAGNOSED', checked_fact_ids: ['restricted-evidence'] },
+    runs: [
+      { run_id: 'initial-run', task_id: 'task-s3', source_message_id: 's3-question', kind: 'INVESTIGATE',
+        status: 'SUCCEEDED', created_at: '2026-01-01T00:00:00Z' },
+      { run_id: 'followup-run', task_id: 'task-s3', source_message_id: 's3-followup-question', kind: 'INVESTIGATE',
+        status: 'SUCCEEDED', created_at: '2026-01-01T00:01:00Z' },
+    ],
+    evidence: [{ evidence_id: 'restricted-evidence' }],
+    observations: [{ evidence_id: 'restricted-evidence' }],
+    investigation_answers: [priorAnswer],
+    readonly_followups: [priorFollowup],
+    task_input_messages: [{ message_id: 's3-question' }],
+    investigation_model_traces: [{ evidence_id: 'restricted-evidence' }],
+    chat_model_attempts: [],
+    chat_context_provenance: [{ evidence_refs: ['restricted-evidence'] }],
+    investigator_context_provenance: [{ evidence_ids: ['restricted-evidence'] }],
+  };
+  const messages = [
+    { ...user('s3-question', 1, '2026-01-01T00:00:00Z'), task_id: 'task-s3' },
+    { ...user('s3-followup-question', 2, '2026-01-01T00:01:00Z'), task_id: 'task-s3' },
+    { ...user('s3-answer', 3, '2026-01-01T00:02:00Z', 'restricted S3 chat response'),
+      task_id: 'task-s3', role: 'ASSISTANT' as const, answer_run_id: 'initial-run',
+      answer_source_message_id: 's3-question', answer_kind: 'CHAT_MODEL' as const },
+    { ...user('orphan-s3-answer', 4, '2026-01-01T00:02:01Z', 'restricted orphan response'),
+      task_id: null, role: 'ASSISTANT' as const, answer_run_id: 'followup-run',
+      answer_source_message_id: 's3-followup-question', answer_kind: 'CHAT_MODEL' as const },
+    { ...user('other-question', 5, '2026-01-01T00:03:00Z'), task_id: 'task-other' },
+    { ...user('other-answer', 6, '2026-01-01T00:04:00Z', 'unrelated response'),
+      task_id: 'task-other', role: 'ASSISTANT' as const, answer_run_id: 'other-run',
+      answer_source_message_id: 'other-question', answer_kind: 'CHAT_MODEL' as const },
+  ];
+
+  assert.equal(s3InspectorAuthorizationUnavailable(inspector), false);
+  const revoked = { ...inspector, trusted_state: { ...inspector.trusted_state,
+    s3_outcome: { currentness: 'INVALIDATED_BY_CURRENT_FACTS',
+      gate: { reason_code: 'S3_AUTHORIZATION_UNAVAILABLE' } } } };
+  assert.equal(s3InspectorAuthorizationUnavailable(revoked), true);
+  assert.equal(s3InspectorAuthorizationUnavailable({ ...revoked, trusted_state: { ...revoked.trusted_state,
+    s3_outcome: { currentness: 'INVALIDATED_BY_CURRENT_FACTS', gate: { reason_code: 'S3_SLA_EXPIRED' } } } }), false);
+
+  const cleared = clearS3RestrictedResultCache(revoked, messages, 'task-s3');
+  assert.deepEqual(cleared.inspector?.investigation_answers, []);
+  assert.deepEqual(cleared.inspector?.readonly_followups, []);
+  assert.deepEqual(cleared.inspector?.evidence, []);
+  assert.deepEqual(cleared.inspector?.observations, []);
+  assert.deepEqual(cleared.inspector?.investigator_context_provenance, []);
+  assert.deepEqual(cleared.messages.map((message) => message.message_id), ['s3-question', 's3-followup-question', 'other-question', 'other-answer']);
+  const projection = projectConversation({
+    messages: cleared.messages,
+    runs: cleared.inspector?.runs,
+    investigationAnswers: cleared.inspector?.investigation_answers,
+    readonlyFollowups: cleared.inspector?.readonly_followups,
+  });
+  const rendered = JSON.stringify(projection);
+  for (const restricted of ['restricted initial S3 answer', 'restricted C1 Follow-up answer',
+    'restricted S3 chat response', 'restricted orphan response', 'restricted-receipt', 'restricted-evidence']) {
+    assert.equal(rendered.includes(restricted), false, `stale result reached projection: ${restricted}`);
+  }
+  assert.deepEqual(projection.unassociatedItems, []);
+});
+
+test('does not project restricted bodies or receipts from a previously received SSE event', () => {
+  const event = projectSessionEvent({
+    event_seq: 88,
+    event_kind: 'S3_HANDOFF_ACCEPTED',
+    happened_at: '2026-01-01T00:00:00Z',
+    payload: { answer_text: 'restricted S3 body', receipt_id: 'restricted-receipt', source_refs: ['restricted-evidence'] },
+  });
+  assert.deepEqual(event, {
+    event_seq: 88,
+    event_kind: 'S3_HANDOFF_ACCEPTED',
+    happened_at: '2026-01-01T00:00:00Z',
+  });
+  for (const restricted of ['restricted S3 body', 'restricted-receipt', 'restricted-evidence']) {
+    assert.equal(JSON.stringify(event).includes(restricted), false);
+  }
 });

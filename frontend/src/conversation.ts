@@ -49,6 +49,7 @@ export interface ConversationAssessment {
   intent: string;
   follow_up_action?: string;
   status: string;
+  failure_code?: string | null;
   correction_message_id?: string | null;
   investigation_run_id?: string | null;
   change_summary?: string | null;
@@ -91,6 +92,102 @@ export interface ProjectConversationInput {
   activeChatRun?: ConversationRun | null;
   chunks?: ChatChunk[];
   s3Outcome?: Record<string, unknown> | null;
+}
+
+export interface SessionEventDisplay {
+  event_seq: number;
+  event_kind: string;
+  happened_at: string;
+}
+
+export function projectSessionEvent(event: SessionEventDisplay & { payload?: unknown }): SessionEventDisplay {
+  return {
+    event_seq: event.event_seq,
+    event_kind: event.event_kind,
+    happened_at: event.happened_at,
+  };
+}
+
+export interface CachedS3Inspector {
+  task: Record<string, unknown>;
+  trusted_state: Record<string, unknown>;
+  current_gate: Record<string, unknown>;
+  runs: ConversationRun[];
+  evidence: unknown[];
+  observations: unknown[];
+  investigation_answers?: ConversationAnswer[];
+  readonly_followups?: ConversationFollowup[];
+  task_input_messages?: Array<Record<string, unknown>>;
+  investigation_model_traces?: unknown[];
+  chat_model_attempts?: unknown[];
+  chat_context_provenance?: unknown[];
+  investigator_context_provenance?: unknown[];
+}
+
+export function s3InspectorAuthorizationUnavailable(
+  inspector: Pick<CachedS3Inspector, 'task' | 'trusted_state'> | null,
+): boolean {
+  if (!inspector || inspector.task.service_id !== 'orders-async-demo') return false;
+  const outcome = inspector.trusted_state.s3_outcome;
+  if (!outcome || typeof outcome !== 'object') return false;
+  const record = outcome as Record<string, unknown>;
+  const gate = record.gate;
+  return record.currentness === 'INVALIDATED_BY_CURRENT_FACTS'
+    && !!gate && typeof gate === 'object'
+    && (gate as Record<string, unknown>).reason_code === 'S3_AUTHORIZATION_UNAVAILABLE';
+}
+
+export function clearS3RestrictedResultCache<T extends CachedS3Inspector>(
+  inspector: T | null,
+  messages: MessageItem[],
+  taskId: string,
+): { inspector: T | null; messages: MessageItem[] } {
+  if (!inspector || inspector.task.task_id !== taskId || inspector.task.service_id !== 'orders-async-demo') {
+    return { inspector, messages };
+  }
+  const runIds = new Set(inspector.runs.map((run) => run.run_id));
+  const followupSources = new Set((inspector.readonly_followups ?? []).map((item) => item.source_message_id));
+  const hiddenFollowupRunIds = new Set([
+    ...(inspector.readonly_followups ?? []).map((item) => item.run_id),
+    ...inspector.runs.filter((run) => run.source_message_id && followupSources.has(run.source_message_id))
+      .map((run) => run.run_id),
+  ]);
+  const sourceMessageIds = new Set([
+    ...(inspector.task_input_messages ?? []).map((item) => String(item.message_id ?? '')),
+    ...(inspector.investigation_answers ?? []).map((item) => item.source_message_id),
+    ...(inspector.readonly_followups ?? []).map((item) => item.source_message_id),
+  ].filter(Boolean));
+  const visibleMessages = messages.filter((message) => {
+    if (message.role !== 'ASSISTANT') return true;
+    return message.task_id !== taskId
+      && !(message.answer_run_id && runIds.has(message.answer_run_id))
+      && !(message.answer_source_message_id && sourceMessageIds.has(message.answer_source_message_id));
+  });
+  const trustedState = { ...inspector.trusted_state };
+  delete trustedState.s3_outcome;
+  delete trustedState.s3_handoff;
+  const clearedInspector = {
+    ...inspector,
+    runs: inspector.runs.filter((run) => !hiddenFollowupRunIds.has(run.run_id)),
+    trusted_state: {
+      ...trustedState,
+      s3_outcome: {
+        outcome: 'INCONCLUSIVE',
+        currentness: 'INVALIDATED_BY_CURRENT_FACTS',
+        recovered: false,
+        gate: { decision: 'INCONCLUSIVE', reason_code: 'S3_AUTHORIZATION_UNAVAILABLE' },
+      },
+    },
+    current_gate: { decision: 'INCONCLUSIVE', reason_code: 'S3_AUTHORIZATION_UNAVAILABLE', checked_fact_ids: [] },
+    evidence: [],
+    observations: [],
+    investigation_answers: [],
+    readonly_followups: [],
+    investigation_model_traces: [],
+    chat_context_provenance: [],
+    investigator_context_provenance: [],
+  } as T;
+  return { inspector: clearedInspector, messages: visibleMessages };
 }
 
 function taskMatches(anchor: MessageItem, taskId: string | null | undefined): boolean {
@@ -186,6 +283,7 @@ export function projectConversation(input: ProjectConversationInput): Conversati
   }
 
   for (const assessment of assessments) {
+    if (assessment.intent === 'FOLLOW_UP' && assessment.status === 'NO_UPDATE' && !assessment.failure_code) continue;
     const taskId = assessment.target_task_id ?? assessment.task_id ?? null;
     const correctionMessage = assessment.correction_message_id
       ? messagesById.get(assessment.correction_message_id)

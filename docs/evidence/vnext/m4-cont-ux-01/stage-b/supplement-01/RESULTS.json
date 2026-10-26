@@ -1,0 +1,163 @@
+{
+  "schema": "opspilot-m4-cont-ux-stage-b-supplement-01-v1",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "stage_b_overall_status": "NOT_ACCEPTED_BROWSER_REQUIRED",
+  "repository": "wgqa/OpsPilot",
+  "remote": "https://github.com/wgqa/OpsPilot.git",
+  "base_main_sha": "ad056c38da1f925fca80b74aef0a88a686ac97e1",
+  "remote_main_after_validation": "ad056c38da1f925fca80b74aef0a88a686ac97e1",
+  "freeze_commit": "daa475b",
+  "red_commits": ["ffff924", "b222e3c", "f25e380", "6fba3d9"],
+  "tested_candidate_parent": "6fba3d99769ce6fa8e901c34184ef95f85d2e3c9",
+  "environment": {
+    "os": "Windows",
+    "python": "3.14.0",
+    "venv": ".venv-stageb",
+    "pytest": "9.1.1",
+    "fastapi": "0.137.1",
+    "langgraph": "1.2.16",
+    "langchain_core": "1.6.12",
+    "node": "v24.16.0",
+    "npm": "11.13.0",
+    "provider_calls": 0,
+    "browser_or_computer_use_calls": 0
+  },
+  "runs": [
+    {
+      "id": "api-red-scope-revocation",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_contux_stage_b_supplement_api.py::test_inspector_redacts_initial_and_persisted_followup_after_scope_revocation -vv -s --basetemp=docs/evidence/vnext/m4-cont-ux-01/stage-b/supplement-01/runs/red-01/basetemp",
+      "result": "RED_REPRODUCED",
+      "passed": 0,
+      "failed": 1,
+      "exit_code": 1,
+      "raw_log": "runs/red-01/pytest.log",
+      "raw_response": "runs/red-01/api-responses.json"
+    },
+    {
+      "id": "api-red-expanded-metadata",
+      "result": "RED_REPRODUCED",
+      "passed": 0,
+      "failed": 1,
+      "exit_code": 1,
+      "raw_log": "runs/red-04/pytest.log",
+      "raw_response": "runs/red-04/api-responses.json"
+    },
+    {
+      "id": "projection-red-duplicate-followup",
+      "command": "node --experimental-strip-types --test test/conversation.test.ts (working directory: frontend)",
+      "result": "RED_REPRODUCED",
+      "passed": 4,
+      "failed": 1,
+      "exit_code": 1,
+      "raw_log": "runs/red-03/node-test.log"
+    },
+    {
+      "id": "api-green-scope-revocation",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_contux_stage_b_supplement_api.py::test_inspector_redacts_initial_and_persisted_followup_after_scope_revocation -q --basetemp=docs/evidence/vnext/m4-cont-ux-01/stage-b/supplement-01/runs/green-05/basetemp",
+      "result": "PASS",
+      "passed": 1,
+      "failed": 0,
+      "exit_code": 0,
+      "raw_log": "runs/green-05/pytest.log",
+      "raw_response": "runs/green-05/api-responses.json"
+    },
+    {
+      "id": "projection-green",
+      "command": "node --experimental-strip-types --test test/conversation.test.ts (working directory: frontend)",
+      "result": "PASS",
+      "passed": 6,
+      "failed": 0,
+      "exit_code": 0,
+      "raw_log": "runs/green-04/node-test.log"
+    },
+    {
+      "id": "frontend-static-and-build",
+      "commands": [
+        "npm run typecheck (working directory: frontend)",
+        "npm run build (working directory: frontend)",
+        "npx eslint src/App.vue src/conversation.ts test/conversation.test.ts (working directory: frontend)"
+      ],
+      "result": "PASS",
+      "typecheck_exit_code": 0,
+      "build_exit_code": 0,
+      "eslint_exit_code": 0,
+      "raw_logs": "runs/frontend-04/",
+      "note": "These checks were rerun after the final Inspector refresh race check and safe SSE display projection were added."
+    },
+    {
+      "id": "projection-green-final",
+      "command": "node --experimental-strip-types --test test/conversation.test.ts (working directory: frontend)",
+      "result": "PASS",
+      "passed": 7,
+      "failed": 0,
+      "exit_code": 0,
+      "raw_log": "runs/frontend-04/node-test.log"
+    },
+    {
+      "id": "targeted-security-and-stage-b-regression",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_contux_stage_b_api.py tests/test_m4_contux_stage_b_supplement_api.py tests/test_m4_c1_hf_01.py tests/test_m4_cont_ux_stage_a.py tests/test_m4_continuous_vs01.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_03_s3.py tests/test_m1_task_control.py -q --basetemp=docs/evidence/vnext/m4-cont-ux-01/stage-b/supplement-01/runs/regression-02/basetemp",
+      "result": "PASS",
+      "passed": 127,
+      "failed": 0,
+      "exit_code": 0,
+      "raw_log": "runs/regression-02/pytest.log"
+    },
+    {
+      "id": "full-pytest-deep-basetemp",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest --basetemp=docs/evidence/vnext/m4-cont-ux-01/stage-b/supplement-01/runs/full-pytest-01/basetemp -q --deselect=tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix",
+      "result": "ENVIRONMENT_PATH_FAILURE_REPRODUCED",
+      "passed": 382,
+      "failed": 20,
+      "deselected": 1,
+      "exit_code": 1,
+      "failure": "The same sqlite3.OperationalError: unable to open database file occurred in 20 M1 Web approval checkpoint tests using the deep Windows basetemp path.",
+      "raw_log": "runs/full-pytest-01/pytest.log"
+    },
+    {
+      "id": "full-pytest-short-basetemp",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest --basetemp=C:/Temp/ops_sb01_full_03 -q --deselect=tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix",
+      "result": "PASS_WITH_HISTORICAL_CASE_DESELECTED",
+      "passed": 402,
+      "failed": 0,
+      "deselected": 1,
+      "exit_code": 0,
+      "raw_log": "runs/full-pytest-03/pytest.log",
+      "runtime": "538.27s"
+    },
+    {
+      "id": "full-pytest-output-path-attempt",
+      "result": "UNVERIFIABLE_NO_CAPTURED_PYTEST_SUMMARY",
+      "passed": null,
+      "failed": null,
+      "exit_code": null,
+      "details": "A separate attempt lacked its pre-created Tee-Object output directory. Some basetemp directories were created, but no stdout, summary, or reliable pytest exit code was captured. See FAILURES.md; not counted as a result."
+    }
+  ],
+  "historical_c1_red": {
+    "deselected_test": "tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix",
+    "reason": "Historical test uses a retired intent contract; the test remains unchanged and excluded from the aggregate run, as in the prior Stage B full-suite report."
+  },
+  "browser": {
+    "status": "NOT_RUN",
+    "reason": "Explicit current execution boundary forbids Computer Use; no alternate browser automation was used."
+  },
+  "provider": {
+    "status": "NOT_RUN",
+    "calls": 0
+  },
+  "source_and_documentation_diff_check": {
+    "result": "PASS",
+    "command": "git diff --cached --check excluding verbatim *.log artifacts",
+    "note": "Verbatim pytest/npm logs contain their original whitespace; they are preserved unchanged."
+  },
+  "historical_trace_side_effect": {
+    "path": "docs/evidence/vnext/m4-autonomy-c1/runs/rev1/behavior-red-trace.jsonl",
+    "effect": "Full pytest appended two test-generated rows; the file was restored to committed HEAD contents after confirming the diff contained only those rows.",
+    "included_in_candidate_diff": false
+  },
+  "limitations": [
+    "This supplement does not satisfy the Stage B real-browser acceptance requirement.",
+    "No Provider or live browser interaction was performed.",
+    "The revoked Scope is changed in the deterministic local Domain test; the protected Inspector read is exercised through the real local HTTP API."
+  ]
+}

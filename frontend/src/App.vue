@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
-import { projectConversation, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
+import { clearS3RestrictedResultCache, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -35,6 +35,7 @@ const pendingApprovals = ref<PendingApproval[]>([]);
 const selectedReview = ref<PlanReview | null>(null);
 const approvalResult = ref<ApprovalResult | null>(null);
 const sessionEvents = ref<EventItem[]>([]);
+const sessionEventProjection = computed(() => sessionEvents.value.map(projectSessionEvent));
 const draft = ref('');
 const initialSymptom = ref('');
 const correctionDraft = ref('');
@@ -428,29 +429,84 @@ async function refreshSession(): Promise<void> {
 }
 
 async function refreshInspector(): Promise<boolean> {
-  if (!taskId.value) return false;
+  const requestedTaskId = taskId.value;
+  if (!requestedTaskId) return false;
+  const stillShowingRequestedTask = (): boolean => taskId.value === requestedTaskId;
   try {
-    inspector.value = await api.inspector(taskId.value);
+    const refreshed = await api.inspector(requestedTaskId);
+    if (!stillShowingRequestedTask()) return false;
+    inspector.value = refreshed;
+    if (s3InspectorAuthorizationUnavailable(refreshed as unknown as CachedS3Inspector)) {
+      clearS3TaskResultCache(requestedTaskId);
+      try {
+        await refreshSessionMessagesOnly();
+        clearS3TaskResultCache(requestedTaskId);
+      } catch {
+        // The stale cache was already removed before the optional message refresh.
+      }
+      if (!stillShowingRequestedTask()) return false;
+      notice.value = '当前 S3 Scope 授权不可用，受限调查答复与来源已隐藏；现存业务记录未被修改。';
+      return true;
+    }
     if (user.value?.role === 'SUPPORT') {
-      investigationUpdates.value = (await api.investigationUpdates(taskId.value)).items;
+      const updates = await api.investigationUpdates(requestedTaskId);
+      if (!stillShowingRequestedTask()) return false;
+      investigationUpdates.value = updates.items;
       if (String(inspector.value.task.service_id ?? '') === 'orders-async-demo') {
-        s3HandoffOutcome.value = await api.s3Handoff(taskId.value);
+        const handoff = await api.s3Handoff(requestedTaskId);
+        if (!stillShowingRequestedTask()) return false;
+        s3HandoffOutcome.value = handoff;
         taskOutcome.value = null;
       } else {
         s3HandoffOutcome.value = null;
         const [handoffOutcome, taskOutcomeResult] = await Promise.all([
-          api.handoff(taskId.value), api.taskOutcome(taskId.value),
+          api.handoff(requestedTaskId), api.taskOutcome(requestedTaskId),
         ]);
+        if (!stillShowingRequestedTask()) return false;
         taskOutcome.value = ['NO_PLAN', 'NO_S2_DIAGNOSIS'].includes(String(handoffOutcome.business_outcome))
           ? taskOutcomeResult : handoffOutcome;
       }
-      taskMemoryContext.value = await api.taskMemories(taskId.value);
-      taskSemanticContext.value = await api.taskSemanticMemories(taskId.value);
+      const memoryContext = await api.taskMemories(requestedTaskId);
+      if (!stillShowingRequestedTask()) return false;
+      taskMemoryContext.value = memoryContext;
+      const semanticMemoryContext = await api.taskSemanticMemories(requestedTaskId);
+      if (!stillShowingRequestedTask()) return false;
+      taskSemanticContext.value = semanticMemoryContext;
     }
     return true;
   } catch (error) {
-    if (user.value?.role === 'APPROVER') errorMessage.value = explainError(error);
+    if (taskId.value === requestedTaskId && inspector.value?.task.task_id === requestedTaskId
+      && String(inspector.value.task.service_id ?? '') === 'orders-async-demo') {
+      clearS3TaskResultCache(requestedTaskId);
+      try {
+        await refreshSessionMessagesOnly();
+        clearS3TaskResultCache(requestedTaskId);
+      } catch {
+        // Keep the in-memory S3 result cache cleared if the Session read is also unavailable.
+      }
+      if (!stillShowingRequestedTask()) return false;
+      errorMessage.value = explainError(error);
+    } else if (user.value?.role === 'APPROVER') {
+      errorMessage.value = explainError(error);
+    }
     return false;
+  }
+}
+
+function clearS3TaskResultCache(expectedTaskId: string): void {
+  const cleared = clearS3RestrictedResultCache(
+    inspector.value as unknown as CachedS3Inspector | null,
+    messages.value,
+    expectedTaskId,
+  );
+  inspector.value = cleared.inspector as unknown as Inspector | null;
+  messages.value = cleared.messages;
+  s3HandoffOutcome.value = null;
+  taskOutcome.value = null;
+  if (activeChatRun.value?.task_id === expectedTaskId) {
+    activeChatRun.value = null;
+    chunks.value = [];
+    lastChunkSeq.value = 0;
   }
 }
 
@@ -886,6 +942,7 @@ function readableUpdateIntent(value: unknown): string {
 
 function readableUpdateStatus(value: unknown): string {
   return ({
+    ASSESSING: '正在识别这条消息的处理方式',
     PENDING_CONFIRMATION: '等待你确认',
     CONFIRMED: '已由 TaskControl 受理',
     CANCELLED: '已取消',
@@ -1557,7 +1614,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="inspector-section timeline-section"><div class="section-heading"><h3>事件时间线</h3><button class="text-button" type="button" @click="reconnectEvents">刷新</button></div>
             <div v-if="sessionEvents.length === 0" class="muted-card">持久事件到达后会显示在这里。</div>
-            <div v-for="item in sessionEvents.slice(0, 12)" :key="item.event_seq" class="timeline-item"><span class="timeline-dot"></span><div><strong>{{ item.event_kind.replaceAll('_', ' ') }}</strong><small>{{ dateLabel(item.happened_at) }} · #{{ item.event_seq }}</small></div></div>
+            <div v-for="item in sessionEventProjection.slice(0, 12)" :key="item.event_seq" class="timeline-item"><span class="timeline-dot"></span><div><strong>{{ item.event_kind.replaceAll('_', ' ') }}</strong><small>{{ dateLabel(item.happened_at) }} · #{{ item.event_seq }}</small></div></div>
           </div>
         </template>
         <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>新建 S1 调查并输入真实故障描述后，这里会显示来源引用、可信 Evidence 和确定性 Gate。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = true">新建调查任务</button></div>

@@ -1,0 +1,87 @@
+✔ groups interleaved results under exact source messages and keeps late answer timestamps (1.6091ms)
+✔ does not guess a missing source, preserves same-text operations, and filters routed chat failures (0.1525ms)
+✔ links a confirmed correction and its new run under the exact originating message once (5.0753ms)
+✔ deduplicates replayed stable ids and renders only the active source run chunks (0.7332ms)
+✔ keeps waiting and failed outcomes visible without duplicating an ordinary Follow-up card (0.2611ms)
+✖ clears revoked S3 result caches without removing unrelated conversation messages (1.2076ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85.6495
+
+✖ failing tests:
+
+test at test\conversation.test.ts:153:1
+✖ clears revoked S3 result caches without removing unrelated conversation messages (1.2076ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     createdAt: '2026-01-01T00:00:00Z',
+  +     id: 'run:initial-run',
+  +     kind: 'RUN_STATUS',
+  +     run: {
+  +       created_at: '2026-01-01T00:00:00Z',
+  +       kind: 'INVESTIGATE',
+  +       run_id: 'initial-run',
+  +       source_message_id: 's3-question',
+  +       status: 'SUCCEEDED',
+  +       task_id: 'task-s3'
+  +     },
+  +     runId: 'initial-run'
+  +   },
+  +   {
+  +     createdAt: '2026-01-01T00:01:00Z',
+  +     id: 'run:followup-run',
+  +     kind: 'RUN_STATUS',
+  +     run: {
+  +       created_at: '2026-01-01T00:01:00Z',
+  +       kind: 'INVESTIGATE',
+  +       run_id: 'followup-run',
+  +       source_message_id: 's3-followup-question',
+  +       status: 'SUCCEEDED',
+  +       task_id: 'task-s3'
+  +     },
+  +     runId: 'followup-run'
+  +   },
+  +   {
+  +     createdAt: '2026-01-01T00:04:00Z',
+  +     id: 'message:other-answer',
+  +     kind: 'CHAT_MESSAGE',
+  +     message: {
+  +       answer_kind: 'CHAT_MODEL',
+  +       answer_run_id: 'other-run',
+  +       answer_source_message_id: 'other-question',
+  +       application_state: null,
+  +       applied_run_id: null,
+  +       body: 'unrelated response',
+  +       created_at: '2026-01-01T00:04:00Z',
+  +       input_kind: 'CHAT_READONLY',
+  +       message_id: 'other-answer',
+  +       role: 'ASSISTANT',
+  +       sequence: 6,
+  +       task_id: 'task-other'
+  +     }
+  +   }
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///C:/Users/tu%20me%20manques/.codex/worktrees/c1-approved-integration-20261025/agent%E6%96%B0%E9%A1%B9%E7%9B%AE/frontend/test/conversation.test.ts:223:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1306:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:897:18)
+      at Test.postRun (node:internal/test_runner/test:1447:19)
+      at Test.run (node:internal/test_runner/test:1372:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:897:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { id: 'run:initial-run', kind: 'RUN_STATUS', createdAt: '2026-01-01T00:00:00Z', runId: 'initial-run', run: [Object] }, { id: 'run:followup-run', kind: 'RUN_STATUS', createdAt: '2026-01-01T00:01:00Z', runId: 'followup-run', run: [Object] }, { id: 'message:other-answer', kind: 'CHAT_MESSAGE', createdAt: '2026-01-01T00:04:00Z', message: [Object] } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

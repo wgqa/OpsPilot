@@ -2436,6 +2436,10 @@ def get_chat_manifest(path: str | Path, identity: TrustedIdentity, run_id: str) 
 
 def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str) -> dict[str, Any]:
     with connect(path) as connection:
+        # Keep current authorization and every projected S3 result on the same
+        # SQLite read snapshot. A revoked Scope must not be checked separately
+        # from the answer/source rows that it protects.
+        connection.execute("BEGIN")
         _verify_identity(connection, identity)
         binding = connection.execute(
             "SELECT b.* FROM task_bindings b WHERE b.task_id = ? AND b.tenant_id = ?",
@@ -2457,9 +2461,35 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                 raise TaskControlError("TASK_SCOPE_DENIED")
         elif identity.role != "SUPPORT":
             raise TaskControlError("TASK_SCOPE_DENIED")
+        s3_scope_current = str(binding["service_id"]) != "orders-async-demo"
+        if not s3_scope_current:
+            from opspilot.domain.d2 import ScopeDenied
+            from opspilot.domain.s3 import get_s3_binding
+
+            try:
+                get_s3_binding(connection, task_id)
+                s3_scope_current = True
+            except ScopeDenied:
+                s3_scope_current = False
         trusted_state, _ = _trusted_state(connection, task_id)
         from opspilot.domain.s3_answers import answers_in_transaction
-        investigation_answers = answers_in_transaction(connection, task_id)
+        investigation_answers = (
+            answers_in_transaction(connection, task_id)
+            if s3_scope_current else []
+        )
+        if str(binding["service_id"]) == "orders-async-demo" and not s3_scope_current and trusted_state is not None:
+            # Keep only the non-sensitive revocation reason for the UI. Do not
+            # expose an invalidated receipt ID, outcome body, Evidence IDs, or
+            # historical exclusions as if they remained readable.
+            trusted_state["s3_outcome"] = {
+                "outcome": "INCONCLUSIVE",
+                "currentness": "INVALIDATED_BY_CURRENT_FACTS",
+                "recovered": False,
+                "gate": {
+                    "decision": "INCONCLUSIVE",
+                    "reason_code": "S3_AUTHORIZATION_UNAVAILABLE",
+                },
+            }
         evidence = _current_evidence(connection, task_id, trusted_state)
         plan_history = connection.execute(
             """SELECT p.plan_hash, p.plan_version, a.eligibility,
@@ -2476,7 +2506,22 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                       evidence_id, created_at FROM d2_tool_observations
                WHERE task_id = ? ORDER BY created_at DESC, observation_id DESC LIMIT 50""",
             (task_id,),
-        ).fetchall()
+        ).fetchall() if s3_scope_current else []
+        restricted_s3_run_ids: set[str] = set()
+        if str(binding["service_id"]) == "orders-async-demo" and not s3_scope_current:
+            followup_sources = connection.execute(
+                "SELECT run_id,source_message_id FROM c1_readonly_followup_runs WHERE tenant_id=? AND task_id=?",
+                (identity.tenant_id, task_id),
+            ).fetchall()
+            restricted_s3_run_ids.update(str(row["run_id"]) for row in followup_sources)
+            source_ids = list(dict.fromkeys(str(row["source_message_id"]) for row in followup_sources))
+            if source_ids:
+                placeholders = ",".join("?" for _ in source_ids)
+                sidecars = connection.execute(
+                    f"SELECT run_id FROM task_runs WHERE tenant_id=? AND task_id=? AND source_message_id IN ({placeholders})",
+                    (identity.tenant_id, task_id, *source_ids),
+                ).fetchall()
+                restricted_s3_run_ids.update(str(row["run_id"]) for row in sidecars)
         runs = connection.execute(
             """SELECT r.run_id, r.kind, r.status, r.blocked_reason, r.source_message_id,
                       r.expected_control_revision, r.consumed_message_seq,
@@ -2487,6 +2532,8 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                FROM task_runs r WHERE r.task_id = ? AND r.tenant_id = ? ORDER BY r.created_at DESC LIMIT 50""",
             (task_id, identity.tenant_id),
         ).fetchall()
+        if restricted_s3_run_ids:
+            runs = [row for row in runs if str(row["run_id"]) not in restricted_s3_run_ids]
         readonly_followups = (
             connection.execute(
                 """SELECT f.run_id,f.source_message_id,f.source_digest,f.expected_control_revision,
@@ -2497,7 +2544,7 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                    ORDER BY f.created_at DESC,f.run_id DESC LIMIT 20""",
                 (identity.tenant_id, task_id),
             ).fetchall()
-            if identity.role == "SUPPORT" else []
+            if identity.role == "SUPPORT" and s3_scope_current else []
         )
         task_input_messages = connection.execute(
             """SELECT m.message_id, m.sequence, m.input_kind, m.body_digest,
@@ -2549,6 +2596,13 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                ORDER BY built_at DESC, call_id DESC LIMIT 20""",
             (task_id,),
         ).fetchall()
+        if not s3_scope_current and str(binding["service_id"]) == "orders-async-demo":
+            # Context provenance and traces may carry run/source/Evidence IDs.
+            # Keep operational counts on Runs, but omit S3 investigation detail.
+            model = []
+            chat_context_rows = []
+            compression_context_rows = []
+            investigator_contexts = []
     from opspilot.domain.d2 import evaluate_evidence_gate
 
     try:
