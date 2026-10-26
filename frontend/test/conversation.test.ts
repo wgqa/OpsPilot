@@ -111,6 +111,8 @@ test('keeps waiting and failed outcomes visible without duplicating an ordinary 
         kind: 'CHAT_READONLY', status: 'BLOCKED', blocked_reason: 'UPDATE_CONFIRMATION_PENDING', created_at: '2026-01-01T00:01:01Z' },
       { run_id: 'routed-sidecar', source_message_id: 'followup-question', task_id: 'task-a',
         kind: 'CHAT_READONLY', status: 'BLOCKED', blocked_reason: 'FOLLOWUP_ROUTED_TO_INVESTIGATOR', created_at: '2026-01-01T00:02:01Z' },
+      { run_id: 'followup-run', source_message_id: 'followup-question', task_id: 'task-a',
+        kind: 'INVESTIGATE', status: 'SUCCEEDED', created_at: '2026-01-01T00:02:02Z' },
       { run_id: 'failed-run', source_message_id: 'failed-question', task_id: 'task-a',
         kind: 'INVESTIGATE', status: 'FAILED', blocked_reason: 'MCP_TIMEOUT', created_at: '2026-01-01T00:05:01Z' },
       { run_id: 'partial-run', source_message_id: 'partial-question', task_id: 'task-a',
