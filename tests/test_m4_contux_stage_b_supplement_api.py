@@ -129,6 +129,8 @@ def test_inspector_redacts_initial_and_persisted_followup_after_scope_revocation
     prior_followup = next(item for item in before["readonly_followups"] if item["run_id"] == followup["run_id"])
     assert prior_followup["result_state"] == "ANSWERED"
     assert prior_followup["source_refs"] and prior_followup["result"]
+    diagnosis_receipt_id = str(before["investigation_answers"][0]["report_ref"])
+    current_evidence_ids = {str(item["evidence_id"]) for item in before["evidence"]}
     before_business = _business_answer_snapshot(db, task_id)
 
     with connect(db) as connection:
@@ -160,6 +162,10 @@ def test_inspector_redacts_initial_and_persisted_followup_after_scope_revocation
     for restricted in (initial_body, str(prior_followup["answer_text"]), str(followup["source_message_id"])):
         if restricted in encoded_after:
             violations.append(f"restricted body/source leaked: {restricted[:80]}")
+    if diagnosis_receipt_id in encoded_after:
+        violations.append("invalidated S3 diagnosis receipt id remains visible")
+    if any(evidence_id in encoded_after for evidence_id in current_evidence_ids):
+        violations.append("current S3 Evidence ids remain visible in trace metadata")
     if after["trusted_state"].get("s3_handoff"):
         violations.append("S3 handoff result remains visible")
     assert _business_answer_snapshot(db, task_id) == before_business, "read authorization must not rewrite immutable answer/diagnosis rows"

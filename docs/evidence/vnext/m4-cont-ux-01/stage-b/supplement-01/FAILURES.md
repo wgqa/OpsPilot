@@ -23,6 +23,13 @@ All entries below are preserved from fresh executions against frozen implementat
 - Exit: `1`; existing 4 projection tests passed and the new case failed.
 - After fixing the fixture's missing Run relation, the ordinary `FOLLOW_UP` assessment appeared beside its persisted Follow-up answer as `assessment:ordinary-followup` plus `followup:followup-run`. This is a duplicate user-facing classification card. In the same fixture, classification waiting, confirmation waiting, the routed Chat sidecar, genuine FAILED Run, PARTIAL answer, and PROGRAM_LIMIT result are independently asserted to retain their distinct projection behavior.
 
+## Additional valid RED: Inspector source metadata remains after revocation
+
+- Run: `runs/red-04/`; command matches `runs/red-01/` with the response artifact path changed to `runs/red-04/api-responses.json`.
+- Exit: `1`.
+- Extending the same deterministic case to inspect the entire API object found that, in addition to the C1 answer row, the revoked response still includes the immutable diagnosis receipt ID in `trusted_state.s3_outcome` and current S3 Evidence IDs in trace metadata. The old `evidence` list itself is correctly empty. This confirms the Inspector response needs one shared authorization decision for the S3 answer and source/result projection, including its summary fields.
+- Full authorized and revoked responses are saved in `api-responses.json`; the failed assertions are preserved in `pytest.log`.
+
 ## Not run
 
 - Browser / Computer Use: `NOT_RUN / BLOCKED_BY_TOOL_ENVIRONMENT` per the explicit execution boundary.
