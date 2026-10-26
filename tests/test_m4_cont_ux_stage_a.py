@@ -407,7 +407,11 @@ def test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model(tmp_pa
             contents=json.dumps([m.content for m in messages],ensure_ascii=False)
             calls.append({"kind":"CHAT","messages":[{"role":m.type,"content":m.content} for m in messages]})
             assert "receiver-ack-contract-v2" in contents and "prior" in contents.lower()
-            yield AIMessageChunk(content="刚才引用的是 receiver-ack-contract-v2@2.0.0。它只约定 202 受理，不能证明接收方处理完成；当前状态须另取本轮事实。")
+            prior_results=[json.loads(m.content[m.content.index("{"):]) for m in messages
+                           if m.content.startswith("PRIOR READONLY FOLLOWUP RESULT")]
+            doc=next(ref for prior in reversed(prior_results) for ref in prior["source_refs"]
+                     if ref["kind"]=="KNOWLEDGE" and ref["currentness"]=="CURRENT_APPLICABLE")
+            yield AIMessageChunk(content=f"刚才引用的是 {doc['document_id']}@{doc['version']}。它只约定 202 受理，不能证明接收方处理完成；当前状态须另取本轮事实。")
     monkeypatch.setattr(investigator,"ChatOpenAI",DeterministicModel)
     monkeypatch.setattr(langchain_openai,"ChatOpenAI",DeterministicModel)
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY","deterministic-no-paid-provider")
@@ -465,7 +469,8 @@ def test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model(tmp_pa
                 if i==1:
                     messages=client.get(f"/api/sessions/{session}/messages").json()["items"]
                     answer=next(m for m in reversed(messages) if m["role"]=="ASSISTANT")
-                    assert "receiver-ack-contract-v2" in answer["body"]
+                    prior_doc=next(ref for ref in rounds[-1]["result"]["source_refs"] if ref["kind"]=="KNOWLEDGE")
+                    assert f"{prior_doc['document_id']}@{prior_doc['version']}" in answer["body"]
                 else:
                     answer=next(x for x in inspector["readonly_followups"] if x["run_id"]==run)
                     assert answer["answer_text"].strip() and answer["result_state"]=="ANSWERED"

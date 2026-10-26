@@ -1,0 +1,242 @@
+HTTP Request: GET http://127.0.0.1:65495/api/async-orders/async-order?order_id=async-order "HTTP/1.0 200 OK"
+FHTTP Request: GET http://127.0.0.1:65526/api/async-orders/async-order?order_id=async-order "HTTP/1.0 200 OK"
+F
+================================== FAILURES ===================================
+_ test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model[knowledge] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/fixture-version-red-01/basetemp/test_a08_four_api_requests_wit0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000214DCA8A5A0>
+protocol_first = 'knowledge'
+
+    @pytest.mark.parametrize("protocol_first",["knowledge","delivery"])
+    def test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model(tmp_path, monkeypatch, protocol_first):
+        from fastapi.testclient import TestClient
+        from langchain_core.messages import AIMessage, AIMessageChunk
+        from opspilot.web.app import create_app
+        from opspilot.web.worker import SingleInstanceWorker, _dispatch_run
+        from opspilot.domain.execution_budget import execution_budget_snapshot
+        from test_m4_c1_s3_prompt import _business_snapshot
+        import opspilot.investigator as investigator
+        import langchain_openai
+        db=tmp_path/"four-requests.sqlite3"
+        reset_fixture(db,"S1_POS"); preparation=prepare_s3_fixture(db,"DELIVERED_PENDING",contract_version=2,queue_age_seconds=1)
+        calls=[]; classifications=[]
+        class DeterministicModel:
+            def __init__(self,**_kwargs): pass
+            def bind_tools(self,*_args,**_kwargs): return self
+            async def ainvoke(self,messages):
+                body=json.loads(messages[-1].content); calls.append({"kind":"INVESTIGATOR","body":body})
+                inputs=body["untrusted_user_inputs"]; question=str(inputs[-1]["body"])
+                facts=body["current_mcp_evidence"]; kinds={x["type"] for x in facts}
+                knowledge=body["retrieved_knowledge_method_only"]
+                protocol="绑定协议" in question
+                if protocol:
+                    available={"knowledge":bool(knowledge),"delivery":"s3_delivery" in kinds}
+                    choice=next((kind for kind in [protocol_first,"delivery" if protocol_first=="knowledge" else "knowledge"] if not available[kind]),None)
+                    tool={"knowledge":"search_callback_knowledge","delivery":"get_callback_delivery"}.get(choice)
+                elif "新一轮" in question:
+                    tool=None if "s3_receiver" in kinds else "get_receiver_processing"
+                else:
+                    tool=next((name for kind,name in [("s3_order","get_order_status"),("s3_delivery","get_callback_delivery"),("s3_receiver","get_receiver_processing")] if kind not in kinds),None)
+                if tool:
+                    args={"reason":"read an applicable source missing from this Run; deterministic test double"}
+                    if tool=="search_callback_knowledge": args["query"]="HTTP 202 receiver acknowledgement"
+                    return AIMessage(content="",tool_calls=[{"id":f"tool-{len(calls)}","name":tool,"args":args}])
+                if protocol:
+                    doc=next(x for x in knowledge if x["document_id"]=="receiver-ack-contract-v2")
+                    answer=f"根据 {doc['document_id']}@{doc['version']}，HTTP 202 表示受理，不代表处理完成；本轮投递证据仅证明受理。"
+                    value={"action":"answer","result_state":"ANSWERED","answer":answer,"processing_claim":"NOT_APPLICABLE"}
+                else:
+                    receiver=next(x for x in facts if x["type"]=="s3_receiver")
+                    answer=f"本轮同一事件 {receiver['facts']['event_id']} 接收状态为 {receiver['facts']['status']}，来源 {receiver['id']}。"
+                    value={"action":"answer","result_state":"ANSWERED","answer":answer,
+                           "processing_claim":receiver["facts"]["status"],"target_event_id":receiver["facts"]["event_id"]}
+                return AIMessage(content=json.dumps(value,ensure_ascii=False))
+            async def astream(self,messages):
+                contents=json.dumps([m.content for m in messages],ensure_ascii=False)
+                calls.append({"kind":"CHAT","messages":[{"role":m.type,"content":m.content} for m in messages]})
+                assert "receiver-ack-contract-v2" in contents and "prior" in contents.lower()
+                yield AIMessageChunk(content="刚才引用的是 receiver-ack-contract-v2@2.0.0。它只约定 202 受理，不能证明接收方处理完成；当前状态须另取本轮事实。")
+        monkeypatch.setattr(investigator,"ChatOpenAI",DeterministicModel)
+        monkeypatch.setattr(langchain_openai,"ChatOpenAI",DeterministicModel)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY","deterministic-no-paid-provider")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME","deterministic-no-paid-provider")
+        def classify(*,prepared,**_kwargs):
+            classifications.append(prepared)
+            return {"intent":"FOLLOW_UP","change_summary":"","readonly_action":"EXPLAIN" if "刚才引用" in prepared["source_message"] else "INVESTIGATE"}
+        monkeypatch.setattr("opspilot.domain.investigation_updates.classify_input",classify)
+        app=create_app(db_path=db,start_worker=False,credentials={"support-a":"contux-password"},expected_origin="http://testserver")
+        rounds=[]; worker=SingleInstanceWorker(db)
+        with TestClient(app) as client:
+            login=client.post("/api/auth/login",headers={"Origin":"http://testserver"},json={"actor_id":"support-a","password":"contux-password"})
+            assert login.status_code==200
+            headers={"Origin":"http://testserver","X-CSRF-Token":login.json()["csrf_token"]}
+            session=client.post("/api/sessions",headers=headers).json()["session_id"]
+            created=client.post(f"/api/sessions/{session}/tasks",headers={**headers,"Idempotency-Key":"initial-api"},
+                 json={"investigation_kind":"ASYNC_CALLBACK","s3_order_id":"async-order","initial_message":"订单返回 200，但下游回调还未完成，请核实。"})
+            assert created.status_code==202,created.text
+            task=created.json(); tid=str(task["task_id"])
+            worker.acquire(); worker.register()
+            try:
+                def drive(run):
+                    with connect(db) as c: selected=dict(c.execute("SELECT * FROM task_runs WHERE run_id=?",(run,)).fetchone())
+                    asyncio.run(_dispatch_run(db,tmp_path/"checkpoints.sqlite3",worker.owner_id,"executor-a",selected,worker.epoch))
+                    item=client.get(f"/api/runs/{run}").json()
+                    assert item["status"]=="SUCCEEDED",item
+                drive(str(task["run_id"]))
+                inspector=client.get(f"/api/tasks/{tid}/inspector").json()
+                initial=inspector["investigation_answers"][0]
+                assert initial["answer_text"].strip()
+                rounds.append({"source":task,"result":initial,"active_time":execution_budget_snapshot(db,tid)})
+                before=_business_snapshot(db,tid); before.pop("outbox_count")
+                for i,text in enumerate([
+                    "请按当前绑定协议核对 HTTP 202 的含义，给出能核对的来源。",
+                    "你刚才引用的那份，为什么不能证明已经处理完成？",
+                    "那现在这次回调完成了吗？请按新一轮事实核实。",
+                ]):
+                    prep=None
+                    if i==2:
+                        # Independent trusted test preparation, never an Agent tool.
+                        with connect(db) as c:
+                            previous=dict(c.execute("SELECT * FROM s3_receivers WHERE tenant_id='tenant-a' AND order_id='async-order'").fetchone())
+                            c.execute("UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE tenant_id='tenant-a' AND order_id='async-order'")
+                            after=dict(c.execute("SELECT * FROM s3_receivers WHERE tenant_id='tenant-a' AND order_id='async-order'").fetchone())
+                        prep={"kind":"INDEPENDENT_TEST_PREPARATION","before":previous,"after":after}
+                    response=client.post(f"/api/sessions/{session}/messages",headers={**headers,"Idempotency-Key":f"round-{i}"},json={"task_id":tid,"input_kind":"CHAT_READONLY","body":text})
+                    assert response.status_code==202,response.text
+                    source=response.json(); mid=source["message_id"]
+                    assessment=client.post(f"/api/tasks/{tid}/investigation-updates/proposals",headers={**headers,"Idempotency-Key":mid},json={"source_message_id":mid})
+                    assert assessment.status_code==200,assessment.text
+                    classified=assessment.json()
+                    run=str(classified.get("investigation_run_id") or source["run_id"])
+                    drive(run)
+                    inspector=client.get(f"/api/tasks/{tid}/inspector").json()
+                    if i==1:
+                        messages=client.get(f"/api/sessions/{session}/messages").json()["items"]
+                        answer=next(m for m in reversed(messages) if m["role"]=="ASSISTANT")
+                        prior_doc=next(ref for ref in rounds[-1]["result"]["source_refs"] if ref["kind"]=="KNOWLEDGE")
+>                       assert f"{prior_doc['document_id']}@{prior_doc['version']}" in answer["body"]
+E                       AssertionError: assert 'receiver-ack-contract-v2@2.1.0' in '刚才引用的是 receiver-ack-contract-v2@2.0.0。它只约定 202 受理，不能证明接收方处理完成；当前状态须另取本轮事实。'
+
+tests\test_m4_cont_ux_stage_a.py:469: AssertionError
+_ test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model[delivery] _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/docs/evidence/vnext/m4-cont-ux-01/stage-a/runs/fixture-version-red-01/basetemp/test_a08_four_api_requests_wit1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000214E0718FE0>
+protocol_first = 'delivery'
+
+    @pytest.mark.parametrize("protocol_first",["knowledge","delivery"])
+    def test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model(tmp_path, monkeypatch, protocol_first):
+        from fastapi.testclient import TestClient
+        from langchain_core.messages import AIMessage, AIMessageChunk
+        from opspilot.web.app import create_app
+        from opspilot.web.worker import SingleInstanceWorker, _dispatch_run
+        from opspilot.domain.execution_budget import execution_budget_snapshot
+        from test_m4_c1_s3_prompt import _business_snapshot
+        import opspilot.investigator as investigator
+        import langchain_openai
+        db=tmp_path/"four-requests.sqlite3"
+        reset_fixture(db,"S1_POS"); preparation=prepare_s3_fixture(db,"DELIVERED_PENDING",contract_version=2,queue_age_seconds=1)
+        calls=[]; classifications=[]
+        class DeterministicModel:
+            def __init__(self,**_kwargs): pass
+            def bind_tools(self,*_args,**_kwargs): return self
+            async def ainvoke(self,messages):
+                body=json.loads(messages[-1].content); calls.append({"kind":"INVESTIGATOR","body":body})
+                inputs=body["untrusted_user_inputs"]; question=str(inputs[-1]["body"])
+                facts=body["current_mcp_evidence"]; kinds={x["type"] for x in facts}
+                knowledge=body["retrieved_knowledge_method_only"]
+                protocol="绑定协议" in question
+                if protocol:
+                    available={"knowledge":bool(knowledge),"delivery":"s3_delivery" in kinds}
+                    choice=next((kind for kind in [protocol_first,"delivery" if protocol_first=="knowledge" else "knowledge"] if not available[kind]),None)
+                    tool={"knowledge":"search_callback_knowledge","delivery":"get_callback_delivery"}.get(choice)
+                elif "新一轮" in question:
+                    tool=None if "s3_receiver" in kinds else "get_receiver_processing"
+                else:
+                    tool=next((name for kind,name in [("s3_order","get_order_status"),("s3_delivery","get_callback_delivery"),("s3_receiver","get_receiver_processing")] if kind not in kinds),None)
+                if tool:
+                    args={"reason":"read an applicable source missing from this Run; deterministic test double"}
+                    if tool=="search_callback_knowledge": args["query"]="HTTP 202 receiver acknowledgement"
+                    return AIMessage(content="",tool_calls=[{"id":f"tool-{len(calls)}","name":tool,"args":args}])
+                if protocol:
+                    doc=next(x for x in knowledge if x["document_id"]=="receiver-ack-contract-v2")
+                    answer=f"根据 {doc['document_id']}@{doc['version']}，HTTP 202 表示受理，不代表处理完成；本轮投递证据仅证明受理。"
+                    value={"action":"answer","result_state":"ANSWERED","answer":answer,"processing_claim":"NOT_APPLICABLE"}
+                else:
+                    receiver=next(x for x in facts if x["type"]=="s3_receiver")
+                    answer=f"本轮同一事件 {receiver['facts']['event_id']} 接收状态为 {receiver['facts']['status']}，来源 {receiver['id']}。"
+                    value={"action":"answer","result_state":"ANSWERED","answer":answer,
+                           "processing_claim":receiver["facts"]["status"],"target_event_id":receiver["facts"]["event_id"]}
+                return AIMessage(content=json.dumps(value,ensure_ascii=False))
+            async def astream(self,messages):
+                contents=json.dumps([m.content for m in messages],ensure_ascii=False)
+                calls.append({"kind":"CHAT","messages":[{"role":m.type,"content":m.content} for m in messages]})
+                assert "receiver-ack-contract-v2" in contents and "prior" in contents.lower()
+                yield AIMessageChunk(content="刚才引用的是 receiver-ack-contract-v2@2.0.0。它只约定 202 受理，不能证明接收方处理完成；当前状态须另取本轮事实。")
+        monkeypatch.setattr(investigator,"ChatOpenAI",DeterministicModel)
+        monkeypatch.setattr(langchain_openai,"ChatOpenAI",DeterministicModel)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY","deterministic-no-paid-provider")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME","deterministic-no-paid-provider")
+        def classify(*,prepared,**_kwargs):
+            classifications.append(prepared)
+            return {"intent":"FOLLOW_UP","change_summary":"","readonly_action":"EXPLAIN" if "刚才引用" in prepared["source_message"] else "INVESTIGATE"}
+        monkeypatch.setattr("opspilot.domain.investigation_updates.classify_input",classify)
+        app=create_app(db_path=db,start_worker=False,credentials={"support-a":"contux-password"},expected_origin="http://testserver")
+        rounds=[]; worker=SingleInstanceWorker(db)
+        with TestClient(app) as client:
+            login=client.post("/api/auth/login",headers={"Origin":"http://testserver"},json={"actor_id":"support-a","password":"contux-password"})
+            assert login.status_code==200
+            headers={"Origin":"http://testserver","X-CSRF-Token":login.json()["csrf_token"]}
+            session=client.post("/api/sessions",headers=headers).json()["session_id"]
+            created=client.post(f"/api/sessions/{session}/tasks",headers={**headers,"Idempotency-Key":"initial-api"},
+                 json={"investigation_kind":"ASYNC_CALLBACK","s3_order_id":"async-order","initial_message":"订单返回 200，但下游回调还未完成，请核实。"})
+            assert created.status_code==202,created.text
+            task=created.json(); tid=str(task["task_id"])
+            worker.acquire(); worker.register()
+            try:
+                def drive(run):
+                    with connect(db) as c: selected=dict(c.execute("SELECT * FROM task_runs WHERE run_id=?",(run,)).fetchone())
+                    asyncio.run(_dispatch_run(db,tmp_path/"checkpoints.sqlite3",worker.owner_id,"executor-a",selected,worker.epoch))
+                    item=client.get(f"/api/runs/{run}").json()
+                    assert item["status"]=="SUCCEEDED",item
+                drive(str(task["run_id"]))
+                inspector=client.get(f"/api/tasks/{tid}/inspector").json()
+                initial=inspector["investigation_answers"][0]
+                assert initial["answer_text"].strip()
+                rounds.append({"source":task,"result":initial,"active_time":execution_budget_snapshot(db,tid)})
+                before=_business_snapshot(db,tid); before.pop("outbox_count")
+                for i,text in enumerate([
+                    "请按当前绑定协议核对 HTTP 202 的含义，给出能核对的来源。",
+                    "你刚才引用的那份，为什么不能证明已经处理完成？",
+                    "那现在这次回调完成了吗？请按新一轮事实核实。",
+                ]):
+                    prep=None
+                    if i==2:
+                        # Independent trusted test preparation, never an Agent tool.
+                        with connect(db) as c:
+                            previous=dict(c.execute("SELECT * FROM s3_receivers WHERE tenant_id='tenant-a' AND order_id='async-order'").fetchone())
+                            c.execute("UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE tenant_id='tenant-a' AND order_id='async-order'")
+                            after=dict(c.execute("SELECT * FROM s3_receivers WHERE tenant_id='tenant-a' AND order_id='async-order'").fetchone())
+                        prep={"kind":"INDEPENDENT_TEST_PREPARATION","before":previous,"after":after}
+                    response=client.post(f"/api/sessions/{session}/messages",headers={**headers,"Idempotency-Key":f"round-{i}"},json={"task_id":tid,"input_kind":"CHAT_READONLY","body":text})
+                    assert response.status_code==202,response.text
+                    source=response.json(); mid=source["message_id"]
+                    assessment=client.post(f"/api/tasks/{tid}/investigation-updates/proposals",headers={**headers,"Idempotency-Key":mid},json={"source_message_id":mid})
+                    assert assessment.status_code==200,assessment.text
+                    classified=assessment.json()
+                    run=str(classified.get("investigation_run_id") or source["run_id"])
+                    drive(run)
+                    inspector=client.get(f"/api/tasks/{tid}/inspector").json()
+                    if i==1:
+                        messages=client.get(f"/api/sessions/{session}/messages").json()["items"]
+                        answer=next(m for m in reversed(messages) if m["role"]=="ASSISTANT")
+                        prior_doc=next(ref for ref in rounds[-1]["result"]["source_refs"] if ref["kind"]=="KNOWLEDGE")
+>                       assert f"{prior_doc['document_id']}@{prior_doc['version']}" in answer["body"]
+E                       AssertionError: assert 'receiver-ack-contract-v2@2.1.0' in '刚才引用的是 receiver-ack-contract-v2@2.0.0。它只约定 202 受理，不能证明接收方处理完成；当前状态须另取本轮事实。'
+
+tests\test_m4_cont_ux_stage_a.py:469: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model[knowledge]
+FAILED tests/test_m4_cont_ux_stage_a.py::test_a08_four_api_requests_with_real_mcp_http_and_deterministic_model[delivery]
+2 failed, 23 deselected in 10.84s
