@@ -90,3 +90,59 @@ test('deduplicates replayed stable ids and renders only the active source run ch
   assert.deepEqual(projection.threads[0]?.items.map((item) => item.id), ['stream:chat-r1']);
   assert.deepEqual(projection.threads[0]?.items[0]?.chunks?.map((chunk) => chunk.body), ['hello', ' world']);
 });
+
+test('keeps waiting and failed outcomes visible without duplicating an ordinary Follow-up card', () => {
+  const projection = projectConversation({
+    messages: [
+      user('classifying-question', 1, '2026-01-01T00:00:00Z'),
+      user('confirm-question', 2, '2026-01-01T00:01:00Z'),
+      user('followup-question', 3, '2026-01-01T00:02:00Z'),
+      user('partial-question', 4, '2026-01-01T00:03:00Z'),
+      user('limit-question', 5, '2026-01-01T00:04:00Z'),
+      user('failed-question', 6, '2026-01-01T00:05:00Z'),
+      { ...user('limit-answer', 7, '2026-01-01T00:04:30Z', '额度已用尽，尚未完成当前状态核实。'),
+        role: 'ASSISTANT' as const, answer_run_id: 'limit-run',
+        answer_source_message_id: 'limit-question', answer_kind: 'PROGRAM_LIMIT' as const },
+    ],
+    runs: [
+      { run_id: 'classification-sidecar', source_message_id: 'classifying-question', task_id: 'task-a',
+        kind: 'CHAT_READONLY', status: 'BLOCKED', blocked_reason: 'UPDATE_CLASSIFICATION_PENDING', created_at: '2026-01-01T00:00:01Z' },
+      { run_id: 'confirmation-sidecar', source_message_id: 'confirm-question', task_id: 'task-a',
+        kind: 'CHAT_READONLY', status: 'BLOCKED', blocked_reason: 'UPDATE_CONFIRMATION_PENDING', created_at: '2026-01-01T00:01:01Z' },
+      { run_id: 'routed-sidecar', source_message_id: 'followup-question', task_id: 'task-a',
+        kind: 'CHAT_READONLY', status: 'BLOCKED', blocked_reason: 'FOLLOWUP_ROUTED_TO_INVESTIGATOR', created_at: '2026-01-01T00:02:01Z' },
+      { run_id: 'failed-run', source_message_id: 'failed-question', task_id: 'task-a',
+        kind: 'INVESTIGATE', status: 'FAILED', blocked_reason: 'MCP_TIMEOUT', created_at: '2026-01-01T00:05:01Z' },
+      { run_id: 'partial-run', source_message_id: 'partial-question', task_id: 'task-a',
+        kind: 'INVESTIGATE', status: 'SUCCEEDED', created_at: '2026-01-01T00:03:01Z' },
+      { run_id: 'limit-run', source_message_id: 'limit-question', task_id: 'task-a',
+        kind: 'CHAT_READONLY', status: 'BLOCKED', blocked_reason: 'TASK_MODEL_LIMIT', created_at: '2026-01-01T00:04:01Z' },
+    ],
+    assessments: [
+      { assessment_id: 'classification-wait', source_message_id: 'classifying-question', task_id: 'task-a',
+        intent: 'UNKNOWN', status: 'ASSESSING' },
+      { assessment_id: 'confirmation-wait', source_message_id: 'confirm-question', task_id: 'task-a',
+        intent: 'CRITICAL_CORRECTION', status: 'PENDING_CONFIRMATION',
+        proposal: { status: 'PENDING_CONFIRMATION' } },
+      { assessment_id: 'ordinary-followup', source_message_id: 'followup-question', task_id: 'task-a',
+        intent: 'FOLLOW_UP', follow_up_action: 'INVESTIGATE', status: 'NO_UPDATE' },
+    ],
+    readonlyFollowups: [{ run_id: 'followup-run', source_message_id: 'followup-question', expected_control_revision: 0,
+      result_state: 'ANSWERED', answer_text: '同一 Task 的合法补查答复。', source_refs: [], result: {},
+      created_at: '2026-01-01T00:02:02Z', completed_at: '2026-01-01T00:02:03Z', run_status: 'SUCCEEDED' }],
+    investigationAnswers: [{ run_id: 'partial-run', source_message_id: 'partial-question',
+      answer_text: '已确认投递受理，接收方处理状态仍未知。', result_state: 'PARTIAL', source_refs: [],
+      created_at: '2026-01-01T00:03:02Z' }],
+  });
+
+  const itemIds = (messageId: string) => projection.threads
+    .find((thread) => thread.anchor.message_id === messageId)?.items.map((item) => item.id) ?? [];
+  assert.deepEqual(itemIds('classifying-question'), ['assessment:classification-wait']);
+  assert.deepEqual(itemIds('confirm-question'), ['assessment:confirmation-wait']);
+  assert.deepEqual(itemIds('followup-question'), ['followup:followup-run']);
+  assert.deepEqual(itemIds('partial-question'), ['investigation:partial-run']);
+  assert.deepEqual(itemIds('limit-question'), ['message:limit-answer']);
+  assert.deepEqual(itemIds('failed-question'), ['run:failed-run']);
+  assert.equal(projection.threads.find((thread) => thread.anchor.message_id === 'limit-question')
+    ?.items[0]?.message?.answer_kind, 'PROGRAM_LIMIT');
+});
