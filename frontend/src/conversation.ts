@@ -100,6 +100,74 @@ export interface SessionEventDisplay {
   happened_at: string;
 }
 
+export interface InspectorReadTicket {
+  taskId: string;
+  generation: number;
+}
+
+export interface SessionMessagesReadTicket {
+  sessionId: string;
+  generation: number;
+}
+
+export interface S3ReadResponseFence {
+  beginInspector(taskId: string): InspectorReadTicket;
+  isCurrentInspector(ticket: InspectorReadTicket, selectedTaskId: string): boolean;
+  denyInspector(ticket: InspectorReadTicket): InspectorReadTicket | null;
+  acceptAuthorizedInspector(ticket: InspectorReadTicket): boolean;
+  isTaskDenied(taskId: string): boolean;
+  beginSessionMessages(sessionId: string): SessionMessagesReadTicket;
+  isCurrentSessionMessages(ticket: SessionMessagesReadTicket, selectedSessionId: string): boolean;
+}
+
+export function createS3ReadResponseFence(): S3ReadResponseFence {
+  const inspectorGenerations = new Map<string, number>();
+  const deniedTasks = new Set<string>();
+  let sessionMessagesGeneration = 0;
+  return {
+    beginInspector(taskId) {
+      const generation = (inspectorGenerations.get(taskId) ?? 0) + 1;
+      inspectorGenerations.set(taskId, generation);
+      return { taskId, generation };
+    },
+    isCurrentInspector(ticket, selectedTaskId) {
+      return ticket.taskId === selectedTaskId
+        && inspectorGenerations.get(ticket.taskId) === ticket.generation;
+    },
+    denyInspector(ticket) {
+      if (inspectorGenerations.get(ticket.taskId) !== ticket.generation) return null;
+      deniedTasks.add(ticket.taskId);
+      const generation = ticket.generation + 1;
+      inspectorGenerations.set(ticket.taskId, generation);
+      sessionMessagesGeneration += 1;
+      return { taskId: ticket.taskId, generation };
+    },
+    acceptAuthorizedInspector(ticket) {
+      if (inspectorGenerations.get(ticket.taskId) !== ticket.generation) return false;
+      deniedTasks.delete(ticket.taskId);
+      sessionMessagesGeneration += 1;
+      return true;
+    },
+    isTaskDenied: (taskId) => deniedTasks.has(taskId),
+    beginSessionMessages(sessionId) {
+      sessionMessagesGeneration += 1;
+      return { sessionId, generation: sessionMessagesGeneration };
+    },
+    isCurrentSessionMessages(ticket, selectedSessionId) {
+      return ticket.sessionId === selectedSessionId
+        && ticket.generation === sessionMessagesGeneration;
+    },
+  };
+}
+
+export function filterDeniedS3AssistantMessages(
+  messages: MessageItem[],
+  isTaskDenied: (taskId: string) => boolean,
+): MessageItem[] {
+  return messages.filter((message) => message.role !== 'ASSISTANT'
+    || !message.task_id || !isTaskDenied(message.task_id));
+}
+
 export function projectSessionEvent(event: SessionEventDisplay & { payload?: unknown }): SessionEventDisplay {
   return {
     event_seq: event.event_seq,

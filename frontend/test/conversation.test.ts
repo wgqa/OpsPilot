@@ -1,11 +1,132 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { clearS3RestrictedResultCache, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable,
+import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable,
   type CachedS3Inspector } from '../src/conversation.ts';
 
 const user = (message_id: string, sequence: number, created_at: string, body = message_id) => ({
   message_id, task_id: 'task-a', sequence, role: 'USER' as const, input_kind: 'CHAT_READONLY',
   body, created_at, application_state: null, applied_run_id: null,
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => { resolve = accept; });
+  return { promise, resolve };
+}
+
+test('same-Task stale authorized Inspector response cannot overwrite later revocation', async () => {
+  const fence = createS3ReadResponseFence();
+  const taskId = 'task-s3';
+  const selectedTaskId = taskId;
+  let inspectorResult: Record<string, string> = {
+    answer_text: 'restricted S3 answer',
+    source_ref: 'restricted source',
+    receipt_id: 'restricted receipt',
+    evidence_id: 'restricted evidence',
+  };
+  const oldResponse = deferred<'authorized-old'>();
+  const revokedResponse = deferred<'authorization-unavailable'>();
+
+  const applyInspectorResponse = async (
+    ticket: ReturnType<typeof fence.beginInspector>,
+    response: Promise<'authorized-old' | 'authorization-unavailable'>,
+  ) => {
+    const result = await response;
+    if (!fence.isCurrentInspector(ticket, selectedTaskId)) return;
+    if (result === 'authorization-unavailable') {
+      if (!fence.denyInspector(ticket)) return;
+      inspectorResult = { gate: 'S3_AUTHORIZATION_UNAVAILABLE' };
+    } else if (fence.acceptAuthorizedInspector(ticket)) {
+      inspectorResult = {
+        answer_text: 'restricted S3 answer',
+        source_ref: 'restricted source',
+        receipt_id: 'restricted receipt',
+        evidence_id: 'restricted evidence',
+      };
+    }
+  };
+
+  const requestA = fence.beginInspector(taskId);
+  const responseA = applyInspectorResponse(requestA, oldResponse.promise);
+  const requestB = fence.beginInspector(taskId);
+  const responseB = applyInspectorResponse(requestB, revokedResponse.promise);
+  revokedResponse.resolve('authorization-unavailable');
+  await responseB;
+  oldResponse.resolve('authorized-old');
+  await responseA;
+
+  assert.deepEqual(inspectorResult, { gate: 'S3_AUTHORIZATION_UNAVAILABLE' },
+    'late authorized response reintroduced the pre-revocation Inspector');
+  for (const restricted of ['restricted S3 answer', 'restricted source', 'restricted receipt', 'restricted evidence']) {
+    assert.equal(JSON.stringify(inspectorResult).includes(restricted), false);
+  }
+});
+
+test('keeps legitimate current same-Task refreshes and isolates another Task', () => {
+  const fence = createS3ReadResponseFence();
+  const firstTaskRequest = fence.beginInspector('task-s3');
+  const latestTaskRequest = fence.beginInspector('task-s3');
+  const otherTaskRequest = fence.beginInspector('task-other');
+
+  assert.equal(fence.isCurrentInspector(firstTaskRequest, 'task-s3'), false);
+  assert.equal(fence.acceptAuthorizedInspector(latestTaskRequest), true);
+  assert.equal(fence.isCurrentInspector(otherTaskRequest, 'task-other'), true);
+  assert.equal(fence.acceptAuthorizedInspector(otherTaskRequest), true);
+});
+
+test('a pre-revocation Session Message response cannot restore a cleared assistant body', async () => {
+  const fence = createS3ReadResponseFence();
+  const taskId = 'task-s3';
+  const sessionId = 'session-1';
+  let messages = ['safe user anchor', 'cached restricted assistant body'];
+  const oldMessageResponse = deferred<string[]>();
+  const messageTicket = fence.beginSessionMessages(sessionId);
+  const pendingMessages = oldMessageResponse.promise.then((items) => {
+    if (fence.isCurrentSessionMessages(messageTicket, sessionId)) messages = items;
+  });
+
+  assert.ok(messages.includes('cached restricted assistant body'));
+  const inspectorTicket = fence.beginInspector(taskId);
+  assert.ok(fence.denyInspector(inspectorTicket));
+  messages = ['safe user anchor'];
+  oldMessageResponse.resolve(['safe user anchor', 'restricted S3 assistant body and source']);
+  await pendingMessages;
+
+  assert.deepEqual(messages, ['safe user anchor'], 'late Session response restored a restricted assistant body');
+});
+
+test('does not clear another Task message and permits a fresh read after authorization returns', () => {
+  const fence = createS3ReadResponseFence();
+  const deniedTicket = fence.beginInspector('task-s3');
+  assert.ok(fence.denyInspector(deniedTicket));
+  assert.equal(fence.isTaskDenied('task-s3'), true);
+
+  const filtered = filterDeniedS3AssistantMessages([
+    { ...user('s3-user', 1, '2026-01-01T00:00:00Z'), task_id: 'task-s3' },
+    { ...user('s3-answer', 2, '2026-01-01T00:00:01Z', 's3 answer'), role: 'ASSISTANT' as const,
+      task_id: 'task-s3' },
+    { ...user('other-answer', 3, '2026-01-01T00:00:02Z', 'other task answer'), role: 'ASSISTANT' as const,
+      task_id: 'task-other' },
+  ], (taskId) => taskId === 'task-s3' && fence.isTaskDenied(taskId));
+  assert.deepEqual(filtered.map((message) => message.message_id), ['s3-user', 'other-answer']);
+
+  const reauthorizedTicket = fence.beginInspector('task-s3');
+  assert.equal(fence.acceptAuthorizedInspector(reauthorizedTicket), true);
+  assert.equal(fence.isTaskDenied('task-s3'), false);
+  assert.deepEqual(filterDeniedS3AssistantMessages([
+    { ...user('s3-answer', 1, '2026-01-01T00:00:00Z', 'fresh authorized answer'), role: 'ASSISTANT' as const,
+      task_id: 'task-s3' },
+  ], (taskId) => fence.isTaskDenied(taskId)).map((message) => message.message_id), ['s3-answer']);
+
+  const staleBeforeRevocation = fence.beginSessionMessages('session-1');
+  const nextInspectorTicket = fence.beginInspector('task-s3');
+  const nextDeniedTicket = fence.denyInspector(nextInspectorTicket);
+  assert.ok(nextDeniedTicket);
+  assert.equal(fence.isCurrentSessionMessages(staleBeforeRevocation, 'session-1'), false);
+  const reauthorizedAgain = fence.beginInspector('task-s3');
+  assert.equal(fence.acceptAuthorizedInspector(reauthorizedAgain), true);
+  const freshMessages = fence.beginSessionMessages('session-1');
+  assert.equal(fence.isCurrentSessionMessages(freshMessages, 'session-1'), true);
 });
 
 test('groups interleaved results under exact source messages and keeps late answer timestamps', () => {

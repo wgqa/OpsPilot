@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
-import { clearS3RestrictedResultCache, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
+import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -57,6 +57,7 @@ let reconnectTimer: number | undefined;
 let runPollTimer: number | undefined;
 let loadingChunksRunId: string | null = null;
 let seenEventSeq = new Set<number>();
+const s3ReadResponseFence = createS3ReadResponseFence();
 
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const isApprover = computed(() => user.value?.role === 'APPROVER');
@@ -431,23 +432,31 @@ async function refreshSession(): Promise<void> {
 async function refreshInspector(): Promise<boolean> {
   const requestedTaskId = taskId.value;
   if (!requestedTaskId) return false;
-  const stillShowingRequestedTask = (): boolean => taskId.value === requestedTaskId;
+  const requestTicket = s3ReadResponseFence.beginInspector(requestedTaskId);
+  const stillShowingRequestedTask = (): boolean => s3ReadResponseFence
+    .isCurrentInspector(requestTicket, taskId.value);
   try {
     const refreshed = await api.inspector(requestedTaskId);
     if (!stillShowingRequestedTask()) return false;
-    inspector.value = refreshed;
     if (s3InspectorAuthorizationUnavailable(refreshed as unknown as CachedS3Inspector)) {
+      const deniedTicket = s3ReadResponseFence.denyInspector(requestTicket);
+      if (!deniedTicket) return false;
+      inspector.value = refreshed;
       clearS3TaskResultCache(requestedTaskId);
       try {
         await refreshSessionMessagesOnly();
+        if (!s3ReadResponseFence.isCurrentInspector(deniedTicket, taskId.value)) return false;
         clearS3TaskResultCache(requestedTaskId);
       } catch {
         // The stale cache was already removed before the optional message refresh.
       }
-      if (!stillShowingRequestedTask()) return false;
+      if (!s3ReadResponseFence.isCurrentInspector(deniedTicket, taskId.value)) return false;
       notice.value = '当前 S3 Scope 授权不可用，受限调查答复与来源已隐藏；现存业务记录未被修改。';
       return true;
     }
+    if (String(refreshed.task.service_id ?? '') === 'orders-async-demo'
+      && !s3ReadResponseFence.acceptAuthorizedInspector(requestTicket)) return false;
+    inspector.value = refreshed;
     if (user.value?.role === 'SUPPORT') {
       const updates = await api.investigationUpdates(requestedTaskId);
       if (!stillShowingRequestedTask()) return false;
@@ -477,14 +486,17 @@ async function refreshInspector(): Promise<boolean> {
   } catch (error) {
     if (taskId.value === requestedTaskId && inspector.value?.task.task_id === requestedTaskId
       && String(inspector.value.task.service_id ?? '') === 'orders-async-demo') {
+      const deniedTicket = s3ReadResponseFence.denyInspector(requestTicket);
+      if (!deniedTicket) return false;
       clearS3TaskResultCache(requestedTaskId);
       try {
         await refreshSessionMessagesOnly();
+        if (!s3ReadResponseFence.isCurrentInspector(deniedTicket, taskId.value)) return false;
         clearS3TaskResultCache(requestedTaskId);
       } catch {
         // Keep the in-memory S3 result cache cleared if the Session read is also unavailable.
       }
-      if (!stillShowingRequestedTask()) return false;
+      if (!s3ReadResponseFence.isCurrentInspector(deniedTicket, taskId.value)) return false;
       errorMessage.value = explainError(error);
     } else if (user.value?.role === 'APPROVER') {
       errorMessage.value = explainError(error);
@@ -976,7 +988,12 @@ function readableRunReason(value: unknown): string {
 
 async function refreshSessionMessagesOnly(): Promise<void> {
   if (!sessionId.value) return;
-  messages.value = (await api.messages(sessionId.value)).items;
+  const requestedSessionId = sessionId.value;
+  const requestTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
+  const response = await api.messages(requestedSessionId);
+  if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
+    messages.value = filterDeniedS3AssistantMessages(response.items, (taskId) => s3ReadResponseFence.isTaskDenied(taskId));
+  }
 }
 
 async function loadChunks(runId: string): Promise<void> {
