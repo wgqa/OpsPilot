@@ -69,6 +69,7 @@ export interface ConversationItem {
   followup?: ConversationFollowup;
   assessment?: ConversationAssessment;
   correctionMessage?: MessageItem;
+  supersededChatRuns?: ConversationRun[];
   run?: ConversationRun;
   chunks?: ChatChunk[];
   diagnosis?: Record<string, unknown>;
@@ -358,6 +359,23 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     unassociatedItems.push(item);
   };
 
+  const correctionTakeoverSidecars = new Map<string, ConversationRun[]>();
+  const correctionTakeoverSidecarIds = new Set<string>();
+  for (const assessment of assessments) {
+    if (assessment.intent !== 'CRITICAL_CORRECTION' || assessment.status !== 'CONFIRMED'
+      || !assessment.investigation_run_id || !assessment.correction_message_id) continue;
+    const taskId = assessment.target_task_id ?? assessment.task_id;
+    const correctionSource = correctedRunSources.get(assessment.investigation_run_id);
+    if (!taskId || correctionSource?.sourceMessageId !== assessment.source_message_id
+      || correctionSource.correctionMessageId !== assessment.correction_message_id) continue;
+    const sidecars = [...allRuns.values()].filter((run) => run.kind === 'CHAT_READONLY'
+      && run.status === 'BLOCKED' && run.blocked_reason === 'CORRECTION_CONFIRMED'
+      && run.source_message_id === assessment.source_message_id && sameTask(run.task_id, taskId));
+    if (!sidecars.length) continue;
+    correctionTakeoverSidecars.set(assessment.assessment_id, sidecars);
+    for (const run of sidecars) correctionTakeoverSidecarIds.add(run.run_id);
+  }
+
   for (const message of uniqueMessages) {
     if (message.role === 'USER') continue;
     const sourceId = message.answer_source_message_id ?? null;
@@ -410,6 +428,8 @@ export function projectConversation(input: ProjectConversationInput): Conversati
       id: `assessment:${assessment.assessment_id}`, kind: 'CORRECTION_ASSESSMENT',
       createdAt: correctionMessage?.created_at ?? uniqueMessages.find((message) => message.message_id === assessment.source_message_id)?.created_at ?? '',
       assessment,
+      ...(correctionTakeoverSidecars.has(assessment.assessment_id)
+        ? { supersededChatRuns: correctionTakeoverSidecars.get(assessment.assessment_id) } : {}),
       correctionMessage: correctionMessage?.role === 'USER' && correctionMessage.input_kind === 'CORRECT_TASK_INPUT'
         ? correctionMessage : undefined,
     };
@@ -424,6 +444,7 @@ export function projectConversation(input: ProjectConversationInput): Conversati
 
   for (const run of allRuns.values()) {
     if (!run.source_message_id) continue;
+    if (correctionTakeoverSidecarIds.has(run.run_id)) continue;
     const reason = run.blocked_reason ?? run.waiting_reason ?? '';
     if (reason === 'FOLLOWUP_ROUTED_TO_INVESTIGATOR'
       || reason === 'UPDATE_CLASSIFICATION_PENDING' || reason === 'UPDATE_CONFIRMATION_PENDING') continue;
