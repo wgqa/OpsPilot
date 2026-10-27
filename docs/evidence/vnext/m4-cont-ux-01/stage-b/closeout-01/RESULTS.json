@@ -1,0 +1,92 @@
+{
+  "schema": "opspilot-stage-b-closeout-01-results-v1",
+  "status": "INTERMEDIATE_IMPLEMENTATION",
+  "acceptance_candidate": false,
+  "repository": "wgqa/OpsPilot",
+  "base_sha": "e0ecb9463dcce8e1390a30f812d5f8b42cea9f4a",
+  "freeze_commit_sha": "020de9e4ab8763027614257559053b7963b3bc4e",
+  "red_test_commit_sha": "1f56d83e8abf0f218b70a8d389d8704e382d92cf",
+  "implementation_commit_sha": "2bbb4e86286302597fc3d5085715ac407859d379",
+  "execution_environment": {
+    "os": "Windows",
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "node": "v24.16.0",
+    "npm": "11.13.0",
+    "frontend": {
+      "vue": "3.5.44",
+      "vite": "8.3.4",
+      "vue-tsc": "3.3.13",
+      "typescript": "5.9.3",
+      "eslint": "10.0.1",
+      "eslint-plugin-vue": "10.11.1"
+    }
+  },
+  "runs": [
+    {
+      "id": "red-frontend-01",
+      "command": "cd frontend; node --experimental-strip-types --test test/stage-b-closeout.test.ts",
+      "exit_code": 1,
+      "tests": { "passed": 0, "failed": 4 },
+      "evidence": "runs/red-frontend-01/node-test.log"
+    },
+    {
+      "id": "red-api-01",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_contux_stage_b_closeout_api.py -vv -s --basetemp=C:/Temp/opspilot_bclose_red_20261027_a",
+      "exit_code": 1,
+      "tests": { "passed": 0, "failed": 3 },
+      "evidence": "runs/red-api-01/pytest.log"
+    },
+    {
+      "id": "green-api-05",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_contux_stage_b_closeout_api.py -vv -s --basetemp=C:/Temp/opspilot_bclose_green_20261027_e",
+      "exit_code": 0,
+      "tests": { "passed": 4, "failed": 0 },
+      "evidence": "runs/green-api-05/pytest.log",
+      "captured_api_responses": "runs/green-api-05/responses/"
+    },
+    {
+      "id": "green-frontend-04",
+      "command": "cd frontend; node --experimental-strip-types --test test/conversation.test.ts test/stage-b-closeout.test.ts",
+      "exit_code": 0,
+      "tests": { "passed": 15, "failed": 0, "legacy_projection_tests": 11, "new_closeout_tests": 4 },
+      "evidence": "runs/green-frontend-04/node-test.log"
+    },
+    {
+      "id": "backend-regression-01",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_contux_stage_b_closeout_api.py tests/test_m4_contux_stage_b_supplement_api.py tests/test_m4_contux_stage_b_api.py tests/test_m4_c1_hf_01.py tests/test_m4_03_s3.py tests/test_m1_task_control.py tests/test_m1_web_events.py tests/test_m1_event_process_recovery.py -q --basetemp=C:/Temp/opspilot_bclose_regression_20261027",
+      "exit_code": 0,
+      "tests": { "passed": 47, "failed": 0 },
+      "evidence": "runs/backend-regression-01/pytest.log",
+      "note": "This run preceded addition of the fourth closeout API test; that final test is covered by green-api-05. Three closeout tests overlap."
+    },
+    {
+      "id": "frontend-typecheck-03",
+      "command": "cd frontend; npm run typecheck",
+      "exit_code": 0,
+      "evidence": "runs/frontend-checks-03/typecheck.log"
+    },
+    {
+      "id": "frontend-build-03",
+      "command": "cd frontend; npm run build",
+      "exit_code": 0,
+      "evidence": "runs/frontend-checks-03/build.log"
+    },
+    {
+      "id": "frontend-eslint-03",
+      "command": "cd frontend; npm exec eslint -- src/App.vue src/api.ts src/conversation.ts test/conversation.test.ts test/stage-b-closeout.test.ts test/stage-b-api-projection.ts",
+      "exit_code": 0,
+      "evidence": "runs/frontend-checks-03/eslint.log"
+    }
+  ],
+  "not_run": {
+    "full_pytest": "NOT_RUN",
+    "browser_dom_screenshot_refresh_sse": "NOT_RUN / BLOCKED_BY_TOOL_ENVIRONMENT",
+    "provider": "NOT_RUN",
+    "mcp": "NOT_RUN",
+    "paid_calls": 0
+  },
+  "trace": "TRACE.jsonl",
+  "failures": "FAILURES.md",
+  "report": "REPORT.md"
+}
