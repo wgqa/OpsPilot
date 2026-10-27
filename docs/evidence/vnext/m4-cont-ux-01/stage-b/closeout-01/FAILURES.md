@@ -12,4 +12,3 @@
 | `runs/green-api-04/pytest.log` | 1 失败、3 通过 | 新增 Chat API 用例在 Worker claim 前未调用正式提议分类端点，Run 仍可信地处于 `UPDATE_CLASSIFICATION_PENDING`；这不是产品路径缺陷 | 测试改为经 API 提交确定性的 `FOLLOW_UP/EXPLAIN` 后由 `next_worker_run()` 受理；`green-api-05` 4 项通过 |
 
 所有以上失败都被保留，不以覆盖日志或修改 Gold 消除。`green-api-02/03`、`green-frontend-01/03/04`、`frontend-checks-02/03` 与 `backend-regression-01` 是对应的后续成功运行。
-

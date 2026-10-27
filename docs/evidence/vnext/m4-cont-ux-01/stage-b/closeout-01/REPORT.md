@@ -1,10 +1,15 @@
 # M4-CONT-UX-01 Stage B 集中收口报告
 
-**状态：`INTERMEDIATE_IMPLEMENTATION`**  
-**验收候选：未提交。** 真实浏览器验收仍为 `NOT_RUN / BLOCKED_BY_TOOL_ENVIRONMENT`，按既有 Computer Use 停止限制执行。  
-**开发基线：** `main@e0ecb9463dcce8e1390a30f812d5f8b42cea9f4a`  
-**冻结计划提交：** `020de9e4ab8763027614257559053b7963b3bc4e`  
-**RED/测试提交：** `1f56d83e8abf0f218b70a8d389d8704e382d92cf`  
+**状态：`INTERMEDIATE_IMPLEMENTATION`**
+
+**验收候选：未提交。** 真实浏览器验收仍为 `NOT_RUN / BLOCKED_BY_TOOL_ENVIRONMENT`，按既有 Computer Use 停止限制执行。
+
+**开发基线：** `main@e0ecb9463dcce8e1390a30f812d5f8b42cea9f4a`
+
+**冻结计划提交：** `020de9e4ab8763027614257559053b7963b3bc4e`
+
+**RED/测试提交：** `1f56d83e8abf0f218b70a8d389d8704e382d92cf`
+
 **源码实现提交：** `2bbb4e86286302597fc3d5085715ac407859d379`
 
 ## 用户现在可以完成什么
@@ -52,4 +57,3 @@
 4. **新增约束与合法任务影响：** 只有精确来源链成立才显示为某问题的正式结果；合法授权刷新、新 Chat、Follow-up 与已应用纠错仍可显示。未知来源留在未关联区域。
 5. **简化结果：** 统一一份纠错来源映射，不另建 Timeline/权限服务；将授权恢复后的读取接到现有刷新函数。
 6. **证据与停止线：** 15 项前端测试、4 项 API 投影集成、47 项定向后端回归、类型/构建/ESLint通过；浏览器和全仓 pytest 未运行。停在 `INTERMEDIATE_IMPLEMENTATION`，交主 Agent审查。
-
