@@ -2472,6 +2472,20 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
             except ScopeDenied:
                 s3_scope_current = False
         trusted_state, _ = _trusted_state(connection, task_id)
+        if (str(binding["service_id"]) == "orders-async-demo" and s3_scope_current
+                and isinstance(trusted_state, dict)
+                and isinstance(trusted_state.get("s3_outcome"), dict)):
+            # Expose only the immutable diagnosis-to-Run key needed by the
+            # conversation projection. It is read under the same tenant,
+            # TaskBinding, and current-Scope snapshot as the protected result.
+            receipt_id = trusted_state["s3_outcome"].get("receipt_id")
+            if isinstance(receipt_id, str):
+                diagnosis = connection.execute(
+                    "SELECT run_id FROM s3_diagnoses WHERE tenant_id=? AND task_id=? AND receipt_id=?",
+                    (identity.tenant_id, task_id, receipt_id),
+                ).fetchone()
+                if diagnosis is not None:
+                    trusted_state["s3_outcome"]["run_id"] = str(diagnosis["run_id"])
         from opspilot.domain.s3_answers import answers_in_transaction
         investigation_answers = (
             answers_in_transaction(connection, task_id)
@@ -2523,7 +2537,7 @@ def get_task_inspector(path: str | Path, identity: TrustedIdentity, task_id: str
                 ).fetchall()
                 restricted_s3_run_ids.update(str(row["run_id"]) for row in sidecars)
         runs = connection.execute(
-            """SELECT r.run_id, r.kind, r.status, r.blocked_reason, r.source_message_id,
+            """SELECT r.run_id, r.task_id, r.kind, r.status, r.blocked_reason, r.source_message_id,
                       r.expected_control_revision, r.consumed_message_seq,
                       r.applied_critical_message_seq, r.created_at, r.started_at, r.ended_at,
                       ((SELECT COUNT(*) FROM chat_attempts a WHERE a.run_id = r.run_id) +

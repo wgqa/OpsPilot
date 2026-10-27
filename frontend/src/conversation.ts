@@ -4,6 +4,7 @@ import type {
 
 export interface ConversationAnswer {
   run_id: string;
+  task_id?: string;
   source_message_id: string;
   answer_text: string;
   result_state: string;
@@ -144,8 +145,7 @@ export function createS3ReadResponseFence(): S3ReadResponseFence {
     },
     acceptAuthorizedInspector(ticket) {
       if (inspectorGenerations.get(ticket.taskId) !== ticket.generation) return false;
-      deniedTasks.delete(ticket.taskId);
-      sessionMessagesGeneration += 1;
+      if (deniedTasks.delete(ticket.taskId)) sessionMessagesGeneration += 1;
       return true;
     },
     isTaskDenied: (taskId) => deniedTasks.has(taskId),
@@ -276,22 +276,66 @@ function addUnique(items: ConversationItem[], byId: Map<string, ConversationItem
   items.push(item);
 }
 
+interface ConfirmedCorrectionSource {
+  sourceMessageId: string;
+  correctionMessageId: string;
+}
+
+function confirmedCorrectionSources(
+  assessments: ConversationAssessment[],
+  messages: Map<string, MessageItem>,
+  runs: Map<string, ConversationRun>,
+): Map<string, ConfirmedCorrectionSource> {
+  const resolved = new Map<string, ConfirmedCorrectionSource>();
+  const ambiguous = new Set<string>();
+  for (const assessment of assessments) {
+    if (assessment.intent !== 'CRITICAL_CORRECTION' || assessment.status !== 'CONFIRMED'
+      || !assessment.investigation_run_id || !assessment.correction_message_id) continue;
+    const taskId = assessment.target_task_id ?? assessment.task_id;
+    if (!taskId || (assessment.target_task_id && assessment.task_id
+      && assessment.target_task_id !== assessment.task_id)) continue;
+    const source = messages.get(assessment.source_message_id);
+    const correction = messages.get(assessment.correction_message_id);
+    const run = runs.get(assessment.investigation_run_id);
+    if (!source || source.role !== 'USER' || !taskMatches(source, taskId)
+      || !correction || correction.role !== 'USER' || correction.input_kind !== 'CORRECT_TASK_INPUT'
+      || correction.application_state !== 'APPLIED_TO_RUN' || correction.applied_run_id !== run?.run_id
+      || !taskMatches(correction, taskId) || !run || !sameTask(run.task_id, taskId)
+      || run.source_message_id !== correction.message_id) continue;
+    const previous = resolved.get(run.run_id);
+    if (previous && (previous.sourceMessageId !== source.message_id
+      || previous.correctionMessageId !== correction.message_id)) {
+      resolved.delete(run.run_id);
+      ambiguous.add(run.run_id);
+    } else if (!ambiguous.has(run.run_id)) {
+      resolved.set(run.run_id, { sourceMessageId: source.message_id, correctionMessageId: correction.message_id });
+    }
+  }
+  return resolved;
+}
+
 export function projectConversation(input: ProjectConversationInput): ConversationProjection {
   const assessments = input.assessments ?? [];
   const uniqueMessages = [...new Map(input.messages.map((message) => [message.message_id, message])).values()];
   const messagesById = new Map(uniqueMessages.map((message) => [message.message_id, message]));
-  const linkedCorrectionIds = new Set<string>();
-  for (const assessment of assessments) {
-    const correction = assessment.correction_message_id
-      ? messagesById.get(assessment.correction_message_id)
-      : undefined;
-    const source = messagesById.get(assessment.source_message_id);
-    if (correction && correction.role === 'USER' && correction.input_kind === 'CORRECT_TASK_INPUT'
-      && source?.role === 'USER' && taskMatches(source, assessment.target_task_id ?? assessment.task_id)
-      && taskMatches(correction, assessment.target_task_id ?? assessment.task_id)) {
-      linkedCorrectionIds.add(correction.message_id);
+  const allRuns = new Map<string, ConversationRun>();
+  const conflictingRuns = new Set<string>();
+  for (const run of [...(input.runs ?? []), ...(input.activeChatRun ? [input.activeChatRun] : [])]) {
+    const previous = allRuns.get(run.run_id);
+    if (previous && (!sameTask(previous.task_id, run.task_id)
+      || previous.source_message_id !== run.source_message_id)) {
+      allRuns.delete(run.run_id);
+      conflictingRuns.add(run.run_id);
+    } else if (!conflictingRuns.has(run.run_id)) {
+      allRuns.set(run.run_id, previous ? { ...previous, ...run } : run);
     }
   }
+  const correctedRunSources = confirmedCorrectionSources(assessments, messagesById, allRuns);
+  const linkedCorrectionIds = new Set([...correctedRunSources.values()].map((item) => item.correctionMessageId));
+  const resolveRunSource = (run: ConversationRun | undefined, sourceId: string | null | undefined): string | undefined => {
+    if (!run || !sourceId || run.source_message_id !== sourceId) return undefined;
+    return correctedRunSources.get(run.run_id)?.sourceMessageId ?? sourceId;
+  };
 
   const anchors = uniqueMessages
     .filter((message) => message.role === 'USER' && !linkedCorrectionIds.has(message.message_id))
@@ -318,9 +362,11 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     if (message.role === 'USER') continue;
     const sourceId = message.answer_source_message_id ?? null;
     const source = sourceId ? messagesById.get(sourceId) : undefined;
+    const correctedSource = message.answer_run_id ? correctedRunSources.get(message.answer_run_id) : undefined;
+    const displaySource = correctedSource?.correctionMessageId === sourceId ? correctedSource.sourceMessageId : sourceId;
     const valid = message.role === 'ASSISTANT' && !!source && source.role === 'USER'
       && taskMatches(message, source.task_id) && !!message.answer_run_id
-      && !!message.answer_kind && attach(sourceId, message.task_id, {
+      && !!message.answer_kind && attach(displaySource, message.task_id, {
         id: `message:${message.message_id}`, kind: 'CHAT_MESSAGE', createdAt: message.created_at,
         runId: message.answer_run_id, message,
       });
@@ -334,20 +380,24 @@ export function projectConversation(input: ProjectConversationInput): Conversati
   }
 
   for (const answer of input.investigationAnswers ?? []) {
+    const run = allRuns.get(answer.run_id);
+    const source = resolveRunSource(run, answer.source_message_id);
     const item: ConversationItem = {
       id: `investigation:${answer.run_id}`, kind: 'INVESTIGATION_ANSWER', createdAt: answer.created_at,
       runId: answer.run_id, answer,
     };
-    if (!attach(answer.source_message_id, input.runs?.find((run) => run.run_id === answer.run_id)?.task_id, item)) orphan(item);
+    if (!run?.task_id || (answer.task_id && answer.task_id !== run.task_id)
+      || !source || !attach(source, run.task_id, item)) orphan(item);
   }
 
   for (const followup of input.readonlyFollowups ?? []) {
-    const run = input.runs?.find((candidate) => candidate.run_id === followup.run_id);
+    const run = allRuns.get(followup.run_id);
+    const source = resolveRunSource(run, followup.source_message_id);
     const item: ConversationItem = {
       id: `followup:${followup.run_id}`, kind: 'READONLY_FOLLOWUP',
       createdAt: followup.completed_at ?? followup.created_at, runId: followup.run_id, followup,
     };
-    if (!attach(followup.source_message_id, run?.task_id, item)) orphan(item);
+    if (!run?.task_id || !source || !attach(source, run.task_id, item)) orphan(item);
   }
 
   for (const assessment of assessments) {
@@ -366,22 +416,7 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     if (!attach(assessment.source_message_id, taskId, item)) orphan(item);
   }
 
-  const allRuns = new Map<string, ConversationRun>();
-  for (const run of input.runs ?? []) allRuns.set(run.run_id, run);
-  if (input.activeChatRun) allRuns.set(input.activeChatRun.run_id, input.activeChatRun);
   const active = input.activeChatRun;
-  const correctedRunSources = new Map<string, string>();
-  for (const assessment of assessments) {
-    if (!assessment.investigation_run_id || !assessment.correction_message_id) continue;
-    const run = allRuns.get(assessment.investigation_run_id);
-    const correction = messagesById.get(assessment.correction_message_id);
-    const taskId = assessment.target_task_id ?? assessment.task_id ?? null;
-    if (run?.source_message_id === assessment.correction_message_id && correction?.role === 'USER'
-      && correction.input_kind === 'CORRECT_TASK_INPUT' && taskMatches(correction, taskId)
-      && sameTask(taskId, run.task_id)) {
-      correctedRunSources.set(run.run_id, assessment.source_message_id);
-    }
-  }
   const answeredRuns = new Set<string>();
   for (const thread of threads) {
     for (const item of thread.items) if (item.runId) answeredRuns.add(item.runId);
@@ -398,7 +433,7 @@ export function projectConversation(input: ProjectConversationInput): Conversati
       id: `run:${run.run_id}`, kind: 'RUN_STATUS', createdAt: run.started_at ?? run.created_at,
       runId: run.run_id, run,
     };
-    const effectiveSource = correctedRunSources.get(run.run_id) ?? run.source_message_id;
+    const effectiveSource = resolveRunSource(run, run.source_message_id);
     if (!attach(effectiveSource, run.task_id, item)) orphan(item);
   }
 
@@ -409,15 +444,22 @@ export function projectConversation(input: ProjectConversationInput): Conversati
       id: `stream:${active.run_id}`, kind: 'STREAM', createdAt: active.started_at ?? active.created_at,
       runId: active.run_id, run: active, chunks,
     };
-    if (!attach(active.source_message_id, active.task_id, item)) orphan(item);
+    const source = resolveRunSource(allRuns.get(active.run_id), active.source_message_id);
+    if (!source || !attach(source, active.task_id, item)) orphan(item);
   }
 
   const diagnosis = input.s3Outcome;
   const receiptId = diagnosis?.receipt_id;
-  if (receiptId) {
-    const answer = (input.investigationAnswers ?? []).find((candidate) => candidate.report_ref === receiptId);
-    if (answer) {
-      const thread = threadByMessageId.get(answer.source_message_id);
+  const diagnosisRunId = diagnosis?.run_id;
+  if (diagnosis && typeof receiptId === 'string' && typeof diagnosisRunId === 'string'
+    && ['CURRENT', 'INVALIDATED_BY_CURRENT_FACTS'].includes(String(diagnosis?.currentness))) {
+    const answer = (input.investigationAnswers ?? []).find((candidate) =>
+      candidate.report_ref === receiptId && candidate.run_id === diagnosisRunId);
+    const run = answer ? allRuns.get(answer.run_id) : undefined;
+    const source = answer ? resolveRunSource(run, answer.source_message_id) : undefined;
+    if (answer && run?.task_id && run.run_id === diagnosisRunId
+      && (!answer.task_id || answer.task_id === run.task_id) && source) {
+      const thread = threadByMessageId.get(source);
       const projectedAnswer = thread?.items.find((item) => item.kind === 'INVESTIGATION_ANSWER' && item.runId === answer.run_id);
       if (projectedAnswer) projectedAnswer.diagnosis = diagnosis;
     }

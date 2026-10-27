@@ -21,8 +21,8 @@ function confirmedCorrection(state: 'ANSWERED' | 'PARTIAL') {
   const assessment: ConversationAssessment = { assessment_id: 'assessment', source_message_id: question.message_id,
     target_task_id: 'task-s3', intent: 'CRITICAL_CORRECTION', status: 'CONFIRMED',
     correction_message_id: correction.message_id, investigation_run_id: run.run_id };
-  const diagnosis = { receipt_id: 'current-receipt', currentness: 'CURRENT', outcome: 'RECEIVER_PROCESSED',
-    body: { task_id: 'task-s3', run_id: run.run_id } };
+  const diagnosis = { receipt_id: 'current-receipt', run_id: run.run_id,
+    currentness: 'CURRENT', outcome: 'RECEIVER_PROCESSED' };
   return { messages: [question, correction], runs: [run], investigationAnswers: [answer],
     assessments: [assessment], s3Outcome: diagnosis };
 }
@@ -61,13 +61,16 @@ test('only confirmed and applied same-Task corrections remap a Run; stale diagno
   for (const mismatch of ['receipt', 'run', 'task', 'currentness'] as const) {
     const fixture = confirmedCorrection('ANSWERED');
     if (mismatch === 'receipt') fixture.s3Outcome.receipt_id = 'old-receipt';
-    if (mismatch === 'run') fixture.s3Outcome.body.run_id = 'old-run';
-    if (mismatch === 'task') fixture.s3Outcome.body.task_id = 'other-task';
+    if (mismatch === 'run') fixture.s3Outcome.run_id = 'old-run';
+    if (mismatch === 'task') fixture.runs[0]!.task_id = 'other-task';
     if (mismatch === 'currentness') fixture.s3Outcome.currentness = 'UNKNOWN';
     const thread = projectConversation(fixture).threads.find((item) => item.anchor.message_id === 'correction-question');
     const result = thread?.items.find((item) => item.kind === 'INVESTIGATION_ANSWER');
-    assert.ok(result, mismatch);
-    assert.equal(result.diagnosis, undefined, mismatch);
+    if (mismatch === 'task') assert.equal(result, undefined, mismatch);
+    else {
+      assert.ok(result, mismatch);
+      assert.equal(result.diagnosis, undefined, mismatch);
+    }
   }
 });
 

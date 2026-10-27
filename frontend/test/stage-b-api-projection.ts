@@ -9,7 +9,8 @@ interface Snapshot {
   messages: { items: MessageItem[] };
   assessments?: { items: ConversationAssessment[] };
 }
-interface Payload { authorized: Snapshot; revoked: Snapshot; confirmed: Snapshot; ids: Record<string, string>; restricted: string[] }
+interface Payload { authorized: Snapshot; revoked: Snapshot; confirmed: Snapshot; chat?: Snapshot;
+  ids: Record<string, string>; restricted: string[] }
 const data = JSON.parse(readFileSync(process.argv[2]!, 'utf8')) as Payload;
 const mode = process.argv[3];
 const project = (snapshot: Snapshot) => projectConversation({
@@ -55,6 +56,9 @@ if (mode === 'initial') {
   assert.equal(itemIds(missingRun, data.ids.initial_source).includes(`investigation:${data.ids.initial_run}`), false);
 
   const revoked = project(data.revoked);
+  const revokedOutcome = data.revoked.inspector.trusted_state.s3_outcome as Record<string, unknown> | undefined;
+  assert.equal(revokedOutcome?.run_id, undefined, 'revoked Inspector must not return a diagnosis Run link');
+  assert.equal(revokedOutcome?.receipt_id, undefined, 'revoked Inspector must not return a diagnosis receipt');
   const serialized = JSON.stringify(revoked);
   for (const restricted of data.restricted) assert.equal(serialized.includes(restricted), false, `revoked result leaked: ${restricted}`);
   console.log(JSON.stringify({ mode, negative_cases: 'passed', revoked_projection: 'restricted results absent' }));
@@ -73,9 +77,20 @@ if (mode === 'initial') {
   assert.equal(result.answer?.result_state, data.ids.result_state);
   assert.equal(result.runId, data.ids.run);
   assert.equal(result.diagnosis?.receipt_id, data.ids.receipt);
-  assert.equal((result.diagnosis?.body as Record<string, unknown>)?.run_id, data.ids.run);
+  assert.equal(result.diagnosis?.run_id, data.ids.run);
   assert.equal(projection.threads.some((item) => item.anchor.message_id === data.ids.correction), false);
   console.log(JSON.stringify({ mode, persisted_answer_and_diagnosis: 'attached', state: data.ids.result_state }));
+} else if (mode === 'chat') {
+  assert.ok(data.chat, 'actual Chat API snapshot is required');
+  const projection = project(data.chat);
+  const thread = projection.threads.find((item) => item.anchor.message_id === data.ids.question);
+  const answers = thread?.items.filter((item) => item.kind === 'CHAT_MESSAGE' && item.message?.message_id === data.ids.answer) ?? [];
+  assert.equal(answers.length, 1, 'persisted Chat answer must appear once under its exact API source Message');
+  assert.equal(answers[0]?.message?.body, data.ids.answer_text);
+  assert.equal(answers[0]?.runId, data.ids.run);
+  assert.equal(projection.unassociatedItems.some((item) => item.id === `message:${data.ids.answer}`), false);
+  console.log(JSON.stringify({ mode, question: data.ids.question, run: data.ids.run,
+    answer: data.ids.answer, exact_message_projection: 'passed once' }));
 } else {
   throw new Error(`unsupported test mode: ${mode}`);
 }

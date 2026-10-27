@@ -10,12 +10,14 @@ from pathlib import Path
 import pytest
 
 from opspilot.domain.api import make_server
+from opspilot.domain.chat import complete_chat_attempt, prepare_chat_attempt
 from opspilot.domain.database import connect, reset_fixture
 from opspilot.domain.investigation_context import load_investigation_context
 from opspilot.domain.s3 import get_callback_delivery_fact, get_order_status_fact, get_receiver_processing_fact, persist_s3_diagnosis
 from opspilot.domain.s3_answers import persist_run_answer
 from opspilot.domain.task_control import (
-    apply_pending_critical_inputs, claim_task_run, create_task_with_initial_run, finish_task_run, trusted_identity,
+    apply_pending_critical_inputs, claim_task_run, create_task_with_initial_run, finish_task_run,
+    next_worker_run, register_worker_owner, trusted_identity,
 )
 from tests.s3_observation_support import record_s3_observation
 from tests.test_m4_c1_hf_01 import _persist_previous_followup
@@ -86,6 +88,47 @@ def test_real_inspector_and_messages_project_initial_followup_and_revocation(tmp
                 "other_source": other_source},
     }
     _project_real_api_json(tmp_path, "initial-followup-revoked", "initial", payload)
+
+
+def test_real_api_chat_answer_projects_once_under_exact_user_question(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = tmp_path / "api-chat-projection.sqlite3"
+    reset_fixture(db, "S1_POS")
+    session_id, task_id, _, _ = _task_with_persisted_initial_answer(db)
+    with _inspector_client(db) as client:
+        headers = _login(client)
+        accepted = client.post(
+            f"/api/sessions/{session_id}/messages", headers={**headers, "Idempotency-Key": "closeout-chat-answer"},
+            json={"task_id": task_id, "input_kind": "CHAT_READONLY", "body": "请解释刚才的调查结果。"},
+        )
+        assert accepted.status_code == 202, accepted.text
+        run_id, question_id = str(accepted.json()["run_id"]), str(accepted.json()["message_id"])
+        monkeypatch.setattr(
+            "opspilot.domain.investigation_updates.classify_input",
+            lambda **_kwargs: {"intent": "FOLLOW_UP", "change_summary": "", "readonly_action": "EXPLAIN"},
+        )
+        assessed = client.post(
+            f"/api/tasks/{task_id}/investigation-updates/proposals",
+            headers={**headers, "Idempotency-Key": question_id}, json={"source_message_id": question_id},
+        )
+        assert assessed.status_code == 200, assessed.text
+        assert assessed.json()["follow_up_action"] == "EXPLAIN"
+        assert str(next_worker_run(db)["run_id"]) == run_id
+        identity = trusted_identity(db, "support-a")
+        worker_id = "closeout-chat-worker"
+        register_worker_owner(db, worker_id, os.getpid())
+        claim_task_run(db, identity, run_id)
+        attempt = prepare_chat_attempt(db, run_id, worker_id, "deterministic-closeout")
+        answer_text = "依据刚才核实的事实，回调已被接收；接收方处理状态仍需确认。"
+        completed = complete_chat_attempt(
+            db, worker_id, str(attempt["attempt_id"]), answer_text,
+            provider_response_id="deterministic-closeout-answer", input_tokens=3, output_tokens=9, total_tokens=12,
+        )
+        snapshot = _snapshot(client, headers, session_id, task_id)
+    payload = {"chat": snapshot, "ids": {"task_id": task_id, "question": question_id,
+               "run": run_id, "answer": str(completed["message_id"]), "answer_text": answer_text}}
+    _project_real_api_json(tmp_path, "chat-answer", "chat", payload)
 
 
 def _complete_correction_run(db: Path, task_id: str, run_id: str, state: str) -> str:

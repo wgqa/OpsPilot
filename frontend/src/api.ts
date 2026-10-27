@@ -81,13 +81,30 @@ export interface ChatChunk {
   attempt_id: string;
 }
 
+export interface InspectorRun {
+  run_id: string;
+  task_id: string;
+  kind: string;
+  status: string;
+  blocked_reason: string | null;
+  source_message_id: string | null;
+  expected_control_revision: number | null;
+  consumed_message_seq: number | null;
+  applied_critical_message_seq: number | null;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  chat_attempt_count: number;
+  context_compression_attempt_count: number;
+}
+
 export interface Inspector {
   task: Record<string, unknown>;
   trusted_state: Record<string, unknown>;
   plan_history: Array<Record<string, unknown>>;
   evidence: Array<Record<string, unknown>>;
   observations: Array<Record<string, unknown>>;
-  runs: Array<Record<string, unknown>>;
+  runs: InspectorRun[];
   investigation_answers?: Array<{
     run_id: string; source_message_id: string; answer_text: string; result_state: string;
     source_refs: Array<Record<string, unknown>>; result: Record<string, unknown>;

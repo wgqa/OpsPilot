@@ -65,7 +65,7 @@ const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
 const conversationProjection = computed(() => projectConversation({
   messages: sessionHistoryReady.value ? messages.value : [],
-  runs: (inspector.value?.runs ?? []) as unknown as ConversationRun[],
+  runs: inspector.value?.runs ?? [],
   investigationAnswers: (inspector.value?.investigation_answers ?? []) as ConversationAnswer[],
   readonlyFollowups: (inspector.value?.readonly_followups ?? []) as ConversationFollowup[],
   assessments: investigationUpdates.value as unknown as ConversationAssessment[],
@@ -454,9 +454,18 @@ async function refreshInspector(): Promise<boolean> {
       notice.value = '当前 S3 Scope 授权不可用，受限调查答复与来源已隐藏；现存业务记录未被修改。';
       return true;
     }
-    if (String(refreshed.task.service_id ?? '') === 'orders-async-demo'
-      && !s3ReadResponseFence.acceptAuthorizedInspector(requestTicket)) return false;
+    const isS3 = String(refreshed.task.service_id ?? '') === 'orders-async-demo';
+    const authorizationRestored = isS3 && s3ReadResponseFence.isTaskDenied(requestedTaskId);
+    if (isS3 && !s3ReadResponseFence.acceptAuthorizedInspector(requestTicket)) return false;
     inspector.value = refreshed;
+    if (authorizationRestored) {
+      try {
+        await refreshSessionMessagesOnly();
+      } catch (error) {
+        errorMessage.value = `授权恢复后会话消息刷新失败：${explainError(error)}`;
+      }
+      if (!stillShowingRequestedTask()) return false;
+    }
     if (user.value?.role === 'SUPPORT') {
       const updates = await api.investigationUpdates(requestedTaskId);
       if (!stillShowingRequestedTask()) return false;
@@ -617,7 +626,7 @@ async function sendMessage(): Promise<void> {
       } else if (assessment.intent === 'FOLLOW_UP' && assessment.follow_up_action === 'INVESTIGATE' && assessment.investigation_run_id) {
         activeChatRun.value = null;
         chunks.value = [];
-        notice.value = `OpsPilot 选择补查当前 Task 证据；调查 Run ${assessment.investigation_run_id} 正在执行。`;
+        notice.value = 'OpsPilot 选择补查当前任务的可信事实；调查正在执行。';
         await watchRun(assessment.investigation_run_id);
         await refreshInspector();
         const followup = inspector.value?.readonly_followups.find((item) => item.run_id === assessment.investigation_run_id);
@@ -625,7 +634,7 @@ async function sendMessage(): Promise<void> {
           ? '只读补查已完成，答案与来源已显示在对话中。'
           : followup?.result_state === 'PARTIAL'
             ? '只读补查只完成了部分目标；请查看缺口和来源后继续对话。'
-            : `补查 Run ${assessment.investigation_run_id} 尚未形成完整结果；Task 的业务状态与诊断未改变。`;
+            : '本次补查尚未形成完整结果；业务状态与诊断未改变。';
       } else {
         await watchRun(accepted.run_id);
       }
@@ -651,13 +660,13 @@ async function confirmInvestigationUpdate(proposal: InvestigationUpdateProposal)
   if (!currentTask || !csrf.value || busy.value || user.value?.role !== 'SUPPORT') return;
   busy.value = true;
   errorMessage.value = '';
-  notice.value = '正在由 TaskControl 核对身份、控制版本和重复提交，再受理新的调查 Run。';
+  notice.value = '正在核对任务版本和重复提交，准备受理这项调查更新。';
   try {
     const accepted = await api.confirmTaskUpdate(currentTask, proposal, csrf.value);
     const previousGate = String(inspector.value?.current_gate.decision ?? '未形成');
     await refreshSessionMessagesOnly();
     await refreshInspector();
-    notice.value = `正式纠错已受理，新调查 Run ${accepted.run_id} 正在重新读取当前可信事实；纠错文字仍是未验证线索。`;
+    notice.value = '正式纠错已受理，新一轮调查正在重新读取当前可信事实；纠错文字仍是未验证线索。';
     await watchRun(accepted.run_id);
     const completed = await api.run(accepted.run_id);
     const currentGate = String(inspector.value?.current_gate.decision ?? 'INCONCLUSIVE');
@@ -669,8 +678,8 @@ async function confirmInvestigationUpdate(proposal: InvestigationUpdateProposal)
     const probeSummary = typeof probeFacts?.http_status === 'number'
       ? `；当前真实 Probe HTTP ${probeFacts.http_status}` : '';
     notice.value = inspector.value?.task.service_id === 'orders-async-demo'
-      ? `重新调查 Run ${readableStatus(completed.status)}；正式业务 Gate：${readableGate(currentGate)}。本轮答复的观察来源与未知事项见上方卡片；部分调查事实不等同于正式业务资格。纠错文字仍是未验证线索。`
-      : `重新调查已结束：Run ${readableStatus(completed.status)}；确定性 Gate ${readableGate(previousGate)} → ${readableGate(currentGate)}${reason ? `（${reason}）` : ''}；当前有效 Evidence ${currentEvidence.length} 项${probeSummary}。判断依据是新 Run 的可信事实，用户纠错仍是未验证线索。`;
+      ? `重新调查${readableStatus(completed.status)}；正式业务判断：${readableGate(currentGate)}。本轮答复的观察来源与未知事项见上方卡片；部分调查事实不等同于正式业务资格。纠错文字仍是未验证线索。`
+      : `重新调查${readableStatus(completed.status)}；确定性判断从${readableGate(previousGate)}更新为${readableGate(currentGate)}${reason ? `（${reason}）` : ''}；当前有效事实 ${currentEvidence.length} 项${probeSummary}。判断依据是新一轮调查取得的可信事实，用户纠错仍是未验证线索。`;
   } catch (error) {
     errorMessage.value = explainError(error);
     await refreshInspector();
@@ -709,7 +718,7 @@ async function submitCriticalCorrection(): Promise<void> {
   if (!confirmed) return;
   busy.value = true;
   errorMessage.value = '';
-  notice.value = '正在原子接收关键更正；旧 Run 与审批资格将由 TaskControl 重新裁决。';
+  notice.value = '正在提交关键更正；系统将重新核验旧调查和审批状态。';
   try {
     const accepted = await api.send(sessionId.value, body, taskId.value, csrf.value, 'CORRECT_TASK_INPUT');
     correctionDraft.value = '';
@@ -956,7 +965,7 @@ function readableUpdateStatus(value: unknown): string {
   return ({
     ASSESSING: '正在识别这条消息的处理方式',
     PENDING_CONFIRMATION: '等待你确认',
-    CONFIRMED: '已由 TaskControl 受理',
+    CONFIRMED: '已确认',
     CANCELLED: '已取消',
     STALE: '版本已过期',
     NO_UPDATE: '只解释，不更新 Task',
@@ -1373,23 +1382,23 @@ onBeforeUnmount(() => {
                 <div class="message-avatar">✳</div><div class="message-content">
                   <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(item.message.created_at) }}</span><span class="message-task">{{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序限制说明 · 非模型答复' : '聊天答复' }}</span></div>
                   <div class="message-bubble">{{ item.message.body }}</div>
-                  <small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }}</small>
+                  <details class="followup-sources"><summary>查看答复来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序生成的限制说明，不是模型答复' : '持久化的聊天答复' }}</small></details>
                 </div>
               </article>
               <article v-else-if="item.kind === 'INVESTIGATION_ANSWER' && item.answer" class="readonly-followup-card" :data-testid="`investigation-answer-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
-                <div class="update-proposal-heading"><h2>本次调查答复</h2><span class="status-badge" :class="item.answer.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.answer.result_state === 'ANSWERED' ? '已答复' : '事实与待核实事项' }}</span><span v-if="item.answer.currentness && item.answer.currentness !== 'CURRENT'" class="status-badge neutral">历史结果</span></div>
+                <div class="update-proposal-heading"><h2>本次调查答复</h2><span class="status-badge" :class="item.answer.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.answer.result_state === 'ANSWERED' ? '已答复' : item.answer.result_state === 'PARTIAL' ? '部分结果 · 仍有待核实事项' : item.answer.result_state === 'NOT_COMPLETED' ? '本次调查未完成' : '结果待确认' }}</span><span v-if="item.answer.currentness && item.answer.currentness !== 'CURRENT'" class="status-badge neutral">历史结果</span></div>
                 <small>形成于 {{ dateLabel(item.answer.created_at) }}。这是该 Run 的持久结果；刷新页面不会重新取证。</small>
                 <p>{{ item.answer.answer_text }}</p>
-                <div v-if="item.diagnosis" class="s3-result-card" data-testid="s3-diagnosis"><span>{{ item.diagnosis.currentness === 'CURRENT' ? '当前调查结果 · 持久业务回执' : '历史调查结果 · 当前性已失效' }}</span><b>{{ readableS3Outcome(item.diagnosis.outcome) }}</b><small>仅只读诊断；未重发回调，也未宣称业务恢复。回执 {{ String(item.diagnosis.receipt_id) }}</small></div>
+                <div v-if="item.diagnosis" class="s3-result-card" data-testid="s3-diagnosis"><span>{{ item.diagnosis.currentness === 'CURRENT' ? '当前调查结果' : '历史调查结果 · 当前性已失效' }}</span><b>{{ readableS3Outcome(item.diagnosis.outcome) }}</b><small>仅只读诊断；未重发回调，也未宣称业务恢复。</small></div>
                 <details class="followup-sources"><summary>查看形成时间与来源（{{ item.answer.source_refs.length }}）</summary>
                   <small>{{ dateLabel(item.answer.created_at) }} · {{ item.answer.result?.delivery_mode === 'MODEL' ? '模型依据当时有效来源回答' : '可信事实与未知事项汇总' }}；这是对话答复，不授予业务操作资格。</small>
                   <ul><li v-for="(sourceRef, index) in item.answer.source_refs" :key="index"><code>{{ JSON.stringify(sourceRef) }}</code></li></ul>
-                  <small>来源消息 {{ item.answer.source_message_id }} · Run {{ item.answer.run_id }}</small>
+                  <small>来源消息 {{ item.answer.source_message_id }} · Run {{ item.answer.run_id }}<template v-if="item.diagnosis"> · 诊断回执 {{ String(item.diagnosis.receipt_id) }}（Run {{ String(item.diagnosis.run_id) }}）</template></small>
                 </details>
               </article>
               <article v-else-if="item.kind === 'READONLY_FOLLOWUP' && item.followup" class="readonly-followup-card" :data-testid="`readonly-followup-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
-                <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">READONLY TASK FOLLOW-UP</span><h2>同一任务的连续调查</h2></div><span class="status-badge" :class="item.followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.followup.result_state === 'ANSWERED' ? '已答复' : item.followup.result_state === 'PARTIAL' ? '结果与待核实事项' : item.followup.result_state === 'NOT_COMPLETED' ? '需要补充' : '调查中' }}</span></div>
-                <p>{{ item.followup.answer_text || '本次补查尚未形成可展示的回答。' }}</p>
+                <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">补充调查</span><h2>同一任务的连续调查</h2></div><span class="status-badge" :class="item.followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.followup.result_state === 'ANSWERED' ? '已答复' : item.followup.result_state === 'PARTIAL' ? '部分结果 · 仍有待核实事项' : item.followup.result_state === 'NOT_COMPLETED' ? '本次补查未完成' : item.followup.run_status === 'FAILED' ? '补查失败' : '调查中' }}</span></div>
+                <p>{{ item.followup.answer_text || (item.followup.result_state === 'NOT_COMPLETED' ? '本次补查未能完成当前目标。' : '本次补查尚未形成最终回答。') }}</p>
                 <details class="followup-sources"><summary>查看来源与调查记录（{{ item.followup.source_refs.length }}）</summary>
                   <ul><li v-for="(sourceRef, index) in item.followup.source_refs" :key="index"><code>{{ JSON.stringify(sourceRef) }}</code></li></ul>
                   <small>Run {{ item.followup.run_id }} · 来源消息 {{ item.followup.source_message_id }} · 控制版本 {{ item.followup.expected_control_revision }}</small>
@@ -1399,26 +1408,24 @@ onBeforeUnmount(() => {
               </article>
               <section v-else-if="item.kind === 'CORRECTION_ASSESSMENT' && item.assessment" class="update-proposal-card" :data-testid="`investigation-update-${item.assessment.assessment_id}`" :data-source-message-id="thread.anchor.message_id">
                 <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">TASK INPUT PROPOSAL</span><h2>{{ item.assessment.intent === 'CRITICAL_CORRECTION' ? '关键纠错状态' : '本条消息的处理结果' }}</h2></div><span class="status-badge" :class="item.assessment.status === 'PENDING_CONFIRMATION' ? 'warm' : 'neutral'">{{ readableUpdateStatus(item.assessment.status) }}</span></div>
-                <p class="update-proposal-summary">{{ readableUpdateIntent(item.assessment.intent) }}<template v-if="item.assessment.change_summary">：{{ item.assessment.change_summary }}</template>。判断文本不构成业务事实或授权。</p>
+                <p class="update-proposal-summary">{{ readableUpdateIntent(item.assessment.intent) }}<template v-if="item.assessment.change_summary">：{{ item.assessment.change_summary }}</template>。<template v-if="item.correctionMessage?.application_state === 'APPLIED_TO_RUN'">已确认并应用到新一轮调查。</template><template v-else-if="item.assessment.status === 'CONFIRMED'">已确认，正在等待新一轮调查处理。</template><template v-else-if="item.assessment.status === 'PENDING_CONFIRMATION'">尚未更新 Task；请先确认或取消这项更正。</template><template v-else-if="item.assessment.status === 'CANCELLED'">更正已取消，Task 输入未更新。</template><template v-else-if="item.assessment.status === 'STALE'">此提议已过期，Task 输入未更新。</template><template v-else>这条判断不会直接改变业务事实或权限。</template></p>
                 <div v-if="item.assessment.proposal && item.assessment.intent === 'CRITICAL_CORRECTION' && item.assessment.status === 'PENDING_CONFIRMATION'" class="update-diff-grid">
                   <div><span>当前 Task 调查输入</span><pre>{{ String(item.assessment.proposal.current_input ?? '暂无已提交的正式更正') }}</pre></div>
                   <div><span>等待确认的用户输入</span><pre>{{ String(item.assessment.proposal.proposed_input ?? item.assessment.original_message) }}</pre></div>
                 </div>
-                <div v-if="item.correctionMessage" class="update-proposal-meta">TaskControl 更正消息 {{ item.correctionMessage.message_id }} · {{ item.correctionMessage.application_state === 'APPLIED_TO_RUN' ? '已应用到新 Run' : '已受理，等待调查应用' }} · Run {{ item.correctionMessage.applied_run_id ?? item.assessment.investigation_run_id ?? '尚未创建' }}</div>
-                <div v-else class="update-proposal-meta">来源消息 {{ item.assessment.source_message_id }} · Task {{ item.assessment.target_task_id ?? item.assessment.task_id ?? '—' }} · USER_INPUT_UNTRUSTED</div>
                 <div v-if="item.assessment.proposal && item.assessment.status === 'PENDING_CONFIRMATION'" class="update-proposal-actions">
                   <button class="outline-button" type="button" :disabled="busy || !csrf" @click="cancelInvestigationUpdate(item.assessment.proposal as unknown as InvestigationUpdateProposal)">取消提议</button>
                   <button class="primary-button" type="button" :disabled="busy || !csrf" @click="confirmInvestigationUpdate(item.assessment.proposal as unknown as InvestigationUpdateProposal)">确认并重新调查 <span>→</span></button>
                 </div>
-                <small v-if="item.assessment.investigation_run_id">重新调查 Run {{ item.assessment.investigation_run_id }}</small>
+                <details class="followup-sources"><summary>查看更正与关联记录</summary><small>判断来源 USER_INPUT_UNTRUSTED；原消息 {{ item.assessment.source_message_id }} · Task {{ item.assessment.target_task_id ?? item.assessment.task_id ?? '—' }}<template v-if="item.correctionMessage"> · TaskControl 更正消息 {{ item.correctionMessage.message_id }} · 应用状态 {{ item.correctionMessage.application_state }} · Run {{ item.correctionMessage.applied_run_id ?? item.assessment.investigation_run_id ?? '尚未创建' }}</template><template v-else-if="item.assessment.investigation_run_id"> · 重新调查 Run {{ item.assessment.investigation_run_id }}</template></small></details>
               </section>
               <article v-else-if="item.kind === 'RUN_STATUS' && item.run" class="readonly-followup-card" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
                 <div class="update-proposal-heading"><h2>{{ item.run.kind === 'CHAT_READONLY' ? '只读回答' : '调查运行' }}</h2><span class="status-badge" :class="statusTone(item.run.status)">{{ readableStatus(item.run.status) }}</span></div>
                 <p v-if="item.run.status === 'QUEUED'">本条消息对应的工作已进入持久队列。</p>
                 <p v-else-if="item.run.status === 'RUNNING'">本条消息对应的工作正在执行。</p>
                 <p v-else-if="item.run.status === 'INTERRUPTED_RECOVERABLE'">进程中断留下可恢复状态；暂存片段不等于最终答复。</p>
-                <p v-else-if="item.run.status === 'FAILED' || item.run.status === 'BLOCKED'">本次工作未完成：{{ readableRunReason(item.run.blocked_reason ?? item.run.waiting_reason ?? '未提供原因') }}。</p>
-                <small>Run {{ item.run.run_id }} · {{ dateLabel(item.run.started_at ?? item.run.created_at) }} · 来源问题 {{ thread.anchor.message_id }}</small>
+                <p v-else-if="item.run.status === 'FAILED' || item.run.status === 'BLOCKED'">本次工作未完成。请展开运行详情查看具体原因。</p>
+                <details class="followup-sources"><summary>查看运行详情</summary><small>Run {{ item.run.run_id }} · {{ dateLabel(item.run.started_at ?? item.run.created_at) }} · 来源问题 {{ thread.anchor.message_id }}<template v-if="item.run.blocked_reason || item.run.waiting_reason"> · 原因代码 {{ item.run.blocked_reason ?? item.run.waiting_reason }}</template></small></details>
               </article>
               <div v-else-if="item.kind === 'STREAM' && item.run" class="streaming-row" data-testid="live-stream" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
                 <div class="message-avatar assistant-avatar">✳</div><div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label"><i></i>正在生成 · 暂存片段</span></div>
@@ -1433,8 +1440,8 @@ onBeforeUnmount(() => {
               <p v-if="item.message">{{ item.message.body }}</p>
               <p v-else-if="item.answer">{{ item.answer.answer_text }}</p>
               <p v-else-if="item.followup">{{ item.followup.answer_text || '补查尚未完成。' }}</p>
-              <p v-else>Run {{ item.run?.run_id ?? item.runId }} · {{ readableStatus(item.run?.status ?? item.kind) }} · {{ readableRunReason(item.run?.blocked_reason ?? '来源问题暂不可见') }}</p>
-              <small v-if="item.answer">来源 {{ item.answer.source_message_id }} · Run {{ item.answer.run_id }}</small>
+              <p v-else>工作结果目前无法关联到已加载的问题；系统没有猜测其归属。</p>
+              <details v-if="item.run || item.runId || item.answer" class="followup-sources"><summary>查看未关联记录详情</summary><small v-if="item.run || item.runId">Run {{ item.run?.run_id ?? item.runId }} · {{ readableStatus(item.run?.status ?? item.kind) }} · {{ readableRunReason(item.run?.blocked_reason ?? item.run?.waiting_reason ?? '来源问题暂不可见') }}</small><small v-if="item.answer">来源 {{ item.answer.source_message_id }} · Run {{ item.answer.run_id }}</small></details>
             </article>
           </section>
           <div ref="conversationEnd"></div>
