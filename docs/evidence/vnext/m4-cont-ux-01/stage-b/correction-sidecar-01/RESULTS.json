@@ -1,0 +1,95 @@
+{
+  "schema": "opspilot-stage-b-correction-sidecar-results-v1",
+  "status": "INTERMEDIATE_IMPLEMENTATION",
+  "stage_b_verdict": "HOLD",
+  "repository": "wgqa/OpsPilot",
+  "base_sha": "54329a6f11f909167ca6b64de6a905d5fe9e36fc",
+  "freeze_commit_sha": "1743bedd670012887788ab8a1ddfe1dc39c7c742",
+  "red_test_commit_sha": "04ee2aca19b524b4474653f88b03166e3e843413",
+  "implementation_commit_sha": "a515a0e580e76d3358a679446987ee5f27afd825",
+  "remote_main_before_push": "54329a6f11f909167ca6b64de6a905d5fe9e36fc",
+  "environment": {
+    "os": "Windows",
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "node": "v24.16.0",
+    "npm": "11.13.0",
+    "vue": "3.5.44",
+    "vite": "8.3.4",
+    "typescript": "5.9.3",
+    "vue_tsc": "3.3.13",
+    "eslint": "10.0.1"
+  },
+  "runs": [
+    {
+      "id": "red-01",
+      "command": "cd frontend; node --experimental-strip-types --test test/stage-b-correction-sidecar.test.ts",
+      "exit_code": 1,
+      "passed": 0,
+      "failed": 2,
+      "evidence": "runs/red-01/node-test.log"
+    },
+    {
+      "id": "green-01",
+      "command": "cd frontend; node --experimental-strip-types --test test/stage-b-correction-sidecar.test.ts",
+      "exit_code": 0,
+      "passed": 2,
+      "failed": 0,
+      "evidence": "runs/green-01/node-test.log"
+    },
+    {
+      "id": "frontend-projection-01",
+      "command": "cd frontend; node --experimental-strip-types --test test/conversation.test.ts test/stage-b-closeout.test.ts test/stage-b-correction-sidecar.test.ts",
+      "exit_code": 0,
+      "passed": 17,
+      "failed": 0,
+      "evidence": "runs/frontend-projection-01/node-test.log"
+    },
+    {
+      "id": "api-regression-01",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_m4_contux_stage_b_closeout_api.py tests/test_m4_contux_stage_b_supplement_api.py tests/test_m4_contux_stage_b_api.py tests/test_m4_03_s3.py -q --basetemp=C:/Temp/opspilot_correction_sidecar_pytest_20261027",
+      "exit_code": 0,
+      "passed": 20,
+      "failed": 0,
+      "duration_seconds": 36.57,
+      "evidence": "runs/api-regression-01/pytest.log"
+    },
+    {
+      "id": "typecheck-01",
+      "command": "cd frontend; npm run typecheck",
+      "exit_code": 0,
+      "evidence": "runs/typecheck-01/typecheck.log"
+    },
+    {
+      "id": "build-01",
+      "command": "cd frontend; npm run build",
+      "exit_code": 0,
+      "evidence": "runs/build-01/build.log"
+    },
+    {
+      "id": "eslint-01",
+      "command": "cd frontend; npm exec eslint -- src/App.vue src/conversation.ts test/stage-b-correction-sidecar.test.ts",
+      "exit_code": 0,
+      "evidence": "runs/eslint-01/eslint.log"
+    }
+  ],
+  "not_run": {
+    "full_pytest": "NOT_RUN in this supplemental repair; historical 402 count is not presented as a fresh run",
+    "browser_dom_screenshot_refresh_sse": "NOT_RUN / BLOCKED_BY_TOOL_ENVIRONMENT",
+    "provider": "NOT_RUN",
+    "mcp": "NOT_RUN",
+    "paid_calls": 0,
+    "remote_push": "PENDING_AT_EVIDENCE_CAPTURE; remote main was subsequently fetched and verified at the approved base; actual push SHA is reported in the task handoff"
+  },
+  "source_files": [
+    "frontend/src/conversation.ts",
+    "frontend/src/App.vue",
+    "frontend/test/stage-b-correction-sidecar.test.ts"
+  ],
+  "evidence": {
+    "plan": "ACCEPTANCE_PLAN.md",
+    "baseline": "BASELINE.json",
+    "failures": "FAILURES.md",
+    "report": "REPORT.md"
+  }
+}
