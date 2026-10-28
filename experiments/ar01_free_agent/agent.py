@@ -117,10 +117,13 @@ def schema_constraints(value):
 
 class Candidate(AgentMiddleware):
     """Per-experiment middleware around the standard LangGraph model/tool edges."""
-    def __init__(self, db, task_id, run_id, client, specs, *, model_id="ar01-deterministic", limits=None, trace=None):
+    def __init__(self, db, task_id, run_id, client, specs, *, model_id="ar01-deterministic", limits=None, trace=None, output_limit=512):
         self.db, self.task, self.run_id, self.client = db, task_id, run_id, client
         self.specs, self.model_id = specs, model_id
         self.limits, self.trace = limits or Limits(), trace or Trace()
+        if type(output_limit) is not int or output_limit not in {512,2048}:
+            raise ValueError("AR01_OUTPUT_PROFILE_UNSUPPORTED")
+        self.output_limit=output_limit
         self.evidence_ids, self.pins, self.assets = [], {}, {}
         self.call_ids = {}
         self.stop_reason = None
@@ -172,7 +175,7 @@ class Candidate(AgentMiddleware):
                 attempt_id=attempt, messages=serialized, tools=self.specs, context_budget=metadata.get("context_budget"))
             response = await asyncio.wait_for(handler(request.override(tools=self.specs,
                 model_settings={**request.model_settings, "parallel_tool_calls": False,
-                                "max_tokens": 512})), timeout=self.limits.model_seconds)
+                                "max_tokens": self.output_limit})), timeout=self.limits.model_seconds)
             ai = next((m for m in reversed(response.result) if isinstance(m, AIMessage)), None)
             if ai is None or len(content_text(ai.content)) > 20_000:
                 raise ValueError("MODEL_RESPONSE_INVALID")

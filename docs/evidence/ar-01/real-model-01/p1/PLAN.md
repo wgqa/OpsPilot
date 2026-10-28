@@ -73,3 +73,13 @@ Skill B: user gets first real A/B decision evidence; existing Agent choices rema
 free; paired observations may change actions/conclusions; quota/auth checks protect
 resources while legal queries remain tested; reuse existing experiment components;
 stop after five pairs or first hard condition, branch commit/push for independent review.
+
+### Pre-paid clarification of the first-pair gate
+
+No paid P1 calls had occurred when this clarification was frozen. Per user rule
+P1-C.7, first-pair "normal delivery" above means completed executions with healthy
+HTTP/Usage/schema audit, not passing the user-goal score. Model-quality failures,
+including pair one, remain in the fixed sample when protocol/accounting are sound.
+Existing adapter protocol failures still stop immediately after a group. Do not
+filter hard cases by demanding a model win before continuing. Unit-test this
+distinction separately from the actual local HTTP/MCP positive path.

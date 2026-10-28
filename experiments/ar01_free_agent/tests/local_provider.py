@@ -65,6 +65,9 @@ def provider(mode="normal"):
             if state["mode"]=="reasoning": response["usage"]["completion_tokens_details"]={"reasoning_tokens":5}
             if state["mode"]=="reasoning-text": response["choices"][0]["message"]["reasoning_content"]="test hidden reasoning, never persist"
             if state["mode"]=="bad-total": response["usage"]["total_tokens"]=1
+            if state["mode"]=="p1-length":
+                response["choices"][0]["finish_reason"]="length"
+                response["usage"].update(completion_tokens=2048,total_tokens=2148)
             value=json.dumps(response,ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header("Content-Type","application/json")

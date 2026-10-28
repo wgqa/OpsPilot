@@ -123,7 +123,7 @@ async def run_a(db, task, client, specs, model, trace, *, model_id="ar01-determi
     return response
 
 
-async def run_pair(case, output, *, model_factory=None, model_id="ar01-deterministic"):
+async def run_pair(case, output, *, model_factory=None, model_id="ar01-deterministic",trace_factory=None,group_observer=None):
     output.mkdir(parents=True,exist_ok=False)
     seed=output/"seed.sqlite3"
     prepared=prepare_seed(seed,case["setup"])
@@ -136,7 +136,7 @@ async def run_pair(case, output, *, model_factory=None, model_id="ar01-determini
         assert digest_json(snapshot(db,FACT_TABLES)) == initial
         task=new_task(db,case["question"])
         before=snapshot(db,PROTECTED)
-        trace=Trace()
+        trace=trace_factory(output,group) if trace_factory else Trace()
         trace.emit("initial_state",group=group,task_id=task["task_id"],run_id=task["run_id"],business_digest=initial)
         model=None
         start=time.monotonic()
@@ -149,7 +149,7 @@ async def run_pair(case, output, *, model_factory=None, model_id="ar01-determini
                        if model_factory else LocalModel())
                 if group=="A": result=await run_a(db,task,client,specs,model,trace,model_id=model_id)
                 else: result=(await Candidate(db,task["task_id"],task["run_id"],client,specs,
-                    model_id=model_id,trace=trace).run(model,case["question"]))["result"]
+                    model_id=model_id,trace=trace,output_limit=getattr(getattr(model,"config",None),"max_tokens",512)).run(model,case["question"]))["result"]
         except BaseException as error:
             trace.emit("group_failure",error_class=type(error).__name__,reason=str(error))
             with (output/f"{group}.trace.jsonl").open("x",encoding="utf-8") as f:
@@ -183,6 +183,8 @@ async def run_pair(case, output, *, model_factory=None, model_id="ar01-determini
         (output/f"{group}.result.json").write_text(json.dumps(results[-1],ensure_ascii=False,indent=2),encoding="utf-8")
         if hasattr(model,"assert_healthy"):
             model.assert_healthy()
+        if group_observer:
+            group_observer(results[-1])
     assert results[0]["tool_schema_digest"]==results[1]["tool_schema_digest"]
     return {"id":case["id"],"variant":case["variant"],"groups":results,"conditions_ready":True}
 

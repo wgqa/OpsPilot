@@ -22,22 +22,25 @@ class BudgetStop(RuntimeError):
 
 
 REQUEST_WIRE_V1 = "REQUEST_WIRE_V1"
+REQUEST_WIRE_P1_2048 = "REQUEST_WIRE_P1_2048_V1"
 LEGACY_MODEL_MAX = "LEGACY_MODEL_MAX"
 
 
-def request_bound(payload):
+def request_bound(payload, *, policy=REQUEST_WIRE_V1):
     """Contract bound, not a tokenizer estimate or unconditional billing promise.
 
     Server context capacity bounds ALL input, including tools and private framing.
     Only the correctly serialized, documented output limit narrows the old bound.
     Keep the full payload for both arms; byte counts below are audit data only.
     """
+    if policy not in {REQUEST_WIRE_V1,REQUEST_WIRE_P1_2048}: raise BudgetStop("WIRE_POLICY_UNKNOWN")
+    output_limit=2048 if policy==REQUEST_WIRE_P1_2048 else 512
     allowed={"model","messages","stream","thinking","max_tokens","parallel_tool_calls","tools","tool_choice"}
     if not isinstance(payload,dict) or set(payload)-allowed:
         raise BudgetStop("WIRE_UNKNOWN_FIELD")
     if payload.get("model")!="deepseek-flash" or payload.get("thinking")!={"type":"disabled"}:
         raise BudgetStop("WIRE_MODEL_OR_MODE_UNBOUNDED")
-    if type(payload.get("max_tokens")) is not int or payload["max_tokens"]!=512:
+    if type(payload.get("max_tokens")) is not int or payload["max_tokens"]!=output_limit:
         raise BudgetStop("WIRE_OUTPUT_LIMIT_UNBOUNDED")
     if payload.get("stream") is not False or payload.get("parallel_tool_calls") is not False:
         raise BudgetStop("WIRE_FROZEN_PARAMETERS_CHANGED")
@@ -61,9 +64,9 @@ def request_bound(payload):
         serialized=json.dumps(payload,ensure_ascii=False,sort_keys=True,allow_nan=False).encode("utf-8")
     except (ValueError,TypeError,UnicodeError) as error:
         raise BudgetStop("WIRE_SERIALIZATION_UNBOUNDED") from error
-    return {"policy":REQUEST_WIRE_V1,"wire_semantic_digest":digest_json(payload),
-        "input_upper_tokens":1_048_576,"output_upper_tokens":512,
-        "reserve_micro":usage_cost({"prompt_tokens":1_048_576,"completion_tokens":512,"total_tokens":1_049_088}),
+    return {"policy":policy,"wire_semantic_digest":digest_json(payload),
+        "input_upper_tokens":1_048_576,"output_upper_tokens":output_limit,
+        "reserve_micro":usage_cost({"prompt_tokens":1_048_576,"completion_tokens":output_limit,"total_tokens":1_048_576+output_limit}),
         "basis":"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT",
         "input_includes":"messages + all tool schemas + server framing; no byte/token ratio assumed",
         "prepared_json_bytes_audit_only":len(serialized),"message_count":len(messages),"tool_count":len(tools),
@@ -109,15 +112,17 @@ class ExperimentBudget:
         if type(request_limit) is not int or not 1<=request_limit<=80 or not Decimal("0")<Decimal(str(cost_cap_usd))<=2:
             raise ValueError("INVALID_EXPERIMENT_LIMITS")
         self.cap, self.limit=micro(cost_cap_usd),request_limit
-        if reservation_policy not in {LEGACY_MODEL_MAX,REQUEST_WIRE_V1}:
+        if reservation_policy not in {LEGACY_MODEL_MAX,REQUEST_WIRE_V1,REQUEST_WIRE_P1_2048}:
             raise ValueError("UNKNOWN_RESERVATION_POLICY")
-        self.requestwise=reservation_policy==REQUEST_WIRE_V1
+        self.p1=reservation_policy==REQUEST_WIRE_P1_2048
+        self.requestwise=reservation_policy in {REQUEST_WIRE_V1,REQUEST_WIRE_P1_2048}
+        self.output_limit=2048 if self.p1 else 512
         self.policy={"release":"AR01-RM01-P0-V1","cap_micro":self.cap,"request_limit":self.limit,
             "input_peak_per_million":"0.30","output_peak_per_million":"1.20",
             "reservation_micro":self.worst_micro,"single_in_flight":True}
         if self.requestwise:
-            self.policy.update(release="AR01-RM01-HF01-V1",reservation_policy=REQUEST_WIRE_V1,
-                reservation_micro=None,input_context_ceiling=1_048_576,wire_max_tokens=512)
+            self.policy.update(release="AR01-RM01-P1-2048-V1" if self.p1 else "AR01-RM01-HF01-V1",reservation_policy=reservation_policy,
+                reservation_micro=None,input_context_ceiling=1_048_576,wire_max_tokens=self.output_limit)
         with self.transaction() as c:
             c.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
             c.execute("CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,logical_key TEXT UNIQUE NOT NULL,"
@@ -164,7 +169,7 @@ class ExperimentBudget:
         bound=None
         reason=None
         if self.requestwise:
-            try: bound=request_bound(payload)
+            try: bound=request_bound(payload,policy=self.policy["reservation_policy"])
             except BudgetStop as error: reason=str(error)
         reserve=bound["reserve_micro"] if bound else None if self.requestwise else self.worst_micro
         return {"ready":not s["halted"] and not s["unresolved"] and s["requests"]<self.limit
@@ -180,7 +185,7 @@ class ExperimentBudget:
             c.execute("INSERT INTO groups VALUES(?,?)",(label,time.time()))
 
     def reserve(self,logical_key,payload):
-        bound=request_bound(payload) if self.requestwise else None
+        bound=request_bound(payload,policy=self.policy["reservation_policy"]) if self.requestwise else None
         reserve=bound["reserve_micro"] if bound else self.worst_micro
         with self.transaction() as c:
             s=self._snapshot(c)
@@ -233,7 +238,7 @@ class ExperimentBudget:
             row=c.execute("SELECT * FROM requests WHERE id=?",(key,)).fetchone()
             if row is None or row["status"]!="SENT": raise BudgetStop("INVALID_SETTLEMENT")
             if charge>row["reserved_micro"]: violation="DOCUMENTED_COST_BOUND_EXCEEDED"
-            if usage["completion_tokens"]>512: violation="REQUEST_MAX_TOKENS_NOT_HONORED"
+            if usage["completion_tokens"]>self.output_limit: violation="REQUEST_MAX_TOKENS_NOT_HONORED"
             if self.requestwise:
                 bound=json.loads(row["bound_json"])
                 if usage["prompt_tokens"]>bound["input_upper_tokens"]:

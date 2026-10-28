@@ -21,7 +21,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import Field
 
 from experiments.ar01_free_agent.agent import sanitize
-from experiments.ar01_free_agent.provider_budget import BudgetStop, ExperimentBudget, REQUEST_WIRE_V1
+from experiments.ar01_free_agent.provider_budget import BudgetStop, ExperimentBudget, REQUEST_WIRE_V1, REQUEST_WIRE_P1_2048
 from opspilot.config import ROOT, MODEL_API_KEY
 from opspilot.domain.d2 import digest_json
 
@@ -48,6 +48,18 @@ class ProviderConfig:
             raise ValueError("FROZEN_PROVIDER_CONFIGURATION_CHANGED")
 
 
+@dataclass(frozen=True)
+class P1ProviderConfig(ProviderConfig):
+    """Only the separately authorized P1 changes the output allowance."""
+    max_tokens: int = 2048
+
+    def __post_init__(self):
+        values=asdict(self)
+        if type(values["max_tokens"]) is not int or values["max_tokens"]!=2048:
+            raise ValueError("FROZEN_P1_CONFIGURATION_CHANGED")
+        ProviderConfig(**{**values,"max_tokens":512})
+
+
 ORDER=(("AR01-01","material"),("AR01-03","acknowledged"),("AR01-03","failed"),
        ("AR01-04","different-event"),("AR01-06","scope"))
 
@@ -69,7 +81,7 @@ class MeteredModel(BaseChatModel):
     sdk: Any = Field(exclude=True)
     budget: Any = Field(exclude=True)
     trace: Any = Field(exclude=True)
-    config: ProviderConfig
+    config: ProviderConfig | P1ProviderConfig
     group_label: str
     expected_specs: list[dict] = Field(exclude=True)
     # Shared by bound clones and httpx hooks; Pydantic must not copy this map.
@@ -102,7 +114,7 @@ class MeteredModel(BaseChatModel):
         self.trace.emit("provider_invoke_settings",settings=settings)
         if set(settings)-{"tools","tool_choice","parallel_tool_calls","max_tokens"}:
             raise ProviderStopped("UNFROZEN_PROVIDER_PARAMETER")
-        if settings.get("max_tokens",512)!=512 or settings.get("parallel_tool_calls",False) is not False or settings.get("tool_choice","auto")!="auto":
+        if settings.get("max_tokens",self.config.max_tokens)!=self.config.max_tokens or settings.get("parallel_tool_calls",False) is not False or settings.get("tool_choice","auto")!="auto":
             raise ProviderStopped("FROZEN_PROVIDER_PARAMETER_CHANGED")
         specs=settings.get("tools",[])
         if specs not in ([],self.expected_specs): raise ProviderStopped("ACTUAL_TOOL_SCHEMA_MISMATCH")
@@ -123,7 +135,13 @@ class MeteredModel(BaseChatModel):
             expected=self.runtime.get("authorized_wire_digest")
             if expected and digest_json(payload)!=expected:
                 raise ProviderStopped("PROBE_AUTHORIZED_WIRE_CHANGED")
-        key=self.budget.reserve(logical,payload)
+        try:
+            key=self.budget.reserve(logical,payload)
+        except BudgetStop as error:
+            if self.budget.p1:
+                self.budget.halt(str(error))
+                self.trace.emit("provider_not_sent",logical_key=logical,reason=str(error))
+            raise
         self.runtime.update(reservation=key,raw=None,request_id=None,expected_tools=specs)
         self.requests.append({"logical_key":logical,"reservation_id":key})
         try:
@@ -172,7 +190,7 @@ class MeteredModel(BaseChatModel):
 
 
 def _model(*,budget,specs,trace,group_label,base_url,key,local=False):
-    config=ProviderConfig()
+    config=P1ProviderConfig() if budget.p1 else ProviderConfig()
     parsed=urlparse(base_url)
     if local:
         if parsed.scheme!="http" or parsed.hostname!="127.0.0.1" or not parsed.port or parsed.path not in {"","/"} or parsed.username or parsed.query or parsed.fragment:
@@ -187,7 +205,7 @@ def _model(*,budget,specs,trace,group_label,base_url,key,local=False):
         payload=json.loads(request.content)
         trace.emit("provider_pre_send_wire",reservation_id=runtime["reservation"],body=payload)
         allowed={"model","messages","stream","thinking","max_tokens","parallel_tool_calls","tools","tool_choice"}
-        if set(payload)-allowed or payload.get("model")!=config.model or payload.get("max_tokens")!=512 or (
+        if set(payload)-allowed or payload.get("model")!=config.model or payload.get("max_tokens")!=config.max_tokens or (
             payload.get("thinking")!={"type":"disabled"} or payload.get("stream") is not False
             or payload.get("parallel_tool_calls") is not False
             or payload.get("tools",[])!=runtime["expected_tools"]
@@ -213,7 +231,7 @@ def _model(*,budget,specs,trace,group_label,base_url,key,local=False):
     runtime.update(http_async=client,http_sync=sync)
     sdk=ChatOpenAI(model=config.model,base_url=base_url,api_key=key,max_retries=0,timeout=30,
         temperature=None,streaming=False,http_async_client=client,http_client=sync,http_socket_options=(),
-        extra_body={"thinking":{"type":"disabled"},"max_tokens":512})
+        extra_body={"thinking":{"type":"disabled"},"max_tokens":config.max_tokens})
     return MeteredModel(sdk=sdk,budget=budget,trace=trace,config=config,
         expected_specs=specs,group_label=group_label,runtime=runtime)
 
@@ -225,9 +243,23 @@ def build_local_model(*,base_url,budget,specs,trace,group_label):
 
 def build_live_model(*,budget,specs,trace,group_label="unapproved",live=False,authorization=None,probe_wire=None):
     # No key lookup/client construction/network before both independent gates.
-    config=ProviderConfig()
+    config=P1ProviderConfig() if budget.p1 else ProviderConfig()
     if not live or not isinstance(authorization,dict) or authorization.get("authorized") is not True or not authorization.get("human_approval_reference"):
         raise ProviderStopped("PAID_AUTHORIZATION_REQUIRED")
+    if budget.p1:
+        expected={"scope":"AR01_RM01_BOUNDED_P1","reservation_policy":REQUEST_WIRE_P1_2048,
+            "config_digest":digest_json(asdict(config)),"request_limit":80,"cost_cap_usd":"0.50",
+            "cases":[list(k) for k in ORDER],"case_manifest_digest":digest_json(selected_cases()),
+            "tool_schema_digest":digest_json(sorted(specs,key=lambda s:s["function"]["name"]))}
+        if any(authorization.get(k)!=v for k,v in expected.items()) or budget.cap!=500_000 or budget.limit!=80 or len(specs)!=6:
+            raise ProviderStopped("P1_AUTHORIZATION_CONFIGURATION_MISMATCH")
+        check={"model":config.model,"stream":False,"thinking":{"type":"disabled"},
+            "max_tokens":2048,"parallel_tool_calls":False,"tool_choice":"auto","tools":specs,
+            "messages":[{"role":"user","content":"Accounting-only preflight; never sent to the model."}]}
+        if not budget.preflight(check)["ready"]: raise ProviderStopped("P1_COST_OR_UNRESOLVED_PREFLIGHT_BLOCKED")
+        key=os.environ.get(MODEL_API_KEY)
+        if not key: raise ProviderStopped("LOCAL_API_KEY_MISSING")
+        return _model(budget=budget,specs=specs,trace=trace,group_label=group_label,base_url=config.base_url,key=key)
     if budget.requestwise:
         # A new request-bound policy does not inherit authorization for the full
         # five-pair trial. This is a different, one-request scope, not P1.
@@ -256,7 +288,7 @@ def build_live_model(*,budget,specs,trace,group_label="unapproved",live=False,au
         base_url=config.base_url,key=key)
 
 
-async def batch(output,budget,model_factory):
+async def batch(output,budget,model_factory,*,trace_factory=None,group_observer=None):
     """Fixed initial-run sample. No repeats, adaptive sample changes or retries."""
     from experiments.ar01_free_agent.harness import run_pair
     output=Path(output)
@@ -264,12 +296,18 @@ async def batch(output,budget,model_factory):
     results=[]
     status="COMPLETED"
     try:
-        for case in selected_cases():
+        for index,case in enumerate(selected_cases()):
             result=await run_pair(case,output/f"{case['id']}-{case['variant']}",
-                model_factory=model_factory,model_id=ProviderConfig().model)
+                model_factory=model_factory,model_id=ProviderConfig().model,
+                trace_factory=trace_factory,group_observer=group_observer)
             results.append(result)
             # First material pair is the mandatory protocol gate for later pairs.
-            if not all(g["model_dispatches"] and g["result"]["delivery_mode"]=="MODEL" for g in result["groups"]):
+            if budget.p1:
+                # Protocol health is checked after EVERY group by the adapter.
+                # Do not filter out a model-quality failure, including pair one.
+                if index==0 and not all(g["model_dispatches"] and g["provider_tokens"] for g in result["groups"]):
+                    raise ProviderStopped("FIRST_PAIR_PROTOCOL_AUDIT_INCOMPLETE")
+            elif not all(g["model_dispatches"] and g["result"]["delivery_mode"]=="MODEL" for g in result["groups"]):
                 raise ProviderStopped("PAIR_PROTOCOL_OR_DELIVERY_INCOMPLETE")
     except Exception as error:
         status="STOPPED"
