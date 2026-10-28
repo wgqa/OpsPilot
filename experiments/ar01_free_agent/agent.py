@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -29,6 +31,7 @@ from opspilot.domain.s3 import get_s3_binding, current_s3_evidence
 from opspilot.domain.s3_assets import refresh_asset_refs
 from opspilot.domain.schemas import D2ToolFact
 from opspilot.model_io import content_text, redact_text
+from opspilot.config import MODEL_API_KEY
 from opspilot.s3_delivery import parse_response, supported_response, factual_partial
 
 SYSTEM = """You are a read-only investigation Agent. Pursue the latest user goal.
@@ -56,7 +59,13 @@ def sanitize(value):
         } else sanitize(v) for k, v in value.items()}
     if isinstance(value, (tuple, list)):
         return [sanitize(v) for v in value]
-    return redact_text(value, limit=100_000) if isinstance(value, str) else value
+    if isinstance(value,str):
+        secret=os.environ.get(MODEL_API_KEY,"")
+        if secret:
+            value=value.replace(secret,"[REDACTED]")
+        # A task-UUID contains 'sk-' but is not an API key. Keep audit identities.
+        return re.sub(r"(?i)\bbearer\s+[^\s'\",}]+|(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}","[REDACTED]",value)[:100_000]
+    return value
 
 
 class Trace:

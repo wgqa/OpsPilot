@@ -238,6 +238,7 @@ def test_empty_or_fabricated_receipt_is_not_success(setup,response):
 
 def test_sanitize_and_limits():
     assert sanitize({"Authorization":"Bearer secret","body":"Bearer local-secret"})=={"Authorization":"[REDACTED]","body":"[REDACTED]"}
+    assert sanitize({"task_id":"task-12345678-0000-0000-0000-123456789abc","key":"sk-12345678-secret"})=={"task_id":"task-12345678-0000-0000-0000-123456789abc","key":"[REDACTED]"}
     with pytest.raises(ValueError): Limits(model=9)
     with pytest.raises(ValueError): Limits(tools=7)
 
