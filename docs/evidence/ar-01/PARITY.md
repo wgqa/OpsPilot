@@ -15,3 +15,29 @@
 | Continuity | Small in-experiment message history tests only; not product cross-Run goals or new persistent conversation implementation. |
 
 Readiness requires actual protocol checks and initial-state/schema equality. Deterministic runs prove loop mechanics and safety, not comparative autonomy. Paid trials remain NOT_RUN.
+
+## Observed implementation details (do not alter frozen Gold)
+
+LangChain's BaseTool converter strips display-only `title` metadata. The initial
+strict check rejected this difference (local-02, schema-diff-01.json). B now checks
+native execution constraints excluding titles, then passes the original A raw
+specs at the actual model boundary. The runner verifies the actual model's bound
+schemas are identical in every final pair; parameters/descriptions were not reduced.
+
+Both request parallel_tool_calls=false. If a model violates that setting, standard
+B receives a native tool batch and executes it serially under a lock; A retains its
+existing first-tool/reconsider-candidates behavior. This is a declared loop-policy
+difference, not an extra B tool or permission. The local normal cases use single
+proposals; a separate negative test proves a batch cannot overrun remaining slots.
+
+Only fresh initial Run equivalence is claimed. The B experiment's default 8/6
+limit argument caps cumulative experiment usage as well as the existing Domain
+Run caps. Full CONT-UX 24/18 Task allocation across multiple Runs is NOT matched
+or evaluated. Re-entry on the same Run retains spent attempts; unverified or
+restarted native history is explicitly refused. Neither adapter runs production
+Worker heartbeat/Checkpoint recovery or formal completion writes.
+
+B rejects structured fake Receipt/result fields and uses existing typed processing
+support checks. Natural-language truth remains unverified; an authority label
+cannot establish semantic correctness. A's extra structured Context/catalog and
+B's native retained messages may affect real-model results and cost.

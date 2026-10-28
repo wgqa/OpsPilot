@@ -1,0 +1,1071 @@
+diff --git a/experiments/__init__.py b/experiments/__init__.py
+new file mode 100644
+index 0000000..7e0ca89
+--- /dev/null
++++ b/experiments/__init__.py
+@@ -0,0 +1 @@
++"""Isolated experiments, never imported by the product execution chain."""
+diff --git a/experiments/ar01_free_agent/.gitignore b/experiments/ar01_free_agent/.gitignore
+new file mode 100644
+index 0000000..efea0a5
+--- /dev/null
++++ b/experiments/ar01_free_agent/.gitignore
+@@ -0,0 +1,2 @@
++__pycache__/
++.artifacts/
+diff --git a/experiments/ar01_free_agent/README.md b/experiments/ar01_free_agent/README.md
+new file mode 100644
+index 0000000..c1887f1
+--- /dev/null
++++ b/experiments/ar01_free_agent/README.md
+@@ -0,0 +1,60 @@
++# AR-01 isolated standard Agent candidate
++
++Local/free experiment only. Nothing in the product imports this directory.
++`agent.py` builds installed `langchain.agents.create_agent()` with the existing six
++MCP tools. Its middleware handles existing Attempt/Observation/Context audit and
++bounded safe delivery. There is no new investigation planner or fault router.
++
++`simulation.py` contains the deterministic test model. Its business branches are
++test fixtures, not candidate policy. `harness.py` prepares real local HTTP facts,
++clones independent A/B SQLite initial states, invokes unchanged S3 strategy A
++methods and the candidate, and evaluates the frozen cases offline.
++
++## Run from the repository root
++
++Use a separate Python environment with the repository's `requirements.lock.txt`.
++The actual validation environment reused the existing `.venv-stageb`; no package
++was installed or upgraded for AR-01.
++
++```powershell
++python -m venv .venv-ar01
++.venv-ar01/Scripts/python.exe -m pip install -r requirements.lock.txt
++.venv-ar01/Scripts/python.exe -m experiments.ar01_free_agent --output experiments/ar01_free_agent/.artifacts/local-01
++.venv-ar01/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests -q --basetemp=C:/Temp/opspilot_ar01_review_01
++```
++
++The output directory must be new: existing evidence is never overwritten. Each
++case creates its own seed/A/B DB, real HTTP preparation record, protocol/model
++Trace and local result. SQLite files stay local and are ignored by Git. MCP child
++processes and local HTTP servers close through context managers. The CLI constructs
++only LocalModel; it has no live Provider flag or key loader.
++
++## Scope of the comparison
++
++- Exactly six tool definitions obtained from the existing MCP `tools/list`.
++- The B native BaseTool serializer removes only display `title` metadata. The
++  middleware passes the original A specs to `bind_tools`, and the runner compares
++  actual bound model schemas byte-for-byte (canonical JSON).
++- A uses unchanged S3Nodes strategy A investigate/execute/gate/next_step; it omits
++  the production report/Diagnosis writer. A's Prompt is not rewritten for B.
++- B uses the standard message/tool loop and a smaller system instruction. It
++  requests parallel calls disabled; if a model violates that setting, native B
++  batch execution is serialized. A instead reconsiders unexecuted proposals.
++- Only fresh initial Task/Run cases are claimed equivalent (8/6). B's experiment
++  `limit` argument also caps cumulative usage at 8/6 by default; this adapter does
++  not claim CONT-UX lifecycle 24/18 allocation across multiple Runs is equivalent.
++- Re-entering the same Run counts persisted failed/reserved/unknown attempts.
++  Continuity accepts only an unchanged history returned by this same Candidate
++  instance, revalidating current sources before dispatch. Restarted/cross-Run
++  history needs a future trusted integration and is rejected explicitly.
++- The experiment controls invocation time (60 s); it does not run the production
++  Worker active-time heartbeat or Checkpoint recovery. Experimental Runs remain
++  local RUNNING records, not product-completion or recovery claims.
++
++Output has `EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT` authority. Existing support checks
++reject unsupported typed processing claims and structured fake Receipt fields.
++Free text remains untrusted model output and is not proof of factual accuracy.
++No business Gate/approval/write API is exposed by the candidate.
++
++Review `docs/evidence/ar-01/` for Gold, parity differences, actual attempts,
++limitations, and a separately proposed (not authorized) real-model trial.
+diff --git a/experiments/ar01_free_agent/__init__.py b/experiments/ar01_free_agent/__init__.py
+new file mode 100644
+index 0000000..dc540f6
+--- /dev/null
++++ b/experiments/ar01_free_agent/__init__.py
+@@ -0,0 +1 @@
++"""AR-01 local-only standard Agent comparison."""
+diff --git a/experiments/ar01_free_agent/__main__.py b/experiments/ar01_free_agent/__main__.py
+new file mode 100644
+index 0000000..7cead08
+--- /dev/null
++++ b/experiments/ar01_free_agent/__main__.py
+@@ -0,0 +1,17 @@
++import argparse
++import asyncio
++from pathlib import Path
++from experiments.ar01_free_agent.harness import suite
++
++
++def main():
++    parser=argparse.ArgumentParser(description="AR01 deterministic local-only A/B comparison; no Provider construction")
++    parser.add_argument("--output",type=Path,required=True,help="New output directory; never overwritten")
++    args=parser.parse_args()
++    result=asyncio.run(suite(args.output.resolve()))
++    print(f"AR01 local suite: {len(result['results'])} pairs; real Provider NOT_RUN")
++    if result["status"] != "LOCAL_DETERMINISTIC_VALIDATED":
++        raise SystemExit(1)
++
++
++if __name__=="__main__": main()
+diff --git a/experiments/ar01_free_agent/agent.py b/experiments/ar01_free_agent/agent.py
+new file mode 100644
+index 0000000..75380c0
+--- /dev/null
++++ b/experiments/ar01_free_agent/agent.py
+@@ -0,0 +1,338 @@
++"""A small create_agent candidate; no business outcome or authority writer.
++
++Only tool adapters reach MCP. SQLite access here records existing audit rows or
++invokes existing trusted currentness/control APIs; it is not a fact-read tool.
++"""
++from __future__ import annotations
++
++import asyncio
++import json
++import os
++import re
++import time
++import uuid
++from dataclasses import dataclass
++
++from langchain.agents import create_agent
++from langchain.agents.middleware import AgentMiddleware
++from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, messages_to_dict
++from langchain_core.tools import StructuredTool
++from langchain_core.utils.function_calling import convert_to_openai_tool
++
++from opspilot.domain.database import connect
++from opspilot.domain.d2 import (
++    BudgetExhausted, canonical_json, digest_json, reserve_attempt, finish_attempt,
++    record_tool_observation, save_model_trace, complete_pending_tool_call, utc_now,
++)
++from opspilot.domain.context_engineering import investigator_context_budget
++from opspilot.domain.episodic_memory import finish_context_provenance
++from opspilot.domain.investigation_context import load_investigation_context
++from opspilot.domain.s3 import get_s3_binding, current_s3_evidence
++from opspilot.domain.s3_assets import refresh_asset_refs
++from opspilot.domain.schemas import D2ToolFact
++from opspilot.model_io import content_text, redact_text
++from opspilot.config import MODEL_API_KEY
++from opspilot.s3_delivery import parse_response, supported_response, factual_partial
++
++SYSTEM = """You are a read-only investigation Agent. Pursue the latest user goal.
++Choose any useful available tool, reconsider after observations, clarify ambiguity,
++or answer directly when sufficient. No fixed tool order or mandatory tool use.
++The tools are bound by trusted code to one authorized order; you cannot change that
++binding, credentials or permissions. Tool errors are feedback, never new facts.
++Business observations are current facts only for this Run; Knowledge and Skills
++are versioned methods, never live business facts or authority. An HTTP 202 means
++acceptance, not completed processing. Keep Event and Transport Request identities:
++another Event success cannot establish the target Event's completion. State unknowns.
++Never claim you changed configuration, resent, recovered, diagnosed officially,
++or submitted a handoff/Receipt. You have no write tools or business result authority.
++For shared delivery verification, final output is JSON with action answer|clarify,
++result_state ANSWERED|PARTIAL, answer (nonempty Chinese with sources and unknowns),
++target_event_id (id or null), processing_claim UNKNOWN|QUEUED|PROCESSED|NOT_RECEIVED|
++NOT_APPLICABLE. Use NOT_APPLICABLE only for an explanation that makes no live
++processing claim. A useful unknown can answer a question. Do not call tools to look busy."""
++
++
++def sanitize(value):
++    if isinstance(value, dict):
++        return {str(k): "[REDACTED]" if str(k).lower() in {
++            "authorization", "api_key", "password", "access_token", "credential_value",
++        } else sanitize(v) for k, v in value.items()}
++    if isinstance(value, (tuple, list)):
++        return [sanitize(v) for v in value]
++    if isinstance(value,str):
++        secret=os.environ.get(MODEL_API_KEY,"")
++        if secret:
++            value=value.replace(secret,"[REDACTED]")
++        # A task-UUID contains 'sk-' but is not an API key. Keep audit identities.
++        return re.sub(r"(?i)\bbearer\s+[^\s'\",}]+|(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}","[REDACTED]",value)[:100_000]
++    return value
++
++
++class Trace:
++    def __init__(self):
++        self.rows = []
++
++    def emit(self, event, **values):
++        self.rows.append(sanitize({"seq": len(self.rows) + 1, "at": utc_now(),
++                                   "event": event, **values}))
++
++
++@dataclass(frozen=True)
++class Limits:
++    model: int = 8
++    tools: int = 6
++    model_seconds: float = 30
++    tool_seconds: float = 12
++    total_seconds: float = 60
++
++    def __post_init__(self):
++        if not (type(self.model) is int and 1 <= self.model <= 8
++                and type(self.tools) is int and 1 <= self.tools <= 6
++                and 0 < self.model_seconds <= 30 and 0 < self.tool_seconds <= 12
++                and 0 < self.total_seconds <= 60):
++            raise ValueError("AR01 limits may only equal or lower the frozen limits")
++
++
++def unpack(result):
++    if result.is_error:
++        raise ValueError("MCP_TOOL_REJECTED")
++    value = result.structured_content
++    if value is None:
++        value = json.loads("".join(b.text for b in result.content if hasattr(b, "text")))
++    if isinstance(value, dict) and isinstance(value.get("result"), dict):
++        value = value["result"]
++    if not isinstance(value, dict):
++        raise ValueError("MCP_RESULT_INVALID")
++    return value
++
++
++def schema_constraints(value):
++    """LangChain removes display-only JSON Schema titles on BaseTool conversion."""
++    if isinstance(value, dict):
++        return {k:schema_constraints(v) for k,v in value.items() if k != "title"}
++    if isinstance(value, list):
++        return [schema_constraints(v) for v in value]
++    return value
++
++
++class Candidate(AgentMiddleware):
++    """Per-experiment middleware around the standard LangGraph model/tool edges."""
++    def __init__(self, db, task_id, run_id, client, specs, *, model_id="ar01-deterministic", limits=None, trace=None):
++        self.db, self.task, self.run_id, self.client = db, task_id, run_id, client
++        self.specs, self.model_id = specs, model_id
++        self.limits, self.trace = limits or Limits(), trace or Trace()
++        self.evidence_ids, self.pins, self.assets = [], {}, {}
++        self.call_ids = {}
++        self.stop_reason = None
++        self._history_digest = None
++        self._tool_lock = asyncio.Lock()
++
++    def current_sources(self):
++        context = load_investigation_context(self.db, self.task, self.run_id)
++        with connect(self.db) as c:
++            binding = get_s3_binding(c, self.task)
++            facts, excluded = current_s3_evidence(c, self.task, self.evidence_ids,
++                run_id=self.run_id, observation_ids=self.pins)
++        knowledge, skill, asset_excluded = refresh_asset_refs(self.assets, contract_version=int(binding["contract_version"]))
++        if excluded or asset_excluded:
++            raise ValueError("SOURCE_INVALIDATED")
++        return context, binding, facts, knowledge, skill
++
++    def fallback(self, reason):
++        self.stop_reason = reason
++        try:
++            context, _, facts, knowledge, _ = self.current_sources()
++        except Exception:
++            context, facts, knowledge = {"inputs": []}, [], []
++        answer, _ = factual_partial(facts, knowledge, context["inputs"], reason)
++        return {"action": "answer", "result_state": "PARTIAL", "answer": answer,
++                "delivery_mode": "DETERMINISTIC_FALLBACK", "stop_reason": reason,
++                "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"}
++
++    async def awrap_model_call(self, request, handler):
++        attempt = None
++        call_id = f"ar01-model-{uuid.uuid4()}"
++        try:
++            context, _, facts, knowledge, skill = self.current_sources()
++            messages = ([request.system_message] if request.system_message else []) + list(request.messages)
++            serialized = messages_to_dict(messages)
++            metadata = {"evidence_ids": self.evidence_ids, "selected_knowledge": knowledge,
++                        "selected_skill": skill, "task_run_control": context["task_run_control"],
++                        "selected_input_messages": context["task_run_control"]["input_refs"]}
++            # Include native tool-call arguments/ids as well as content in estimation.
++            shadow = [HumanMessage(content=canonical_json(serialized))]
++            investigator_context_budget(shadow, self.model_id, self.specs, metadata)
++            prompt_digest = digest_json(serialized)
++            provenance = {"model_id": self.model_id, "prompt_version": "ar01-standard-loop-v1",
++                "prompt_digest": prompt_digest, "tool_schema_version": "ar01-six-tools-v1",
++                "tool_schema_digest": digest_json(self.specs), **metadata}
++            attempt, _ = reserve_attempt(self.db, self.task, "MODEL", self.limits.model,
++                call_id=call_id, argument_digest=prompt_digest, context_provenance=provenance, run_id=self.run_id)
++            self.trace.emit("model_request", task_id=self.task, run_id=self.run_id, call_id=call_id,
++                attempt_id=attempt, messages=serialized, tools=self.specs, context_budget=metadata.get("context_budget"))
++            response = await asyncio.wait_for(handler(request.override(tools=self.specs,
++                model_settings={**request.model_settings, "parallel_tool_calls": False,
++                                "max_tokens": 512})), timeout=self.limits.model_seconds)
++            ai = next((m for m in reversed(response.result) if isinstance(m, AIMessage)), None)
++            if ai is None or len(content_text(ai.content)) > 20_000:
++                raise ValueError("MODEL_RESPONSE_INVALID")
++            calls = list(ai.tool_calls)
++            for call in calls:
++                self.call_ids[call["id"]] = call_id
++            save_model_trace(self.db, task_id=self.task, call_id=call_id, attempt_id=attempt,
++                model_id=self.model_id, prompt_digest=prompt_digest, input_evidence_ids=self.evidence_ids,
++                provider_response_id=ai.response_metadata.get("id"), tool_calls=calls,
++                assistant_text=redact_text(content_text(ai.content), limit=20_000),
++                usage=dict(ai.usage_metadata or {}), status="OK")
++            finish_attempt(self.db, attempt, "OK", result_digest=digest_json({"text": ai.content,"calls": calls}))
++            finish_context_provenance(self.db,call_id,"OK")
++            self.trace.emit("model_response", call_id=call_id, attempt_id=attempt,
++                content=ai.content, tool_calls=calls, usage=ai.usage_metadata)
++            return response
++        except asyncio.CancelledError:
++            if attempt:
++                finish_attempt(self.db, attempt, "UNKNOWN", error_class="CANCELLED_OR_TOTAL_TIMEOUT")
++                finish_context_provenance(self.db,call_id,"UNKNOWN","CANCELLED_OR_TOTAL_TIMEOUT")
++            raise
++        except Exception as error:
++            if attempt:
++                finish_attempt(self.db, attempt, "FAILED", error_class=type(error).__name__)
++                save_model_trace(self.db,task_id=self.task,call_id=call_id,attempt_id=attempt,
++                    model_id=self.model_id,prompt_digest=prompt_digest,input_evidence_ids=self.evidence_ids,
++                    provider_response_id=None,tool_calls=[],assistant_text=type(error).__name__,usage={},status="MODEL_REQUEST_FAILED")
++                finish_context_provenance(self.db,call_id,"FAILED",type(error).__name__)
++            reason = error.reason_code if isinstance(error, BudgetExhausted) else str(error) if str(error) in {
++                "SOURCE_INVALIDATED", "MODEL_RESPONSE_INVALID"} else type(error).__name__
++            self.trace.emit("safe_stop", call_id=call_id, attempt_id=attempt, reason=reason)
++            return AIMessage(content=canonical_json(self.fallback(reason)))
++
++    async def awrap_tool_call(self, request, handler):
++        async with self._tool_lock:
++            call = request.tool_call
++            name, args, tool_id = call["name"], call.get("args", {}), call["id"]
++            call_id = self.call_ids.get(tool_id, f"ar01-unmatched-{uuid.uuid4()}")
++            attempt = None
++            try:
++                context, _, _, _, _ = self.current_sources()
++                attempt, _ = reserve_attempt(self.db, self.task, "MCP", self.limits.tools,
++                    call_id=call_id, tool_call_id=tool_id, tool_name=name,
++                    argument_digest=digest_json(args), run_id=self.run_id,
++                    task_run_control=context["task_run_control"])
++                self.trace.emit("tool_request", task_id=self.task, run_id=self.run_id, call_id=call_id,
++                    attempt_id=attempt, tool_call_id=tool_id, name=name, arguments=args)
++                if name not in {s["function"]["name"] for s in self.specs}:
++                    raise ValueError("UNKNOWN_TOOL")
++                message = await asyncio.wait_for(handler(request), self.limits.tool_seconds)
++                if not isinstance(message, ToolMessage) or message.status == "error" or not isinstance(message.artifact, dict):
++                    raise ValueError("MCP_TOOL_REJECTED")
++                value = message.artifact
++                if name in {"search_callback_knowledge", "load_callback_skill"}:
++                    previous_assets = digest_json(self.assets)
++                    if "documents" in value:
++                        refs = {r["document_id"]: r for r in self.assets.get("s3_knowledge_refs", [])}
++                        refs.update({d["document_id"]: {k: d[k] for k in ("document_id","version","digest","source","valid_from")} for d in value["documents"]})
++                        self.assets["s3_knowledge_refs"] = list(refs.values())
++                    if "skill" in value:
++                        self.assets["s3_skill_ref"] = {k: value["skill"][k] for k in ("name","version","digest")}
++                    observation = self._asset_observation(call_id, tool_id, attempt, name, args, value,
++                        changed=previous_assets != digest_json(self.assets))
++                else:
++                    value = D2ToolFact.model_validate(value).model_dump(mode="json")
++                    observation = record_tool_observation(self.db, task_id=self.task, call_id=call_id,
++                        attempt_id=attempt, tool_call_id=tool_id, tool_name=name, arguments=args, status="OK", result=value)
++                    eid = observation["evidence_id"]
++                    if eid not in self.evidence_ids:
++                        self.evidence_ids.append(eid)
++                    self.pins[eid] = observation["observation_id"]
++                finish_attempt(self.db, attempt, "OK", result_digest=digest_json(value))
++                complete_pending_tool_call(self.db, self.task, call_id, tool_id, "OK")
++                message.content = canonical_json({"tool_result": value, "observation": {
++                    k: observation.get(k) for k in ("observation_id","evidence_id","attempt_id")}})
++                self.trace.emit("tool_result", call_id=call_id, tool_call_id=tool_id,
++                    attempt_id=attempt, observation=observation, result=value)
++                return message
++            except asyncio.CancelledError:
++                if attempt:
++                    finish_attempt(self.db, attempt, "UNKNOWN", error_class="CANCELLED_OR_TOTAL_TIMEOUT")
++                raise
++            except Exception as error:
++                reason = error.reason_code if isinstance(error, BudgetExhausted) else type(error).__name__ + ":" + str(error)[:80]
++                if attempt:
++                    finish_attempt(self.db, attempt, "TOOL_ERROR", error_class=reason)
++                    record_tool_observation(self.db, task_id=self.task, call_id=call_id,
++                        attempt_id=attempt, tool_call_id=tool_id, tool_name=name, arguments=args,
++                        status="TOOL_ERROR", result=None, error_class=reason)
++                complete_pending_tool_call(self.db, self.task, call_id, tool_id, "TOOL_ERROR")
++                self.trace.emit("tool_error", call_id=call_id, tool_call_id=tool_id, attempt_id=attempt, reason=reason)
++                return ToolMessage(content=canonical_json({"error": reason, "facts": None}),
++                    tool_call_id=tool_id, name=name, status="error")
++
++    def _asset_observation(self, call_id, tool_id, attempt, name, args, value, *, changed):
++        row = {"observation_id":f"observation-{uuid.uuid4()}","task_id":self.task,
++            "call_id":call_id,"attempt_id":attempt,"tool_call_id":tool_id,"tool_name":name,
++            "argument_digest":digest_json(args),"status":"OK","progress_added":bool(changed),
++            "error_class":None,"result_digest":digest_json(value),"result_json":canonical_json(value),
++            "evidence_id":None,"created_at":utc_now()}
++        with connect(self.db) as c:
++            keys = list(row)
++            c.execute(f"INSERT INTO d2_tool_observations ({','.join(keys)}) VALUES({','.join('?' for _ in keys)})", tuple(row.values()))
++        return row
++
++    def make_tools(self):
++        tools = []
++        def adapter(name):
++            async def invoke(**kwargs):
++                value = unpack(await self.client.call_tool(name, kwargs))
++                return canonical_json(value), value
++            return invoke
++        for spec in self.specs:
++            f = spec["function"]
++            tools.append(StructuredTool.from_function(coroutine=adapter(f["name"]), name=f["name"],
++                description=f["description"], args_schema=f["parameters"], response_format="content_and_artifact"))
++        return tools
++
++    async def run(self, model, question, *, history=()):
++        self.stop_reason = None
++        if history and digest_json(messages_to_dict(list(history))) != self._history_digest:
++            final = self.fallback("UNVERIFIED_EXPERIMENT_HISTORY")
++            self.trace.emit("safe_stop", reason="UNVERIFIED_EXPERIMENT_HISTORY", result=final)
++            return {"result":final,"messages":[],"trace":self.trace.rows}
++        tools = self.make_tools()
++        # Canonical schemas must be identical; never silently narrow model tools.
++        actual = {t["function"]["name"]:t for t in map(convert_to_openai_tool,tools)}
++        expected = {s["function"]["name"]:s for s in self.specs}
++        if schema_constraints(actual) != schema_constraints(expected):
++            raise ValueError("A_B_TOOL_SCHEMA_PARITY_FAILED")
++        try:
++            _, binding, _, _, _ = self.current_sources()
++        except Exception as error:
++            final = self.fallback(type(error).__name__)
++            self.trace.emit("safe_stop", reason=type(error).__name__, result=final)
++            return {"result":final, "messages":list(history) + [HumanMessage(content=question), AIMessage(content=canonical_json(final))], "trace":self.trace.rows}
++        binding_context = {key: binding[key] for key in ("service_id","integration_id","principal_id","order_id","contract_version")}
++        graph = create_agent(model=model, tools=tools, system_prompt=SYSTEM + "\nTrusted binding: " + canonical_json(binding_context), middleware=[self])
++        start = time.monotonic()
++        messages = list(history) + [HumanMessage(content=question)]
++        try:
++            result = await asyncio.wait_for(graph.ainvoke({"messages": messages},
++                config={"recursion_limit": 40, "max_concurrency": 1}), self.limits.total_seconds)
++            response = parse_response(content_text(result["messages"][-1].content))
++            if self.stop_reason:
++                final = self.fallback(self.stop_reason)
++            else:
++                context, _, facts, _, _ = self.current_sources()
++                privileged_fields = {"receipt_id","diagnosis_receipt","handoff_receipt","recovered","business_outcome"}
++                if response and privileged_fields.intersection(response):
++                    final = self.fallback("UNSUPPORTED_BUSINESS_CLAIM")
++                else:
++                    final = response if supported_response(response, facts, context["inputs"]) else self.fallback("UNSUPPORTED_OR_EMPTY_ANSWER")
++            final = {**final,
++                "stop_reason":final.get("stop_reason") or ("MODEL_CLARIFY" if final.get("action")=="clarify" else "MODEL_ANSWER"),
++                "delivery_mode":final.get("delivery_mode","MODEL"),
++                "authority":"EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"}
++        except Exception as error:
++            final = self.fallback(type(error).__name__)
++            result = {"messages": messages + [AIMessage(content=canonical_json(final))]}
++        self.trace.emit("final", result=final, elapsed_seconds=time.monotonic()-start)
++        self._history_digest = digest_json(messages_to_dict(result["messages"]))
++        return {"result":final,"messages":result["messages"],"trace":self.trace.rows}
+diff --git a/experiments/ar01_free_agent/harness.py b/experiments/ar01_free_agent/harness.py
+new file mode 100644
+index 0000000..d8c4b00
+--- /dev/null
++++ b/experiments/ar01_free_agent/harness.py
+@@ -0,0 +1,200 @@
++"""Small comparison runner and isolated fixture preparation; not a product Runtime."""
++from __future__ import annotations
++
++import asyncio
++import json
++from pathlib import Path
++import shutil
++import sys
++import time
++
++from mcp import Client, StdioServerParameters
++from langchain_core.messages import messages_to_dict
++
++from opspilot.config import ROOT
++from opspilot.domain.database import connect, reset_fixture
++from opspilot.domain.d2 import canonical_json, digest_json, list_model_traces, list_observations, attempt_counts
++from opspilot.domain.s3 import prepare_s3_fixture
++from opspilot.domain.s3_history import prepare_transport_history_fixture
++from opspilot.domain.task_control import create_session, create_task_with_initial_run, trusted_identity, claim_task_run
++from opspilot.investigator import _mcp_child_environment
++from opspilot.s3_investigation import S3Nodes, s3_catalog
++from opspilot.s3_delivery import parse_response, supported_response, factual_partial
++from experiments.ar01_free_agent.agent import Candidate, Trace, Limits, sanitize
++from experiments.ar01_free_agent.simulation import LocalModel
++
++FACT_TABLES = ("s3_orders","s3_deliveries","s3_receivers","s3_transport_attempts",
++    "principals","integrations","auth_policies","route_scope_policies","principal_scope_grants")
++PROTECTED = FACT_TABLES + ("task_controls","task_bindings","d3_plans","d3_approvals",
++    "d3_action_intents","d3_action_ledgers","s3_diagnoses","s3_handoff_queue_entries",
++    "s3_handoff_receipts","domain_outbox")
++
++
++def snapshot(db, tables):
++    with connect(db) as c:
++        return {table:[dict(r) for r in c.execute(f"SELECT * FROM {table} ORDER BY rowid")] for table in tables}
++
++
++def prepare_seed(db, setup):
++    reset_fixture(db,"S1_POS")
++    if "history" in setup:
++        prepared = prepare_transport_history_fixture(db, order_id="ar01-order", attempts=setup["history"], receiver_status=setup["receiver"])
++    else:
++        prepared = prepare_s3_fixture(db, setup["state"], order_id="ar01-order", contract_version=2)
++    if setup.get("outside_event"):
++        prepare_transport_history_fixture(db, tenant_id="tenant-b",order_id="ar01-outside-order",
++            attempts=[{"event_id":setup["outside_event"],"http_status":202}], receiver_status="PROCESSED")
++    return prepared
++
++
++def new_task(db, question):
++    identity = trusted_identity(db,"support-a")
++    session = create_session(db,identity)
++    task = create_task_with_initial_run(db,identity,session_id=session["session_id"],
++        service_id="orders-async-demo",integration_id="async-integration-a",ticket_id="AR01-LOCAL",
++        initial_message=question,idempotency_key="ar01-initial",s3_order_id="ar01-order")
++    claim_task_run(db,identity,task["run_id"])
++    return task
++
++
++def mcp_params(db, task):
++    return StdioServerParameters(command=sys.executable,
++        args=["-m","opspilot.mcp_server","--db",str(db),"--binding-id",str(task["task_id"])],
++        env=_mcp_child_environment(Path(db)),cwd=str(ROOT))
++
++
++class AModelTrace:
++    def __init__(self,model,trace,limits):
++        self.model,self.trace,self.limits = model,trace,limits
++    def bind_tools(self,tools,**kwargs):
++        return AModelTrace(self.model.bind_tools(tools,**kwargs),self.trace,self.limits)
++    async def ainvoke(self,messages):
++        self.trace.emit("model_request", messages=messages_to_dict(messages))
++        response = await asyncio.wait_for(self.model.ainvoke(messages),self.limits.model_seconds)
++        self.trace.emit("model_response",content=response.content,tool_calls=response.tool_calls,usage=response.usage_metadata)
++        return response
++
++
++class AClientTrace:
++    def __init__(self,client,trace): self.client,self.trace=client,trace
++    async def call_tool(self,name,args):
++        self.trace.emit("tool_request",name=name,arguments=args)
++        result=await self.client.call_tool(name,args)
++        self.trace.emit("tool_result",name=name,is_error=result.is_error,
++            result=result.structured_content,content=[b.text for b in result.content if hasattr(b,"text")])
++        return result
++
++
++async def run_a(db, task, client, specs, model, trace, *, model_id="ar01-deterministic"):
++    limits = Limits()
++    node=S3Nodes(db,task["task_id"],task["run_id"],AModelTrace(model,trace,limits),
++        model_id,AClientTrace(client,trace),specs,strategy="A",memory_enabled=False)
++    state={"evidence_ids":[],"tool_observations":[],"diagnosis_draft":{}}
++    async def drive():
++        # Invoke the existing policy methods without rewriting prompt/route logic.
++        while True:
++            state.update(await node.investigate(state))
++            if state.get("pending_call_refs") or state.get("policy_tool_call"):
++                state.update(await node.execute(state))
++            state.update(await node.gate(state))
++            if node.next_step(state)=="report": break
++        return state
++    reason="MODEL_DELIVERY"
++    try:
++        await asyncio.wait_for(drive(),limits.total_seconds)
++    except Exception as error:
++        reason=type(error).__name__
++    response=state.get("diagnosis_draft",{}).get("s3_response",{}).get("response")
++    _,meta=node.prompt(state)
++    with connect(db) as c:
++        from opspilot.domain.s3 import current_s3_evidence
++        evidence,_=current_s3_evidence(c,task["task_id"],state["evidence_ids"],run_id=task["run_id"])
++    from opspilot.domain.investigation_context import load_investigation_context
++    inputs=load_investigation_context(db,task["task_id"],task["run_id"])["inputs"]
++    if not supported_response(response,evidence,inputs):
++        reason=state.get("diagnosis_draft",{}).get("s3_budget_reason") or state.get("diagnosis_draft",{}).get("s3_error") or reason
++        text,_=factual_partial(evidence,meta["selected_knowledge"],inputs,reason)
++        response={"result_state":"PARTIAL","answer":text,"delivery_mode":"DETERMINISTIC_FALLBACK","stop_reason":reason}
++    response={**response,
++        "stop_reason":response.get("stop_reason") or ("MODEL_CLARIFY" if response.get("action")=="clarify" else "MODEL_ANSWER"),
++        "delivery_mode":response.get("delivery_mode","MODEL"),
++        "authority":"EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"}
++    trace.emit("final",result=response)
++    return response
++
++
++async def run_pair(case, output):
++    output.mkdir(parents=True,exist_ok=False)
++    seed=output/"seed.sqlite3"
++    prepared=prepare_seed(seed,case["setup"])
++    initial=digest_json(snapshot(seed,FACT_TABLES))
++    (output/"preparation.json").write_text(canonical_json(sanitize(prepared)),encoding="utf-8")
++    results=[]
++    for group in ("A","B"):
++        db=output/f"{group}.sqlite3"
++        shutil.copy2(seed,db)
++        assert digest_json(snapshot(db,FACT_TABLES)) == initial
++        task=new_task(db,case["question"])
++        before=snapshot(db,PROTECTED)
++        trace=Trace()
++        trace.emit("initial_state",group=group,task_id=task["task_id"],run_id=task["run_id"],business_digest=initial)
++        model=LocalModel()
++        start=time.monotonic()
++        async with Client(mcp_params(db,task)) as client:
++            listed=await client.list_tools()
++            catalog,specs=s3_catalog(listed.tools)
++            trace.emit("tools_list",group=group,tools=catalog,model_specs=specs)
++            if group=="A": result=await run_a(db,task,client,specs,model,trace)
++            else: result=(await Candidate(db,task["task_id"],task["run_id"],client,specs,trace=trace).run(model,case["question"]))["result"]
++        after=snapshot(db,PROTECTED)
++        same=before==after
++        if not same: raise AssertionError("AR01_PROTECTED_BUSINESS_STATE_CHANGED")
++        outbound=digest_json(sorted(model.bound_schemas,key=lambda s:s["function"]["name"]))
++        assert outbound==digest_json(sorted(specs,key=lambda s:s["function"]["name"])), "ACTUAL_MODEL_TOOL_SCHEMA_MISMATCH"
++        traces=list_model_traces(db,task["task_id"])
++        observations=list_observations(db,task["task_id"])
++        trace.emit("ledger",task_id=task["task_id"],run_id=task["run_id"],model_traces=traces,observations=observations)
++        with (output/f"{group}.trace.jsonl").open("w",encoding="utf-8") as f:
++            for row in trace.rows: f.write(canonical_json(row)+"\n")
++        results.append({"group":group,"task_id":task["task_id"],"run_id":task["run_id"],
++            "initial_business_digest":initial,"tool_schema_digest":digest_json(sorted(specs,key=lambda s:s["function"]["name"])),
++            "actual_outbound_tool_schema_digest":outbound,
++            "attempt_counts":attempt_counts(db,task["task_id"]),"model_dispatches":len(model.requests),
++            "tool_names":[o["tool_name"] for o in observations],"result":result,
++            "business_state_unchanged":same,"elapsed_seconds":time.monotonic()-start,
++            "provider_tokens":None,"provider_cost_usd":0,"evidence_level":"DETERMINISTIC_MODEL_REAL_LOCAL_MCP_HTTP"})
++    assert results[0]["tool_schema_digest"]==results[1]["tool_schema_digest"]
++    return {"id":case["id"],"variant":case["variant"],"groups":results,"conditions_ready":True}
++
++
++async def suite(output):
++    output.mkdir(parents=True,exist_ok=False)
++    cases=json.loads((ROOT/"docs/evidence/ar-01/CASES.json").read_text(encoding="utf-8"))["cases"]
++    results=[]
++    for case in cases:
++        pair=await run_pair(case,output/f"{case['id']}-{case['variant']}")
++        pair["local_gold_checks"] = assess(case,pair)
++        results.append(pair)
++    passed=all(all(r["local_gold_checks"].values()) for r in results)
++    value={"status":"LOCAL_DETERMINISTIC_VALIDATED" if passed else "LOCAL_TEST_FAILURE","real_model_effect":"NOT_RUN",
++        "paid_provider_calls":0,"results":results}
++    (output/"local-results.json").write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding="utf-8")
++    return value
++
++
++def assess(case,pair):
++    """Offline local rubric only; none of this is visible to either Agent."""
++    checks={"equivalent_conditions":pair["conditions_ready"],"protected_state":all(g["business_state_unchanged"] for g in pair["groups"])}
++    for g in pair["groups"]:
++        result=g["result"]
++        valid=bool(result["answer"]) and result.get("delivery_mode")!="DETERMINISTIC_FALLBACK"
++        if case["id"]=="AR01-01": valid &= g["attempt_counts"]["MCP"]==0
++        elif case["id"]=="AR01-02": valid &= "PROCESSING" in result["answer"]
++        elif case["id"]=="AR01-03":
++            valid &= result.get("processing_claim")==("QUEUED" if case["variant"]=="acknowledged" else "UNKNOWN")
++            if case["variant"]=="failed": valid &= "503" in result["answer"]
++        elif case["id"]=="AR01-04": valid &= result.get("processing_claim")==("PROCESSED" if case["variant"]=="same-event" else "UNKNOWN") and result.get("target_event_id")=="event-e1"
++        elif case["id"]=="AR01-05": valid &= result.get("processing_claim")=="QUEUED" and "search_callback_knowledge" in g["tool_names"] and "receiver-ack-contract" in result["answer"]
++        elif case["id"]=="AR01-06": valid &= result["result_state"]=="PARTIAL" and "ar01-outside-order" not in result["answer"] and "get_order_status" in g["tool_names"]
++        checks[g["group"]+"_deterministic_delivery"] = bool(valid)
++    return checks
+diff --git a/experiments/ar01_free_agent/simulation.py b/experiments/ar01_free_agent/simulation.py
+new file mode 100644
+index 0000000..f11ee95
+--- /dev/null
++++ b/experiments/ar01_free_agent/simulation.py
+@@ -0,0 +1,127 @@
++"""Deterministic TEST model, deliberately separate from the candidate loop.
++
++This is a reactive simulation, not a real Provider, an intelligence metric, or
++policy exposed to the production/candidate Agent. It never receives Gold labels.
++"""
++from __future__ import annotations
++
++import asyncio
++import json
++import uuid
++from typing import Any, Callable
++
++from langchain_core.language_models.chat_models import BaseChatModel
++from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
++from langchain_core.outputs import ChatGeneration, ChatResult
++from langchain_core.utils.function_calling import convert_to_openai_tool
++from pydantic import Field
++
++
++def view(messages):
++    question, facts, done, documents = "", [], [], []
++    for message in messages:
++        if isinstance(message, HumanMessage):
++            try:
++                body = json.loads(str(message.content))
++            except ValueError:
++                question = str(message.content)
++                continue
++            if "untrusted_user_inputs" in body:  # unchanged A prompt representation
++                question = str(body["untrusted_user_inputs"][-1]["body"])
++                facts = [{"type":e["type"],"facts":e["facts"],"id":e["id"]} for e in body["current_mcp_evidence"]]
++                done = [a["tool_name"] for a in body["previous_actions"]]
++                documents = body["retrieved_knowledge_method_only"]
++        elif isinstance(message, ToolMessage):
++            done.append(message.name)
++            body = json.loads(str(message.content))
++            value = body.get("tool_result", {})
++            if "fact_type" in value:
++                facts.append({"type":value["fact_type"],"facts":value["facts"],"id":body["observation"].get("evidence_id")})
++            documents.extend(value.get("documents", []))
++    return question, facts, done, documents
++
++
++def answer(text, *, target=None, claim="NOT_APPLICABLE", partial=False, clarify=False):
++    return AIMessage(content=json.dumps({"action":"clarify" if clarify else "answer",
++        "result_state":"PARTIAL" if partial or clarify else "ANSWERED", "answer":text,
++        "target_event_id":target,"processing_claim":claim}, ensure_ascii=False))
++
++
++def call(tool_name, **args):
++    return AIMessage(content="", tool_calls=[{"id":f"sim-tool-{uuid.uuid4()}",
++        "name":tool_name,"args":{"reason":"deterministic test: resolve current user goal from observed facts",**args}}])
++
++
++def reactive(messages):
++    q, facts, done, documents = view(messages)
++    by_type = {f["type"]:f for f in facts}
++    source = " 来源：" + ", ".join(str(f["id"]) for f in facts) if facts else ""
++    if "已知材料" in q or "刚才" in q:
++        return answer("HTTP 202 只证明受理；处理完成需要同一事件当前接收处理事实。" + source)
++    if "哪个" in q:
++        return answer("请补充您所指的事件标识，我会在当前绑定订单内核对。", clarify=True)
++    if "event-outside" in q:
++        if "get_callback_transport_history" not in done:
++            return call("get_callback_transport_history", event_id="event-outside")
++        if "s3_order" not in by_type:
++            return call("get_order_status")
++        return answer("越域事件查询被可信工具拒绝，未取得该资源事实；本订单当前仍在处理中。"+source, partial=True)
++    if "event-e1" in q:
++        if "s3_transport_history" not in by_type:
++            return call("get_callback_transport_history", event_id="event-e1")
++        if "s3_receiver" not in by_type:
++            return call("get_receiver_processing")
++        receiver = by_type["s3_receiver"]["facts"]
++        claim = receiver["status"] if receiver["event_id"] == "event-e1" else "UNKNOWN"
++        return answer("同一事件的请求记录需分别核对；event-e1 当前处理状态为 " + claim + "，其他 Event 的成功不能替代它。"+source,
++            target="event-e1",claim=claim)
++    if "适用协议" in q:
++        if "search_callback_knowledge" not in done:
++            return call("search_callback_knowledge", query="202 receiver acknowledgement")
++        if "s3_receiver" not in by_type:
++            return call("get_receiver_processing")
++        r = by_type["s3_receiver"]["facts"]
++        refs = ",".join(f"{d['document_id']}@{d['version']}" for d in documents)
++        return answer("协议只解释受理语义；实时接收状态是 " + r["status"] + "。协议来源：" + refs + source,
++            target=r["event_id"],claim=r["status"])
++    if "投递失败" in q:
++        if "s3_delivery" not in by_type:
++            return call("get_callback_delivery")
++        d = by_type["s3_delivery"]["facts"]
++        if d["receiver_http_status"] == 202:
++            if "s3_receiver" not in by_type:
++                return call("get_receiver_processing")
++            r = by_type["s3_receiver"]["facts"]
++            return answer("HTTP 202 排除了投递失败判断；当前同一事件仍是 " + r["status"] + "，不能称已完成。"+source,
++                target=r["event_id"],claim=r["status"])
++        if "load_callback_skill" not in done:
++            return call("load_callback_skill", name="callback-delivery-triage")
++        return answer("真实投递记录为 HTTP 503；排障方法可以指导后续核查，尚无本轮当前处理完成证据。"+source,
++            target=d["event_id"],claim="UNKNOWN")
++    if "s3_order" not in by_type:
++        return call("get_order_status")
++    return answer("订单当前状态为 " + by_type["s3_order"]["facts"]["body"]["status"] + "；HTTP 200 本身不表示处理完成。"+source)
++
++
++class LocalModel(BaseChatModel):
++    policy: Callable = Field(default=reactive, exclude=True)
++    requests: list[Any] = Field(default_factory=list, exclude=True)
++    bound_schemas: list[dict] = Field(default_factory=list, exclude=True)
++    sleep_seconds: float = 0
++
++    @property
++    def _llm_type(self):
++        return "ar01-deterministic-no-provider"
++
++    def bind_tools(self, tools, **kwargs):
++        self.bound_schemas = [convert_to_openai_tool(t) for t in tools]
++        return self
++
++    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
++        self.requests.append(messages)
++        return ChatResult(generations=[ChatGeneration(message=self.policy(messages))])
++
++    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
++        if self.sleep_seconds:
++            await asyncio.sleep(self.sleep_seconds)
++        return self._generate(messages, stop, run_manager, **kwargs)
+diff --git a/experiments/ar01_free_agent/tests/test_agent.py b/experiments/ar01_free_agent/tests/test_agent.py
+new file mode 100644
+index 0000000..40b2a4e
+--- /dev/null
++++ b/experiments/ar01_free_agent/tests/test_agent.py
+@@ -0,0 +1,271 @@
++from __future__ import annotations
++
++import asyncio
++from contextlib import asynccontextmanager
++import json
++import os
++from pathlib import Path
++
++import pytest
++from mcp import Client
++from langchain_core.messages import AIMessage
++
++from experiments.ar01_free_agent.agent import Candidate, Limits, sanitize
++from experiments.ar01_free_agent.harness import (
++    mcp_params,new_task,prepare_seed,run_pair,snapshot,PROTECTED,
++)
++from experiments.ar01_free_agent.simulation import LocalModel,call,answer
++from opspilot.domain.database import connect
++from opspilot.domain.d2 import attempt_counts, list_model_traces, list_observations, canonical_json
++from opspilot.s3_investigation import s3_catalog
++
++
++@pytest.fixture
++def setup(tmp_path):
++    db=tmp_path/"domain.sqlite3"
++    prepare_seed(db,{"state":"PROCESSING","outside_event":"event-outside"})
++    return db,new_task(db,"现在绑定订单是什么状态？")
++
++
++@asynccontextmanager
++async def candidate_context(setup, **options):
++    db,task=setup
++    async with Client(mcp_params(db,task)) as client:
++        _,specs=s3_catalog((await client.list_tools()).tools)
++        candidate=Candidate(db,task["task_id"],task["run_id"],client,specs,**options)
++        try:
++            yield candidate,client
++        finally:
++            destination=os.environ.get("AR01_TEST_TRACE_DIR")
++            if destination:
++                directory=Path(destination)
++                directory.mkdir(parents=True,exist_ok=True)
++                candidate.trace.emit("test_ledger",task_id=task["task_id"],run_id=task["run_id"],
++                    observations=list_observations(db,task["task_id"]),model_traces=list_model_traces(db,task["task_id"]))
++                with (directory/f"{db.parent.name}.jsonl").open("x",encoding="utf-8") as output:
++                    for row in candidate.trace.rows: output.write(canonical_json(row)+"\n")
++
++
++def sequence(*responses):
++    items=iter(responses)
++    return LocalModel(policy=lambda _messages:next(items))
++
++
++def test_pair_equivalent_facts_and_exact_actual_model_tools(tmp_path):
++    case={"id":"AR01-02","variant":"unit","question":"现在订单是什么状态？","setup":{"state":"PROCESSING"}}
++    result=asyncio.run(run_pair(case,tmp_path/"pair"))
++    a,b=result["groups"]
++    assert a["initial_business_digest"]==b["initial_business_digest"]
++    assert a["actual_outbound_tool_schema_digest"]==b["actual_outbound_tool_schema_digest"]
++    for group in (a,b):
++        assert group["business_state_unchanged"]
++        assert "PROCESSING" in group["result"]["answer"]
++        assert "get_order_status" in group["tool_names"]
++
++
++def test_direct_answer_and_clarification_need_no_tools(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,_):
++            model=sequence(answer("HTTP受理与业务完成不同。"),answer("您指哪个事件？",clarify=True))
++            first=await candidate.run(model,"已有资料足够，解释概念。")
++            second=await candidate.run(model,"哪个事件？",history=first["messages"])
++            assert first["result"]["result_state"]=="ANSWERED"
++            assert second["result"]["action"]=="clarify"
++            assert attempt_counts(candidate.db,candidate.task)=={"MODEL":2,"MCP":0}
++            assert len(model.requests)==2
++            with connect(candidate.db) as c:
++                statuses=[r[0] for r in c.execute("SELECT model_status FROM d5_context_provenance WHERE task_id=?",(candidate.task,))]
++            assert statuses==["OK","OK"]
++            assert any("HTTP受理" in str(m.content) for m in model.requests[-1])
++    asyncio.run(check())
++
++
++def test_pronoun_continuation_and_reordered_questions_retain_budget(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,_):
++            model=LocalModel()
++            one=await candidate.run(model,"订单目前处理到哪一步？")
++            before=attempt_counts(candidate.db,candidate.task)
++            two=await candidate.run(model,"刚才说的处理完成和受理有什么区别？",history=one["messages"])
++            assert two["result"]["answer"]
++            assert attempt_counts(candidate.db,candidate.task)=={"MODEL":before["MODEL"]+1,"MCP":before["MCP"]}
++            assert any(m.type=="tool" for m in model.requests[-1])
++    asyncio.run(check())
++
++
++def test_scope_denial_and_same_scope_positive_through_real_mcp(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,client):
++            outside=await client.call_tool("get_callback_transport_history",{"reason":"test scope","event_id":"event-outside"})
++            forged=await client.call_tool("get_order_status",{"reason":"test scope","tenant_id":"tenant-b","order_id":"ar01-outside-order"})
++            good=await client.call_tool("get_order_status",{"reason":"legal bound order"})
++            assert outside.is_error and forged.is_error and not good.is_error
++            model=sequence(call("get_order_status",tenant_id="tenant-b",order_id="ar01-outside-order"),
++                call("get_order_status"),answer("越域请求被拒绝；合法本订单仍在处理中。",partial=True))
++            result=await candidate.run(model,"先越域，再查本订单")
++            assert "ar01-outside-order" not in result["result"]["answer"]
++            assert any(r["event"]=="tool_error" for r in result["trace"])
++            assert any(r["event"]=="tool_result" for r in result["trace"])
++    asyncio.run(check())
++
++
++def test_scope_revoked_before_dispatch_no_model_or_fact(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,_):
++            with connect(candidate.db) as c:
++                c.execute("UPDATE principal_scope_grants SET granted_scopes_json='[]',grant_version=grant_version+1 WHERE principal_id='async-principal-a'")
++            model=LocalModel()
++            result=await candidate.run(model,"当前订单状态？")
++            assert not model.requests
++            assert result["result"]["result_state"]=="PARTIAL"
++            assert result["result"]["answer"]
++    asyncio.run(check())
++
++
++def test_scope_revoke_after_observation_stops_history_then_fresh_reauthorization_works(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,client):
++            model=LocalModel()
++            first=await candidate.run(model,"当前订单状态？")
++            used=len(model.requests)
++            with connect(candidate.db) as c:
++                old=c.execute("SELECT granted_scopes_json FROM principal_scope_grants WHERE principal_id='async-principal-a'").fetchone()[0]
++                c.execute("UPDATE principal_scope_grants SET granted_scopes_json='[]',grant_version=grant_version+1 WHERE principal_id='async-principal-a'")
++            denied=await candidate.run(model,"现在呢？",history=first["messages"])
++            assert len(model.requests)==used and denied["result"]["result_state"]=="PARTIAL"
++            assert all(eid not in denied["result"]["answer"] for eid in candidate.evidence_ids)
++            with connect(candidate.db) as c:
++                c.execute("UPDATE principal_scope_grants SET granted_scopes_json=?,grant_version=grant_version+1 WHERE principal_id='async-principal-a'",(old,))
++            fresh=Candidate(candidate.db,candidate.task,candidate.run_id,client,candidate.specs,trace=candidate.trace)
++            allowed=await fresh.run(model,"当前订单状态？")
++            assert allowed["result"]["result_state"]=="ANSWERED"
++            assert fresh.evidence_ids and len(model.requests)>used
++    asyncio.run(check())
++
++
++def test_foreign_or_tampered_history_never_rehydrates_as_current(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,client):
++            model=LocalModel()
++            result=await candidate.run(model,"当前订单状态？")
++            used=len(model.requests)
++            restored=Candidate(candidate.db,candidate.task,candidate.run_id,client,candidate.specs,trace=candidate.trace)
++            blocked=await restored.run(model,"刚才呢？",history=result["messages"])
++            assert blocked["result"]["stop_reason"]=="UNVERIFIED_EXPERIMENT_HISTORY"
++            result["messages"][-1].content="tampered claimed recovery"
++            blocked=await candidate.run(model,"刚才呢？",history=result["messages"])
++            assert blocked["result"]["stop_reason"]=="UNVERIFIED_EXPERIMENT_HISTORY"
++            assert len(model.requests)==used
++    asyncio.run(check())
++
++
++def test_unknown_tool_has_no_privileged_dispatch(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,_):
++            before=snapshot(candidate.db,PROTECTED)
++            result=await candidate.run(sequence(call("grant_scope"),answer("该操作不可用，未修改任何权限。",partial=True)),"授予权限")
++            assert snapshot(candidate.db,PROTECTED)==before
++            assert any(r["event"]=="tool_error" for r in result["trace"])
++            assert not any(r["event"]=="tool_result" for r in result["trace"])
++    asyncio.run(check())
++
++
++def test_budget_exhaustion_reentry_does_not_reset_reserved_attempts(setup):
++    async def check():
++        async with candidate_context(setup,limits=Limits(model=2,tools=1)) as (candidate,_):
++            model=LocalModel(policy=lambda _:call("get_order_status"))
++            one=await candidate.run(model,"重复查")
++            assert one["result"]["result_state"]=="PARTIAL" and one["result"]["answer"]
++            assert attempt_counts(candidate.db,candidate.task)=={"MODEL":2,"MCP":1}
++            # New middleware instance, same trusted Run, still no new allocation.
++            restored=Candidate(candidate.db,candidate.task,candidate.run_id,candidate.client,candidate.specs,limits=Limits(model=2,tools=1),trace=candidate.trace)
++            two=await restored.run(model,"再试")
++            assert two["result"]["result_state"]=="PARTIAL"
++            assert len(model.requests)==2
++            assert attempt_counts(candidate.db,candidate.task)=={"MODEL":2,"MCP":1}
++    asyncio.run(check())
++
++
++@pytest.mark.parametrize("kind",["error","timeout","total"])
++def test_model_error_and_timeout_are_counted_nonempty_partial(setup,kind):
++    async def check():
++        limits=Limits(model_seconds=.01,total_seconds=.005 if kind=="total" else 5)
++        async with candidate_context(setup,limits=limits) as (candidate,_):
++            def fail(_): raise OSError("local simulated model error")
++            model=LocalModel(policy=fail) if kind=="error" else LocalModel(sleep_seconds=.1)
++            result=await candidate.run(model,"问题")
++            assert result["result"]["result_state"]=="PARTIAL" and result["result"]["answer"]
++            with connect(candidate.db) as c:
++                row=c.execute("SELECT status FROM d2_attempts WHERE kind='MODEL'").fetchone()
++            assert row["status"]==("UNKNOWN" if kind=="total" else "FAILED")
++    asyncio.run(check())
++
++
++def test_tool_timeout_counted_without_fabricated_observation(setup):
++    async def check():
++        async with candidate_context(setup,limits=Limits(tool_seconds=.01)) as (candidate,client):
++            class SlowClient:
++                async def call_tool(self,*_args): await asyncio.sleep(.1)
++            candidate.client=SlowClient()
++            result=await candidate.run(sequence(call("get_order_status"),answer("工具未返回事实，当前状态未知。",partial=True)),"查订单")
++            assert result["result"]["result_state"]=="PARTIAL"
++            assert not candidate.evidence_ids
++            with connect(candidate.db) as c:
++                assert c.execute("SELECT status FROM d2_attempts WHERE kind='MCP'").fetchone()[0]=="TOOL_ERROR"
++    asyncio.run(check())
++
++
++def test_context_overflow_does_not_dispatch_model(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,_):
++            model=LocalModel()
++            result=await candidate.run(model,"overflow "*20000)
++            assert not model.requests
++            assert attempt_counts(candidate.db,candidate.task)["MODEL"]==0
++            assert result["result"]["stop_reason"]=="ContextBudgetExceeded"
++    asyncio.run(check())
++
++
++@pytest.mark.parametrize("response",[AIMessage(content=""),AIMessage(content=json.dumps({"action":"answer","result_state":"ANSWERED","answer":"fake","receipt_id":"invented"})),answer("E1 已完成",target="event-e1",claim="PROCESSED")])
++def test_empty_or_fabricated_receipt_is_not_success(setup,response):
++    async def check():
++        async with candidate_context(setup) as (candidate,_):
++            result=await candidate.run(sequence(response),"问题")
++            assert result["result"]["result_state"]=="PARTIAL"
++            assert "receipt_id" not in result["result"]
++    asyncio.run(check())
++
++
++def test_sanitize_and_limits():
++    assert sanitize({"Authorization":"Bearer secret","body":"Bearer local-secret"})=={"Authorization":"[REDACTED]","body":"[REDACTED]"}
++    assert sanitize({"task_id":"task-12345678-0000-0000-0000-123456789abc","key":"sk-12345678-secret"})=={"task_id":"task-12345678-0000-0000-0000-123456789abc","key":"[REDACTED]"}
++    with pytest.raises(ValueError): Limits(model=9)
++    with pytest.raises(ValueError): Limits(tools=7)
++
++
++def test_parallel_proposals_cannot_exceed_one_reserved_tool_slot(setup):
++    async def check():
++        async with candidate_context(setup,limits=Limits(tools=1)) as (candidate,_):
++            multi=AIMessage(content="",tool_calls=[
++                {"id":"t1","name":"get_order_status","args":{"reason":"order"}},
++                {"id":"t2","name":"get_callback_delivery","args":{"reason":"delivery"}},
++            ])
++            result=await candidate.run(sequence(multi,answer("只取得部分事实，第二项未获额度。",partial=True)),"组合补查")
++            assert attempt_counts(candidate.db,candidate.task)["MCP"]==1
++            assert result["result"]["result_state"]=="PARTIAL"
++            assert len([r for r in result["trace"] if r["event"]=="tool_result"])==1
++    asyncio.run(check())
++
++
++def test_repeated_asset_is_counted_but_not_new_semantic_progress(setup):
++    async def check():
++        async with candidate_context(setup) as (candidate,_):
++            result=await candidate.run(sequence(
++                call("search_callback_knowledge",query="202 receiver acknowledgement"),
++                call("search_callback_knowledge",query="202 receiver acknowledgement"),
++                answer("协议只能解释受理，不构成实时处理证据。")),"解释协议")
++            assert result["result"]["answer"]
++            rows=list_observations(candidate.db,candidate.task)
++            assert len(rows)==2 and rows[0]["progress_added"] and not rows[1]["progress_added"]
++            assert attempt_counts(candidate.db,candidate.task)["MCP"]==2
++    asyncio.run(check())
