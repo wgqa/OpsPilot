@@ -1,0 +1,595 @@
+diff --git a/experiments/ar01_free_agent/provider_budget.py b/experiments/ar01_free_agent/provider_budget.py
+index 663bfa4..ee8c408 100644
+--- a/experiments/ar01_free_agent/provider_budget.py
++++ b/experiments/ar01_free_agent/provider_budget.py
+@@ -21,6 +21,59 @@ class BudgetStop(RuntimeError):
+     pass
+ 
+ 
++REQUEST_WIRE_V1 = "REQUEST_WIRE_V1"
++LEGACY_MODEL_MAX = "LEGACY_MODEL_MAX"
++
++
++def request_bound(payload):
++    """Contract bound, not a tokenizer estimate or unconditional billing promise.
++
++    Server context capacity bounds ALL input, including tools and private framing.
++    Only the correctly serialized, documented output limit narrows the old bound.
++    Keep the full payload for both arms; byte counts below are audit data only.
++    """
++    allowed={"model","messages","stream","thinking","max_tokens","parallel_tool_calls","tools","tool_choice"}
++    if not isinstance(payload,dict) or set(payload)-allowed:
++        raise BudgetStop("WIRE_UNKNOWN_FIELD")
++    if payload.get("model")!="deepseek-flash" or payload.get("thinking")!={"type":"disabled"}:
++        raise BudgetStop("WIRE_MODEL_OR_MODE_UNBOUNDED")
++    if type(payload.get("max_tokens")) is not int or payload["max_tokens"]!=512:
++        raise BudgetStop("WIRE_OUTPUT_LIMIT_UNBOUNDED")
++    if payload.get("stream") is not False or payload.get("parallel_tool_calls") is not False:
++        raise BudgetStop("WIRE_FROZEN_PARAMETERS_CHANGED")
++    messages=payload.get("messages")
++    if not isinstance(messages,list) or not messages:
++        raise BudgetStop("WIRE_MESSAGES_INVALID")
++    for m in messages:
++        if not isinstance(m,dict) or set(m)-{"role","content","name","tool_calls","tool_call_id"}:
++            raise BudgetStop("WIRE_MESSAGE_FIELDS_UNKNOWN")
++        if m.get("role") not in {"system","user","assistant","tool"} or not (
++            isinstance(m.get("content"),str) or (m.get("role")=="assistant" and m.get("content") is None and m.get("tool_calls"))):
++            raise BudgetStop("WIRE_NON_TEXT_MESSAGE_UNBOUNDED")
++    tools=payload.get("tools",[])
++    if not isinstance(tools,list) or any(not isinstance(t,dict) or t.get("type")!="function" or
++        not isinstance(t.get("function"),dict) or not isinstance(t["function"].get("name"),str) or
++        not isinstance(t["function"].get("parameters"),dict) for t in tools):
++        raise BudgetStop("WIRE_TOOL_SCHEMA_INVALID")
++    if tools and payload.get("tool_choice")!="auto":
++        raise BudgetStop("WIRE_TOOL_CHOICE_CHANGED")
++    try:
++        serialized=json.dumps(payload,ensure_ascii=False,sort_keys=True,allow_nan=False).encode("utf-8")
++    except (ValueError,TypeError,UnicodeError) as error:
++        raise BudgetStop("WIRE_SERIALIZATION_UNBOUNDED") from error
++    return {"policy":REQUEST_WIRE_V1,"wire_semantic_digest":digest_json(payload),
++        "input_upper_tokens":1_048_576,"output_upper_tokens":512,
++        "reserve_micro":usage_cost({"prompt_tokens":1_048_576,"completion_tokens":512,"total_tokens":1_049_088}),
++        "basis":"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT",
++        "input_includes":"messages + all tool schemas + server framing; no byte/token ratio assumed",
++        "prepared_json_bytes_audit_only":len(serialized),"message_count":len(messages),"tool_count":len(tools),
++        "tool_schema_digest":digest_json(tools),"absolute_billing_guarantee":False,
++        "assumptions":["vendor enforces documented context and max_tokens limits",
++            "disabled thinking and documented peak rates apply"],
++        "sources":["https://api-docs.deepseek.com/quick_start/pricing/",
++            "https://api-docs.deepseek.com/api/create-chat-completion/"]}
++
++
+ def micro(value):
+     return int((Decimal(str(value))*1_000_000).to_integral_value(rounding=ROUND_CEILING))
+ 
+@@ -49,15 +102,22 @@ class ExperimentBudget:
+     # Independent upper bounds deliberately overcount the joint context ceiling.
+     worst_micro = usage_cost({"prompt_tokens":1_048_576,"completion_tokens":393_216,"total_tokens":1_441_792})
+ 
+-    def __init__(self,path,*,cost_cap_usd=Decimal("0.50"),request_limit=80):
++    def __init__(self,path,*,cost_cap_usd=Decimal("0.50"),request_limit=80,
++                 reservation_policy=LEGACY_MODEL_MAX):
+         self.path=Path(path)
+         self.path.parent.mkdir(parents=True,exist_ok=True)
+         if type(request_limit) is not int or not 1<=request_limit<=80 or not Decimal("0")<Decimal(str(cost_cap_usd))<=2:
+             raise ValueError("INVALID_EXPERIMENT_LIMITS")
+         self.cap, self.limit=micro(cost_cap_usd),request_limit
++        if reservation_policy not in {LEGACY_MODEL_MAX,REQUEST_WIRE_V1}:
++            raise ValueError("UNKNOWN_RESERVATION_POLICY")
++        self.requestwise=reservation_policy==REQUEST_WIRE_V1
+         self.policy={"release":"AR01-RM01-P0-V1","cap_micro":self.cap,"request_limit":self.limit,
+             "input_peak_per_million":"0.30","output_peak_per_million":"1.20",
+             "reservation_micro":self.worst_micro,"single_in_flight":True}
++        if self.requestwise:
++            self.policy.update(release="AR01-RM01-HF01-V1",reservation_policy=REQUEST_WIRE_V1,
++                reservation_micro=None,input_context_ceiling=1_048_576,wire_max_tokens=512)
+         with self.transaction() as c:
+             c.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+             c.execute("CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY,logical_key TEXT UNIQUE NOT NULL,"
+@@ -69,6 +129,8 @@ class ExperimentBudget:
+             if row and row[0]!=canonical_json(self.policy):
+                 raise BudgetStop("LEDGER_POLICY_CHANGED")
+             c.execute("INSERT OR IGNORE INTO meta VALUES('policy',?)",(canonical_json(self.policy),))
++            if self.requestwise and "bound_json" not in {r[1] for r in c.execute("PRAGMA table_info(requests)")}:
++                c.execute("ALTER TABLE requests ADD COLUMN bound_json TEXT")
+ 
+     @contextmanager
+     def transaction(self):
+@@ -97,11 +159,18 @@ class ExperimentBudget:
+         with self.transaction() as c:
+             return self._snapshot(c)
+ 
+-    def preflight(self):
++    def preflight(self,payload=None):
+         s=self.snapshot()
++        bound=None
++        reason=None
++        if self.requestwise:
++            try: bound=request_bound(payload)
++            except BudgetStop as error: reason=str(error)
++        reserve=bound["reserve_micro"] if bound else None if self.requestwise else self.worst_micro
+         return {"ready":not s["halted"] and not s["unresolved"] and s["requests"]<self.limit
+-            and s["exposure_micro"]+self.worst_micro<=self.cap,
+-            "next_reservation_usd":dollars(self.worst_micro),"snapshot":s,
++            and reserve is not None and s["exposure_micro"]+reserve<=self.cap,
++            "next_reservation_usd":dollars(reserve) if reserve is not None else None,"snapshot":s,
++            "bound":bound,"bound_error":reason,
+             "live_vendor_compliance":"NOT_VERIFIED","billing_guarantee":False}
+ 
+     def claim_group(self,label):
+@@ -111,6 +180,8 @@ class ExperimentBudget:
+             c.execute("INSERT INTO groups VALUES(?,?)",(label,time.time()))
+ 
+     def reserve(self,logical_key,payload):
++        bound=request_bound(payload) if self.requestwise else None
++        reserve=bound["reserve_micro"] if bound else self.worst_micro
+         with self.transaction() as c:
+             s=self._snapshot(c)
+             if c.execute("SELECT 1 FROM requests WHERE logical_key=?",(logical_key,)).fetchone():
+@@ -118,23 +189,28 @@ class ExperimentBudget:
+             if s["halted"]: raise BudgetStop("LEDGER_HALTED_"+s["halted"])
+             if s["unresolved"]: raise BudgetStop("REQUEST_IN_FLIGHT_OR_UNKNOWN")
+             if s["requests"]>=self.limit: raise BudgetStop("REQUEST_CAP")
+-            if s["exposure_micro"]+self.worst_micro>self.cap: raise BudgetStop("COST_CAP")
++            if s["exposure_micro"]+reserve>self.cap: raise BudgetStop("COST_CAP")
+             key=f"rm01-{uuid.uuid4()}"
+             c.execute("INSERT INTO requests(id,logical_key,payload_digest,status,reserved_micro,created) VALUES(?,?,?,?,?,?)",
+-                (key,logical_key,digest_json(payload),"RESERVED",self.worst_micro,time.time()))
++                (key,logical_key,digest_json(payload),"RESERVED",reserve,time.time()))
++            if bound:
++                c.execute("UPDATE requests SET bound_json=? WHERE id=?",(canonical_json(bound),key))
+             return key
+ 
+-    def sent(self,key):
+-        duplicate=False
++    def sent(self,key,*,payload=None):
++        failure=None
+         with self.transaction() as c:
+             row=c.execute("SELECT * FROM requests WHERE id=?",(key,)).fetchone()
+             if row is None: raise BudgetStop("UNKNOWN_RESERVATION")
+             if row["sends"] or row["status"]!="RESERVED":
+                 c.execute("INSERT OR REPLACE INTO meta VALUES('halted','REPEAT_SEND')")
+-                duplicate=True
++                failure="REPEAT_SEND"
++            elif self.requestwise and (payload is None or digest_json(payload)!=row["payload_digest"]):
++                c.execute("INSERT OR IGNORE INTO meta VALUES('halted','WIRE_BODY_CHANGED')")
++                failure="WIRE_BODY_CHANGED"
+             else:
+                 c.execute("UPDATE requests SET sends=1,status='SENT' WHERE id=?",(key,))
+-        if duplicate: raise BudgetStop("REPEAT_SEND")
++        if failure: raise BudgetStop(failure)
+ 
+     def halt(self,reason):
+         with self.transaction() as c:
+@@ -158,6 +234,14 @@ class ExperimentBudget:
+             if row is None or row["status"]!="SENT": raise BudgetStop("INVALID_SETTLEMENT")
+             if charge>row["reserved_micro"]: violation="DOCUMENTED_COST_BOUND_EXCEEDED"
+             if usage["completion_tokens"]>512: violation="REQUEST_MAX_TOKENS_NOT_HONORED"
++            if self.requestwise:
++                bound=json.loads(row["bound_json"])
++                if usage["prompt_tokens"]>bound["input_upper_tokens"]:
++                    violation="REQUEST_INPUT_BOUND_EXCEEDED"
++                details=usage.get("completion_tokens_details")
++                if details is not None and (not isinstance(details,dict) or
++                    ("reasoning_tokens" in details and (type(details["reasoning_tokens"]) is not int or details["reasoning_tokens"]!=0))):
++                    violation="NON_THINKING_USAGE_MISMATCH"
+             c.execute("UPDATE requests SET status=?,charge_micro=?,usage_json=?,finished=?,error=? WHERE id=?",
+                 ("SETTLED_ERROR" if violation else "SETTLED",charge,canonical_json(usage),time.time(),violation,key))
+             if violation: c.execute("INSERT OR IGNORE INTO meta VALUES('halted',?)",(violation,))
+diff --git a/experiments/ar01_free_agent/real_model.py b/experiments/ar01_free_agent/real_model.py
+index ee07008..7866ea8 100644
+--- a/experiments/ar01_free_agent/real_model.py
++++ b/experiments/ar01_free_agent/real_model.py
+@@ -21,7 +21,7 @@ from langchain_openai import ChatOpenAI
+ from pydantic import Field
+ 
+ from experiments.ar01_free_agent.agent import sanitize
+-from experiments.ar01_free_agent.provider_budget import BudgetStop, ExperimentBudget
++from experiments.ar01_free_agent.provider_budget import BudgetStop, ExperimentBudget, REQUEST_WIRE_V1
+ from opspilot.config import ROOT, MODEL_API_KEY
+ from opspilot.domain.d2 import digest_json
+ 
+@@ -112,6 +112,17 @@ class MeteredModel(BaseChatModel):
+         if specs: sdk_settings.update(tools=specs,tool_choice="auto")
+         logical=f"{self.group_label}/{len(self.requests)+1}"
+         payload={"messages":messages_to_dict(messages),"tools":specs,"config":asdict(self.config)}
++        if self.budget.requestwise:
++            # Installed SDK preparation, before I/O. Its extra_body is merged by
++            # OpenAI's request builder; verify this exact semantic body again at
++            # the HTTP edge. No heuristic tokenizer bound is used for pricing.
++            payload=self.sdk._get_request_payload(messages,**sdk_settings)
++            extra=payload.pop("extra_body",{})
++            if set(extra)&set(payload): raise ProviderStopped("AMBIGUOUS_EXTRA_BODY_OVERRIDE")
++            payload.update(extra)
++            expected=self.runtime.get("authorized_wire_digest")
++            if expected and digest_json(payload)!=expected:
++                raise ProviderStopped("PROBE_AUTHORIZED_WIRE_CHANGED")
+         key=self.budget.reserve(logical,payload)
+         self.runtime.update(reservation=key,raw=None,request_id=None,expected_tools=specs)
+         self.requests.append({"logical_key":logical,"reservation_id":key})
+@@ -121,7 +132,8 @@ class MeteredModel(BaseChatModel):
+             if not isinstance(raw,dict): raise ProviderStopped("MISSING_RAW_PROVIDER_RESPONSE")
+             # Preserve real Usage even when the response contract later fails.
+             self.budget.settle(key,raw.get("usage"))
+-            if not raw.get("id") or not self.runtime["request_id"]:
++            if not isinstance(raw.get("id"),str) or not raw["id"] or (
++                not self.budget.requestwise and not self.runtime["request_id"]):
+                 raise ProviderStopped("MISSING_COMPLETION_OR_REQUEST_ID")
+             if raw.get("model") not in {self.config.model,"DeepSeek-V4.1-Flash-1017"}:
+                 raise ProviderStopped("UNEXPECTED_RESPONSE_MODEL")
+@@ -129,8 +141,13 @@ class MeteredModel(BaseChatModel):
+             choices=raw.get("choices")
+             if not isinstance(choices,list) or len(choices)!=1 or choices[0].get("finish_reason") not in {"stop","tool_calls"}:
+                 raise ProviderStopped("INCOMPLETE_OR_INVALID_COMPLETION")
++            if self.budget.requestwise and choices[0].get("message",{}).get("reasoning_content"):
++                raise ProviderStopped("NON_THINKING_RESPONSE_MISMATCH")
+             ai.response_metadata.update(id=raw["id"],provider_request_id=self.runtime["request_id"],
+                 provider_model=raw["model"],system_fingerprint=raw.get("system_fingerprint"))
++            if self.budget.requestwise:
++                ai.response_metadata.update(provider_correlation_id=self.runtime["request_id"] or raw["id"],
++                    provider_correlation_kind="HTTP_REQUEST_ID" if self.runtime["request_id"] else "COMPLETION_ID")
+             self.trace.emit("provider_settlement",reservation_id=key,logical_key=logical,
+                 sdk_usage=ai.usage_metadata,raw_usage=raw["usage"],ledger=self.budget.snapshot())
+             return ChatResult(generations=[ChatGeneration(message=ai)])
+@@ -176,7 +193,7 @@ def _model(*,budget,specs,trace,group_label,base_url,key,local=False):
+             or payload.get("tools",[])!=runtime["expected_tools"]
+             or (payload.get("tools") and payload.get("tool_choice")!="auto")):
+             raise ProviderStopped("ACTUAL_WIRE_CONFIGURATION_MISMATCH")
+-        budget.sent(runtime["reservation"])
++        budget.sent(runtime["reservation"],payload=payload)
+         trace.emit("provider_http_request",reservation_id=runtime["reservation"],
+             endpoint=str(request.url),body=payload,transport="LOCAL_PROTOCOL_STUB" if local else "LIVE_PROVIDER")
+ 
+@@ -206,11 +223,27 @@ def build_local_model(*,base_url,budget,specs,trace,group_label):
+         base_url=base_url,key="ar01-loopback-dummy-key",local=True)
+ 
+ 
+-def build_live_model(*,budget,specs,trace,group_label="unapproved",live=False,authorization=None):
++def build_live_model(*,budget,specs,trace,group_label="unapproved",live=False,authorization=None,probe_wire=None):
+     # No key lookup/client construction/network before both independent gates.
+     config=ProviderConfig()
+     if not live or not isinstance(authorization,dict) or authorization.get("authorized") is not True or not authorization.get("human_approval_reference"):
+         raise ProviderStopped("PAID_AUTHORIZATION_REQUIRED")
++    if budget.requestwise:
++        # A new request-bound policy does not inherit authorization for the full
++        # five-pair trial. This is a different, one-request scope, not P1.
++        probe_expected={"scope":"ONE_REQUEST_PROTOCOL_PROBE","reservation_policy":REQUEST_WIRE_V1,
++            "config_digest":digest_json(asdict(config)),"request_limit":1,"cost_cap_usd":"0.50"}
++        if any(authorization.get(k)!=v for k,v in probe_expected.items()) or budget.cap!=500_000 or budget.limit!=1:
++            raise ProviderStopped("PROBE_AUTHORIZATION_REQUIRED_OR_MISMATCHED")
++        if not isinstance(probe_wire,dict) or authorization.get("wire_digest")!=digest_json(probe_wire) or probe_wire.get("tools",[])!=specs:
++            raise ProviderStopped("PROBE_AUTHORIZATION_WIRE_MISMATCH")
++        if not budget.preflight(probe_wire)["ready"]:
++            raise ProviderStopped("COST_OR_UNRESOLVED_PREFLIGHT_BLOCKED")
++        key=os.environ.get(MODEL_API_KEY)
++        if not key: raise ProviderStopped("LOCAL_API_KEY_MISSING")
++        model=_model(budget=budget,specs=specs,trace=trace,group_label=group_label,base_url=config.base_url,key=key)
++        model.runtime["authorized_wire_digest"]=authorization["wire_digest"]
++        return model
+     expected={"config_digest":digest_json(asdict(config)),"request_limit":80,
+         "cost_cap_usd":"0.50","cases":[list(k) for k in ORDER]}
+     if any(authorization.get(k)!=v for k,v in expected.items()) or budget.cap!=500_000 or budget.limit!=80:
+@@ -254,14 +287,23 @@ def main():
+     parser.add_argument("--output",required=True,type=Path)
+     parser.add_argument("--live",action="store_true")
+     parser.add_argument("--authorization",type=Path)
++    parser.add_argument("--request-bound",action="store_true",help="offline candidate preflight for one separately authorized probe")
++    parser.add_argument("--wire-body",type=Path,help="actual prepared/observed JSON body; never a token estimate")
+     args=parser.parse_args()
+-    budget=ExperimentBudget(args.output/"request-budget.sqlite3")
++    budget=ExperimentBudget(args.output/"request-budget.sqlite3",**(
++        {"reservation_policy":REQUEST_WIRE_V1,"request_limit":1} if args.request_bound else {}))
++    wire=json.loads(args.wire_body.read_text(encoding="utf-8")) if args.wire_body else None
+     preflight={"config":asdict(ProviderConfig()),"paid_authorized":False,
+-        "p1":"NOT_RUN","p2":"NOT_RUN",**budget.preflight()}
+-    (args.output/"preflight.json").write_text(json.dumps(preflight,indent=2),encoding="utf-8")
++        "p1":"NOT_RUN","p2":"NOT_RUN",**budget.preflight(wire)}
++    with (args.output/"preflight.json").open("x",encoding="utf-8") as f:
++        f.write(json.dumps(preflight,indent=2))
+     if not args.live:
+         print(json.dumps(preflight,indent=2))
+         return
++    if args.request_bound:
++        # Do not fall through to the existing P1 batch CLI. A separately approved
++        # single probe can use build_live_model's exact-wire, one-call interface.
++        raise ProviderStopped("P1_BLOCKED_SINGLE_PROBE_REQUIRES_SEPARATE_EXECUTION_AUTHORIZATION")
+     auth=json.loads(args.authorization.read_text(encoding="utf-8")) if args.authorization else None
+     # Enforce all gates before fixture/server setup. Default USD .50 stops here.
+     model=build_live_model(budget=budget,specs=[],trace=None,live=True,authorization=auth)
+diff --git a/experiments/ar01_free_agent/tests/local_provider.py b/experiments/ar01_free_agent/tests/local_provider.py
+index cd789b9..5bceeaa 100644
+--- a/experiments/ar01_free_agent/tests/local_provider.py
++++ b/experiments/ar01_free_agent/tests/local_provider.py
+@@ -58,11 +58,18 @@ def provider(mode="normal"):
+             if state["mode"]=="extra-output": response["usage"].update(completion_tokens=600,total_tokens=700)
+             if state["mode"]=="drift" and index>1: response["system_fingerprint"]="different-stub"
+             if state["mode"]=="missing-id": response.pop("system_fingerprint")
++            if state["mode"]=="no-completion": response.pop("id")
++            if state["mode"]=="no-finish": response["choices"][0].pop("finish_reason")
++            if state["mode"]=="input-overrun": response["usage"].update(prompt_tokens=1_048_577,total_tokens=1_048_597,prompt_cache_miss_tokens=1_048_577)
++            if state["mode"]=="both-bound-overrun": response["usage"].update(prompt_tokens=1_048_576,completion_tokens=393216,total_tokens=1_441_792,prompt_cache_miss_tokens=1_048_576)
++            if state["mode"]=="reasoning": response["usage"]["completion_tokens_details"]={"reasoning_tokens":5}
++            if state["mode"]=="reasoning-text": response["choices"][0]["message"]["reasoning_content"]="test hidden reasoning, never persist"
++            if state["mode"]=="bad-total": response["usage"]["total_tokens"]=1
+             value=json.dumps(response,ensure_ascii=False).encode()
+             self.send_response(200)
+             self.send_header("Content-Type","application/json")
+             self.send_header("Content-Length",str(len(value)))
+-            self.send_header("x-request-id",f"local-http-request-{index}")
++            if state["mode"]!="no-request-id": self.send_header("x-request-id",f"local-http-request-{index}")
+             self.end_headers()
+             try: self.wfile.write(value)
+             except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError): pass
+diff --git a/experiments/ar01_free_agent/tests/test_fee_hf01.py b/experiments/ar01_free_agent/tests/test_fee_hf01.py
+new file mode 100644
+index 0000000..26deba8
+--- /dev/null
++++ b/experiments/ar01_free_agent/tests/test_fee_hf01.py
+@@ -0,0 +1,267 @@
++"""HF-01 free tests; legacy tests and frozen cases are not modified."""
++from __future__ import annotations
++
++import asyncio
++from decimal import Decimal
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import time
++
++import pytest
++
++from experiments.ar01_free_agent.provider_budget import (
++    ExperimentBudget, BudgetStop, REQUEST_WIRE_V1, request_bound,
++)
++from experiments.ar01_free_agent.real_model import (
++    build_local_model, build_live_model, ProviderStopped, batch,
++)
++from experiments.ar01_free_agent.agent import Trace
++from experiments.ar01_free_agent.tests.local_provider import provider
++
++
++def wire():
++    return {"model":"deepseek-flash","stream":False,"thinking":{"type":"disabled"},
++        "max_tokens":512,"parallel_tool_calls":False,
++        "messages":[{"role":"user","content":"已知材料：请解释 HTTP 202 与处理完成的区别。"}]}
++
++
++def budget(path,**kwargs):
++    return ExperimentBudget(path,reservation_policy=REQUEST_WIRE_V1,**kwargs)
++
++
++@pytest.fixture
++def capture(request):
++    trace=Trace()
++    yield trace
++    root=os.environ.get("AR01_HF01_TRACE_DIR")
++    if root:
++        path=Path(root)
++        path.mkdir(parents=True,exist_ok=True)
++        (path/f"{request.node.name}.jsonl").write_text("".join(json.dumps(r,ensure_ascii=False)+"\n" for r in trace.rows),encoding="utf-8")
++
++
++def test_hf01_01_request_contract_fits_without_heuristic_input_bound(tmp_path,capture):
++    body=wire()
++    bound=request_bound(body)
++    assert bound["input_upper_tokens"]==1_048_576 and bound["output_upper_tokens"]==512
++    assert bound["reserve_micro"]==315188 and not bound["absolute_billing_guarantee"]
++    b=budget(tmp_path/"budget.sqlite3")
++    assert not b.preflight()["ready"]  # An actual body is mandatory.
++    assert b.preflight(body)["ready"]
++    key=b.reserve("valid",body)
++    b.sent(key,payload=body)
++    assert b.snapshot()["exposure_usd"]=="0.315188"
++    capture.emit("request_bound_observed",bound=bound,body=body,ledger=b.snapshot())
++    old=ExperimentBudget(tmp_path/"legacy.sqlite3")
++    with pytest.raises(BudgetStop,match="COST_CAP"): old.reserve("legacy",body)
++
++
++@pytest.mark.parametrize("change",[
++    {"max_tokens":None},{"max_tokens":True},{"max_tokens":512.0},{"max_tokens":393216},
++    {"thinking":{"type":"enabled"}},{"max_completion_tokens":512},
++    {"model":"unknown"},{"messages":[{"role":"user","content":[{"type":"image_url"}]}]},
++])
++def test_hf01_02_unbounded_or_unknown_wire_rejected(tmp_path,change):
++    b=budget(tmp_path/"budget.sqlite3")
++    with pytest.raises(BudgetStop,match="WIRE_"): b.reserve("invalid",{**wire(),**change})
++    assert b.snapshot()["requests"]==0
++
++
++def test_hf01_02_actual_wire_must_match_prepared_reservation(tmp_path,capture):
++    async def check(server):
++        b=budget(tmp_path/"budget.sqlite3")
++        model=build_local_model(base_url=server["url"],budget=b,specs=[],trace=capture,group_label="changed")
++        async def tamper(request):
++            data=json.loads(request.content)
++            data["messages"][0]["content"]+=" changed after reserve"
++            request._content=json.dumps(data).encode()
++        model.runtime["http_async"].event_hooks["request"].insert(0,tamper)
++        try:
++            with pytest.raises(BudgetStop,match="WIRE_BODY_CHANGED"):
++                await model.ainvoke("已知材料解释")
++            assert not server["requests"] and b.snapshot()["requests"]==1
++            assert b.snapshot()["exposure_usd"]=="0.315188"
++        finally: await model.aclose()
++    with provider() as server: asyncio.run(check(server))
++
++
++def test_hf01_03_settled_plus_next_reserve_and_legacy_policy_isolation(tmp_path,capture):
++    path=tmp_path/"budget.sqlite3"
++    b=budget(path)
++    for i in range(2):
++        key=b.reserve(str(i),wire())
++        b.sent(key,payload=wire())
++        b.settle(key,{"prompt_tokens":600000,"completion_tokens":20,"total_tokens":600020})
++    with pytest.raises(BudgetStop,match="COST_CAP"): b.reserve("third",wire())
++    assert b.snapshot()["exposure_usd"]=="0.360048"
++    with pytest.raises(BudgetStop,match="LEDGER_POLICY_CHANGED"): ExperimentBudget(path)
++    assert budget(path).snapshot()["requests"]==2
++    capture.emit("accumulation_observed",ledger=b.snapshot())
++
++
++@pytest.mark.parametrize("mode",["lost","wait"])
++def test_hf01_04_unknown_and_timeout_keep_request_reservation(tmp_path,capture,mode):
++    async def check(server):
++        b=budget(tmp_path/"budget.sqlite3")
++        model=build_local_model(base_url=server["url"],budget=b,specs=[],trace=capture,group_label="unknown")
++        try:
++            with pytest.raises(Exception): await asyncio.wait_for(model.ainvoke("已知材料解释"),.2 if mode=="wait" else 3)
++            assert len(server["requests"])==1
++            assert b.snapshot()["exposure_usd"]=="0.315188"
++            assert not budget(b.path).preflight(wire())["ready"]
++            with pytest.raises(BudgetStop,match="HALTED"): b.reserve("retry",wire())
++            capture.emit("unknown_keeps_reservation",mode=mode,ledger=b.snapshot())
++        finally: await model.aclose()
++    with provider(mode) as server: asyncio.run(check(server))
++
++
++def test_hf01_05_two_os_processes_restart_and_same_logical_key(tmp_path,capture):
++    path=tmp_path/"budget.sqlite3"
++    budget(path)
++    program="""import json,pathlib,sys,time
++from experiments.ar01_free_agent.provider_budget import ExperimentBudget,BudgetStop,REQUEST_WIRE_V1
++b=ExperimentBudget(sys.argv[1],reservation_policy=REQUEST_WIRE_V1)
++pathlib.Path(sys.argv[2]+sys.argv[3]).touch()
++while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.01)
++body=json.loads(sys.argv[4])
++try:
++ k=b.reserve(sys.argv[3],body); b.sent(k,payload=body); print(json.dumps({'reserved':k}),flush=True)
++except BudgetStop as e: print(json.dumps({'denied':str(e)}),flush=True)
++"""
++    gate=tmp_path/"go"
++    children=[subprocess.Popen([sys.executable,"-c",program,str(path),str(gate),label,json.dumps(wire())],
++        stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8") for label in ("A","B")]
++    try:
++        deadline=time.monotonic()+10
++        while not all(Path(str(gate)+v).exists() for v in ("A","B")):
++            assert time.monotonic()<deadline
++            time.sleep(.01)
++        gate.touch()
++        outputs=[p.communicate(timeout=10) for p in children]
++        results=[json.loads(o) for o,e in outputs if not e]
++        assert len(results)==2 and sum("reserved" in r for r in results)==1
++        assert sum("IN_FLIGHT" in r.get("denied","") for r in results)==1
++        reopened=budget(path)
++        assert reopened.snapshot()["requests"]==1 and reopened.snapshot()["exposure_usd"]=="0.315188"
++        with pytest.raises(BudgetStop): reopened.reserve("A",wire())
++        capture.emit("two_process_race_observed",outputs=results,ledger=reopened.snapshot(),exit_codes=[p.returncode for p in children])
++    finally:
++        for child in children:
++            if child.poll() is None:
++                child.terminate()
++                child.wait(timeout=5)
++
++
++@pytest.mark.parametrize("mode",["400","missing-usage","extra-output","input-overrun","both-bound-overrun","reasoning","reasoning-text","bad-total","no-completion","no-finish"])
++def test_hf01_06_usage_or_response_contract_halts_next_request(tmp_path,capture,mode):
++    async def check(server):
++        b=budget(tmp_path/"budget.sqlite3")
++        model=build_local_model(base_url=server["url"],budget=b,specs=[],trace=capture,group_label="invalid-response")
++        try:
++            with pytest.raises(Exception): await model.ainvoke("已知材料解释")
++            assert b.snapshot()["halted"]
++            with pytest.raises(BudgetStop,match="HALTED"): await model.ainvoke("no retry")
++            assert len(server["requests"])==1
++            assert server["requests"][0]["parallel_tool_calls"] is False
++            if mode=="both-bound-overrun":
++                # A vendor contract violation can exceed the reservation on the
++                # already-sent request. Detect/retain it, never claim prevention.
++                assert b.snapshot()["exposure_usd"]=="0.786432"
++            capture.emit("response_contract_rejected",mode=mode,ledger=b.snapshot())
++        finally: await model.aclose()
++    with provider(mode) as server: asyncio.run(check(server))
++
++
++def test_hf01_07_08_same_five_pairs_fit_with_unchanged_cap_and_tools(tmp_path,capture):
++    target=os.environ.get("AR01_HF01_TRACE_DIR")
++    output=Path(target)/"paired-request-policy" if target else tmp_path/"pairs"
++    async def check(server):
++        b=budget(tmp_path/"budget.sqlite3")
++        def factory(group,task,specs,trace):
++            label=f"{task['case_id']}/{group}"
++            b.claim_group(label)
++            return build_local_model(base_url=server["url"],budget=b,specs=specs,trace=trace,group_label=label)
++        result=await batch(output,b,factory)
++        assert result["status"]=="COMPLETED" and result["groups_completed"]==10
++        assert result["budget"]["policy"]["cap_micro"]==500000
++        assert result["budget"]["requests"]==26
++        tools=server["requests"][0]["tools"]
++        assert len(tools)==6 and all(r["tools"]==tools and r["max_tokens"]==512 for r in server["requests"])
++        for pair in result["results"]:
++            a,bgroup=pair["groups"]
++            assert a["initial_business_digest"]==bgroup["initial_business_digest"]
++            assert a["actual_outbound_tool_schema_digest"]==bgroup["actual_outbound_tool_schema_digest"]
++            assert all(g["business_state_unchanged"] for g in pair["groups"])
++        capture.emit("observed_five_pairs",result=result,paid_calls=0)
++    with provider() as server: asyncio.run(check(server))
++
++
++def test_hf01_header_optional_but_completion_is_real_correlation(tmp_path,capture):
++    async def check(server):
++        b=budget(tmp_path/"budget.sqlite3")
++        model=build_local_model(base_url=server["url"],budget=b,specs=[],trace=capture,group_label="no-header")
++        try:
++            ai=await model.ainvoke("已知材料解释")
++            assert ai.response_metadata["provider_request_id"] is None
++            assert ai.response_metadata["provider_correlation_id"]=="local-completion-1"
++            assert ai.response_metadata["provider_correlation_kind"]=="COMPLETION_ID"
++            model.assert_healthy()
++        finally: await model.aclose()
++    with provider("no-request-id") as server: asyncio.run(check(server))
++
++
++def test_hf01_09_unapproved_or_p1_authorization_cannot_construct_paid_client(tmp_path,monkeypatch):
++    import experiments.ar01_free_agent.real_model as adapter
++    from dataclasses import asdict
++    from opspilot.domain.d2 import digest_json
++    constructed=[]
++    monkeypatch.setattr(adapter,"_model",lambda **kwargs:constructed.append(kwargs))
++    b=budget(tmp_path/"budget.sqlite3",request_limit=1)
++    with pytest.raises(ProviderStopped,match="PAID_AUTHORIZATION_REQUIRED"):
++        build_live_model(budget=b,specs=[],trace=None,probe_wire=wire())
++    p1={"authorized":True,"human_approval_reference":"SYNTHETIC_TEST_NOT_AUTHORIZATION",
++        "config_digest":digest_json(asdict(adapter.ProviderConfig())),"request_limit":80,"cost_cap_usd":"0.50",
++        "cases":[list(k) for k in adapter.ORDER]}
++    with pytest.raises(ProviderStopped,match="PROBE_AUTHORIZATION"):
++        build_live_model(budget=b,specs=[],trace=None,probe_wire=wire(),live=True,authorization=p1)
++    assert not constructed and b.snapshot()["requests"]==0
++
++
++def test_hf01_probe_scope_and_wire_digest_checked_before_client_factory(tmp_path,monkeypatch):
++    import experiments.ar01_free_agent.real_model as adapter
++    from dataclasses import asdict
++    from types import SimpleNamespace
++    from opspilot.domain.d2 import digest_json
++    constructed=[]
++    def fake_factory(**kwargs):
++        constructed.append(kwargs["base_url"])
++        return SimpleNamespace(runtime={})
++    monkeypatch.setattr(adapter,"_model",fake_factory)
++    monkeypatch.setenv("OPSPILOT_MODEL_API_KEY","local-fixture-never-sent")
++    b=budget(tmp_path/"budget.sqlite3",request_limit=1)
++    auth={"authorized":True,"human_approval_reference":"SYNTHETIC_GATE_TEST_ONLY_NOT_USER_APPROVAL",
++        "scope":"ONE_REQUEST_PROTOCOL_PROBE","reservation_policy":REQUEST_WIRE_V1,
++        "config_digest":digest_json(asdict(adapter.ProviderConfig())),"request_limit":1,
++        "cost_cap_usd":"0.50","wire_digest":digest_json(wire())}
++    with pytest.raises(ProviderStopped,match="WIRE_MISMATCH"):
++        build_live_model(budget=b,specs=[],trace=None,live=True,authorization=auth,
++            probe_wire={**wire(),"messages":[{"role":"user","content":"different"}]})
++    assert not constructed
++    # A replaced factory proves gate reachability; no real SDK/client is created.
++    model=build_live_model(budget=b,specs=[],trace=None,live=True,authorization=auth,probe_wire=wire())
++    assert constructed==["https://api.deepseek.com"]
++    assert model.runtime["authorized_wire_digest"]==digest_json(wire())
++    assert b.snapshot()["requests"]==0
++
++
++def test_hf01_exact_one_probe_and_reservation_survive_after_settlement(tmp_path,capture):
++    b=budget(tmp_path/"budget.sqlite3",request_limit=1)
++    key=b.reserve("probe",wire())
++    b.sent(key,payload=wire())
++    b.settle(key,{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120})
++    with pytest.raises(BudgetStop,match="REQUEST_CAP"): budget(b.path,request_limit=1).reserve("second",wire())
++    with pytest.raises(BudgetStop,match="DUPLICATE_REQUEST"): b.reserve("probe",wire())
++    capture.emit("single_probe_cap_observed",ledger=b.snapshot())
