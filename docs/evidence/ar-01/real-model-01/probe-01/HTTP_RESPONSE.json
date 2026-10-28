@@ -1,0 +1,44 @@
+{
+  "observed_at": "2026-10-28T11:25:28.987+00:00",
+  "http_status": 200,
+  "headers": {
+    "content-type": "application/json",
+    "date": "Wed, 28 Oct 2026 11:25:22 GMT"
+  },
+  "body": {
+    "id": "cc60efa0-bd65-4aee-9990-98ce116b2509",
+    "object": "chat.completion",
+    "created": 1793186722,
+    "model": "deepseek-flash",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "这个区别可以直接从协议语义上解释，不需要读取订单状态（你也明确说明不判断当前订单）。\n\n## 核心区别：传输受理 vs 业务处理完成\n\n**HTTP 202 Accepted** 是传输层/接收端网关的应答：\n- 它客观含义是\"我收到了这份请求，并已接收（受理）\"，而不是\"我已经执行/处理完毕\"。\n- 202 属于 2xx 家族，因此\"收到 202\"只能证明请求被接收端接收，不能作为业务成功的证据。\n- 请求可能在接收后端进入队列、缓冲区或异步处理流程，之后仍可能因业务校验失败、重复、拒绝等原因而未完成。\n\n**处理完成（processed）** 是业务/接收方的状态：\n- 它指接收端实际完成了对该事件的处理（例如消费、校验、落库、状态推进）。\n- 该状态由接收方自己的处理状态来体现，而不是由 HTTP 应答码体现。\n- 两次请求可能一次 202 一次失败；202 本身不代表最终处理结果。\n\n## 为什么二者不能混同\n1. **证据层级不同**：202 是\"传输层受理证据\"；processed 是\"接收方业务状态证据\"。二者来自不同观察面，不能相互替代。\n2. **时序不同**：受理在前，处理在后，中间存在异步窗口；在窗口内处理状态可能是未知的。\n3. **持续性不同**：受理是一次性的 HTTP 交互；处理状态可后续变化（成功、失败、待处理），需单独读取接收方状态。\n4. **不可传递性**：即使另一事件显示成功，也不能据此推断某个旧事件已处理完成；每个事件的状态须按其自身 event_id 独立确认。\n\n## 表述建议\n- 看到 202 时可以说：\"已受理，处理结果未知\"，而非\"已完成\"。\n- 只有拿到接收方处理状态，才能说\"已处理完成\"。\n- 若该状态不可获取，应明确标注\"未知（UNKNOWN）\"，而不是从 202 或订单快照推断恢复。\n\n（说明：以上为协议层面的方法性解释，未使用任何本 Run 的业务证据，因此不针对当前订单给出处理结论。）\n\n来源：协议语义解释（方法性），无实时工具证据；当前订单处理状态：**不做判断**。\n\n```json\n{\"action\":\"answer\",\"result_state\":\"ANSWERED\",\"answer\":\"HTTP 202 Accepted 是传输"
+        },
+        "logprobs": null,
+        "finish_reason": "length"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 2388,
+      "completion_tokens": 512,
+      "total_tokens": 2900,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 2388
+    },
+    "system_fingerprint": "bc19ba97cbe016479903222bb1578db6"
+  },
+  "wire_bytes": 2802,
+  "raw_body_sha256": "142a276adcff55502907c30eb90c4b557da1fa612a7f280724a5155c937c2427",
+  "omitted_sensitive_fields": [
+    "authorization",
+    "cookie",
+    "reasoning_content",
+    "reasoning"
+  ]
+}
