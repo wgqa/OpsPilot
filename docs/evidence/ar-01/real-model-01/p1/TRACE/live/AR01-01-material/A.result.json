@@ -1,0 +1,53 @@
+{
+  "group": "A",
+  "task_id": "task-acc7ae0f-a692-4714-9df1-3a0e7e409993",
+  "run_id": "run-cf61eeb2-41e0-49d0-afad-4a1c699443c6",
+  "initial_business_digest": "da21917ccb8323a752685baf369b2f902ba4c3a33407890ba295a9dfec7a1f88",
+  "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "attempt_counts": {
+    "MODEL": 2,
+    "MCP": 1
+  },
+  "model_dispatches": 2,
+  "tool_names": [
+    "search_callback_knowledge"
+  ],
+  "result": {
+    "action": "answer",
+    "result_state": "ANSWERED",
+    "answer": "HTTP 202 与「处理完成」是两个不同层面的状态，这是异步回调/消息投递的通用约定（依据 receiver-ack-contract-v2 v2.1.0 条款）：\n\n1. HTTP 202 只表示「接收方已持久化受理并进入其队列」。它是传输层的确认：请求已被接收方成功接手、不会再因网络原因丢失，因此发送方不应自动重发。但受理只说明任务「已排队」，不说明业务逻辑已执行。\n\n2. 「处理完成（PROCESSED）」是业务层状态，必须由接收方针对同一个 event_id（且同一 delivery_version）的当前状态来证明。只有当前观测到同一事件的 PROCESSED，才算真正完成——即便发生在 SLA 截止时间之前，也足以证明完成。\n\n3. 因此推论是：只有 202、没有同一事件的当前接收方状态证据时，处理状态只能是 UNKNOWN；不能用已过时间、其他事件的成功、订单快照或历史建议去推断。若同一事件仍为 QUEUED：截止前继续观察；到达或超过可信截止时间，则联系接收方运营排查，但超时的 QUEUED 本身也不等于业务失败或事件丢失。\n\n4. 同时 202 也不等于完成的反面证据，它只是受理证据；永远不要自动重发。\n\n说明：本回答仅为协议/契约层面的逻辑解释，按你的要求不查询、不判断当前订单的任何实际状态；无当前订单实时证据，故不给出该订单的处理结论。来源：receiver-ack-contract-v2（版本 2.1.0，本地契约 local:orders-async-demo/contract-v2.1，有效期至 2030-01-01）。",
+    "target_event_id": null,
+    "processing_claim": "NOT_APPLICABLE",
+    "candidate_updates": [],
+    "stop_reason": "MODEL_ANSWER",
+    "delivery_mode": "MODEL",
+    "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+  },
+  "business_state_unchanged": true,
+  "elapsed_seconds": 6.534263299996383,
+  "provider_tokens": [
+    {
+      "prompt_tokens": 2383,
+      "completion_tokens": 89,
+      "total_tokens": 2472,
+      "prompt_tokens_details": {
+        "cached_tokens": 640
+      },
+      "prompt_cache_hit_tokens": 640,
+      "prompt_cache_miss_tokens": 1743
+    },
+    {
+      "prompt_tokens": 2955,
+      "completion_tokens": 417,
+      "total_tokens": 3372,
+      "prompt_tokens_details": {
+        "cached_tokens": 1408
+      },
+      "prompt_cache_hit_tokens": 1408,
+      "prompt_cache_miss_tokens": 1547
+    }
+  ],
+  "provider_cost_usd": null,
+  "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+}

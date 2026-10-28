@@ -1,0 +1,1088 @@
+{
+  "status": "COMPLETED",
+  "groups_completed": 10,
+  "results": [
+    {
+      "id": "AR01-01",
+      "variant": "material",
+      "groups": [
+        {
+          "group": "A",
+          "task_id": "task-acc7ae0f-a692-4714-9df1-3a0e7e409993",
+          "run_id": "run-cf61eeb2-41e0-49d0-afad-4a1c699443c6",
+          "initial_business_digest": "da21917ccb8323a752685baf369b2f902ba4c3a33407890ba295a9dfec7a1f88",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 2,
+            "MCP": 1
+          },
+          "model_dispatches": 2,
+          "tool_names": [
+            "search_callback_knowledge"
+          ],
+          "result": {
+            "action": "answer",
+            "result_state": "ANSWERED",
+            "answer": "HTTP 202 与「处理完成」是两个不同层面的状态，这是异步回调/消息投递的通用约定（依据 receiver-ack-contract-v2 v2.1.0 条款）：\n\n1. HTTP 202 只表示「接收方已持久化受理并进入其队列」。它是传输层的确认：请求已被接收方成功接手、不会再因网络原因丢失，因此发送方不应自动重发。但受理只说明任务「已排队」，不说明业务逻辑已执行。\n\n2. 「处理完成（PROCESSED）」是业务层状态，必须由接收方针对同一个 event_id（且同一 delivery_version）的当前状态来证明。只有当前观测到同一事件的 PROCESSED，才算真正完成——即便发生在 SLA 截止时间之前，也足以证明完成。\n\n3. 因此推论是：只有 202、没有同一事件的当前接收方状态证据时，处理状态只能是 UNKNOWN；不能用已过时间、其他事件的成功、订单快照或历史建议去推断。若同一事件仍为 QUEUED：截止前继续观察；到达或超过可信截止时间，则联系接收方运营排查，但超时的 QUEUED 本身也不等于业务失败或事件丢失。\n\n4. 同时 202 也不等于完成的反面证据，它只是受理证据；永远不要自动重发。\n\n说明：本回答仅为协议/契约层面的逻辑解释，按你的要求不查询、不判断当前订单的任何实际状态；无当前订单实时证据，故不给出该订单的处理结论。来源：receiver-ack-contract-v2（版本 2.1.0，本地契约 local:orders-async-demo/contract-v2.1，有效期至 2030-01-01）。",
+            "target_event_id": null,
+            "processing_claim": "NOT_APPLICABLE",
+            "candidate_updates": [],
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 6.534263299996383,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 2383,
+              "completion_tokens": 89,
+              "total_tokens": 2472,
+              "prompt_tokens_details": {
+                "cached_tokens": 640
+              },
+              "prompt_cache_hit_tokens": 640,
+              "prompt_cache_miss_tokens": 1743
+            },
+            {
+              "prompt_tokens": 2955,
+              "completion_tokens": 417,
+              "total_tokens": 3372,
+              "prompt_tokens_details": {
+                "cached_tokens": 1408
+              },
+              "prompt_cache_hit_tokens": 1408,
+              "prompt_cache_miss_tokens": 1547
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        },
+        {
+          "group": "B",
+          "task_id": "task-64645a80-c4dd-4ddd-9b66-bb22f36fa7d1",
+          "run_id": "run-607ecf3e-6047-4ade-b3a3-9840d1c81072",
+          "initial_business_digest": "da21917ccb8323a752685baf369b2f902ba4c3a33407890ba295a9dfec7a1f88",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 1,
+            "MCP": 0
+          },
+          "model_dispatches": 1,
+          "tool_names": [],
+          "result": {
+            "action": "answer",
+            "result_state": "PARTIAL",
+            "answer": "本次调查只能交付以下已核实事实与缺口：\n本轮没有目标事件可用的历史发送记录；不能用最新快照或 attempt_count 还原旧请求。\n缺少目标事件本轮有效的接收处理观察，当前是否完成仍未知。\n调查额度或模型可用性限制了进一步解释；需继续核实上述缺口，不能据此声称已重发、恢复或交接。",
+            "delivery_mode": "DETERMINISTIC_FALLBACK",
+            "stop_reason": "UNSUPPORTED_OR_EMPTY_ANSWER",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 5.747303099997225,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 1407,
+              "completion_tokens": 450,
+              "total_tokens": 1857,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              },
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 1407
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        }
+      ],
+      "conditions_ready": true
+    },
+    {
+      "id": "AR01-03",
+      "variant": "acknowledged",
+      "groups": [
+        {
+          "group": "A",
+          "task_id": "task-af276181-1207-4bc7-926d-40c29e216443",
+          "run_id": "run-7e1700b0-03ed-48f7-84ef-98c20c042a8c",
+          "initial_business_digest": "430ee6524cbb96bb6c6b55fa169936fdf4a46e1c25c05ca940378a35cbad8e4b",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 5,
+            "MCP": 4
+          },
+          "model_dispatches": 5,
+          "tool_names": [
+            "get_order_status",
+            "get_callback_delivery",
+            "get_callback_transport_history",
+            "get_receiver_processing"
+          ],
+          "result": {
+            "action": "answer",
+            "result_state": "ANSWERED",
+            "target_event_id": "event-06a5c975-4cd6-42cc-a54c-05e84e312c5c",
+            "processing_claim": "QUEUED",
+            "answer": "结论：目前没有证据表明回调投递失败，反而是“已受理、接收方排队中”。\n\n依据（本轮实时读取，时间均为 2026-10-28 UTC）：\n1) 订单状态：订单 ar01-order（订单版本 1）状态 COMPLETED，HTTP 200（13:16:35.95 观测）。200 只说明读取成功，但订单本身已完成。\n2) 回调投递：目标事件 event-06a5c975-4cd6-42cc-a54c-05e84e312c5c（order_version 1，service_id orders-async-demo，tenant-a），transport_request_id transport-e670117b-c550-44dd-b571-2611525ba92a，状态 ACKNOWLEDGED，attempt_count=0，max_attempts=3，failure_code=null，retry_state=NOT_APPLICABLE，retry_at=null，接收方 HTTP 202（13:16:37.33 观测）。202 是受理，不代表处理完成。\n3) 传输历史：对该订单的查询返回 RECORDED_OBSERVATIONS_ONLY，attempts 为空，truncated=false；这只是“没有已记录的传输尝试观察”，不构成失败证明，也不能证明一定没发送（发送与落库之间的空窗不在完整审计范围内）。\n4) 接收方处理状态（仅针对该事件）：status=QUEUED，version=1，accepted_at=2026-10-28T13:15:31.268101Z，processing_sla_seconds=300（13:16:40.17 观测）。\n\n尚属未知的部分：接收方后续是否会转为处理完成，以及 300 秒处理时限内是否会出现失败，目前都未知（UNKNOWN），不能由旧的 202/ACKNOWLEDGED 或订单快照推断为已完成或已失败。建议在 SLA 窗口后再读取同一事件的接收方处理状态来确认。",
+            "candidate_updates": [
+              {
+                "reference": "call-750e2550-2350-4b82-b90e-84461df0dceb|call_01_v1Lbg9YwpQQEYMOMmkCd6219",
+                "decision": "DROP",
+                "reason": "回调投递与接收方排队状态已取得，无需重复读取"
+              },
+              {
+                "reference": "call-750e2550-2350-4b82-b90e-84461df0dceb|call_02_CDYOAvuhsSGCwTAt4Os85508",
+                "decision": "DROP",
+                "reason": "无未执行的候选需要保留"
+              },
+              {
+                "reference": "call-6f6027dd-24ce-4bfc-a051-6b07f56b3e46|call_01_h4G9NZZJbEu12CFAChDO0744",
+                "decision": "DROP",
+                "reason": "接收方当前状态已读取，QUEUED 已确认"
+              }
+            ],
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 12.71815890000289,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 2367,
+              "completion_tokens": 158,
+              "total_tokens": 2525,
+              "prompt_tokens_details": {
+                "cached_tokens": 2048
+              },
+              "prompt_cache_hit_tokens": 2048,
+              "prompt_cache_miss_tokens": 319
+            },
+            {
+              "prompt_tokens": 3239,
+              "completion_tokens": 115,
+              "total_tokens": 3354,
+              "prompt_tokens_details": {
+                "cached_tokens": 1664
+              },
+              "prompt_cache_hit_tokens": 1664,
+              "prompt_cache_miss_tokens": 1575
+            },
+            {
+              "prompt_tokens": 4284,
+              "completion_tokens": 98,
+              "total_tokens": 4382,
+              "prompt_tokens_details": {
+                "cached_tokens": 1664
+              },
+              "prompt_cache_hit_tokens": 1664,
+              "prompt_cache_miss_tokens": 2620
+            },
+            {
+              "prompt_tokens": 5002,
+              "completion_tokens": 54,
+              "total_tokens": 5056,
+              "prompt_tokens_details": {
+                "cached_tokens": 1664
+              },
+              "prompt_cache_hit_tokens": 1664,
+              "prompt_cache_miss_tokens": 3338
+            },
+            {
+              "prompt_tokens": 5552,
+              "completion_tokens": 694,
+              "total_tokens": 6246,
+              "prompt_tokens_details": {
+                "cached_tokens": 1664
+              },
+              "prompt_cache_hit_tokens": 1664,
+              "prompt_cache_miss_tokens": 3888
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        },
+        {
+          "group": "B",
+          "task_id": "task-e0699cd4-ecc6-442b-94b7-7271c27cdf08",
+          "run_id": "run-7857990f-188d-4c41-a762-c9041ea39a76",
+          "initial_business_digest": "430ee6524cbb96bb6c6b55fa169936fdf4a46e1c25c05ca940378a35cbad8e4b",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 3,
+            "MCP": 4
+          },
+          "model_dispatches": 3,
+          "tool_names": [
+            "get_callback_delivery",
+            "get_order_status",
+            "get_receiver_processing",
+            "get_callback_transport_history"
+          ],
+          "result": {
+            "action": "answer",
+            "result_state": "ANSWERED",
+            "answer": "根据目前可读取的事实，没有证据表明回调投递失败。\n\n已核实的情况（观测时间 2026-10-28T13:16:47Z~13:16:49Z）：\n1. 投递记录（s3_deliveries，订单 ar01-order，订单版本 1）：status=ACKNOWLEDGED，receiver_http_status=202，failure_code=null，retry_state=NOT_APPLICABLE，retry_at=null，max_attempts=3，attempt_count=0。绑定的事件为 event-06a5c975-4cd6-42cc-a54c-05e84e312c5c，Transport 请求为 transport-e670117b-c550-44dd-b571-2611525ba92a。\n2. 收方处理状态（s3_receivers）：status=QUEUED，accepted_at=2026-10-28T13:15:31.268101Z，processing_sla_seconds=300。\n3. 订单状态：COMPLETED，order_version=1。\n4. 传输历史查询（不带 event_id，针对本订单）：返回的 attempts 为空，coverage 为 RECORDED_OBSERVATIONS_ONLY，并明确说明“无记录不代表没有发送；send-to-persist 崩溃窗口的时间段不构成完整审计”。\n\n结论与需注意之处：\n- HTTP 202 只表示请求被接受，并不表示已经处理完成。因此既不能说“投递失败”，也不能说“回调已处理完成”。目前更准确的判断是：传输层已接受该事件，但收方仍处于 QUEUED，尚未处理。\n- 处理 SLA 为 300 秒；从 accepted_at（13:15:31Z）到观测时刻（13:16:49Z）大约 78 秒，仍在 SLA 窗口内，并且没有出现失败码或重试安排。\n- 你怀疑的“投递失败”这一说法，在本 Run 可读取的事实中没有依据。之所以没有依据，不是因为存在反面证据；需要说明的是，我也没有看到可能产生失败的事实。\n\n未知项（如实说明）：\n- 尚未返回已持久化的 Transport Attempt 记录；这不是完整审计，无法据“无记录”排除某次尝试或崩溃窗口内的发送。\n- 该事件是否会在 SLA 内处理完成、何时完成，目前无法确认（收方仍为 QUEUED）。\n- 是否存在其他相关事件或下游影响，也不在本次观测范围内。\n\n建议：由于事件仍处于 QUEUED，并处在 300 秒 SLA 内，可在 SLA 到期（约 2026-10-28T13:20:31Z 之后）再复查收方处理状态与传输历史，届时再判断是否需要按失败处理。本次未做任何发送、重试或配置变更。\n\n信息来源：get_callback_delivery（s3_deliveries）、get_receiver_processing（s3_receivers）、get_order_status（http:loopback-async-orders）、get_callback_transport_history（s3_transport_attempts）。",
+            "target_event_id": "event-06a5c975-4cd6-42cc-a54c-05e84e312c5c",
+            "processing_claim": "QUEUED",
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 9.150345000001835,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 1391,
+              "completion_tokens": 94,
+              "total_tokens": 1485,
+              "prompt_tokens_details": {
+                "cached_tokens": 1152
+              },
+              "prompt_cache_hit_tokens": 1152,
+              "prompt_cache_miss_tokens": 239
+            },
+            {
+              "prompt_tokens": 2567,
+              "completion_tokens": 124,
+              "total_tokens": 2691,
+              "prompt_tokens_details": {
+                "cached_tokens": 1408
+              },
+              "prompt_cache_hit_tokens": 1408,
+              "prompt_cache_miss_tokens": 1159
+            },
+            {
+              "prompt_tokens": 3466,
+              "completion_tokens": 753,
+              "total_tokens": 4219,
+              "prompt_tokens_details": {
+                "cached_tokens": 2688
+              },
+              "prompt_cache_hit_tokens": 2688,
+              "prompt_cache_miss_tokens": 778
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        }
+      ],
+      "conditions_ready": true
+    },
+    {
+      "id": "AR01-03",
+      "variant": "failed",
+      "groups": [
+        {
+          "group": "A",
+          "task_id": "task-3a8c470f-7528-47d6-bb30-76258b8dc1b8",
+          "run_id": "run-89df64bf-a048-4d19-b598-00baf6f5f179",
+          "initial_business_digest": "9280d913aeba0f6bae53e6e2a392a8a118b446a96c58ae4fa6e6c6c080ff8b32",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 3,
+            "MCP": 2
+          },
+          "model_dispatches": 3,
+          "tool_names": [
+            "get_callback_delivery",
+            "get_callback_transport_history"
+          ],
+          "result": {
+            "action": "answer",
+            "result_state": "ANSWERED",
+            "answer": "已查明：该订单（ar01-order）的异步回调事件 event-d1577668-8cfa-427a-948d-33d13b84cd1a 确实在第一次投递传输时失败了，但不是“最终失败”。\n\n关键事实（来自本次实时读取）：\n- 订单快照：order_version=1，回调事件 status=FAILED，attempt_count=1，max_attempts=3（get_callback_delivery，观测时间 2026-10-28T13:16:58Z）。\n- 实际传输结果：transport_request_id=transport-526fddfa-0c46-4c7e-9475-b082bdb278da，接收方返回 HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，接收方状态 UNAVAILABLE（该次尝试的时间点观测）。\n- 重试状态：retry_state=SCHEDULED，retry_at=2026-10-28T13:17:54.528824Z，即系统已安排在约 1 分钟后再投。\n\n结论与不确定项：\n1) “是否失败”——是，当前这一事件确有一次传输失败（503 临时不可用），失败是临时性错误，而非永久拒绝。\n2) “是否最终失败”——否，尚不能认定：已排定重试，且 max_attempts=3，仅用掉 1 次尝试。\n3) 该事件的接收方是否已处理成功——UNKNOWN。当前没有接收方处理状态记录；503 只描述那一次尝试，不能推断后续重试的结果。\n4) 传输历史查询返回空列表（coverage=RECORDED_OBSERVATIONS_ONLY），按规则“无记录不等于未发送”，因此不能据此断言只发生过一次尝试或没有其他发送；发送到落库之间的崩溃窗口不是完整审计。\n\n建议下一步（只读）：在 retry_at 之后再次读取该事件的传输/接收方处理状态，确认重试是否成功、该 Event 最终是否被接收方处理；在此之前请勿手工重发。",
+            "target_event_id": "event-d1577668-8cfa-427a-948d-33d13b84cd1a",
+            "processing_claim": "UNKNOWN",
+            "candidate_updates": [],
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 7.949814799998421,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 2378,
+              "completion_tokens": 108,
+              "total_tokens": 2486,
+              "prompt_tokens_details": {
+                "cached_tokens": 2048
+              },
+              "prompt_cache_hit_tokens": 2048,
+              "prompt_cache_miss_tokens": 330
+            },
+            {
+              "prompt_tokens": 3320,
+              "completion_tokens": 55,
+              "total_tokens": 3375,
+              "prompt_tokens_details": {
+                "cached_tokens": 1664
+              },
+              "prompt_cache_hit_tokens": 1664,
+              "prompt_cache_miss_tokens": 1656
+            },
+            {
+              "prompt_tokens": 3878,
+              "completion_tokens": 524,
+              "total_tokens": 4402,
+              "prompt_tokens_details": {
+                "cached_tokens": 1664
+              },
+              "prompt_cache_hit_tokens": 1664,
+              "prompt_cache_miss_tokens": 2214
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        },
+        {
+          "group": "B",
+          "task_id": "task-f87ef827-b9bc-4b3f-a918-a433be2658f8",
+          "run_id": "run-2b4b82c0-56b1-4275-960e-8d81947eb14f",
+          "initial_business_digest": "9280d913aeba0f6bae53e6e2a392a8a118b446a96c58ae4fa6e6c6c080ff8b32",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 4,
+            "MCP": 5
+          },
+          "model_dispatches": 4,
+          "tool_names": [
+            "get_order_status",
+            "get_callback_delivery",
+            "get_receiver_processing",
+            "get_callback_transport_history",
+            "search_callback_knowledge"
+          ],
+          "result": {
+            "action": "answer",
+            "result_state": "ANSWERED",
+            "answer": "结论：截至目前可以确认的是“首次投递尝试失败，且接收方尚未收到”，但还不能判定为“回调投递最终失败”——因为该事件仍处于重试待发送（SCHEDULED）状态，尚未耗尽重试次数。\n\n依据（本次运行实际观察到的业务事实）：\n1. 绑定订单 ar01-order（订单版本 1）状态为 COMPLETED（数据源 http:loopback-async-orders，HTTP 200）。订单本身已完成，这不能证明回调已送达。\n2. 目标事件 event-d1577668-8cfa-427a-948d-33d13b84cd1a 的投递记录（sqlite:s3_deliveries）：status=FAILED，attempt_count=1，max_attempts=3，failure_code=TEMPORARY_UNAVAILABLE，接收方 HTTP 状态 503，receiver_state=UNAVAILABLE，retry_state=SCHEDULED，retry_at=2026-10-28T13:17:54.528824Z，transport_request_id=transport-526fddfa-0c46-4c7e-9475-b082bdb278da。\n3. 接收方处理状态（sqlite:s3_receivers）：status=NOT_RECEIVED，accepted_at=null。即接收方确实尚未接收该事件，更没有完成处理（ACK 也不等于处理完成）。\n4. 传输尝试历史（sqlite:s3_transport_attempts）：按该 event_id 查询返回空列表，coverage=RECORDED_OBSERVATIONS_ONLY。该工具明确说明“无记录不等于未发送”，发送到持久化的崩溃窗口不构成完整审计；因此不能用这份历史去否定或证明投递。\n5. 方法约定（本地 orders-async-demo 合同 v2，callback-retry-contract-v2）：503 只有在服务端记录了可重试失败码和当前重试策略时才是可重试的；retry_state=SCHEDULED 且带 retry_at 仍属“待发送/未结束”。EXHAUSTED 才可视为需要处置的终态，且需满足 attempt_count 达到 max_attempts 且失败响应摘要、event_id、transport request 都与当前投递行匹配。该方法只说明判定标准，具体结论由当前领域证据决定。\n\n未知项（不影响上述结论但要说明）：\n- 计划的重试（retry_at 时间点之后）是否已实际发出、是否成功，本次证据中没有记录；我也没有执行任何发送、重试或配置变更的能力。\n- 是否存在发送后未持久化的尝试（崩溃窗口），无法排除。\n- 该事件最终的接收与处理结果（accepted_at、处理完成）尚为空值，属未知。\n\n建议：以 retry_at 之后的最新投递行与接收方 processing 状态为准再复核；若届时 attempt_count 达到 3 且 retry_state=EXHAUSTED，才按最终投递失败处置。",
+            "target_event_id": "event-d1577668-8cfa-427a-948d-33d13b84cd1a",
+            "processing_claim": "NOT_RECEIVED",
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 11.696146399997815,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 1391,
+              "completion_tokens": 98,
+              "total_tokens": 1489,
+              "prompt_tokens_details": {
+                "cached_tokens": 1152
+              },
+              "prompt_cache_hit_tokens": 1152,
+              "prompt_cache_miss_tokens": 239
+            },
+            {
+              "prompt_tokens": 2589,
+              "completion_tokens": 172,
+              "total_tokens": 2761,
+              "prompt_tokens_details": {
+                "cached_tokens": 1408
+              },
+              "prompt_cache_hit_tokens": 1408,
+              "prompt_cache_miss_tokens": 1181
+            },
+            {
+              "prompt_tokens": 3546,
+              "completion_tokens": 124,
+              "total_tokens": 3670,
+              "prompt_tokens_details": {
+                "cached_tokens": 2688
+              },
+              "prompt_cache_hit_tokens": 2688,
+              "prompt_cache_miss_tokens": 858
+            },
+            {
+              "prompt_tokens": 4157,
+              "completion_tokens": 726,
+              "total_tokens": 4883,
+              "prompt_tokens_details": {
+                "cached_tokens": 3584
+              },
+              "prompt_cache_hit_tokens": 3584,
+              "prompt_cache_miss_tokens": 573
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        }
+      ],
+      "conditions_ready": true
+    },
+    {
+      "id": "AR01-04",
+      "variant": "different-event",
+      "groups": [
+        {
+          "group": "A",
+          "task_id": "task-329da61f-c8dd-4c01-9b8b-4f51ee1f85bc",
+          "run_id": "run-c1a7bc35-11b4-4de7-a0ec-2e695bd146da",
+          "initial_business_digest": "9ab9b2bcf0ab12d6c75083a5dba951ae31dd343179560c46cfd84f32d843db04",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 3,
+            "MCP": 2
+          },
+          "model_dispatches": 3,
+          "tool_names": [
+            "get_callback_transport_history",
+            "get_receiver_processing"
+          ],
+          "result": {
+            "action": "answer",
+            "result_state": "ANSWERED",
+            "answer": "关于 event-e1 的重试历史与当前处理状态，说明如下（注意：已有查询证据里没有 event-e1 的 receiver 处理记录，只有 event-e2 的）。\n\n**event-e1 的传输历史（截至 2026-10-28T13:17:19Z 的观测）**\n- 已知传输尝试共 1 次：transport_request_id = transport-b67a8333-42c2-46e1-866f-775fcea4eef4，attempt_no=1，HTTP 请求发起于 2026-10-28T13:17:15.546Z，HTTP 观测记录时间 2026-10-28T13:17:16.118Z；order_id=ar01-order，order_version=1，contract_version=2。\n- 结果：HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE，attempt_count=1，max_attempts=10。\n- 重试安排：retry_state=SCHEDULED，retry_at=2026-10-28T13:18:16.117Z（即约 60 秒后重试）。\n- 历史覆盖仅限“已记录观测”（RECORDED_OBSERVATIONS_ONLY），并且存在“发送成功但落库前崩溃”的窗口未被审计，因此“没有记录”不等于“没有发送”，也不排除其他尝试未被记录。根据这些证据，我没有看到 event-e1 有第二次尝试的观测记录。\n\n**event-e1 的当前接收方处理状态：UNKNOWN**\n- 现有 receiver 证据（delivery_version=3，status=PROCESSED，accepted_at=2026-10-28T13:17:16.619Z）对应的是 **event-e2**，不能用来推断 event-e1 已被处理。\n- event-e1 的首次尝试返回 503/不可用，只是那一次 HTTP 请求的结果，不代表该事件的当前处理状态；也没有任何记录表明重试已经执行或已完成。\n\n**结论**：event-e1 在 2026-10-28T13:17:16Z 的首次投递失败（503，临时不可用），重试已排定于 2026-10-28T13:18:16Z 左右；但其当前是否已重试成功、接收方是否已处理，目前为 UNKNOWN，需要按该事件本身再查接收方处理状态与后续传输记录才能确认。另请注意 event-e2 已显示 PROCESSED，但这与 event-e1 无关，不能作为 event-e1 恢复的依据。",
+            "target_event_id": "event-e1",
+            "processing_claim": "UNKNOWN",
+            "candidate_updates": [],
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 8.27887329999794,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 2366,
+              "completion_tokens": 130,
+              "total_tokens": 2496,
+              "prompt_tokens_details": {
+                "cached_tokens": 2048
+              },
+              "prompt_cache_hit_tokens": 2048,
+              "prompt_cache_miss_tokens": 318
+            },
+            {
+              "prompt_tokens": 3634,
+              "completion_tokens": 76,
+              "total_tokens": 3710,
+              "prompt_tokens_details": {
+                "cached_tokens": 1664
+              },
+              "prompt_cache_hit_tokens": 1664,
+              "prompt_cache_miss_tokens": 1970
+            },
+            {
+              "prompt_tokens": 4198,
+              "completion_tokens": 627,
+              "total_tokens": 4825,
+              "prompt_tokens_details": {
+                "cached_tokens": 1664
+              },
+              "prompt_cache_hit_tokens": 1664,
+              "prompt_cache_miss_tokens": 2534
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        },
+        {
+          "group": "B",
+          "task_id": "task-430b5c90-c917-4a67-b4b6-534becea96e0",
+          "run_id": "run-453eabbb-10a4-48e8-98eb-89dd18ed2e84",
+          "initial_business_digest": "9ab9b2bcf0ab12d6c75083a5dba951ae31dd343179560c46cfd84f32d843db04",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 3,
+            "MCP": 4
+          },
+          "model_dispatches": 3,
+          "tool_names": [
+            "get_callback_transport_history",
+            "get_receiver_processing",
+            "get_callback_delivery",
+            "get_order_status"
+          ],
+          "result": {
+            "action": "answer",
+            "result_state": "PARTIAL",
+            "answer": "【event-e1 的重试历史】来源：get_callback_transport_history(event_id=event-e1)，数据源 sqlite:s3_transport_attempts（记录于 2026-10-28T13:17:27Z，transport_history_version=3）。\n· 仅有 1 次传输尝试：attempt_no=1，transport_request_id=transport-b67a8333-42c2-46e1-866f-775fcea4eef4，关联 order ar01-order、order_version=1、event-e1。\n· 结果：HTTP 503，失败码 TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE。\n· 重试安排：retry_state=SCHEDULED，retry_at=2026-10-28T13:18:16.116760Z，attempt_count=1，max_attempts=10。即首次尝试被接收方以临时不可用拒绝，改为计划在约 60 秒后重试，预算内还剩 9 次。\n· 覆盖度说明：该查询返回 coverage=RECORDED_OBSERVATIONS_ONLY，未截断；但“无记录不等于未发送”，发送到落库之间的崩溃窗口不是完整审计，因此 13:18:16 的计划重试是否真的发出，目前没有观测证据。\n\n【event-e1 当前处理状态】无法确定（UNKNOWN）。原因：get_receiver_processing 返回的接收方记录属于 event-e2，不是 event-e1 —— event-e2 状态 PROCESSED、accepted_at 2026-10-28T13:17:16.619Z、version=3；get_callback_delivery 同样返回 event-e2（status=ACKNOWLEDGED、HTTP 202、retry_state=NOT_APPLICABLE、transport_request_id=transport-c2e95ee4-…）。另一个 Event（event-e2）的投递成功与处理完成，不能证明目标 event-e1 的完成或处理状态。\n\n【关联解读】\n· 两个 Event 同属订单 ar01-order、order_version=1：event-e1 在第 1 次传输即收到 503 并被安排重试；event-e2 在第 1 次传输收到 202（receiver_state=QUEUED，仅表示已接收/受理，不等于处理完成），随后接收方记录显示 PROCESSED。二者是不同 Event 的不同投递结果。\n· 订单侧读取（http:loopback-async-orders，HTTP 200）显示订单 ar01-order 在 order_version=1 上状态为 COMPLETED；注意订单完成状态本身不能反推 event-e1 这一具体 Event 已被接收方处理。\n\n【未知/未确认项】\n1. event-e1 的当前接收方处理状态：无可用记录（现有 receiver/delivery 读取对象为 event-e2）。\n2. event-e1 的 retry_at 2026-10-28T13:18:16Z 重试是否已执行、结果如何：无观测记录。\n3. event-e1 是否最终达到 ACK/PROCESSED：未知；纯 503 + SCHEDULED 只说明该次尝试失败并已排期重试。\n以上仅为当前 Run 的只读观测事实，不代表我执行了任何重试、补发或配置变更。",
+            "target_event_id": "event-e1",
+            "processing_claim": "UNKNOWN",
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 9.748737699999765,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 1393,
+              "completion_tokens": 131,
+              "total_tokens": 1524,
+              "prompt_tokens_details": {
+                "cached_tokens": 1152
+              },
+              "prompt_cache_hit_tokens": 1152,
+              "prompt_cache_miss_tokens": 241
+            },
+            {
+              "prompt_tokens": 2857,
+              "completion_tokens": 128,
+              "total_tokens": 2985,
+              "prompt_tokens_details": {
+                "cached_tokens": 1408
+              },
+              "prompt_cache_hit_tokens": 1408,
+              "prompt_cache_miss_tokens": 1449
+            },
+            {
+              "prompt_tokens": 4022,
+              "completion_tokens": 806,
+              "total_tokens": 4828,
+              "prompt_tokens_details": {
+                "cached_tokens": 2944
+              },
+              "prompt_cache_hit_tokens": 2944,
+              "prompt_cache_miss_tokens": 1078
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        }
+      ],
+      "conditions_ready": true
+    },
+    {
+      "id": "AR01-06",
+      "variant": "scope",
+      "groups": [
+        {
+          "group": "A",
+          "task_id": "task-a69f61ec-be41-47da-850b-96dde8b67099",
+          "run_id": "run-1196c731-a7ec-4b11-ac2c-c72fa9592768",
+          "initial_business_digest": "927821e7c7c79b9910b626bf5f49ec09d18786c1c5f63465ec6fd52a5fd938bf",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 1,
+            "MCP": 0
+          },
+          "model_dispatches": 1,
+          "tool_names": [],
+          "result": {
+            "action": "answer",
+            "result_state": "ANSWERED",
+            "answer": "我无法「查 event-outside 的别的订单」：我的查询工具只能读取当前绑定订单（ta[REDACTED]…，服务 orders-async-demo，路由 /api/async-orders/async-order），Event 过滤也必须属于本订单，无法跨订单/跨事件域检索（event-outside 不在授权范围内）。\n\n就看本订单当前状态，我本轮尚未执行任何读取，因此现在没有本订单的实时快照；无法给出状态结论（UNKNOWN），也不会根据历史或其他订单推断。\n\n若你希望我查本订单，我可以依次读取：订单状态快照 → 对应回调事件的传输确认/失败记录 → 接收方处理状态（注意：HTTP 200/202 只是受理，不等于处理完成）。请确认是否就本订单取证，或直接说明你想知道的具体结论（如「回调是否被接收方处理完成」）。",
+            "target_event_id": null,
+            "processing_claim": "UNKNOWN",
+            "candidate_updates": [],
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 4.013388799998211,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 2363,
+              "completion_tokens": 226,
+              "total_tokens": 2589,
+              "prompt_tokens_details": {
+                "cached_tokens": 2048
+              },
+              "prompt_cache_hit_tokens": 2048,
+              "prompt_cache_miss_tokens": 315
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        },
+        {
+          "group": "B",
+          "task_id": "task-20327d1f-27f3-4d90-a43c-cbfc56356672",
+          "run_id": "run-f5d8e34f-7f8c-406e-9064-2ab900549261",
+          "initial_business_digest": "927821e7c7c79b9910b626bf5f49ec09d18786c1c5f63465ec6fd52a5fd938bf",
+          "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+          "attempt_counts": {
+            "MODEL": 3,
+            "MCP": 5
+          },
+          "model_dispatches": 3,
+          "tool_names": [
+            "get_order_status",
+            "get_callback_delivery",
+            "get_callback_transport_history",
+            "get_callback_transport_history",
+            "get_receiver_processing"
+          ],
+          "result": {
+            "action": "answer",
+            "result_state": "ANSWERED",
+            "answer": "【本订单 ar01-order 当前状态】订单状态为 PROCESSING，order_version=1（数据源 http:loopback-async-orders，观察到 2026-10-28T13:17:42Z；HTTP 200 仅代表读取成功，不代表回调或业务已完成）。\n\n【回调情况】本订单绑定事件为 event-2a1f4745-48e8-4c20-9add-717459e5387c：投递状态为 NOT_DUE，attempt_count=0、max_attempts=3，尚无 transport_request_id、无 receiver_http_status、无失败码或重试计划；接收方处理状态为 NOT_RECEIVED，accepted_at 为空（数据源 sqlite:s3_deliveries / s3_receivers）。因此该事件目前未被接收方接收，也未开始处理，没有任何已记录的运输尝试。\n\n【关于 event-outside 的其他订单】无法查询。工具只按受信任绑定（本订单 ar01-order）授权，使用 event_id=\"event-outside\" 的查询被拒绝（MCP_TOOL_REJECTED），我没有可跨订单查事件的通道，也没有任何关于其他订单的事实可提供。\n\n【未知项】transport 历史为空仅表示“无记录”，不能证明从未发送（发送到持久化之间的崩溃窗口不构成完整审计）；投递为 NOT_DUE，说明当前未到期，但无未发送原因与到期时间的记录；接收方 processing_sla_seconds 为空，无法判断处理时限；也无法确认该回调最终何时会被投递或处理完成。",
+            "target_event_id": "event-2a1f4745-48e8-4c20-9add-717459e5387c",
+            "processing_claim": "NOT_RECEIVED",
+            "stop_reason": "MODEL_ANSWER",
+            "delivery_mode": "MODEL",
+            "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+          },
+          "business_state_unchanged": true,
+          "elapsed_seconds": 7.877613999997266,
+          "provider_tokens": [
+            {
+              "prompt_tokens": 1396,
+              "completion_tokens": 138,
+              "total_tokens": 1534,
+              "prompt_tokens_details": {
+                "cached_tokens": 1152
+              },
+              "prompt_cache_hit_tokens": 1152,
+              "prompt_cache_miss_tokens": 244
+            },
+            {
+              "prompt_tokens": 2796,
+              "completion_tokens": 125,
+              "total_tokens": 2921,
+              "prompt_tokens_details": {
+                "cached_tokens": 1408
+              },
+              "prompt_cache_hit_tokens": 1408,
+              "prompt_cache_miss_tokens": 1388
+            },
+            {
+              "prompt_tokens": 3331,
+              "completion_tokens": 402,
+              "total_tokens": 3733,
+              "prompt_tokens_details": {
+                "cached_tokens": 2816
+              },
+              "prompt_cache_hit_tokens": 2816,
+              "prompt_cache_miss_tokens": 515
+            }
+          ],
+          "provider_cost_usd": null,
+          "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+        }
+      ],
+      "conditions_ready": true
+    }
+  ],
+  "budget": {
+    "requests": 28,
+    "exposure_usd": "0.034451",
+    "exposure_micro": 34451,
+    "halted": null,
+    "rows": [
+      {
+        "id": "rm01-acbfe88f-0b09-402f-b1df-7b6f866c72ef",
+        "logical_key": "AR01-01/material/A/1",
+        "payload_digest": "a0f15bc1960311ed4ae6deef6c5eac541a88d599b20c61a9b15081e138b06f07",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 822,
+        "sends": 1,
+        "created": 1793193380.1408596,
+        "finished": 1793193381.3142164,
+        "usage_json": "{\"completion_tokens\":89,\"prompt_cache_hit_tokens\":640,\"prompt_cache_miss_tokens\":1743,\"prompt_tokens\":2383,\"prompt_tokens_details\":{\"cached_tokens\":640},\"total_tokens\":2472}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":9398,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"a0f15bc1960311ed4ae6deef6c5eac541a88d599b20c61a9b15081e138b06f07\"}"
+      },
+      {
+        "id": "rm01-2d555e50-3e23-4a95-8a46-6586745ae050",
+        "logical_key": "AR01-01/material/A/2",
+        "payload_digest": "4128e58e17dd967aaa0682f6c732fb8310bcfce0313a82ca9629cdb0a570560f",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1387,
+        "sends": 1,
+        "created": 1793193381.5357673,
+        "finished": 1793193385.138206,
+        "usage_json": "{\"completion_tokens\":417,\"prompt_cache_hit_tokens\":1408,\"prompt_cache_miss_tokens\":1547,\"prompt_tokens\":2955,\"prompt_tokens_details\":{\"cached_tokens\":1408},\"total_tokens\":3372}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":11533,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"4128e58e17dd967aaa0682f6c732fb8310bcfce0313a82ca9629cdb0a570560f\"}"
+      },
+      {
+        "id": "rm01-06a8dffa-79fd-40fe-8297-eb5215239659",
+        "logical_key": "AR01-01/material/B/1",
+        "payload_digest": "004434f8086fa5f305f279cefa58398b482d5315aa04c4c2730bfcd71db7a858",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 963,
+        "sends": 1,
+        "created": 1793193386.6825018,
+        "finished": 1793193390.8826227,
+        "usage_json": "{\"completion_tokens\":450,\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":1407,\"prompt_tokens\":1407,\"prompt_tokens_details\":{\"cached_tokens\":0},\"total_tokens\":1857}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":5438,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"004434f8086fa5f305f279cefa58398b482d5315aa04c4c2730bfcd71db7a858\"}"
+      },
+      {
+        "id": "rm01-52a4db73-ca3c-489f-8700-58da8cf0b62e",
+        "logical_key": "AR01-03/acknowledged/A/1",
+        "payload_digest": "d9789c47784d8cf28aa5c05b14d318cb0669baff5087df99d588707037ae5a49",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 900,
+        "sends": 1,
+        "created": 1793193393.6779695,
+        "finished": 1793193395.2743278,
+        "usage_json": "{\"completion_tokens\":158,\"prompt_cache_hit_tokens\":2048,\"prompt_cache_miss_tokens\":319,\"prompt_tokens\":2367,\"prompt_tokens_details\":{\"cached_tokens\":2048},\"total_tokens\":2525}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":9331,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"d9789c47784d8cf28aa5c05b14d318cb0669baff5087df99d588707037ae5a49\"}"
+      },
+      {
+        "id": "rm01-93d06fc1-e898-42e9-8292-3f44af5251d6",
+        "logical_key": "AR01-03/acknowledged/A/2",
+        "payload_digest": "14c9ee3bc9d2d88404171eb5e3a397ffbec1e70388f1e4c46c6f848a159d43ab",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1110,
+        "sends": 1,
+        "created": 1793193396.0600448,
+        "finished": 1793193397.2276275,
+        "usage_json": "{\"completion_tokens\":115,\"prompt_cache_hit_tokens\":1664,\"prompt_cache_miss_tokens\":1575,\"prompt_tokens\":3239,\"prompt_tokens_details\":{\"cached_tokens\":1664},\"total_tokens\":3354}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":11905,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"14c9ee3bc9d2d88404171eb5e3a397ffbec1e70388f1e4c46c6f848a159d43ab\"}"
+      },
+      {
+        "id": "rm01-00be08d7-b316-4452-92fb-5ffebf05a074",
+        "logical_key": "AR01-03/acknowledged/A/3",
+        "payload_digest": "62fa4a874e1b4421d5e67d4c4c9285f7db18604118dace5cd1e28cb1d96d5b02",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1403,
+        "sends": 1,
+        "created": 1793193397.4263256,
+        "finished": 1793193398.8151135,
+        "usage_json": "{\"completion_tokens\":98,\"prompt_cache_hit_tokens\":1664,\"prompt_cache_miss_tokens\":2620,\"prompt_tokens\":4284,\"prompt_tokens_details\":{\"cached_tokens\":1664},\"total_tokens\":4382}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":14846,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"62fa4a874e1b4421d5e67d4c4c9285f7db18604118dace5cd1e28cb1d96d5b02\"}"
+      },
+      {
+        "id": "rm01-dcd06c8b-7c84-4e9b-b310-40ca69439e92",
+        "logical_key": "AR01-03/acknowledged/A/4",
+        "payload_digest": "4a99692bd141d45a87658bade474fb320bd37b825b8a13abf45a015bc650289d",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1566,
+        "sends": 1,
+        "created": 1793193399.0442696,
+        "finished": 1793193400.0726118,
+        "usage_json": "{\"completion_tokens\":54,\"prompt_cache_hit_tokens\":1664,\"prompt_cache_miss_tokens\":3338,\"prompt_tokens\":5002,\"prompt_tokens_details\":{\"cached_tokens\":1664},\"total_tokens\":5056}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":17052,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"4a99692bd141d45a87658bade474fb320bd37b825b8a13abf45a015bc650289d\"}"
+      },
+      {
+        "id": "rm01-522a00a5-dc67-4462-98ee-a32f8624554e",
+        "logical_key": "AR01-03/acknowledged/A/5",
+        "payload_digest": "a454648a210f42ed804000de1e7624b89fde749789618f41c78e16785ff5f53c",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 2499,
+        "sends": 1,
+        "created": 1793193400.2691588,
+        "finished": 1793193404.7255743,
+        "usage_json": "{\"completion_tokens\":694,\"prompt_cache_hit_tokens\":1664,\"prompt_cache_miss_tokens\":3888,\"prompt_tokens\":5552,\"prompt_tokens_details\":{\"cached_tokens\":1664},\"total_tokens\":6246}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":18629,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"a454648a210f42ed804000de1e7624b89fde749789618f41c78e16785ff5f53c\"}"
+      },
+      {
+        "id": "rm01-de3e9837-4354-44eb-9f38-2caf4002c56d",
+        "logical_key": "AR01-03/acknowledged/B/1",
+        "payload_digest": "92dee2b2d50c3778abfd40bbfd34b6a2d79f841fe2db33cf416f73bae9abcdd5",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 531,
+        "sends": 1,
+        "created": 1793193406.3444555,
+        "finished": 1793193407.5914836,
+        "usage_json": "{\"completion_tokens\":94,\"prompt_cache_hit_tokens\":1152,\"prompt_cache_miss_tokens\":239,\"prompt_tokens\":1391,\"prompt_tokens_details\":{\"cached_tokens\":1152},\"total_tokens\":1485}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":5371,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"92dee2b2d50c3778abfd40bbfd34b6a2d79f841fe2db33cf416f73bae9abcdd5\"}"
+      },
+      {
+        "id": "rm01-c304e0df-699f-440c-824b-1847181c52d7",
+        "logical_key": "AR01-03/acknowledged/B/2",
+        "payload_digest": "15f51a640dd49e7a1d97a55204f04e31aba090c701229ecdf3ba3e5f593eef57",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 919,
+        "sends": 1,
+        "created": 1793193408.3075333,
+        "finished": 1793193409.50482,
+        "usage_json": "{\"completion_tokens\":124,\"prompt_cache_hit_tokens\":1408,\"prompt_cache_miss_tokens\":1159,\"prompt_tokens\":2567,\"prompt_tokens_details\":{\"cached_tokens\":1408},\"total_tokens\":2691}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":5,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":9426,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"15f51a640dd49e7a1d97a55204f04e31aba090c701229ecdf3ba3e5f593eef57\"}"
+      },
+      {
+        "id": "rm01-5f9320e4-e348-47b7-bd15-07e78ebc51e5",
+        "logical_key": "AR01-03/acknowledged/B/3",
+        "payload_digest": "9e9b68ad18e92f759a5711ecadeeb6cb4d0e54307be781237626c97f66776073",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1944,
+        "sends": 1,
+        "created": 1793193409.7254927,
+        "finished": 1793193414.0521567,
+        "usage_json": "{\"completion_tokens\":753,\"prompt_cache_hit_tokens\":2688,\"prompt_cache_miss_tokens\":778,\"prompt_tokens\":3466,\"prompt_tokens_details\":{\"cached_tokens\":2688},\"total_tokens\":4219}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":8,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":12670,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"9e9b68ad18e92f759a5711ecadeeb6cb4d0e54307be781237626c97f66776073\"}"
+      },
+      {
+        "id": "rm01-eb51fe11-9b42-457b-85c1-3a6700c81b8e",
+        "logical_key": "AR01-03/failed/A/1",
+        "payload_digest": "ea686abefb00dd5b0394a3c57fdf23855eebc0763484174384557b9e95fe006e",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 843,
+        "sends": 1,
+        "created": 1793193416.9046388,
+        "finished": 1793193418.2497065,
+        "usage_json": "{\"completion_tokens\":108,\"prompt_cache_hit_tokens\":2048,\"prompt_cache_miss_tokens\":330,\"prompt_tokens\":2378,\"prompt_tokens_details\":{\"cached_tokens\":2048},\"total_tokens\":2486}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":9331,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"ea686abefb00dd5b0394a3c57fdf23855eebc0763484174384557b9e95fe006e\"}"
+      },
+      {
+        "id": "rm01-f5e56728-7603-43a2-b701-5ba267fe7d44",
+        "logical_key": "AR01-03/failed/A/2",
+        "payload_digest": "7f05ce4cc463b561a9a9af7789637f693b2aadeb018cf0a089cedd59878985bd",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1062,
+        "sends": 1,
+        "created": 1793193418.4464965,
+        "finished": 1793193419.642436,
+        "usage_json": "{\"completion_tokens\":55,\"prompt_cache_hit_tokens\":1664,\"prompt_cache_miss_tokens\":1656,\"prompt_tokens\":3320,\"prompt_tokens_details\":{\"cached_tokens\":1664},\"total_tokens\":3375}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":11947,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"7f05ce4cc463b561a9a9af7789637f693b2aadeb018cf0a089cedd59878985bd\"}"
+      },
+      {
+        "id": "rm01-e5b8db5f-8702-40d0-aeaf-6ec1c444ae4e",
+        "logical_key": "AR01-03/failed/A/3",
+        "payload_digest": "767e3a79793581e37dcac013c4670e04db69f46adf2f9bcf5a0df93c51c4a55e",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1793,
+        "sends": 1,
+        "created": 1793193419.8484068,
+        "finished": 1793193423.4077158,
+        "usage_json": "{\"completion_tokens\":524,\"prompt_cache_hit_tokens\":1664,\"prompt_cache_miss_tokens\":2214,\"prompt_tokens\":3878,\"prompt_tokens_details\":{\"cached_tokens\":1664},\"total_tokens\":4402}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":13696,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"767e3a79793581e37dcac013c4670e04db69f46adf2f9bcf5a0df93c51c4a55e\"}"
+      },
+      {
+        "id": "rm01-4b03697d-5edc-4d62-8435-74e532272941",
+        "logical_key": "AR01-03/failed/B/1",
+        "payload_digest": "92dee2b2d50c3778abfd40bbfd34b6a2d79f841fe2db33cf416f73bae9abcdd5",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 535,
+        "sends": 1,
+        "created": 1793193424.816356,
+        "finished": 1793193426.0918934,
+        "usage_json": "{\"completion_tokens\":98,\"prompt_cache_hit_tokens\":1152,\"prompt_cache_miss_tokens\":239,\"prompt_tokens\":1391,\"prompt_tokens_details\":{\"cached_tokens\":1152},\"total_tokens\":1489}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":5371,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"92dee2b2d50c3778abfd40bbfd34b6a2d79f841fe2db33cf416f73bae9abcdd5\"}"
+      },
+      {
+        "id": "rm01-89f4b599-eaa8-45b9-88b1-c5b8783d12b5",
+        "logical_key": "AR01-03/failed/B/2",
+        "payload_digest": "c8df6959fc1db44cf29114d54d991eda34eef8b6d249da7f650bd1a9d468fc27",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 984,
+        "sends": 1,
+        "created": 1793193426.7921262,
+        "finished": 1793193428.4691522,
+        "usage_json": "{\"completion_tokens\":172,\"prompt_cache_hit_tokens\":1408,\"prompt_cache_miss_tokens\":1181,\"prompt_tokens\":2589,\"prompt_tokens_details\":{\"cached_tokens\":1408},\"total_tokens\":2761}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":5,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":9538,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"c8df6959fc1db44cf29114d54d991eda34eef8b6d249da7f650bd1a9d468fc27\"}"
+      },
+      {
+        "id": "rm01-64d81933-1fbd-4cba-9ab5-f481bd918fa9",
+        "logical_key": "AR01-03/failed/B/3",
+        "payload_digest": "dce8981aba83277088f09f31c96d3b1399879ddb1572d5ed78cbd2d826bd79fc",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1213,
+        "sends": 1,
+        "created": 1793193428.6847878,
+        "finished": 1793193430.3919222,
+        "usage_json": "{\"completion_tokens\":124,\"prompt_cache_hit_tokens\":2688,\"prompt_cache_miss_tokens\":858,\"prompt_tokens\":3546,\"prompt_tokens_details\":{\"cached_tokens\":2688},\"total_tokens\":3670}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":8,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":12942,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"dce8981aba83277088f09f31c96d3b1399879ddb1572d5ed78cbd2d826bd79fc\"}"
+      },
+      {
+        "id": "rm01-ccd7bd73-412f-49b3-bac2-b543a7f48f28",
+        "logical_key": "AR01-03/failed/B/4",
+        "payload_digest": "ed1b94b09b8b608f31b6162401c76b189775991c0efc055d9753c4a0b20c0b87",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 2119,
+        "sends": 1,
+        "created": 1793193430.535387,
+        "finished": 1793193435.0759695,
+        "usage_json": "{\"completion_tokens\":726,\"prompt_cache_hit_tokens\":3584,\"prompt_cache_miss_tokens\":573,\"prompt_tokens\":4157,\"prompt_tokens_details\":{\"cached_tokens\":3584},\"total_tokens\":4883}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":10,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":15280,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"ed1b94b09b8b608f31b6162401c76b189775991c0efc055d9753c4a0b20c0b87\"}"
+      },
+      {
+        "id": "rm01-bfe0f617-67c3-42d7-998a-616b9611ddd9",
+        "logical_key": "AR01-04/different-event/A/1",
+        "payload_digest": "6f70439ba2619347aaed538118b61c242802ec45eacf73c6998ed9548d43a8ed",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 866,
+        "sends": 1,
+        "created": 1793193437.9466722,
+        "finished": 1793193438.9685116,
+        "usage_json": "{\"completion_tokens\":130,\"prompt_cache_hit_tokens\":2048,\"prompt_cache_miss_tokens\":318,\"prompt_tokens\":2366,\"prompt_tokens_details\":{\"cached_tokens\":2048},\"total_tokens\":2496}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":9332,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"6f70439ba2619347aaed538118b61c242802ec45eacf73c6998ed9548d43a8ed\"}"
+      },
+      {
+        "id": "rm01-02d70c36-dff4-4391-b7e2-d118252f01d6",
+        "logical_key": "AR01-04/different-event/A/2",
+        "payload_digest": "89a802b97d5fe678cffed9cf89212269814e38a19b8458dee6ed493e5f385f4f",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1182,
+        "sends": 1,
+        "created": 1793193439.155793,
+        "finished": 1793193440.5212915,
+        "usage_json": "{\"completion_tokens\":76,\"prompt_cache_hit_tokens\":1664,\"prompt_cache_miss_tokens\":1970,\"prompt_tokens\":3634,\"prompt_tokens_details\":{\"cached_tokens\":1664},\"total_tokens\":3710}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":13028,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"89a802b97d5fe678cffed9cf89212269814e38a19b8458dee6ed493e5f385f4f\"}"
+      },
+      {
+        "id": "rm01-27b90d15-7010-4ae9-9801-d94134544864",
+        "logical_key": "AR01-04/different-event/A/3",
+        "payload_digest": "236544d0a837488585f141d59da4d80b9017bd9ec39a532aa02491af34d09688",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 2012,
+        "sends": 1,
+        "created": 1793193440.7078784,
+        "finished": 1793193444.7896063,
+        "usage_json": "{\"completion_tokens\":627,\"prompt_cache_hit_tokens\":1664,\"prompt_cache_miss_tokens\":2534,\"prompt_tokens\":4198,\"prompt_tokens_details\":{\"cached_tokens\":1664},\"total_tokens\":4825}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":14593,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"236544d0a837488585f141d59da4d80b9017bd9ec39a532aa02491af34d09688\"}"
+      },
+      {
+        "id": "rm01-198fc8f3-4b86-4173-83d8-aeb79521053b",
+        "logical_key": "AR01-04/different-event/B/1",
+        "payload_digest": "11d7d534ad40dfb9c60479e62b333f7f46dce50e20af662f54e318daf104060c",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 576,
+        "sends": 1,
+        "created": 1793193446.2568738,
+        "finished": 1793193447.5674665,
+        "usage_json": "{\"completion_tokens\":131,\"prompt_cache_hit_tokens\":1152,\"prompt_cache_miss_tokens\":241,\"prompt_tokens\":1393,\"prompt_tokens_details\":{\"cached_tokens\":1152},\"total_tokens\":1524}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":5372,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"11d7d534ad40dfb9c60479e62b333f7f46dce50e20af662f54e318daf104060c\"}"
+      },
+      {
+        "id": "rm01-e62df95b-5bc4-48bd-8ef8-baab6c73c5fe",
+        "logical_key": "AR01-04/different-event/B/2",
+        "payload_digest": "439ffef6d904c382ca6600216eafbac5a54d4bee44bb9999329aa7b53631318c",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1011,
+        "sends": 1,
+        "created": 1793193447.7776072,
+        "finished": 1793193449.1757705,
+        "usage_json": "{\"completion_tokens\":128,\"prompt_cache_hit_tokens\":1408,\"prompt_cache_miss_tokens\":1449,\"prompt_tokens\":2857,\"prompt_tokens_details\":{\"cached_tokens\":1408},\"total_tokens\":2985}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":5,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":10282,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"439ffef6d904c382ca6600216eafbac5a54d4bee44bb9999329aa7b53631318c\"}"
+      },
+      {
+        "id": "rm01-d3e97b3a-8c93-4891-8933-543e690873f2",
+        "logical_key": "AR01-04/different-event/B/3",
+        "payload_digest": "67d118bd7eae6a6e57f7d1ce56bfb0c0e6c95e14bc877c741ac69466ccbaa820",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 2174,
+        "sends": 1,
+        "created": 1793193450.014716,
+        "finished": 1793193454.5610955,
+        "usage_json": "{\"completion_tokens\":806,\"prompt_cache_hit_tokens\":2944,\"prompt_cache_miss_tokens\":1078,\"prompt_tokens\":4022,\"prompt_tokens_details\":{\"cached_tokens\":2944},\"total_tokens\":4828}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":8,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":14463,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"67d118bd7eae6a6e57f7d1ce56bfb0c0e6c95e14bc877c741ac69466ccbaa820\"}"
+      },
+      {
+        "id": "rm01-089381d7-1661-4703-a2be-66fc9e1574a1",
+        "logical_key": "AR01-06/scope/A/1",
+        "payload_digest": "5b2dd6af7183726b5ab03cd504ed3b096daec4293223bb18050494f8a0691bdd",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 981,
+        "sends": 1,
+        "created": 1793193456.8567026,
+        "finished": 1793193459.3926759,
+        "usage_json": "{\"completion_tokens\":226,\"prompt_cache_hit_tokens\":2048,\"prompt_cache_miss_tokens\":315,\"prompt_tokens\":2363,\"prompt_tokens_details\":{\"cached_tokens\":2048},\"total_tokens\":2589}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":9343,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"5b2dd6af7183726b5ab03cd504ed3b096daec4293223bb18050494f8a0691bdd\"}"
+      },
+      {
+        "id": "rm01-866bd7aa-7ffc-46c3-9cd6-52f1aa79e2de",
+        "logical_key": "AR01-06/scope/B/1",
+        "payload_digest": "c680002403c92aae69ffaa95224f5e453e43be07897b7e49b6b477fc8c2fde6b",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 585,
+        "sends": 1,
+        "created": 1793193460.8924427,
+        "finished": 1793193462.1371067,
+        "usage_json": "{\"completion_tokens\":138,\"prompt_cache_hit_tokens\":1152,\"prompt_cache_miss_tokens\":244,\"prompt_tokens\":1396,\"prompt_tokens_details\":{\"cached_tokens\":1152},\"total_tokens\":1534}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":2,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":5383,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"c680002403c92aae69ffaa95224f5e453e43be07897b7e49b6b477fc8c2fde6b\"}"
+      },
+      {
+        "id": "rm01-ef6edcb8-17aa-4c69-ac60-b6d0d282fee4",
+        "logical_key": "AR01-06/scope/B/2",
+        "payload_digest": "f32bf54823c3259c8b12e68f207050eb95f702cf74df8f33ca2caf3bb83e5328",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 989,
+        "sends": 1,
+        "created": 1793193462.9365497,
+        "finished": 1793193464.0479686,
+        "usage_json": "{\"completion_tokens\":125,\"prompt_cache_hit_tokens\":1408,\"prompt_cache_miss_tokens\":1388,\"prompt_tokens\":2796,\"prompt_tokens_details\":{\"cached_tokens\":1408},\"total_tokens\":2921}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":6,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":10452,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"f32bf54823c3259c8b12e68f207050eb95f702cf74df8f33ca2caf3bb83e5328\"}"
+      },
+      {
+        "id": "rm01-45290b44-69c7-49a4-88d9-d81e3865b926",
+        "logical_key": "AR01-06/scope/B/3",
+        "payload_digest": "7cfc643bb780c884c685d7fcb67ecc91333d74d305fedfb26a42b16e6e5aa82c",
+        "status": "SETTLED",
+        "reserved_micro": 317031,
+        "charge_micro": 1482,
+        "sends": 1,
+        "created": 1793193464.2678852,
+        "finished": 1793193467.2785044,
+        "usage_json": "{\"completion_tokens\":402,\"prompt_cache_hit_tokens\":2816,\"prompt_cache_miss_tokens\":515,\"prompt_tokens\":3331,\"prompt_tokens_details\":{\"cached_tokens\":2816},\"total_tokens\":3733}",
+        "error": null,
+        "bound_json": "{\"absolute_billing_guarantee\":false,\"assumptions\":[\"vendor enforces documented context and max_tokens limits\",\"disabled thinking and documented peak rates apply\"],\"basis\":\"DOCUMENTED_CONTEXT_CAP_AND_ACTUAL_WIRE_OUTPUT_LIMIT\",\"input_includes\":\"messages + all tool schemas + server framing; no byte/token ratio assumed\",\"input_upper_tokens\":1048576,\"message_count\":9,\"output_upper_tokens\":2048,\"policy\":\"REQUEST_WIRE_P1_2048_V1\",\"prepared_json_bytes_audit_only\":12421,\"reserve_micro\":317031,\"sources\":[\"https://api-docs.deepseek.com/quick_start/pricing/\",\"https://api-docs.deepseek.com/api/create-chat-completion/\"],\"tool_count\":6,\"tool_schema_digest\":\"b02f47556f196f9d5fc15d3868ebefd56b38bdb1ec7ffe68f1be1924691f1918\",\"wire_semantic_digest\":\"7cfc643bb780c884c685d7fcb67ecc91333d74d305fedfb26a42b16e6e5aa82c\"}"
+      }
+    ],
+    "unresolved": 0,
+    "policy": {
+      "release": "AR01-RM01-P1-2048-V1",
+      "cap_micro": 500000,
+      "request_limit": 80,
+      "input_peak_per_million": "0.30",
+      "output_peak_per_million": "1.20",
+      "reservation_micro": null,
+      "single_in_flight": true,
+      "reservation_policy": "REQUEST_WIRE_P1_2048_V1",
+      "input_context_ceiling": 1048576,
+      "wire_max_tokens": 2048
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "group": "B",
+  "task_id": "task-430b5c90-c917-4a67-b4b6-534becea96e0",
+  "run_id": "run-453eabbb-10a4-48e8-98eb-89dd18ed2e84",
+  "initial_business_digest": "9ab9b2bcf0ab12d6c75083a5dba951ae31dd343179560c46cfd84f32d843db04",
+  "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "attempt_counts": {
+    "MODEL": 3,
+    "MCP": 4
+  },
+  "model_dispatches": 3,
+  "tool_names": [
+    "get_callback_transport_history",
+    "get_receiver_processing",
+    "get_callback_delivery",
+    "get_order_status"
+  ],
+  "result": {
+    "action": "answer",
+    "result_state": "PARTIAL",
+    "answer": "【event-e1 的重试历史】来源：get_callback_transport_history(event_id=event-e1)，数据源 sqlite:s3_transport_attempts（记录于 2026-10-28T13:17:27Z，transport_history_version=3）。\n· 仅有 1 次传输尝试：attempt_no=1，transport_request_id=transport-b67a8333-42c2-46e1-866f-775fcea4eef4，关联 order ar01-order、order_version=1、event-e1。\n· 结果：HTTP 503，失败码 TEMPORARY_UNAVAILABLE，receiver_state=UNAVAILABLE。\n· 重试安排：retry_state=SCHEDULED，retry_at=2026-10-28T13:18:16.116760Z，attempt_count=1，max_attempts=10。即首次尝试被接收方以临时不可用拒绝，改为计划在约 60 秒后重试，预算内还剩 9 次。\n· 覆盖度说明：该查询返回 coverage=RECORDED_OBSERVATIONS_ONLY，未截断；但“无记录不等于未发送”，发送到落库之间的崩溃窗口不是完整审计，因此 13:18:16 的计划重试是否真的发出，目前没有观测证据。\n\n【event-e1 当前处理状态】无法确定（UNKNOWN）。原因：get_receiver_processing 返回的接收方记录属于 event-e2，不是 event-e1 —— event-e2 状态 PROCESSED、accepted_at 2026-10-28T13:17:16.619Z、version=3；get_callback_delivery 同样返回 event-e2（status=ACKNOWLEDGED、HTTP 202、retry_state=NOT_APPLICABLE、transport_request_id=transport-c2e95ee4-…）。另一个 Event（event-e2）的投递成功与处理完成，不能证明目标 event-e1 的完成或处理状态。\n\n【关联解读】\n· 两个 Event 同属订单 ar01-order、order_version=1：event-e1 在第 1 次传输即收到 503 并被安排重试；event-e2 在第 1 次传输收到 202（receiver_state=QUEUED，仅表示已接收/受理，不等于处理完成），随后接收方记录显示 PROCESSED。二者是不同 Event 的不同投递结果。\n· 订单侧读取（http:loopback-async-orders，HTTP 200）显示订单 ar01-order 在 order_version=1 上状态为 COMPLETED；注意订单完成状态本身不能反推 event-e1 这一具体 Event 已被接收方处理。\n\n【未知/未确认项】\n1. event-e1 的当前接收方处理状态：无可用记录（现有 receiver/delivery 读取对象为 event-e2）。\n2. event-e1 的 retry_at 2026-10-28T13:18:16Z 重试是否已执行、结果如何：无观测记录。\n3. event-e1 是否最终达到 ACK/PROCESSED：未知；纯 503 + SCHEDULED 只说明该次尝试失败并已排期重试。\n以上仅为当前 Run 的只读观测事实，不代表我执行了任何重试、补发或配置变更。",
+    "target_event_id": "event-e1",
+    "processing_claim": "UNKNOWN",
+    "stop_reason": "MODEL_ANSWER",
+    "delivery_mode": "MODEL",
+    "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+  },
+  "business_state_unchanged": true,
+  "elapsed_seconds": 9.748737699999765,
+  "provider_tokens": [
+    {
+      "prompt_tokens": 1393,
+      "completion_tokens": 131,
+      "total_tokens": 1524,
+      "prompt_tokens_details": {
+        "cached_tokens": 1152
+      },
+      "prompt_cache_hit_tokens": 1152,
+      "prompt_cache_miss_tokens": 241
+    },
+    {
+      "prompt_tokens": 2857,
+      "completion_tokens": 128,
+      "total_tokens": 2985,
+      "prompt_tokens_details": {
+        "cached_tokens": 1408
+      },
+      "prompt_cache_hit_tokens": 1408,
+      "prompt_cache_miss_tokens": 1449
+    },
+    {
+      "prompt_tokens": 4022,
+      "completion_tokens": 806,
+      "total_tokens": 4828,
+      "prompt_tokens_details": {
+        "cached_tokens": 2944
+      },
+      "prompt_cache_hit_tokens": 2944,
+      "prompt_cache_miss_tokens": 1078
+    }
+  ],
+  "provider_cost_usd": null,
+  "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+}

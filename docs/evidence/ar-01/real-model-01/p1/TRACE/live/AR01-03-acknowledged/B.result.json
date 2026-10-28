@@ -1,0 +1,65 @@
+{
+  "group": "B",
+  "task_id": "task-e0699cd4-ecc6-442b-94b7-7271c27cdf08",
+  "run_id": "run-7857990f-188d-4c41-a762-c9041ea39a76",
+  "initial_business_digest": "430ee6524cbb96bb6c6b55fa169936fdf4a46e1c25c05ca940378a35cbad8e4b",
+  "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "attempt_counts": {
+    "MODEL": 3,
+    "MCP": 4
+  },
+  "model_dispatches": 3,
+  "tool_names": [
+    "get_callback_delivery",
+    "get_order_status",
+    "get_receiver_processing",
+    "get_callback_transport_history"
+  ],
+  "result": {
+    "action": "answer",
+    "result_state": "ANSWERED",
+    "answer": "根据目前可读取的事实，没有证据表明回调投递失败。\n\n已核实的情况（观测时间 2026-10-28T13:16:47Z~13:16:49Z）：\n1. 投递记录（s3_deliveries，订单 ar01-order，订单版本 1）：status=ACKNOWLEDGED，receiver_http_status=202，failure_code=null，retry_state=NOT_APPLICABLE，retry_at=null，max_attempts=3，attempt_count=0。绑定的事件为 event-06a5c975-4cd6-42cc-a54c-05e84e312c5c，Transport 请求为 transport-e670117b-c550-44dd-b571-2611525ba92a。\n2. 收方处理状态（s3_receivers）：status=QUEUED，accepted_at=2026-10-28T13:15:31.268101Z，processing_sla_seconds=300。\n3. 订单状态：COMPLETED，order_version=1。\n4. 传输历史查询（不带 event_id，针对本订单）：返回的 attempts 为空，coverage 为 RECORDED_OBSERVATIONS_ONLY，并明确说明“无记录不代表没有发送；send-to-persist 崩溃窗口的时间段不构成完整审计”。\n\n结论与需注意之处：\n- HTTP 202 只表示请求被接受，并不表示已经处理完成。因此既不能说“投递失败”，也不能说“回调已处理完成”。目前更准确的判断是：传输层已接受该事件，但收方仍处于 QUEUED，尚未处理。\n- 处理 SLA 为 300 秒；从 accepted_at（13:15:31Z）到观测时刻（13:16:49Z）大约 78 秒，仍在 SLA 窗口内，并且没有出现失败码或重试安排。\n- 你怀疑的“投递失败”这一说法，在本 Run 可读取的事实中没有依据。之所以没有依据，不是因为存在反面证据；需要说明的是，我也没有看到可能产生失败的事实。\n\n未知项（如实说明）：\n- 尚未返回已持久化的 Transport Attempt 记录；这不是完整审计，无法据“无记录”排除某次尝试或崩溃窗口内的发送。\n- 该事件是否会在 SLA 内处理完成、何时完成，目前无法确认（收方仍为 QUEUED）。\n- 是否存在其他相关事件或下游影响，也不在本次观测范围内。\n\n建议：由于事件仍处于 QUEUED，并处在 300 秒 SLA 内，可在 SLA 到期（约 2026-10-28T13:20:31Z 之后）再复查收方处理状态与传输历史，届时再判断是否需要按失败处理。本次未做任何发送、重试或配置变更。\n\n信息来源：get_callback_delivery（s3_deliveries）、get_receiver_processing（s3_receivers）、get_order_status（http:loopback-async-orders）、get_callback_transport_history（s3_transport_attempts）。",
+    "target_event_id": "event-06a5c975-4cd6-42cc-a54c-05e84e312c5c",
+    "processing_claim": "QUEUED",
+    "stop_reason": "MODEL_ANSWER",
+    "delivery_mode": "MODEL",
+    "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+  },
+  "business_state_unchanged": true,
+  "elapsed_seconds": 9.150345000001835,
+  "provider_tokens": [
+    {
+      "prompt_tokens": 1391,
+      "completion_tokens": 94,
+      "total_tokens": 1485,
+      "prompt_tokens_details": {
+        "cached_tokens": 1152
+      },
+      "prompt_cache_hit_tokens": 1152,
+      "prompt_cache_miss_tokens": 239
+    },
+    {
+      "prompt_tokens": 2567,
+      "completion_tokens": 124,
+      "total_tokens": 2691,
+      "prompt_tokens_details": {
+        "cached_tokens": 1408
+      },
+      "prompt_cache_hit_tokens": 1408,
+      "prompt_cache_miss_tokens": 1159
+    },
+    {
+      "prompt_tokens": 3466,
+      "completion_tokens": 753,
+      "total_tokens": 4219,
+      "prompt_tokens_details": {
+        "cached_tokens": 2688
+      },
+      "prompt_cache_hit_tokens": 2688,
+      "prompt_cache_miss_tokens": 778
+    }
+  ],
+  "provider_cost_usd": null,
+  "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+}

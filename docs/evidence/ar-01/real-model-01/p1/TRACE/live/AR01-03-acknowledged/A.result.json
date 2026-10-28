@@ -1,0 +1,102 @@
+{
+  "group": "A",
+  "task_id": "task-af276181-1207-4bc7-926d-40c29e216443",
+  "run_id": "run-7e1700b0-03ed-48f7-84ef-98c20c042a8c",
+  "initial_business_digest": "430ee6524cbb96bb6c6b55fa169936fdf4a46e1c25c05ca940378a35cbad8e4b",
+  "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "attempt_counts": {
+    "MODEL": 5,
+    "MCP": 4
+  },
+  "model_dispatches": 5,
+  "tool_names": [
+    "get_order_status",
+    "get_callback_delivery",
+    "get_callback_transport_history",
+    "get_receiver_processing"
+  ],
+  "result": {
+    "action": "answer",
+    "result_state": "ANSWERED",
+    "target_event_id": "event-06a5c975-4cd6-42cc-a54c-05e84e312c5c",
+    "processing_claim": "QUEUED",
+    "answer": "结论：目前没有证据表明回调投递失败，反而是“已受理、接收方排队中”。\n\n依据（本轮实时读取，时间均为 2026-10-28 UTC）：\n1) 订单状态：订单 ar01-order（订单版本 1）状态 COMPLETED，HTTP 200（13:16:35.95 观测）。200 只说明读取成功，但订单本身已完成。\n2) 回调投递：目标事件 event-06a5c975-4cd6-42cc-a54c-05e84e312c5c（order_version 1，service_id orders-async-demo，tenant-a），transport_request_id transport-e670117b-c550-44dd-b571-2611525ba92a，状态 ACKNOWLEDGED，attempt_count=0，max_attempts=3，failure_code=null，retry_state=NOT_APPLICABLE，retry_at=null，接收方 HTTP 202（13:16:37.33 观测）。202 是受理，不代表处理完成。\n3) 传输历史：对该订单的查询返回 RECORDED_OBSERVATIONS_ONLY，attempts 为空，truncated=false；这只是“没有已记录的传输尝试观察”，不构成失败证明，也不能证明一定没发送（发送与落库之间的空窗不在完整审计范围内）。\n4) 接收方处理状态（仅针对该事件）：status=QUEUED，version=1，accepted_at=2026-10-28T13:15:31.268101Z，processing_sla_seconds=300（13:16:40.17 观测）。\n\n尚属未知的部分：接收方后续是否会转为处理完成，以及 300 秒处理时限内是否会出现失败，目前都未知（UNKNOWN），不能由旧的 202/ACKNOWLEDGED 或订单快照推断为已完成或已失败。建议在 SLA 窗口后再读取同一事件的接收方处理状态来确认。",
+    "candidate_updates": [
+      {
+        "reference": "call-750e2550-2350-4b82-b90e-84461df0dceb|call_01_v1Lbg9YwpQQEYMOMmkCd6219",
+        "decision": "DROP",
+        "reason": "回调投递与接收方排队状态已取得，无需重复读取"
+      },
+      {
+        "reference": "call-750e2550-2350-4b82-b90e-84461df0dceb|call_02_CDYOAvuhsSGCwTAt4Os85508",
+        "decision": "DROP",
+        "reason": "无未执行的候选需要保留"
+      },
+      {
+        "reference": "call-6f6027dd-24ce-4bfc-a051-6b07f56b3e46|call_01_h4G9NZZJbEu12CFAChDO0744",
+        "decision": "DROP",
+        "reason": "接收方当前状态已读取，QUEUED 已确认"
+      }
+    ],
+    "stop_reason": "MODEL_ANSWER",
+    "delivery_mode": "MODEL",
+    "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+  },
+  "business_state_unchanged": true,
+  "elapsed_seconds": 12.71815890000289,
+  "provider_tokens": [
+    {
+      "prompt_tokens": 2367,
+      "completion_tokens": 158,
+      "total_tokens": 2525,
+      "prompt_tokens_details": {
+        "cached_tokens": 2048
+      },
+      "prompt_cache_hit_tokens": 2048,
+      "prompt_cache_miss_tokens": 319
+    },
+    {
+      "prompt_tokens": 3239,
+      "completion_tokens": 115,
+      "total_tokens": 3354,
+      "prompt_tokens_details": {
+        "cached_tokens": 1664
+      },
+      "prompt_cache_hit_tokens": 1664,
+      "prompt_cache_miss_tokens": 1575
+    },
+    {
+      "prompt_tokens": 4284,
+      "completion_tokens": 98,
+      "total_tokens": 4382,
+      "prompt_tokens_details": {
+        "cached_tokens": 1664
+      },
+      "prompt_cache_hit_tokens": 1664,
+      "prompt_cache_miss_tokens": 2620
+    },
+    {
+      "prompt_tokens": 5002,
+      "completion_tokens": 54,
+      "total_tokens": 5056,
+      "prompt_tokens_details": {
+        "cached_tokens": 1664
+      },
+      "prompt_cache_hit_tokens": 1664,
+      "prompt_cache_miss_tokens": 3338
+    },
+    {
+      "prompt_tokens": 5552,
+      "completion_tokens": 694,
+      "total_tokens": 6246,
+      "prompt_tokens_details": {
+        "cached_tokens": 1664
+      },
+      "prompt_cache_hit_tokens": 1664,
+      "prompt_cache_miss_tokens": 3888
+    }
+  ],
+  "provider_cost_usd": null,
+  "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+}

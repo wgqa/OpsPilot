@@ -1,0 +1,64 @@
+{
+  "group": "A",
+  "task_id": "task-3a8c470f-7528-47d6-bb30-76258b8dc1b8",
+  "run_id": "run-89df64bf-a048-4d19-b598-00baf6f5f179",
+  "initial_business_digest": "9280d913aeba0f6bae53e6e2a392a8a118b446a96c58ae4fa6e6c6c080ff8b32",
+  "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "attempt_counts": {
+    "MODEL": 3,
+    "MCP": 2
+  },
+  "model_dispatches": 3,
+  "tool_names": [
+    "get_callback_delivery",
+    "get_callback_transport_history"
+  ],
+  "result": {
+    "action": "answer",
+    "result_state": "ANSWERED",
+    "answer": "已查明：该订单（ar01-order）的异步回调事件 event-d1577668-8cfa-427a-948d-33d13b84cd1a 确实在第一次投递传输时失败了，但不是“最终失败”。\n\n关键事实（来自本次实时读取）：\n- 订单快照：order_version=1，回调事件 status=FAILED，attempt_count=1，max_attempts=3（get_callback_delivery，观测时间 2026-10-28T13:16:58Z）。\n- 实际传输结果：transport_request_id=transport-526fddfa-0c46-4c7e-9475-b082bdb278da，接收方返回 HTTP 503，failure_code=TEMPORARY_UNAVAILABLE，接收方状态 UNAVAILABLE（该次尝试的时间点观测）。\n- 重试状态：retry_state=SCHEDULED，retry_at=2026-10-28T13:17:54.528824Z，即系统已安排在约 1 分钟后再投。\n\n结论与不确定项：\n1) “是否失败”——是，当前这一事件确有一次传输失败（503 临时不可用），失败是临时性错误，而非永久拒绝。\n2) “是否最终失败”——否，尚不能认定：已排定重试，且 max_attempts=3，仅用掉 1 次尝试。\n3) 该事件的接收方是否已处理成功——UNKNOWN。当前没有接收方处理状态记录；503 只描述那一次尝试，不能推断后续重试的结果。\n4) 传输历史查询返回空列表（coverage=RECORDED_OBSERVATIONS_ONLY），按规则“无记录不等于未发送”，因此不能据此断言只发生过一次尝试或没有其他发送；发送到落库之间的崩溃窗口不是完整审计。\n\n建议下一步（只读）：在 retry_at 之后再次读取该事件的传输/接收方处理状态，确认重试是否成功、该 Event 最终是否被接收方处理；在此之前请勿手工重发。",
+    "target_event_id": "event-d1577668-8cfa-427a-948d-33d13b84cd1a",
+    "processing_claim": "UNKNOWN",
+    "candidate_updates": [],
+    "stop_reason": "MODEL_ANSWER",
+    "delivery_mode": "MODEL",
+    "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+  },
+  "business_state_unchanged": true,
+  "elapsed_seconds": 7.949814799998421,
+  "provider_tokens": [
+    {
+      "prompt_tokens": 2378,
+      "completion_tokens": 108,
+      "total_tokens": 2486,
+      "prompt_tokens_details": {
+        "cached_tokens": 2048
+      },
+      "prompt_cache_hit_tokens": 2048,
+      "prompt_cache_miss_tokens": 330
+    },
+    {
+      "prompt_tokens": 3320,
+      "completion_tokens": 55,
+      "total_tokens": 3375,
+      "prompt_tokens_details": {
+        "cached_tokens": 1664
+      },
+      "prompt_cache_hit_tokens": 1664,
+      "prompt_cache_miss_tokens": 1656
+    },
+    {
+      "prompt_tokens": 3878,
+      "completion_tokens": 524,
+      "total_tokens": 4402,
+      "prompt_tokens_details": {
+        "cached_tokens": 1664
+      },
+      "prompt_cache_hit_tokens": 1664,
+      "prompt_cache_miss_tokens": 2214
+    }
+  ],
+  "provider_cost_usd": null,
+  "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+}

@@ -1,0 +1,184 @@
+{
+  "status": "ACCEPTANCE_CANDIDATE",
+  "execution_status": "COMPLETED_FIVE_PAIRS_THEN_STOPPED",
+  "base_sha": "88e8e8ab7577e02b960a27667950515e7c5e0c5a",
+  "freeze_sha": "d667762e4a6feccf8701c0d6ec94bee22142b80e",
+  "source_sha": "ff8fb4c48aca609c73d0aa77c4647b30c960c7f0",
+  "final_evidence_commit": "Commit containing this file; exact HEAD reported after commit, no self-referential hash.",
+  "repo": "wgqa/OpsPilot",
+  "branch": "codex/ar01-free-agent",
+  "authorization": "CURRENT_USER_MESSAGE_2026-10-28_AUTHORIZED_FOR_BOUNDED_P1",
+  "authorization_consumed": "FIXED_FIVE_PAIRS_NO_EXTRA_RUNS_OR_RERUNS",
+  "reference_remote_main": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "config_file": "LIVE_PREFLIGHT.json",
+  "configuration_version": "P1_2048_V1",
+  "fee_policy": "REQUEST_WIRE_P1_2048_V1",
+  "reserve_micro_per_request": 317031,
+  "limits": {
+    "cost_cap_usd": "0.50",
+    "provider_requests": 80,
+    "mcp_attempts": 60,
+    "runs": 10,
+    "per_run_model": 8,
+    "per_run_mcp": 6,
+    "single_flight": true,
+    "automatic_retries": 0
+  },
+  "observed": {
+    "runs": 10,
+    "provider_requests": 28,
+    "mcp_attempts": 27,
+    "http_200": 28,
+    "tool_call_finishes": 18,
+    "stop_finishes": 10,
+    "length_finishes": 0,
+    "max_completion_tokens": 806,
+    "prompt_tokens": 84228,
+    "completion_tokens": 7642,
+    "total_tokens": 91870,
+    "conservative_rounded_ledger_usd": "0.034451",
+    "exact_peak_no_cache_estimate_usd": "0.0344388",
+    "offpeak_with_reported_cache_estimate_usd": "0.010088136",
+    "invoice_verified": false,
+    "unresolved_fees": 0,
+    "all_reservations_settled_once": true,
+    "started_at": "2026-10-28T13:16:18.083+00:00",
+    "finished_at": "2026-10-28T13:17:47.621+00:00",
+    "wall_seconds_including_preparation": 89.538,
+    "model_alias": "deepseek-flash",
+    "fingerprint": "bc19ba97cbe016479903222bb1578db6",
+    "backend_exact_version_independently_attested": false,
+    "protected_business_snapshot_unchanged_groups": 10,
+    "expected_scope_mcp_denials": 1,
+    "detected_unauthorized_fact_reads": 0,
+    "detected_unauthorized_business_writes": 0
+  },
+  "tests": [
+    {
+      "id": "01",
+      "command_core": ".venv-stageb/Scripts/python.exe -m pytest -q experiments/ar01_free_agent/tests/test_p1.py",
+      "passed": 5,
+      "deselected": 0,
+      "seconds": 27.76,
+      "log": "runs/01-local-preflight.log",
+      "capture_wrapper": "Original stdout retained; exact basetemp/capture wrapper not embedded in original log.",
+      "exit_code": 0
+    },
+    {
+      "id": "02",
+      "command_core": ".venv-stageb/Scripts/python.exe -m pytest -q experiments/ar01_free_agent/tests/test_agent.py experiments/ar01_free_agent/tests/test_real_model.py experiments/ar01_free_agent/tests/test_fee_hf01.py",
+      "passed": 77,
+      "deselected": 0,
+      "seconds": 124.49,
+      "log": "runs/02-existing-experiment-regression.log",
+      "capture_wrapper": "Original stdout retained; exact basetemp/capture wrapper not embedded in original log.",
+      "exit_code": 0
+    },
+    {
+      "id": "03",
+      "command_core": ".venv-stageb/Scripts/python.exe -m pytest -q tests/test_s1_business.py tests/test_d3_actions.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_ttl_fix_01_integrity.py",
+      "passed": 72,
+      "deselected": 0,
+      "seconds": 99.62,
+      "log": "runs/03-safety-regression.log",
+      "capture_wrapper": "Original stdout retained; exact basetemp/capture wrapper not embedded in original log.",
+      "exit_code": 0
+    },
+    {
+      "id": "04",
+      "command_core": ".venv-stageb/Scripts/python.exe -m pytest -q experiments/ar01_free_agent/tests/test_p1.py -k semantic_failure",
+      "passed": 1,
+      "deselected": 5,
+      "seconds": 1.56,
+      "log": "runs/04-semantic-failure-gate.log",
+      "capture_wrapper": "Separate pre-paid clarification test; original stdout retained.",
+      "exit_code": 0
+    },
+    {
+      "id": "06",
+      "command": ".venv-stageb/Scripts/python.exe -m pytest -q experiments/ar01_free_agent/tests/test_p1.py --basetemp .tmp/ar01-p1-final-06",
+      "environment": {
+        "PYTHONUTF8": "1",
+        "AR01_P1_LOCAL_TRACE_DIR": "docs/evidence/ar-01/real-model-01/p1/TRACE/local-final-06"
+      },
+      "passed": 6,
+      "deselected": 0,
+      "seconds": 26.59,
+      "log": "runs/06-final-focused.log",
+      "capture_wrapper": "Exact command/environment/source and stdout saved in this log; loopback only.",
+      "exit_code": 0
+    }
+  ],
+  "final_unique_test_scope": {
+    "new_p1_tests": 6,
+    "existing_experiment_tests": 77,
+    "necessary_security_subset": 72,
+    "full_repo_pytest": "NOT_RUN"
+  },
+  "live_command": ".venv-stageb/Scripts/python.exe -m experiments.ar01_free_agent.p1 --live",
+  "live_exit_code": 0,
+  "live_log": "runs/05-live.log",
+  "live_rerun": "PROHIBITED_AUTHORIZATION_COMPLETED",
+  "metrics_file": "METRICS.json",
+  "qualitative_assessment_file": "EVALUATION.json",
+  "trace_index": "TRACE/INDEX.json",
+  "groups": {
+    "A": {
+      "provider_requests": 14,
+      "mcp_attempts": 9,
+      "prompt_tokens": 47919,
+      "completion_tokens": 3371,
+      "cache_hit_tokens": 23552,
+      "cache_miss_tokens": 24367,
+      "seconds": 39.494,
+      "multi_tool_proposals": 5,
+      "peak_no_cache_estimate_usd": "0.0184209",
+      "offpeak_cache_rate_estimate_usd": "0.005748306"
+    },
+    "B": {
+      "provider_requests": 14,
+      "mcp_attempts": 18,
+      "prompt_tokens": 36309,
+      "completion_tokens": 4271,
+      "cache_hit_tokens": 24960,
+      "cache_miss_tokens": 11349,
+      "seconds": 44.22,
+      "multi_tool_proposals": 8,
+      "peak_no_cache_estimate_usd": "0.0160179",
+      "offpeak_cache_rate_estimate_usd": "0.004339830"
+    }
+  },
+  "not_run": [
+    "full_repo_pytest",
+    "browser_STOP",
+    "production",
+    "paid_evaluator",
+    "repeated_samples",
+    "account_invoice_check",
+    "cross_Run_user_continuity",
+    "architecture_migration",
+    "AR02"
+  ],
+  "confounds": [
+    "different_Prompt_and_Context",
+    "different_multi_tool_execution",
+    "fixed_A_then_B_and_cache",
+    "one_sample_per_variant",
+    "network_latency"
+  ],
+  "independent_main_agent_acceptance": "PENDING",
+  "main_merge": "NOT_AUTHORIZED",
+  "next_action": "STOP_FOR_MAIN_AGENT_REVIEW",
+  "closeout_audit": {
+    "log": "runs/07-closeout-audit.log",
+    "exit_code": 0,
+    "checks": [
+      "rules_and_gold_unchanged",
+      "production_diff_empty",
+      "base_to_source_no_merges",
+      "actual_dependency_versions",
+      "all_evidence_json_parseable",
+      "actual_configured_key_not_in_evidence"
+    ]
+  }
+}

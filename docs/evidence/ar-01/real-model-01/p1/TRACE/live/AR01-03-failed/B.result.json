@@ -1,0 +1,76 @@
+{
+  "group": "B",
+  "task_id": "task-f87ef827-b9bc-4b3f-a918-a433be2658f8",
+  "run_id": "run-2b4b82c0-56b1-4275-960e-8d81947eb14f",
+  "initial_business_digest": "9280d913aeba0f6bae53e6e2a392a8a118b446a96c58ae4fa6e6c6c080ff8b32",
+  "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+  "attempt_counts": {
+    "MODEL": 4,
+    "MCP": 5
+  },
+  "model_dispatches": 4,
+  "tool_names": [
+    "get_order_status",
+    "get_callback_delivery",
+    "get_receiver_processing",
+    "get_callback_transport_history",
+    "search_callback_knowledge"
+  ],
+  "result": {
+    "action": "answer",
+    "result_state": "ANSWERED",
+    "answer": "结论：截至目前可以确认的是“首次投递尝试失败，且接收方尚未收到”，但还不能判定为“回调投递最终失败”——因为该事件仍处于重试待发送（SCHEDULED）状态，尚未耗尽重试次数。\n\n依据（本次运行实际观察到的业务事实）：\n1. 绑定订单 ar01-order（订单版本 1）状态为 COMPLETED（数据源 http:loopback-async-orders，HTTP 200）。订单本身已完成，这不能证明回调已送达。\n2. 目标事件 event-d1577668-8cfa-427a-948d-33d13b84cd1a 的投递记录（sqlite:s3_deliveries）：status=FAILED，attempt_count=1，max_attempts=3，failure_code=TEMPORARY_UNAVAILABLE，接收方 HTTP 状态 503，receiver_state=UNAVAILABLE，retry_state=SCHEDULED，retry_at=2026-10-28T13:17:54.528824Z，transport_request_id=transport-526fddfa-0c46-4c7e-9475-b082bdb278da。\n3. 接收方处理状态（sqlite:s3_receivers）：status=NOT_RECEIVED，accepted_at=null。即接收方确实尚未接收该事件，更没有完成处理（ACK 也不等于处理完成）。\n4. 传输尝试历史（sqlite:s3_transport_attempts）：按该 event_id 查询返回空列表，coverage=RECORDED_OBSERVATIONS_ONLY。该工具明确说明“无记录不等于未发送”，发送到持久化的崩溃窗口不构成完整审计；因此不能用这份历史去否定或证明投递。\n5. 方法约定（本地 orders-async-demo 合同 v2，callback-retry-contract-v2）：503 只有在服务端记录了可重试失败码和当前重试策略时才是可重试的；retry_state=SCHEDULED 且带 retry_at 仍属“待发送/未结束”。EXHAUSTED 才可视为需要处置的终态，且需满足 attempt_count 达到 max_attempts 且失败响应摘要、event_id、transport request 都与当前投递行匹配。该方法只说明判定标准，具体结论由当前领域证据决定。\n\n未知项（不影响上述结论但要说明）：\n- 计划的重试（retry_at 时间点之后）是否已实际发出、是否成功，本次证据中没有记录；我也没有执行任何发送、重试或配置变更的能力。\n- 是否存在发送后未持久化的尝试（崩溃窗口），无法排除。\n- 该事件最终的接收与处理结果（accepted_at、处理完成）尚为空值，属未知。\n\n建议：以 retry_at 之后的最新投递行与接收方 processing 状态为准再复核；若届时 attempt_count 达到 3 且 retry_state=EXHAUSTED，才按最终投递失败处置。",
+    "target_event_id": "event-d1577668-8cfa-427a-948d-33d13b84cd1a",
+    "processing_claim": "NOT_RECEIVED",
+    "stop_reason": "MODEL_ANSWER",
+    "delivery_mode": "MODEL",
+    "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+  },
+  "business_state_unchanged": true,
+  "elapsed_seconds": 11.696146399997815,
+  "provider_tokens": [
+    {
+      "prompt_tokens": 1391,
+      "completion_tokens": 98,
+      "total_tokens": 1489,
+      "prompt_tokens_details": {
+        "cached_tokens": 1152
+      },
+      "prompt_cache_hit_tokens": 1152,
+      "prompt_cache_miss_tokens": 239
+    },
+    {
+      "prompt_tokens": 2589,
+      "completion_tokens": 172,
+      "total_tokens": 2761,
+      "prompt_tokens_details": {
+        "cached_tokens": 1408
+      },
+      "prompt_cache_hit_tokens": 1408,
+      "prompt_cache_miss_tokens": 1181
+    },
+    {
+      "prompt_tokens": 3546,
+      "completion_tokens": 124,
+      "total_tokens": 3670,
+      "prompt_tokens_details": {
+        "cached_tokens": 2688
+      },
+      "prompt_cache_hit_tokens": 2688,
+      "prompt_cache_miss_tokens": 858
+    },
+    {
+      "prompt_tokens": 4157,
+      "completion_tokens": 726,
+      "total_tokens": 4883,
+      "prompt_tokens_details": {
+        "cached_tokens": 3584
+      },
+      "prompt_cache_hit_tokens": 3584,
+      "prompt_cache_miss_tokens": 573
+    }
+  ],
+  "provider_cost_usd": null,
+  "evidence_level": "REAL_PROVIDER_REAL_LOCAL_MCP_HTTP"
+}
