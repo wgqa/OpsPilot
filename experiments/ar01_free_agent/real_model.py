@@ -21,7 +21,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import Field
 
 from experiments.ar01_free_agent.agent import sanitize
-from experiments.ar01_free_agent.provider_budget import BudgetStop, ExperimentBudget
+from experiments.ar01_free_agent.provider_budget import BudgetStop, ExperimentBudget, REQUEST_WIRE_V1
 from opspilot.config import ROOT, MODEL_API_KEY
 from opspilot.domain.d2 import digest_json
 
@@ -112,6 +112,17 @@ class MeteredModel(BaseChatModel):
         if specs: sdk_settings.update(tools=specs,tool_choice="auto")
         logical=f"{self.group_label}/{len(self.requests)+1}"
         payload={"messages":messages_to_dict(messages),"tools":specs,"config":asdict(self.config)}
+        if self.budget.requestwise:
+            # Installed SDK preparation, before I/O. Its extra_body is merged by
+            # OpenAI's request builder; verify this exact semantic body again at
+            # the HTTP edge. No heuristic tokenizer bound is used for pricing.
+            payload=self.sdk._get_request_payload(messages,**sdk_settings)
+            extra=payload.pop("extra_body",{})
+            if set(extra)&set(payload): raise ProviderStopped("AMBIGUOUS_EXTRA_BODY_OVERRIDE")
+            payload.update(extra)
+            expected=self.runtime.get("authorized_wire_digest")
+            if expected and digest_json(payload)!=expected:
+                raise ProviderStopped("PROBE_AUTHORIZED_WIRE_CHANGED")
         key=self.budget.reserve(logical,payload)
         self.runtime.update(reservation=key,raw=None,request_id=None,expected_tools=specs)
         self.requests.append({"logical_key":logical,"reservation_id":key})
@@ -121,7 +132,8 @@ class MeteredModel(BaseChatModel):
             if not isinstance(raw,dict): raise ProviderStopped("MISSING_RAW_PROVIDER_RESPONSE")
             # Preserve real Usage even when the response contract later fails.
             self.budget.settle(key,raw.get("usage"))
-            if not raw.get("id") or not self.runtime["request_id"]:
+            if not isinstance(raw.get("id"),str) or not raw["id"] or (
+                not self.budget.requestwise and not self.runtime["request_id"]):
                 raise ProviderStopped("MISSING_COMPLETION_OR_REQUEST_ID")
             if raw.get("model") not in {self.config.model,"DeepSeek-V4.1-Flash-1017"}:
                 raise ProviderStopped("UNEXPECTED_RESPONSE_MODEL")
@@ -129,8 +141,13 @@ class MeteredModel(BaseChatModel):
             choices=raw.get("choices")
             if not isinstance(choices,list) or len(choices)!=1 or choices[0].get("finish_reason") not in {"stop","tool_calls"}:
                 raise ProviderStopped("INCOMPLETE_OR_INVALID_COMPLETION")
+            if self.budget.requestwise and choices[0].get("message",{}).get("reasoning_content"):
+                raise ProviderStopped("NON_THINKING_RESPONSE_MISMATCH")
             ai.response_metadata.update(id=raw["id"],provider_request_id=self.runtime["request_id"],
                 provider_model=raw["model"],system_fingerprint=raw.get("system_fingerprint"))
+            if self.budget.requestwise:
+                ai.response_metadata.update(provider_correlation_id=self.runtime["request_id"] or raw["id"],
+                    provider_correlation_kind="HTTP_REQUEST_ID" if self.runtime["request_id"] else "COMPLETION_ID")
             self.trace.emit("provider_settlement",reservation_id=key,logical_key=logical,
                 sdk_usage=ai.usage_metadata,raw_usage=raw["usage"],ledger=self.budget.snapshot())
             return ChatResult(generations=[ChatGeneration(message=ai)])
@@ -176,7 +193,7 @@ def _model(*,budget,specs,trace,group_label,base_url,key,local=False):
             or payload.get("tools",[])!=runtime["expected_tools"]
             or (payload.get("tools") and payload.get("tool_choice")!="auto")):
             raise ProviderStopped("ACTUAL_WIRE_CONFIGURATION_MISMATCH")
-        budget.sent(runtime["reservation"])
+        budget.sent(runtime["reservation"],payload=payload)
         trace.emit("provider_http_request",reservation_id=runtime["reservation"],
             endpoint=str(request.url),body=payload,transport="LOCAL_PROTOCOL_STUB" if local else "LIVE_PROVIDER")
 
@@ -206,11 +223,27 @@ def build_local_model(*,base_url,budget,specs,trace,group_label):
         base_url=base_url,key="ar01-loopback-dummy-key",local=True)
 
 
-def build_live_model(*,budget,specs,trace,group_label="unapproved",live=False,authorization=None):
+def build_live_model(*,budget,specs,trace,group_label="unapproved",live=False,authorization=None,probe_wire=None):
     # No key lookup/client construction/network before both independent gates.
     config=ProviderConfig()
     if not live or not isinstance(authorization,dict) or authorization.get("authorized") is not True or not authorization.get("human_approval_reference"):
         raise ProviderStopped("PAID_AUTHORIZATION_REQUIRED")
+    if budget.requestwise:
+        # A new request-bound policy does not inherit authorization for the full
+        # five-pair trial. This is a different, one-request scope, not P1.
+        probe_expected={"scope":"ONE_REQUEST_PROTOCOL_PROBE","reservation_policy":REQUEST_WIRE_V1,
+            "config_digest":digest_json(asdict(config)),"request_limit":1,"cost_cap_usd":"0.50"}
+        if any(authorization.get(k)!=v for k,v in probe_expected.items()) or budget.cap!=500_000 or budget.limit!=1:
+            raise ProviderStopped("PROBE_AUTHORIZATION_REQUIRED_OR_MISMATCHED")
+        if not isinstance(probe_wire,dict) or authorization.get("wire_digest")!=digest_json(probe_wire) or probe_wire.get("tools",[])!=specs:
+            raise ProviderStopped("PROBE_AUTHORIZATION_WIRE_MISMATCH")
+        if not budget.preflight(probe_wire)["ready"]:
+            raise ProviderStopped("COST_OR_UNRESOLVED_PREFLIGHT_BLOCKED")
+        key=os.environ.get(MODEL_API_KEY)
+        if not key: raise ProviderStopped("LOCAL_API_KEY_MISSING")
+        model=_model(budget=budget,specs=specs,trace=trace,group_label=group_label,base_url=config.base_url,key=key)
+        model.runtime["authorized_wire_digest"]=authorization["wire_digest"]
+        return model
     expected={"config_digest":digest_json(asdict(config)),"request_limit":80,
         "cost_cap_usd":"0.50","cases":[list(k) for k in ORDER]}
     if any(authorization.get(k)!=v for k,v in expected.items()) or budget.cap!=500_000 or budget.limit!=80:
@@ -254,14 +287,23 @@ def main():
     parser.add_argument("--output",required=True,type=Path)
     parser.add_argument("--live",action="store_true")
     parser.add_argument("--authorization",type=Path)
+    parser.add_argument("--request-bound",action="store_true",help="offline candidate preflight for one separately authorized probe")
+    parser.add_argument("--wire-body",type=Path,help="actual prepared/observed JSON body; never a token estimate")
     args=parser.parse_args()
-    budget=ExperimentBudget(args.output/"request-budget.sqlite3")
+    budget=ExperimentBudget(args.output/"request-budget.sqlite3",**(
+        {"reservation_policy":REQUEST_WIRE_V1,"request_limit":1} if args.request_bound else {}))
+    wire=json.loads(args.wire_body.read_text(encoding="utf-8")) if args.wire_body else None
     preflight={"config":asdict(ProviderConfig()),"paid_authorized":False,
-        "p1":"NOT_RUN","p2":"NOT_RUN",**budget.preflight()}
-    (args.output/"preflight.json").write_text(json.dumps(preflight,indent=2),encoding="utf-8")
+        "p1":"NOT_RUN","p2":"NOT_RUN",**budget.preflight(wire)}
+    with (args.output/"preflight.json").open("x",encoding="utf-8") as f:
+        f.write(json.dumps(preflight,indent=2))
     if not args.live:
         print(json.dumps(preflight,indent=2))
         return
+    if args.request_bound:
+        # Do not fall through to the existing P1 batch CLI. A separately approved
+        # single probe can use build_live_model's exact-wire, one-call interface.
+        raise ProviderStopped("P1_BLOCKED_SINGLE_PROBE_REQUIRES_SEPARATE_EXECUTION_AUTHORIZATION")
     auth=json.loads(args.authorization.read_text(encoding="utf-8")) if args.authorization else None
     # Enforce all gates before fixture/server setup. Default USD .50 stops here.
     model=build_live_model(budget=budget,specs=[],trace=None,live=True,authorization=auth)

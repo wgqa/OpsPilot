@@ -58,11 +58,18 @@ def provider(mode="normal"):
             if state["mode"]=="extra-output": response["usage"].update(completion_tokens=600,total_tokens=700)
             if state["mode"]=="drift" and index>1: response["system_fingerprint"]="different-stub"
             if state["mode"]=="missing-id": response.pop("system_fingerprint")
+            if state["mode"]=="no-completion": response.pop("id")
+            if state["mode"]=="no-finish": response["choices"][0].pop("finish_reason")
+            if state["mode"]=="input-overrun": response["usage"].update(prompt_tokens=1_048_577,total_tokens=1_048_597,prompt_cache_miss_tokens=1_048_577)
+            if state["mode"]=="both-bound-overrun": response["usage"].update(prompt_tokens=1_048_576,completion_tokens=393216,total_tokens=1_441_792,prompt_cache_miss_tokens=1_048_576)
+            if state["mode"]=="reasoning": response["usage"]["completion_tokens_details"]={"reasoning_tokens":5}
+            if state["mode"]=="reasoning-text": response["choices"][0]["message"]["reasoning_content"]="test hidden reasoning, never persist"
+            if state["mode"]=="bad-total": response["usage"]["total_tokens"]=1
             value=json.dumps(response,ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header("Content-Type","application/json")
             self.send_header("Content-Length",str(len(value)))
-            self.send_header("x-request-id",f"local-http-request-{index}")
+            if state["mode"]!="no-request-id": self.send_header("x-request-id",f"local-http-request-{index}")
             self.end_headers()
             try: self.wfile.write(value)
             except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError): pass
