@@ -1,0 +1,61 @@
+...................F                                                     [100%]
+================================== FAILURES ===================================
+___________________ test_fixed_batch_real_sdk_mcp_ab_parity ___________________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/.tmp/rm01-g3/test_fixed_batch_real_sdk_mcp_0')
+capture = <experiments.ar01_free_agent.agent.Trace object at 0x0000021E4FCBF250>
+
+    def test_fixed_batch_real_sdk_mcp_ab_parity(tmp_path,capture):
+        destination=os.environ.get("AR01_RM01_TRACE_DIR")
+        output=(Path(destination)/"five-pair-local" if destination else tmp_path/"batch")
+        async def check(server):
+            budget=ExperimentBudget(tmp_path/"budget.sqlite3",cost_cap_usd=Decimal("2"))
+            def factory(group,task,specs,trace):
+                label=f"{task['case_id']}/{group}"
+                budget.claim_group(label)
+                return build_local_model(base_url=server["url"],budget=budget,specs=specs,trace=trace,group_label=label)
+            result=await batch(output,budget,factory)
+            assert result["status"]=="COMPLETED" and result["groups_completed"]==10
+            assert result["budget"]["requests"]==len(server["requests"])<=80
+            assert sum(g["attempt_counts"]["MCP"] for r in result["results"] for g in r["groups"])<=60
+            for pair in result["results"]:
+                a,b=pair["groups"]
+                assert a["initial_business_digest"]==b["initial_business_digest"]
+                assert a["actual_outbound_tool_schema_digest"]==b["actual_outbound_tool_schema_digest"]
+                assert all(g["business_state_unchanged"] for g in pair["groups"])
+            capture.emit("observed_local_batch",result=result,actual_http_count=len(server["requests"]),paid_calls=0)
+>       with provider() as server: asyncio.run(check(server))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+experiments\ar01_free_agent\tests\test_real_model.py:199: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+server = {'requests': [{'model': 'deepseek-flash', 'stream': False, 'messages': [{'content': 'Investigate this bound asynchrono...'role': 'user'}], 'parallel_tool_calls': False, ...}], 'mode': 'normal', 'errors': [], 'url': 'http://127.0.0.1:61662'}
+
+    async def check(server):
+        budget=ExperimentBudget(tmp_path/"budget.sqlite3",cost_cap_usd=Decimal("2"))
+        def factory(group,task,specs,trace):
+            label=f"{task['case_id']}/{group}"
+            budget.claim_group(label)
+            return build_local_model(base_url=server["url"],budget=budget,specs=specs,trace=trace,group_label=label)
+        result=await batch(output,budget,factory)
+>       assert result["status"]=="COMPLETED" and result["groups_completed"]==10
+E       AssertionError: assert ('STOPPED' == 'COMPLETED'
+E         
+E         - COMPLETED
+E         + STOPPED)
+
+experiments\ar01_free_agent\tests\test_real_model.py:190: AssertionError
+=========================== short test summary info ===========================
+FAILED experiments/ar01_free_agent/tests/test_real_model.py::test_fixed_batch_real_sdk_mcp_ab_parity
+1 failed, 19 passed in 10.86s

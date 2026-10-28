@@ -1,0 +1,118 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______________ test_actual_wire_usage_ids_and_exact_parameters _______________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/c1-approved-integration-20261025/agent新项目/.tmp/rm01-wire/test_actual_wire_usage_ids_and0')
+capture = <experiments.ar01_free_agent.agent.Trace object at 0x000001F8AB859010>
+
+    def test_actual_wire_usage_ids_and_exact_parameters(tmp_path,capture):
+        async def check(server):
+            budget=ExperimentBudget(tmp_path/"budget.sqlite3",cost_cap_usd=Decimal("2"))
+            specs=[{"type":"function","function":{"name":"example","description":"local schema probe",
+                "parameters":{"type":"object","title":"kept","properties":{}}}}]
+            model=build_local_model(base_url=server["url"],budget=budget,specs=specs,trace=capture,group_label="probe")
+            try:
+                ai=await model.bind_tools(specs,tool_choice="auto",parallel_tool_calls=False).ainvoke("已知材料：202为何不同于完成？")
+                assert ai.response_metadata["id"]=="local-completion-1"
+                assert ai.response_metadata["provider_request_id"]=="local-http-request-1"
+                assert ai.usage_metadata["input_tokens"]==100
+                wire=server["requests"][0]
+                assert wire["tools"]==specs and wire["max_tokens"]==512
+                assert "max_completion_tokens" not in wire
+                assert wire["thinking"]=={"type":"disabled"} and wire["stream"] is False
+                assert budget.snapshot()["rows"][0]["sends"]==1
+                assert budget.snapshot()["exposure_usd"]=="0.000054"
+                with pytest.raises(ProviderStopped,match="UNFROZEN_PROVIDER_PARAMETER"):
+                    await model.ainvoke("no",temperature=1)
+                assert len(server["requests"])==1
+            finally: await model.aclose()
+>       with provider() as server: asyncio.run(check(server))
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+experiments\ar01_free_agent\tests\test_real_model.py:139: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+experiments\ar01_free_agent\tests\test_real_model.py:125: in check
+    ai=await model.bind_tools(specs,tool_choice="auto",parallel_tool_calls=False).ainvoke("已知材料：202为何不同于完成？")
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv-stageb\Lib\site-packages\langchain_core\language_models\chat_models.py:511: in ainvoke
+    llm_result = await self.agenerate_prompt(
+.venv-stageb\Lib\site-packages\langchain_core\language_models\chat_models.py:1888: in agenerate_prompt
+    return await self.agenerate(
+.venv-stageb\Lib\site-packages\langchain_core\language_models\chat_models.py:1846: in agenerate
+    raise exceptions[0]
+.venv-stageb\Lib\site-packages\langchain_core\language_models\chat_models.py:2179: in _agenerate_with_cache
+    result = await self._agenerate(
+experiments\ar01_free_agent\real_model.py:112: in _agenerate
+    ai=await asyncio.wait_for(self.sdk.ainvoke(messages,**sdk_settings),self.config.timeout)
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\tasks.py:488: in wait_for
+    return await fut
+           ^^^^^^^^^
+.venv-stageb\Lib\site-packages\langchain_core\language_models\chat_models.py:511: in ainvoke
+    llm_result = await self.agenerate_prompt(
+.venv-stageb\Lib\site-packages\langchain_core\language_models\chat_models.py:1888: in agenerate_prompt
+    return await self.agenerate(
+.venv-stageb\Lib\site-packages\langchain_core\language_models\chat_models.py:1846: in agenerate
+    raise exceptions[0]
+.venv-stageb\Lib\site-packages\langchain_core\language_models\chat_models.py:2179: in _agenerate_with_cache
+    result = await self._agenerate(
+.venv-stageb\Lib\site-packages\langchain_openai\chat_models\base.py:2306: in _agenerate
+    raise e
+.venv-stageb\Lib\site-packages\langchain_openai\chat_models\base.py:2295: in _agenerate
+    raw_response = await self.async_client.with_raw_response.create(
+.venv-stageb\Lib\site-packages\openai\_legacy_response.py:386: in wrapped
+    return cast(LegacyAPIResponse[R], await func(*args, **kwargs))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv-stageb\Lib\site-packages\openai\resources\chat\completions\completions.py:2952: in create
+    return await self._post(
+.venv-stageb\Lib\site-packages\openai\_base_client.py:2053: in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv-stageb\Lib\site-packages\openai\_base_client.py:1773: in request
+    response = await self._send_request(
+.venv-stageb\Lib\site-packages\openai\_client.py:1375: in _send_request
+    response = await self._send_with_auth_retry(request, stream=stream, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv-stageb\Lib\site-packages\openai\_client.py:1354: in _send_with_auth_retry
+    response = await super()._send_request(request, stream=stream, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv-stageb\Lib\site-packages\openai\_base_client.py:1690: in _send_request
+    return await self._client.send(request, stream=stream, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv-stageb\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+.venv-stageb\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+.venv-stageb\Lib\site-packages\httpx\_client.py:1692: in _send_handling_redirects
+    await hook(request)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+request = <Request('POST', 'http://127.0.0.1:51701/chat/completions')>
+
+    async def request_hook(request):
+        if str(request.url)!=base_url.rstrip("/")+"/chat/completions":
+            raise ProviderStopped("UNEXPECTED_REQUEST_DESTINATION")
+        payload=json.loads(request.content)
+        trace.emit("provider_pre_send_wire",reservation_id=runtime["reservation"],body=payload)
+        allowed={"model","messages","stream","thinking","max_tokens","parallel_tool_calls","tools","tool_choice"}
+        if set(payload)-allowed or payload.get("model")!=config.model or payload.get("max_tokens")!=512 or (
+            payload.get("thinking")!={"type":"disabled"} or payload.get("stream") is not False
+            or payload.get("parallel_tool_calls") is not False
+            or payload.get("tools",[])!=runtime["expected_tools"]
+            or (payload.get("tools") and payload.get("tool_choice")!="auto")):
+>           raise ProviderStopped("ACTUAL_WIRE_CONFIGURATION_MISMATCH")
+E           experiments.ar01_free_agent.real_model.ProviderStopped: ACTUAL_WIRE_CONFIGURATION_MISMATCH
+
+experiments\ar01_free_agent\real_model.py:171: ProviderStopped
+=========================== short test summary info ===========================
+FAILED experiments/ar01_free_agent/tests/test_real_model.py::test_actual_wire_usage_ids_and_exact_parameters
+1 failed, 19 deselected in 1.93s

@@ -1,0 +1,727 @@
+{
+  "schema": "opspilot-ar01-rm01-p0-results-v1",
+  "status": "ACCEPTANCE_CANDIDATE_P0_ONLY",
+  "implementation": "COMPLETED_ISOLATED_EXPERIMENT",
+  "local_validation": "48_PASSED_PLUS_72_SAFETY",
+  "p1": "NOT_AUTHORIZED_NOT_RUN",
+  "p2": "NOT_RUN",
+  "real_provider_requests": 0,
+  "actual_vendor_tokens": null,
+  "actual_paid_usd": "0.00",
+  "full_repository_pytest": "NOT_RUN",
+  "browser": "NOT_RUN_STANDING_STOP",
+  "stage_b": "HOLD_UNCHANGED",
+  "base_sha": "55d3dd6f3671755621905d3d1437bd7a8dce053e",
+  "remote_main_verified": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "freeze_sha": "749ad4926aac59de949dfc3556ee419e388582ba",
+  "implementation_sha": "47e2bd4b05c66cf134904999dcb0e76ac88496e6",
+  "evidence_commit": "commit containing this file; final exact SHA in handoff",
+  "branch": "codex/ar01-free-agent",
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.0",
+    "packages": {
+      "langchain": "1.4.1",
+      "langchain-core": "1.6.12",
+      "langchain-openai": "1.7.2",
+      "langgraph": "1.2.16",
+      "mcp": "2.3.0",
+      "openai": "3.33.0",
+      "httpx": "0.28.1",
+      "pydantic": "2.14.1",
+      "pytest": "9.1.1"
+    }
+  },
+  "rule_blobs": {
+    "PROJECT_NORTH_STAR.md": "1f737712c7a36ceb34433ac09c3fbba3c3305542",
+    "AGENTS.md": "32c45506cceeaa8c76a5c56bf8360ff476b58856",
+    ".agents/skills/opspilot-slice-review/SKILL.md": "d405c8d413d633824b279202cc1503dab4cf0b03"
+  },
+  "commands": [
+    {
+      "log": "runs/01-red.log",
+      "exit_code": 2,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -q --basetemp .tmp/ar01-rm01-red-20261028",
+      "raw_summary": "1 error in 0.17s"
+    },
+    {
+      "log": "runs/02-green-budget.log",
+      "exit_code": 1,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -q --basetemp .tmp/ar01-rm01-green1-20261028",
+      "raw_summary": "1 passed, 10 errors in 1.58s"
+    },
+    {
+      "log": "runs/03-local-protocol-attempt.log",
+      "exit_code": 1,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -q --basetemp .tmp/rm01-g2",
+      "raw_summary": "8 failed, 12 passed in 7.95s"
+    },
+    {
+      "log": "runs/04-wire-inspection.log",
+      "exit_code": 1,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -k actual_wire -q --basetemp .tmp/rm01-wire",
+      "raw_summary": "1 failed, 19 deselected in 1.93s"
+    },
+    {
+      "log": "runs/05-local-protocol-attempt.log",
+      "exit_code": 1,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -q --basetemp .tmp/rm01-g3",
+      "raw_summary": "1 failed, 19 passed in 10.86s"
+    },
+    {
+      "log": "runs/06-b-binding.log",
+      "exit_code": 1,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -k fixed_batch -q --basetemp .tmp/rm01-g4",
+      "raw_summary": "1 failed, 19 deselected in 4.55s"
+    },
+    {
+      "log": "runs/07-local-protocol-green.log",
+      "exit_code": 1,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -q --basetemp .tmp/rm01-g5",
+      "raw_summary": "1 failed, 19 passed in 20.83s"
+    },
+    {
+      "log": "runs/08-local-protocol-green.log",
+      "exit_code": 0,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -q --basetemp .tmp/rm01-g6",
+      "raw_summary": "20 passed in 29.28s"
+    },
+    {
+      "log": "runs/09-additional-green.log",
+      "exit_code": 0,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -k 'os_process or cancelled or first_pair or explicit_live or safe_trace' -q --basetemp .tmp/rm01-add1",
+      "raw_summary": "7 passed, 20 deselected in 5.42s"
+    },
+    {
+      "log": "runs/10-all-experiment-tests.log",
+      "exit_code": 0,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests -q --basetemp .tmp/rm01-final1",
+      "raw_summary": "47 passed in 72.52s (0:01:12)"
+    },
+    {
+      "log": "runs/11-safety-regression.log",
+      "exit_code": 0,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest tests/test_s1_business.py tests/test_d3_actions.py tests/test_m2_01_facts.py tests/test_m2_02_s2_diagnosis.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_ttl_fix_01_integrity.py -q --basetemp .tmp/rm01-safety1",
+      "raw_summary": "72 passed in 83.18s (0:01:23)"
+    },
+    {
+      "log": "runs/13-exact-cap.log",
+      "exit_code": 0,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests/test_real_model.py -k exact_eighty -q --basetemp .tmp/rm01-cap1",
+      "raw_summary": "1 passed, 27 deselected in 3.37s"
+    },
+    {
+      "log": "runs/14-release-all-tests.log",
+      "exit_code": 0,
+      "command": ".venv-stageb/Scripts/python.exe -m pytest experiments/ar01_free_agent/tests -q --basetemp .tmp/rm01-release",
+      "raw_summary": "48 passed in 72.22s (0:01:12)"
+    },
+    {
+      "log": "runs/12-offline-preflight.log",
+      "exit_code": 0,
+      "command": ".venv-stageb/Scripts/python.exe -m experiments.ar01_free_agent.real_model --output docs/evidence/ar-01/real-model-01/TRACE/offline-preflight-01",
+      "result": "OFFLINE_BLOCKED_ZERO_REQUESTS"
+    }
+  ],
+  "local_batch": {
+    "evidence_level": "DETERMINISTIC_LOOPBACK_PROVIDER_REAL_LOCAL_MCP_HTTP",
+    "runs": 10,
+    "fake_provider_requests": 26,
+    "mcp_attempts": 16,
+    "synthetic_usage": {
+      "input": 2600,
+      "output": 520,
+      "not_actual_vendor_usage": true
+    },
+    "synthetic_ledger_upper_charge_usd": "0.001404",
+    "cases": [
+      {
+        "id": "AR01-01",
+        "variant": "material",
+        "conditions_ready": true,
+        "groups": [
+          {
+            "group": "A",
+            "task_id": "task-6ee891a7-5f75-4995-ac7c-afc94a8e308f",
+            "run_id": "run-4cb38088-f639-4158-88a9-681d611e9875",
+            "initial_business_digest": "a9d800b3dccf878e3c7e46079b92919da9995a085c6075b667b535b2161fa9f8",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 1,
+              "MCP": 0
+            },
+            "model_dispatches": 1,
+            "tool_names": [],
+            "result": {
+              "action": "answer",
+              "result_state": "ANSWERED",
+              "answer": "HTTP 202 只证明受理；处理完成需要同一事件当前接收处理事实。",
+              "target_event_id": null,
+              "processing_claim": "NOT_APPLICABLE",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.229807100000471,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          },
+          {
+            "group": "B",
+            "task_id": "task-c5fdc171-fed9-451b-822a-d99256cc555b",
+            "run_id": "run-2587897a-bb99-4c8d-a012-70c821eafcff",
+            "initial_business_digest": "a9d800b3dccf878e3c7e46079b92919da9995a085c6075b667b535b2161fa9f8",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 1,
+              "MCP": 0
+            },
+            "model_dispatches": 1,
+            "tool_names": [],
+            "result": {
+              "action": "answer",
+              "result_state": "ANSWERED",
+              "answer": "HTTP 202 只证明受理；处理完成需要同一事件当前接收处理事实。",
+              "target_event_id": null,
+              "processing_claim": "NOT_APPLICABLE",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.2701485999996294,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          }
+        ]
+      },
+      {
+        "id": "AR01-03",
+        "variant": "acknowledged",
+        "conditions_ready": true,
+        "groups": [
+          {
+            "group": "A",
+            "task_id": "task-4e24b81d-20ef-4f83-800f-3d617cc8dbf4",
+            "run_id": "run-1a6418e8-2efb-4875-a87a-e3e5b4ec5ca5",
+            "initial_business_digest": "2f41b74b3859231d2ae725167d997991e5c55a54c1d2ecc1aeff386f94b6b4eb",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 3,
+              "MCP": 2
+            },
+            "model_dispatches": 3,
+            "tool_names": [
+              "get_callback_delivery",
+              "get_receiver_processing"
+            ],
+            "result": {
+              "action": "answer",
+              "result_state": "ANSWERED",
+              "answer": "HTTP 202 排除了投递失败判断；当前同一事件仍是 QUEUED，不能称已完成。 来源：evidence-56648a99-250a-41a4-8208-57027008f0c0, evidence-6b699b7a-475d-4315-8886-cafcf15b9d3a",
+              "target_event_id": "event-062c948d-5da8-4e66-a9f0-ff5e1d332b02",
+              "processing_claim": "QUEUED",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.5498695999995107,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          },
+          {
+            "group": "B",
+            "task_id": "task-93b62fbe-f580-477e-9459-10c1a968cb10",
+            "run_id": "run-1d198719-8c77-497f-87aa-3346107b994a",
+            "initial_business_digest": "2f41b74b3859231d2ae725167d997991e5c55a54c1d2ecc1aeff386f94b6b4eb",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 3,
+              "MCP": 2
+            },
+            "model_dispatches": 3,
+            "tool_names": [
+              "get_callback_delivery",
+              "get_receiver_processing"
+            ],
+            "result": {
+              "action": "answer",
+              "result_state": "ANSWERED",
+              "answer": "HTTP 202 排除了投递失败判断；当前同一事件仍是 QUEUED，不能称已完成。 来源：evidence-3ad83624-a211-4abc-89e0-f9b1f13db0b1, evidence-42cc67bc-4ef4-4a54-8a30-aae06df63939",
+              "target_event_id": "event-062c948d-5da8-4e66-a9f0-ff5e1d332b02",
+              "processing_claim": "QUEUED",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.5484594000008656,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          }
+        ]
+      },
+      {
+        "id": "AR01-03",
+        "variant": "failed",
+        "conditions_ready": true,
+        "groups": [
+          {
+            "group": "A",
+            "task_id": "task-570bd04a-7fbf-4727-b113-9b4a153ce534",
+            "run_id": "run-bd517fdc-a286-45f5-af1a-fbc9bd60bcde",
+            "initial_business_digest": "93a7320df59ae29c43ac475d54e2fd8195524c3339eb6eb34304674a05854334",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 3,
+              "MCP": 2
+            },
+            "model_dispatches": 3,
+            "tool_names": [
+              "get_callback_delivery",
+              "load_callback_skill"
+            ],
+            "result": {
+              "action": "answer",
+              "result_state": "ANSWERED",
+              "answer": "真实投递记录为 HTTP 503；排障方法可以指导后续核查，尚无本轮当前处理完成证据。 来源：evidence-9406374e-c519-4934-9622-d5a6c3ef9b8f",
+              "target_event_id": "event-66523f65-c932-4eb2-9a7f-6ae533f7d1e0",
+              "processing_claim": "UNKNOWN",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.700167899999542,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          },
+          {
+            "group": "B",
+            "task_id": "task-2b4ba4a8-e319-4daa-b314-8a716075e019",
+            "run_id": "run-86c4616a-a8e1-40df-83cc-b2eb49c86281",
+            "initial_business_digest": "93a7320df59ae29c43ac475d54e2fd8195524c3339eb6eb34304674a05854334",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 3,
+              "MCP": 2
+            },
+            "model_dispatches": 3,
+            "tool_names": [
+              "get_callback_delivery",
+              "load_callback_skill"
+            ],
+            "result": {
+              "action": "answer",
+              "result_state": "ANSWERED",
+              "answer": "真实投递记录为 HTTP 503；排障方法可以指导后续核查，尚无本轮当前处理完成证据。 来源：evidence-8f6839b4-2e2a-4c15-bf9b-af24ad9ea8e3",
+              "target_event_id": "event-66523f65-c932-4eb2-9a7f-6ae533f7d1e0",
+              "processing_claim": "UNKNOWN",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.5069718000004286,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          }
+        ]
+      },
+      {
+        "id": "AR01-04",
+        "variant": "different-event",
+        "conditions_ready": true,
+        "groups": [
+          {
+            "group": "A",
+            "task_id": "task-6f403b87-c4c7-47b4-bece-75be8beac3f2",
+            "run_id": "run-97eb6892-9ca4-4154-9216-29278b98b925",
+            "initial_business_digest": "51b7b27dc43a1852c35b7aebb0afe31132c9a69c71b3c39cfdcac15b2136e5bb",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 3,
+              "MCP": 2
+            },
+            "model_dispatches": 3,
+            "tool_names": [
+              "get_callback_transport_history",
+              "get_receiver_processing"
+            ],
+            "result": {
+              "action": "answer",
+              "result_state": "ANSWERED",
+              "answer": "同一事件的请求记录需分别核对；event-e1 当前处理状态为 UNKNOWN，其他 Event 的成功不能替代它。 来源：evidence-bcb5986e-b5c5-4637-b730-61cbc985c41f, evidence-a585e6b5-aed8-4bee-a5ac-6000ea7a00dc",
+              "target_event_id": "event-e1",
+              "processing_claim": "UNKNOWN",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.604287199999817,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          },
+          {
+            "group": "B",
+            "task_id": "task-5578ee6a-a500-4f54-91bb-d5681cb0dedf",
+            "run_id": "run-812de534-6c21-4fa1-b66f-a8d0ddd48aad",
+            "initial_business_digest": "51b7b27dc43a1852c35b7aebb0afe31132c9a69c71b3c39cfdcac15b2136e5bb",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 3,
+              "MCP": 2
+            },
+            "model_dispatches": 3,
+            "tool_names": [
+              "get_callback_transport_history",
+              "get_receiver_processing"
+            ],
+            "result": {
+              "action": "answer",
+              "result_state": "ANSWERED",
+              "answer": "同一事件的请求记录需分别核对；event-e1 当前处理状态为 UNKNOWN，其他 Event 的成功不能替代它。 来源：evidence-efd5fe4c-0ef3-4b52-b749-1bf33905e53e, evidence-2d929ef1-818e-4e7d-b5de-7ca17e8ee299",
+              "target_event_id": "event-e1",
+              "processing_claim": "UNKNOWN",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.5468175999994855,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          }
+        ]
+      },
+      {
+        "id": "AR01-06",
+        "variant": "scope",
+        "conditions_ready": true,
+        "groups": [
+          {
+            "group": "A",
+            "task_id": "task-9c30f190-b296-48b2-a5ff-b06114bbfe58",
+            "run_id": "run-3d817984-5c7b-41e4-96d4-0b16f45cd335",
+            "initial_business_digest": "58c0398fae151ba40335609b99bab1a87b6207e430efc6c3973052511947f9f2",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 3,
+              "MCP": 2
+            },
+            "model_dispatches": 3,
+            "tool_names": [
+              "get_callback_transport_history",
+              "get_order_status"
+            ],
+            "result": {
+              "action": "answer",
+              "result_state": "PARTIAL",
+              "answer": "越域事件查询被可信工具拒绝，未取得该资源事实；本订单当前仍在处理中。 来源：evidence-ea9f6afd-653a-489f-aad4-1942a9916fb6",
+              "target_event_id": null,
+              "processing_claim": "NOT_APPLICABLE",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 2.1062905999997383,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          },
+          {
+            "group": "B",
+            "task_id": "task-6f20c8a2-9bcf-4120-b7dd-3304d8577505",
+            "run_id": "run-fdc93b2c-26d5-4819-a5d2-3c34ffafc1d5",
+            "initial_business_digest": "58c0398fae151ba40335609b99bab1a87b6207e430efc6c3973052511947f9f2",
+            "tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "actual_outbound_tool_schema_digest": "93475a49f9a739be154b26d850a8a54ed70a1f4077b61fef7ab2b0f71bfa06e1",
+            "attempt_counts": {
+              "MODEL": 3,
+              "MCP": 2
+            },
+            "model_dispatches": 3,
+            "tool_names": [
+              "get_callback_transport_history",
+              "get_order_status"
+            ],
+            "result": {
+              "action": "answer",
+              "result_state": "PARTIAL",
+              "answer": "越域事件查询被可信工具拒绝，未取得该资源事实；本订单当前仍在处理中。 来源：evidence-65b827f7-1597-4657-961b-8d576bae6067",
+              "target_event_id": null,
+              "processing_claim": "NOT_APPLICABLE",
+              "stop_reason": "MODEL_ANSWER",
+              "delivery_mode": "MODEL",
+              "authority": "EXPERIMENT_ONLY_NO_BUSINESS_RECEIPT"
+            },
+            "business_state_unchanged": true,
+            "elapsed_seconds": 1.969836899999791,
+            "provider_tokens": [
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              },
+              {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "prompt_cache_hit_tokens": 0,
+                "prompt_cache_miss_tokens": 100
+              }
+            ],
+            "provider_cost_usd": null,
+            "evidence_level": "LOCAL_PROTOCOL_STUB_REAL_LOCAL_MCP_HTTP"
+          }
+        ]
+      }
+    ]
+  },
+  "paid_preflight": {
+    "config": {
+      "model": "deepseek-flash",
+      "base_url": "https://api.deepseek.com",
+      "thinking": "disabled",
+      "max_tokens": 512,
+      "max_retries": 0,
+      "timeout": 30,
+      "parallel_tool_calls": false,
+      "stream": false
+    },
+    "paid_authorized": false,
+    "p1": "NOT_RUN",
+    "p2": "NOT_RUN",
+    "ready": false,
+    "next_reservation_usd": "0.786432",
+    "snapshot": {
+      "requests": 0,
+      "exposure_usd": "0.000000",
+      "exposure_micro": 0,
+      "halted": null,
+      "rows": [],
+      "unresolved": 0,
+      "policy": {
+        "release": "AR01-RM01-P0-V1",
+        "cap_micro": 500000,
+        "request_limit": 80,
+        "input_peak_per_million": "0.30",
+        "output_peak_per_million": "1.20",
+        "reservation_micro": 786432,
+        "single_in_flight": true
+      }
+    },
+    "live_vendor_compliance": "NOT_VERIFIED",
+    "billing_guarantee": false
+  },
+  "blockers": [
+    "PAID_AUTHORIZATION_ABSENT",
+    "CONSERVATIVE_NEXT_RESERVATION_0.786432_EXCEEDS_PROPOSED_0.50",
+    "VENDOR_PROTOCOL_AND_BILLING_NOT_VERIFIED"
+  ],
+  "trace_index": "TRACE/INDEX.json",
+  "historical_files_changed": false,
+  "production_sources_changed": false,
+  "independent_main_agent_verification": "NOT_RUN_BY_IMPLEMENTER",
+  "stop": "P0 submitted; no P1/P2/main merge/AR02"
+}
