@@ -123,7 +123,7 @@ async def run_a(db, task, client, specs, model, trace, *, model_id="ar01-determi
     return response
 
 
-async def run_pair(case, output):
+async def run_pair(case, output, *, model_factory=None, model_id="ar01-deterministic"):
     output.mkdir(parents=True,exist_ok=False)
     seed=output/"seed.sqlite3"
     prepared=prepare_seed(seed,case["setup"])
@@ -138,14 +138,26 @@ async def run_pair(case, output):
         before=snapshot(db,PROTECTED)
         trace=Trace()
         trace.emit("initial_state",group=group,task_id=task["task_id"],run_id=task["run_id"],business_digest=initial)
-        model=LocalModel()
+        model=None
         start=time.monotonic()
-        async with Client(mcp_params(db,task)) as client:
-            listed=await client.list_tools()
-            catalog,specs=s3_catalog(listed.tools)
-            trace.emit("tools_list",group=group,tools=catalog,model_specs=specs)
-            if group=="A": result=await run_a(db,task,client,specs,model,trace)
-            else: result=(await Candidate(db,task["task_id"],task["run_id"],client,specs,trace=trace).run(model,case["question"]))["result"]
+        try:
+            async with Client(mcp_params(db,task)) as client:
+                listed=await client.list_tools()
+                catalog,specs=s3_catalog(listed.tools)
+                trace.emit("tools_list",group=group,tools=catalog,model_specs=specs)
+                model=(model_factory(group,{**task,"case_id":f"{case['id']}/{case['variant']}"},specs,trace)
+                       if model_factory else LocalModel())
+                if group=="A": result=await run_a(db,task,client,specs,model,trace,model_id=model_id)
+                else: result=(await Candidate(db,task["task_id"],task["run_id"],client,specs,
+                    model_id=model_id,trace=trace).run(model,case["question"]))["result"]
+        except BaseException as error:
+            trace.emit("group_failure",error_class=type(error).__name__,reason=str(error))
+            with (output/f"{group}.trace.jsonl").open("x",encoding="utf-8") as f:
+                for row in trace.rows: f.write(canonical_json(row)+"\n")
+            raise
+        finally:
+            if model is not None and hasattr(model,"aclose"):
+                await model.aclose()
         after=snapshot(db,PROTECTED)
         same=before==after
         if not same: raise AssertionError("AR01_PROTECTED_BUSINESS_STATE_CHANGED")
@@ -156,13 +168,21 @@ async def run_pair(case, output):
         trace.emit("ledger",task_id=task["task_id"],run_id=task["run_id"],model_traces=traces,observations=observations)
         with (output/f"{group}.trace.jsonl").open("w",encoding="utf-8") as f:
             for row in trace.rows: f.write(canonical_json(row)+"\n")
+        provider_rows=[r for r in trace.rows if r["event"]=="provider_http_response"]
         results.append({"group":group,"task_id":task["task_id"],"run_id":task["run_id"],
             "initial_business_digest":initial,"tool_schema_digest":digest_json(sorted(specs,key=lambda s:s["function"]["name"])),
             "actual_outbound_tool_schema_digest":outbound,
             "attempt_counts":attempt_counts(db,task["task_id"]),"model_dispatches":len(model.requests),
             "tool_names":[o["tool_name"] for o in observations],"result":result,
             "business_state_unchanged":same,"elapsed_seconds":time.monotonic()-start,
-            "provider_tokens":None,"provider_cost_usd":0,"evidence_level":"DETERMINISTIC_MODEL_REAL_LOCAL_MCP_HTTP"})
+            "provider_tokens":[r.get("body",{}).get("usage") for r in provider_rows] or None,
+            "provider_cost_usd":None if model_factory else 0,
+            "evidence_level":getattr(model,"runtime",{}).get("evidence_level","DETERMINISTIC_MODEL_REAL_LOCAL_MCP_HTTP")})
+        # Persist before enforcing the batch protocol gate: partial/failed A must
+        # not disappear when B or later cases are deliberately not executed.
+        (output/f"{group}.result.json").write_text(json.dumps(results[-1],ensure_ascii=False,indent=2),encoding="utf-8")
+        if hasattr(model,"assert_healthy"):
+            model.assert_healthy()
     assert results[0]["tool_schema_digest"]==results[1]["tool_schema_digest"]
     return {"id":case["id"],"variant":case["variant"],"groups":results,"conditions_ready":True}
 
