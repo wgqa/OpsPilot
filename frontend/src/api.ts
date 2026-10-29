@@ -10,6 +10,50 @@ export interface SessionDetail {
   tasks: Array<{ task_id: string; linked_at: string; is_primary: number }>;
 }
 
+export interface AcceptedMessage {
+  run_id: string;
+  message_id: string;
+  sequence: number;
+  answer_status: string | null;
+  input_kind: string;
+}
+
+export interface AssistantProjectScope {
+  project_id: string;
+  title?: string;
+  display_name?: string;
+  configured_contract_version?: number | null;
+}
+
+export interface AssistantScopes {
+  items: AssistantProjectScope[];
+  selected_project: string | null;
+}
+
+export interface AssistantOrderResult {
+  task_id: string;
+  run_id: string;
+  message_id: string;
+  status: string;
+}
+
+export interface AssistantSources {
+  run_id: string;
+  authority: 'ASSISTANT_EXPLANATION_ONLY';
+  current: boolean;
+  exclusion_reason: string | null;
+  items: Array<{
+    call_id: string;
+    tool_name: string;
+    status: string;
+    created_at: string;
+    completed_at: string | null;
+    evidence_id: string | null;
+    observation_id: string | null;
+    result: Record<string, unknown> | null;
+  }>;
+}
+
 export interface MessageItem {
   message_id: string;
   task_id: string | null;
@@ -298,12 +342,35 @@ export const api = {
   messages(sessionId: string) { return request<{ items: MessageItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=500`); },
   sessionRuns(sessionId: string) { return request<{ items: RunItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`); },
   send(sessionId: string, body: string, taskId: string | null, csrf: string, inputKind: 'CHAT_READONLY' | 'CORRECT_TASK_INPUT' = 'CHAT_READONLY') {
-    return request<{ run_id: string; message_id: string; sequence: number; answer_status: string | null; input_kind: string }>(
+    return request<AcceptedMessage>(
       `/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': crypto.randomUUID() },
         body: JSON.stringify({ body, task_id: taskId, input_kind: inputKind }),
       },
     );
+  },
+  assistantSend(sessionId: string, body: string, taskId: string | null, csrf: string, operationId: string) {
+    return request<AcceptedMessage>(`/api/sessions/${encodeURIComponent(sessionId)}/assistant/messages`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': operationId },
+      body: JSON.stringify({ body, task_id: taskId }),
+    });
+  },
+  assistantScopes(sessionId: string) {
+    return request<AssistantScopes>(`/api/sessions/${encodeURIComponent(sessionId)}/assistant/scopes`);
+  },
+  assistantSources(runId: string) {
+    return request<AssistantSources>(`/api/runs/${encodeURIComponent(runId)}/assistant-sources`);
+  },
+  selectAssistantScope(sessionId: string, projectId: string, csrf: string) {
+    return request<AssistantScopes>(`/api/sessions/${encodeURIComponent(sessionId)}/assistant/scopes`, {
+      method: 'PUT', headers: writeHeaders(csrf), body: JSON.stringify({ project_id: projectId }),
+    });
+  },
+  bindAssistantOrder(sessionId: string, orderId: string, initialMessage: string, csrf: string, operationId: string) {
+    return request<AssistantOrderResult>(`/api/sessions/${encodeURIComponent(sessionId)}/assistant/order`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': operationId },
+      body: JSON.stringify({ order_id: orderId, initial_message: initialMessage }),
+    });
   },
   assessTaskUpdate(taskId: string, sourceMessageId: string, csrf: string) {
     return request<InvestigationUpdateAssessment>(

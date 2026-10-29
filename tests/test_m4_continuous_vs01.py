@@ -362,7 +362,7 @@ def test_vs09_schema_v15_migration_preserves_existing_business(tmp_path):
     assert _business_only(db,task["task_id"]) == before
     assert task_attempt_limits(db,task["task_id"]) == {"MODEL":8,"MCP":6}
     with connect(db) as c:
-        assert c.execute("PRAGMA user_version").fetchone()[0] == 17
+        assert c.execute("PRAGMA user_version").fetchone()[0] == 18
 
 
 def test_vs09_budget_exhaustion_delivers_explicit_nonblank_gap_without_writes(tmp_path):

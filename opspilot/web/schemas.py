@@ -30,6 +30,15 @@ class MessageRequest(StrictModel):
     task_id: str | None = Field(default=None, max_length=100)
 
 
+class AssistantScopeRequest(StrictModel):
+    project_id: str = Field(min_length=1, max_length=100)
+
+
+class AssistantOrderRequest(StrictModel):
+    order_id: str = Field(min_length=1, max_length=100)
+    initial_message: str = Field(min_length=1, max_length=20_000)
+
+
 class InvestigationUpdateProposalRequest(StrictModel):
     source_message_id: str = Field(min_length=1, max_length=200)
 

@@ -508,8 +508,18 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
 
 async def _dispatch_run(
     db_path: Path, checkpoint_path: Path, worker_id: str, executor_id: str,
-    run: dict[str, object], worker_epoch: int | None = None,
+    run: dict[str, object], worker_epoch: int | None = None, assistant_model_factory=None,
 ) -> None:
+    from opspilot.domain.assistant import selected as assistant_selected
+    with connect(db_path) as connection:
+        use_assistant = assistant_selected(connection, str(run["run_id"]))
+    if use_assistant:
+        from opspilot.assistant import run_assistant
+        actor_id=await asyncio.to_thread(_chat_run_actor,db_path,str(run['run_id']))
+        await asyncio.to_thread(claim_task_run,db_path,trusted_identity(db_path,actor_id),str(run['run_id']))
+        model=assistant_model_factory() if assistant_model_factory else None
+        await run_assistant(db_path, checkpoint_path, worker_id, str(run["run_id"]),model=model)
+        return
     if str(run["kind"]) == "CHAT_READONLY":
         await _process_chat_run(db_path, worker_id, run)
     else:
@@ -524,6 +534,7 @@ async def run_worker(
     executor_id: str,
     poll_interval: float = 0.2,
     worker_epoch: int | None = None,
+    assistant_model_factory=None,
 ) -> None:
     resolved_db = Path(db_path).resolve()
     resolved_checkpoint = Path(checkpoint_db_path).resolve()
@@ -538,7 +549,7 @@ async def run_worker(
             continue
         try:
             await _dispatch_run(
-                resolved_db, resolved_checkpoint, worker_id, executor_id, run, worker_epoch
+                resolved_db, resolved_checkpoint, worker_id, executor_id, run, worker_epoch,assistant_model_factory
             )
         except asyncio.CancelledError:
             raise

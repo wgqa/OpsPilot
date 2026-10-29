@@ -951,6 +951,7 @@ def create_task_with_initial_run(
     idempotency_key: str,
     deadline_ms: int = 300_000,
     s3_order_id: str | None = None,
+    assistant_core: bool = False,
 ) -> dict[str, object]:
     """Atomically create a trusted S1 binding and its first Message/Command/Run."""
     if not initial_message.strip():
@@ -971,6 +972,10 @@ def create_task_with_initial_run(
         "ticket_id": ticket_id,
         "initial_message": initial_message,
     }
+    if assistant_core:
+        if service_id != "orders-async-demo":
+            raise TaskControlError("ASSISTANT_BINDING_KIND_INVALID")
+        request["execution_core"] = "ASSISTANT_V1"
     request_digest = _digest(request)
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -1048,6 +1053,10 @@ def create_task_with_initial_run(
                VALUES (?, ?, ?, ?, ?, ?, 'INVESTIGATE', 'QUEUED', 0, 0, ?, ?)""",
             (run_id, identity.tenant_id, task_id, session_id, command_id, message_id, sequence, now),
         )
+        if assistant_core:
+            from opspilot.domain.assistant import register
+            connection.execute("UPDATE task_runs SET kind='CHAT_READONLY' WHERE run_id=?", (run_id,))
+            register(connection, run_id)
         connection.execute(
             """INSERT INTO worker_retry_state (run_id, retry_count, max_retries, updated_at)
                VALUES (?, 0, 3, ?)""",
@@ -1092,6 +1101,7 @@ def admit_task_message(
     expected_control_revision: int | None = None,
     update_proposal_id: str | None = None,
     defer_task_chat_until_classified: bool = False,
+    assistant_core: bool = False,
 ) -> dict[str, object]:
     if input_kind not in {"CHAT_READONLY", "CORRECT_TASK_INPUT"}:
         raise ValueError("Unsupported task message kind.")
@@ -1120,6 +1130,10 @@ def admit_task_message(
         "task_id": task_id,
         "body": body,
     }
+    if assistant_core:
+        if input_kind != "CHAT_READONLY" or defer_task_chat_until_classified:
+            raise TaskControlError("ASSISTANT_ADMISSION_INVALID")
+        request["execution_core"] = "ASSISTANT_V1"
     if update_proposal_id is not None:
         request["expected_control_revision"] = expected_control_revision
         request["update_proposal_id"] = update_proposal_id
@@ -1270,6 +1284,9 @@ def admit_task_message(
             (run_id, identity.tenant_id, task_id, session_id, command_id, message_id,
              run_kind, expected_revision, expected_revision, seq, now),
         )
+        if assistant_core:
+            from opspilot.domain.assistant import register
+            register(connection, run_id)
         if defer_task_chat_until_classified:
             connection.execute(
                 "UPDATE task_runs SET blocked_reason='UPDATE_CLASSIFICATION_PENDING' WHERE run_id=? AND status='QUEUED'",

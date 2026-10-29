@@ -45,7 +45,7 @@ def auxiliary_attempt_counts_in_transaction(connection, task_id):
                JOIN investigation_update_assessments s ON s.assessment_id=a.assessment_id
                WHERE s.task_id=?""", (task_id,),
         ).fetchone()[0]),
-        "CHAT": int(connection.execute("SELECT COUNT(*) FROM chat_attempts WHERE task_id=?",(task_id,)).fetchone()[0]),
+        "CHAT": int(connection.execute("SELECT COUNT(*) FROM chat_attempts a WHERE task_id=? AND NOT EXISTS (SELECT 1 FROM assistant_runs r WHERE r.run_id=a.run_id)",(task_id,)).fetchone()[0]) + int(connection.execute("SELECT COUNT(*) FROM assistant_calls a JOIN task_runs r ON r.run_id=a.run_id WHERE r.task_id=? AND a.kind='MODEL'",(task_id,)).fetchone()[0]),
         "COMPRESSION": int(connection.execute("SELECT COUNT(*) FROM context_compression_attempts WHERE task_id=?",(task_id,)).fetchone()[0]),
     }
 
@@ -80,7 +80,8 @@ def investigation_budget_in_transaction(connection, task_id, run_id=None):
         run = connection.execute(
             "SELECT task_id,tenant_id,kind FROM task_runs WHERE run_id=?",(run_id,),
         ).fetchone()
-        if run is None or run["task_id"] != task_id or run["kind"] == "CHAT_READONLY":
+        from opspilot.domain.assistant import selected as assistant_selected
+        if run is None or run["task_id"] != task_id or (run["kind"] == "CHAT_READONLY" and not assistant_selected(connection,run_id)):
             raise ScopeDenied("TASK_ATTEMPT_RUN_INVALID")
         run_used.update({r["kind"]:int(r["n"]) for r in connection.execute(
             "SELECT kind,COUNT(*) AS n FROM d2_attempts WHERE task_id=? AND run_id=? GROUP BY kind",(task_id,run_id))})

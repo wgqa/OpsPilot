@@ -611,13 +611,14 @@ def reserve_attempt(
         if binding is None:
             raise ScopeDenied("Attempt cannot be reserved without a trusted TaskBinding.")
         if run_id is not None:
+            from opspilot.domain.assistant import selected as assistant_selected
             run = connection.execute(
                 "SELECT task_id, kind, status FROM task_runs WHERE run_id = ?",
                 (run_id,),
             ).fetchone()
             if (
                 run is None or str(run["task_id"]) != task_id
-                or str(run["kind"]) == "CHAT_READONLY" or str(run["status"]) != "RUNNING"
+                or (str(run["kind"]) == "CHAT_READONLY" and not (kind == "MCP" and assistant_selected(connection,run_id))) or str(run["status"]) != "RUNNING"
             ):
                 raise ScopeDenied("Attempt Run is not an active business Run for this TaskBinding.")
         from opspilot.domain.execution_budget import investigation_budget_in_transaction

@@ -475,6 +475,12 @@ def _message_source_valid(
     message_seen: set[str] | None = None,
     model_source_cache: dict[str, tuple[bool, str | None]] | None = None,
 ) -> tuple[bool, str | None]:
+    from opspilot.domain.assistant import sources_current as assistant_sources_current
+    assistant_run = connection.execute("SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?",(row["message_id"],)).fetchone()
+    if assistant_run:
+        valid, reason = assistant_sources_current(connection, assistant_run["run_id"])
+        if not valid:
+            return False, reason
     visiting_messages = set(message_seen or ())
     message_id = str(row["message_id"])
     if message_id in visiting_messages:
@@ -2135,6 +2141,12 @@ def complete_chat_attempt(
         run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (attempt["run_id"],)).fetchone()
         if run is None or str(run["status"]) != "RUNNING":
             raise TaskControlError("TASK_RUN_NOT_ACTIVE")
+        from opspilot.domain.assistant import selected as assistant_selected, state as assistant_state, sources_current as assistant_sources_current
+        if assistant_selected(connection,str(run['run_id'])):
+            assistant_state(connection,str(run['run_id']),worker_id=worker_id)
+            valid,reason=assistant_sources_current(connection,str(run['run_id']))
+            if not valid:
+                raise TaskControlError(reason or 'ASSISTANT_SOURCE_INVALIDATED')
         existing = connection.execute("SELECT message_id FROM chat_run_answers WHERE run_id = ?", (run["run_id"],)).fetchone()
         if existing is not None:
             return {"status": "ALREADY_COMMITTED", "message_id": str(existing["message_id"])}

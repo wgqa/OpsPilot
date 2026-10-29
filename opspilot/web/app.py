@@ -34,7 +34,7 @@ from opspilot.web.auth import (
     verify_csrf,
 )
 from opspilot.web.schemas import (
-    AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest,
+    AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest, AssistantScopeRequest, AssistantOrderRequest,
     MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
     S3HandoffSubmitRequest,
     SemanticMemoryCandidateRequest, InvestigationUpdateProposalRequest,
@@ -149,6 +149,7 @@ def create_app(
     credentials: dict[str, str] | None = None,
     expected_origin: str | None = None,
     heartbeat_seconds: float = 10.0,
+    assistant_model_factory=None,
 ) -> FastAPI:
     from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
 
@@ -194,6 +195,7 @@ def create_app(
                     worker_id=worker.owner_id,
                     executor_id=executor_id,
                     worker_epoch=worker.epoch,
+                    assistant_model_factory=assistant_model_factory,
                 ),
                 name="opspilot-domain-run-worker",
             )
@@ -636,6 +638,59 @@ def create_app(
             answer_status = public_chat_answer_status(resolved_db, str(result["run_id"]))
         return {**result, "answer_status": answer_status}
 
+    @app.post("/api/sessions/{session_id}/assistant/messages", status_code=202)
+    async def post_assistant_message(session_id: str, body: MessageRequest,
+        idempotency_key: str | None = Header(default=None,alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user)) -> dict[str, Any]:
+        if body.task_id:
+            from opspilot.domain.s3 import get_s3_binding
+            require_task_reader(context.identity,body.task_id)
+            with connect(resolved_db) as connection:
+                get_s3_binding(connection,body.task_id)
+        result=admit_task_message(resolved_db,context.identity,session_id=session_id,task_id=body.task_id,
+            input_kind=body.input_kind,body=body.body,idempotency_key=require_idempotency_key(idempotency_key),assistant_core=True)
+        from opspilot.domain.chat import public_chat_answer_status
+        return {**result,'answer_status':public_chat_answer_status(resolved_db,str(result['run_id'])),'execution_core':'ASSISTANT_V1'}
+
+    @app.get("/api/sessions/{session_id}/assistant/scopes")
+    async def assistant_scopes(session_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+        from opspilot.domain.assistant_knowledge import list_scopes, KnowledgeScopeDenied
+        try: return list_scopes(resolved_db,context.identity,session_id)
+        except KnowledgeScopeDenied as error: raise HTTPException(status_code=403,detail=str(error)) from error
+
+    @app.put("/api/sessions/{session_id}/assistant/scopes")
+    async def assistant_select_scope(session_id: str, body: AssistantScopeRequest,context: AuthContext = Depends(write_user)) -> dict[str, Any]:
+        from opspilot.domain.assistant_knowledge import select_scope, KnowledgeScopeDenied
+        try:return select_scope(resolved_db,context.identity,session_id,body.project_id)
+        except KnowledgeScopeDenied as error:raise HTTPException(status_code=403,detail=str(error)) from error
+
+    @app.post("/api/sessions/{session_id}/assistant/order",status_code=202)
+    async def assistant_order(session_id: str,body: AssistantOrderRequest,
+        idempotency_key: str | None = Header(default=None,alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user)) -> dict[str, Any]:
+        return create_task_with_initial_run(resolved_db,context.identity,session_id=session_id,
+            service_id='orders-async-demo',integration_id=f"async-integration-{context.identity.tenant_id.removeprefix('tenant-')}",
+            ticket_id=os.environ.get('OPSPILOT_DEMO_TICKET_ID','INC-A-001'),initial_message=body.initial_message,
+            idempotency_key=require_idempotency_key(idempotency_key),deadline_ms=deadline_ms,
+            s3_order_id=body.order_id,assistant_core=True)
+
+    @app.get("/api/runs/{run_id}/assistant-sources")
+    async def assistant_sources(run_id: str,context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+        from opspilot.domain.assistant import sources_current as current_sources
+        with connect(resolved_db) as connection:
+            row=connection.execute('SELECT r.* FROM task_runs r JOIN sessions s ON s.session_id=r.session_id JOIN assistant_runs a ON a.run_id=r.run_id WHERE r.run_id=? AND r.tenant_id=? AND s.owner_id=?',(run_id,context.identity.tenant_id,context.identity.actor_id)).fetchone()
+            if row is None:raise HTTPException(status_code=404,detail='ASSISTANT_RUN_NOT_FOUND')
+            if row['task_id']:
+                from opspilot.domain.s3 import get_s3_binding
+                try:get_s3_binding(connection,row['task_id'])
+                except Exception as error:raise HTTPException(status_code=403,detail='S3_SCOPE_DENIED') from error
+            valid,reason=current_sources(connection,run_id)
+            items=[]
+            for call in connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' ORDER BY created_at",(run_id,)):
+                request=json.loads(call['request_json'])
+                items.append({**{k:call[k] for k in ('call_id','status','created_at','completed_at','evidence_id','observation_id')},'tool_name':request['name'],'result':json.loads(call['result_json']) if valid and call['result_json'] else None})
+            return {'run_id':run_id,'authority':'ASSISTANT_EXPLANATION_ONLY','current':valid,'exclusion_reason':reason,'items':items}
+
     @app.get("/api/sessions/{session_id}/messages")
     async def get_messages(
         session_id: str,
@@ -654,6 +709,14 @@ def create_app(
             items = []
             for row in rows:
                 item = {key: row[key] for key in row.keys()}
+                if row['role'] == 'ASSISTANT':
+                    from opspilot.domain.assistant import sources_current as assistant_sources_current
+                    assistant_answer=connection.execute('SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?',(row['message_id'],)).fetchone()
+                    if assistant_answer:
+                        valid,reason=assistant_sources_current(connection,assistant_answer['run_id'])
+                        if not valid:
+                            item['body']='这条历史答复的来源已失效，不能作为当前依据。请重新查询。'
+                            item['source_status']=reason
                 item["answer_run_id"] = None
                 item["answer_source_message_id"] = None
                 item["answer_kind"] = None

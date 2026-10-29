@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, explainError, type ApprovalResult, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { acknowledgeAssistantOperation, beginAssistantOperation } from './assistant-entry';
 import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
@@ -40,6 +41,12 @@ const draft = ref('');
 const initialSymptom = ref('');
 const correctionDraft = ref('');
 const showTaskForm = ref(false);
+const professionalMode = ref(true);
+const assistantScopes = ref<AssistantScopes>({ items: [], selected_project: null });
+const assistantScopeNotice = ref('');
+const showAssistantOrderForm = ref(false);
+const assistantOrderQuestion = ref('');
+const assistantSourceDetails = ref<Record<string, { taskId: string | null; data: AssistantSources | null; message: string }>>({});
 const busy = ref(false);
 const loading = ref(false);
 const errorMessage = ref('');
@@ -56,11 +63,16 @@ let eventSource: EventSource | null = null;
 let reconnectTimer: number | undefined;
 let runPollTimer: number | undefined;
 let loadingChunksRunId: string | null = null;
+let assistantScopeGeneration = 0;
+const assistantSourceRequests = new Map<string, number>();
+let assistantSourceGeneration = 0;
 let seenEventSeq = new Set<number>();
 const s3ReadResponseFence = createS3ReadResponseFence();
 
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const isApprover = computed(() => user.value?.role === 'APPROVER');
+const useProfessionalAssistant = computed(() => professionalMode.value
+  && (!taskId.value || String(inspector.value?.task.service_id ?? '') === 'orders-async-demo'));
 const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run.kind !== 'CHAT_READONLY') ?? null);
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
 const conversationProjection = computed(() => projectConversation({
@@ -386,8 +398,113 @@ async function selectSession(value: string): Promise<void> {
   chunks.value = [];
   activeChatRun.value = null;
   errorMessage.value = '';
+  assistantScopes.value = { items: [], selected_project: null };
+  assistantScopeNotice.value = '';
+  assistantSourceDetails.value = {};
+  assistantSourceRequests.clear();
+  showAssistantOrderForm.value = false;
   stopEvents();
   await refreshSession();
+  await refreshAssistantScopes();
+}
+
+async function refreshAssistantScopes(): Promise<void> {
+  const requestedSession = sessionId.value;
+  const generation = ++assistantScopeGeneration;
+  if (!requestedSession || isApprover.value) return;
+  try {
+    const result = await api.assistantScopes(requestedSession);
+    if (sessionId.value !== requestedSession || generation !== assistantScopeGeneration) return;
+    assistantScopes.value = result;
+    assistantScopeNotice.value = result.items.length === 0
+      ? '当前没有受保护资料范围，仍可直接提问或分析你提供的材料。'
+      : result.items.length > 1 && !result.selected_project
+        ? '需要查询项目资料时，请先选择服务端允许的项目。' : '';
+  } catch {
+    if (sessionId.value !== requestedSession || generation !== assistantScopeGeneration) return;
+    assistantScopes.value = { items: [], selected_project: null };
+    assistantScopeNotice.value = '资料范围暂时无法确认；可以继续普通问答，受保护资料读取由服务端核验。';
+  }
+}
+
+async function changeAssistantScope(event: Event): Promise<void> {
+  const requestedProject = event.target && 'value' in event.target && typeof event.target.value === 'string' ? event.target.value : '';
+  const requestedSession = sessionId.value;
+  const generation = ++assistantScopeGeneration;
+  if (!requestedProject || !requestedSession || !csrf.value) return;
+  assistantSourceDetails.value = {};
+  assistantSourceRequests.clear();
+  try {
+    const result = await api.selectAssistantScope(requestedSession, requestedProject, csrf.value);
+    if (sessionId.value !== requestedSession || generation !== assistantScopeGeneration) return;
+    assistantScopes.value = result;
+    assistantScopeNotice.value = '资料范围已由服务端确认；每次检索仍会重新核验访问资格。';
+  } catch (error) {
+    if (sessionId.value !== requestedSession || generation !== assistantScopeGeneration) return;
+    assistantScopes.value = { items: [], selected_project: null };
+    assistantScopeNotice.value = explainError(error);
+  }
+}
+
+async function loadAssistantSources(event: Event, runId: string | null | undefined, sourceTaskId: string | null): Promise<void> {
+  if (!runId || !(event.target as HTMLElement).hasAttribute('open')) return;
+  const requestedSession = sessionId.value;
+  const generation = ++assistantSourceGeneration;
+  assistantSourceRequests.set(runId, generation);
+  assistantSourceDetails.value = {
+    ...assistantSourceDetails.value, [runId]: { taskId: sourceTaskId, data: null, message: '正在重新核验来源访问资格…' },
+  };
+  try {
+    const data = await api.assistantSources(runId);
+    if (requestedSession !== sessionId.value || assistantSourceRequests.get(runId) !== generation) return;
+    assistantSourceDetails.value = {
+      ...assistantSourceDetails.value,
+      [runId]: { taskId: sourceTaskId, data, message: data.current ? '' : '部分来源已经失效，不能作为当前事实。' },
+    };
+  } catch (error) {
+    if (requestedSession !== sessionId.value || assistantSourceRequests.get(runId) !== generation) return;
+    // Never leave a prior authorized body visible after this read is rejected.
+    assistantSourceDetails.value = {
+      ...assistantSourceDetails.value, [runId]: { taskId: sourceTaskId, data: null, message: `此来源读取未获确认：${explainError(error)}` },
+    };
+  }
+}
+
+async function openAssistantOrderForm(): Promise<void> {
+  showAssistantOrderForm.value = !showAssistantOrderForm.value;
+  if (showAssistantOrderForm.value) await loadS3OrderResources();
+}
+
+function assistantOperationKey(kind: 'message' | 'order', session: string): string {
+  return `opspilot.assistant-operation.${user.value?.actor_id ?? 'unknown'}.${session}.${kind}`;
+}
+
+async function bindAssistantOrder(): Promise<void> {
+  const requestedSession = sessionId.value;
+  const question = assistantOrderQuestion.value.trim();
+  const order = selectedS3OrderId.value;
+  if (!requestedSession || !question || busy.value || !csrf.value || !canCreateTask.value) return;
+  // The UI only sends a current server-filtered resource; the Domain rechecks it.
+  if (!s3OrderResources.value.some((resource) => resource.order_id === order)) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const operationKey = assistantOperationKey('order', requestedSession);
+    const operation = await beginAssistantOperation(sessionStorage, operationKey, { order_id: order, initial_message: question });
+    const accepted = await api.bindAssistantOrder(requestedSession, order, question, csrf.value, operation.operationId);
+    acknowledgeAssistantOperation(sessionStorage, operationKey, operation.operationId);
+    if (sessionId.value !== requestedSession) return;
+    taskId.value = accepted.task_id;
+    assistantOrderQuestion.value = '';
+    showAssistantOrderForm.value = false;
+    notice.value = '订单选择已由服务端受理，助手将在当前授权范围内进行只读调查；没有执行修复或交接。';
+    await refreshSession();
+    await watchRun(accepted.run_id);
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
 }
 
 async function refreshSession(): Promise<void> {
@@ -515,6 +632,14 @@ async function refreshInspector(): Promise<boolean> {
 }
 
 function clearS3TaskResultCache(expectedTaskId: string): void {
+  const retained = { ...assistantSourceDetails.value };
+  for (const [runId, source] of Object.entries(retained)) {
+    if (source.taskId === expectedTaskId) {
+      delete retained[runId];
+      assistantSourceRequests.delete(runId);
+    }
+  }
+  assistantSourceDetails.value = retained;
   const cleared = clearS3RestrictedResultCache(
     inspector.value as unknown as CachedS3Inspector | null,
     messages.value,
@@ -610,12 +735,26 @@ async function sendMessage(): Promise<void> {
   chunks.value = [];
   lastChunkSeq.value = 0;
   try {
-    const accepted = await api.send(sessionId.value, body, taskId.value || null, csrf.value);
+    const requestedSession = sessionId.value;
+    const professional = useProfessionalAssistant.value;
+    const operationKey = assistantOperationKey('message', requestedSession);
+    const operation = professional ? await beginAssistantOperation(sessionStorage, operationKey, {
+      body, task_id: taskId.value || null,
+    }) : null;
+    const accepted = professional && operation
+      ? await api.assistantSend(requestedSession, body, taskId.value || null, csrf.value, operation.operationId)
+      : await api.send(requestedSession, body, taskId.value || null, csrf.value);
+    if (operation) acknowledgeAssistantOperation(sessionStorage, operationKey, operation.operationId);
     fallbackChatRunId = taskId.value ? accepted.run_id : null;
     draft.value = '';
     activeChatRun.value = await api.run(accepted.run_id);
     await refreshSessionMessagesOnly();
-    if (taskId.value) {
+    if (professional) {
+      // One product core owns this request; do not schedule a classification Chat sidecar.
+      fallbackChatRunId = null;
+      await watchRun(accepted.run_id);
+      if (taskId.value) await refreshInspector();
+    } else if (taskId.value) {
       const assessment = await api.assessTaskUpdate(taskId.value, accepted.message_id, csrf.value);
       investigationUpdates.value = [
         ...investigationUpdates.value.filter((item) => item.source_message_id !== accepted.message_id),
@@ -722,6 +861,7 @@ async function submitCriticalCorrection(): Promise<void> {
   try {
     const accepted = await api.send(sessionId.value, body, taskId.value, csrf.value, 'CORRECT_TASK_INPUT');
     correctionDraft.value = '';
+    if (draft.value.trim() === body) draft.value = '';
     await refreshSessionMessagesOnly();
     await refreshInspector();
     await watchRun(accepted.run_id);
@@ -1338,12 +1478,33 @@ onBeforeUnmount(() => {
           </div>
           <div class="toolbar-actions">
             <span v-if="taskId" class="task-chip"><i></i>{{ taskId.slice(0, 16) }}</span>
-            <button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = !showTaskForm">＋ 新建调查任务</button>
+            <label class="assistant-mode"><input v-model="professionalMode" type="checkbox" data-testid="professional-assistant-mode" :disabled="busy">专业助手</label>
+            <button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = !showTaskForm">原有业务调查</button>
             <button class="inspector-toggle" type="button" aria-label="显示 Task 检查器" @click="narrowInspectorOpen = !narrowInspectorOpen">▤</button>
           </div>
         </div>
 
-        <div class="demo-notice"><span class="notice-icon">i</span><span>业务调查使用服务端可信资源绑定。用户描述和关键更正只提供调查线索，真实状态来自当前 MCP Evidence。S3 可把经你确认的人工处理请求交给本地队列；队列接收不表示订单恢复，也不会自动重发回调。</span></div>
+        <div class="demo-notice"><span class="notice-icon">i</span><span>可以直接提问或粘贴材料，无需先创建任务。读取订单当前状态前，请确认已授权的业务对象。专业助手只做解释和只读调查；修复、审批与正式交接仍使用原有受控流程。</span></div>
+        <div v-if="sessionId && professionalMode" class="assistant-entry" data-testid="assistant-entry">
+          <label v-if="assistantScopes.items.length">资料项目
+            <select :value="assistantScopes.selected_project ?? ''" data-testid="assistant-project" :disabled="busy || !csrf" @change="changeAssistantScope">
+              <option v-if="!assistantScopes.selected_project" value="">请选择可访问的项目</option>
+              <option v-for="scope in assistantScopes.items" :key="scope.project_id" :value="scope.project_id">{{ scope.title ?? scope.display_name ?? scope.project_id }}</option>
+            </select>
+          </label>
+          <small v-if="assistantScopeNotice" role="status">{{ assistantScopeNotice }}</small>
+          <small v-if="taskId && !useProfessionalAssistant">当前任务保留原有业务对话和受控执行协议。</small>
+          <button v-if="canCreateTask" class="outline-button" type="button" data-testid="assistant-order-open" :disabled="busy || !csrf" @click="openAssistantOrderForm">关联授权订单进行只读调查</button>
+        </div>
+        <form v-if="showAssistantOrderForm && canCreateTask" class="task-input-card" data-testid="assistant-order-form" @submit.prevent="bindAssistantOrder">
+          <div><h2>确认要调查的订单</h2><p>这里只列出当前身份可访问的预注册订单。确认后，后续问题与结果仍保留在本会话。</p></div>
+          <label>订单<select v-model="selectedS3OrderId" data-testid="assistant-order-resource" :disabled="busy || !csrf || !s3OrderResources.length">
+            <option v-for="resource in s3OrderResources" :key="resource.order_id" :value="resource.order_id">{{ resource.order_id }} · {{ resource.order_status }} · 合同 v{{ resource.contract_version }}</option>
+          </select></label>
+          <small v-if="!s3OrderResources.length">当前没有可选择的授权订单；仍可继续普通问答。</small>
+          <textarea v-model="assistantOrderQuestion" data-testid="assistant-order-question" rows="2" maxlength="20000" :disabled="busy || !csrf" placeholder="你希望核查什么？可以接着说明刚才日志中的问题。"></textarea>
+          <div class="task-input-actions"><span>仅关联并只读调查，不批准业务操作。</span><button class="primary-button" type="submit" :disabled="busy || !csrf || !selectedS3OrderId || !assistantOrderQuestion.trim()">确认订单并调查</button></div>
+        </form>
         <form v-if="showTaskForm && canCreateTask" class="task-input-card" data-testid="new-task-form" @submit.prevent="createDemoTask">
           <div><span class="eyebrow">NEW INVESTIGATION</span><h2>描述实际故障</h2><p>请写下你观察到的现象。状态码未确认时可以明确说明；业务对象从当前租户已登记资源中选择。</p></div>
           <label>调查场景 <select v-model="investigationKind" data-testid="investigation-kind" :disabled="busy || !csrf" @change="investigationKind === 'ASYNC_CALLBACK' && loadS3OrderResources()"><option value="AUTH_INCIDENT">订单 API 认证与权限</option><option value="ASYNC_CALLBACK">订单回调未送达或接收方未处理（S3）</option></select></label>
@@ -1361,9 +1522,9 @@ onBeforeUnmount(() => {
         <div class="conversation-scroll" data-testid="conversation" aria-live="polite">
           <div v-if="!sessionId" class="welcome-state">
             <div class="orbit-illustration"><span class="orbit-core">OP</span><i></i><b></b></div>
-            <span class="eyebrow">INCIDENT RESPONSE, WITH EVIDENCE</span>
-            <h2>从可信证据开始</h2>
-            <p>创建会话后，你可以进行只读追问、提交实际故障描述启动 S1 调查，并查看来源明确的运行过程。</p>
+            <span class="eyebrow">PROFESSIONAL SUPPORT, WITH EVIDENCE</span>
+            <h2>从你的问题开始</h2>
+            <p>可以询问概念、粘贴日志、查询可访问资料；需要当前业务事实时，再确认授权订单并继续调查。</p>
             <button class="primary-button" :disabled="busy || !csrf" type="button" @click="createSession">创建第一个会话 <span>→</span></button>
           </div>
           <div v-else-if="messages.length === 0 && !loading" class="empty-conversation">
@@ -1382,7 +1543,16 @@ onBeforeUnmount(() => {
                 <div class="message-avatar">✳</div><div class="message-content">
                   <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(item.message.created_at) }}</span><span class="message-task">{{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序限制说明 · 非模型答复' : '聊天答复' }}</span></div>
                   <div class="message-bubble">{{ item.message.body }}</div>
-                  <details class="followup-sources"><summary>查看答复来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序生成的限制说明，不是模型答复' : '持久化的聊天答复' }}</small></details>
+                  <details class="followup-sources" @toggle="loadAssistantSources($event, item.runId, item.message.task_id)"><summary>查看答复来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序生成的限制说明，不是模型答复' : '持久化的聊天答复' }}</small>
+                    <template v-if="item.runId && assistantSourceDetails[item.runId]">
+                      <small v-if="assistantSourceDetails[item.runId].message">{{ assistantSourceDetails[item.runId].message }}</small>
+                      <ul v-if="assistantSourceDetails[item.runId].data"><li v-for="source in assistantSourceDetails[item.runId].data?.items ?? []" :key="source.call_id">
+                        <strong>{{ source.tool_name }} · {{ source.status }}</strong><small>形成于 {{ dateLabel(source.completed_at ?? source.created_at) }}</small>
+                        <code v-if="source.result">{{ JSON.stringify(source.result, null, 2) }}</code><small v-else>来源内容未作为当前可访问资料返回。</small>
+                        <small v-if="source.observation_id">Observation {{ source.observation_id }} · Evidence {{ source.evidence_id ?? '无业务 Evidence' }}</small>
+                      </li></ul>
+                    </template>
+                  </details>
                 </div>
               </article>
               <article v-else-if="item.kind === 'INVESTIGATION_ANSWER' && item.answer" class="readonly-followup-card" :data-testid="`investigation-answer-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
@@ -1451,8 +1621,8 @@ onBeforeUnmount(() => {
           <div v-if="notice" class="notice-line" role="status">{{ notice }} <button v-if="reconnectPaused" type="button" @click="reconnectEvents">重新连接事件流</button></div>
           <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}<button v-if="errorMessage.includes('登录状态')" type="button" @click="logout">重新登录</button></div>
           <form class="composer" @submit.prevent="sendMessage">
-            <textarea v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" placeholder="询问当前证据、任务状态，或继续上一轮对话…" @keydown.enter="submitOnEnter"></textarea>
-            <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 模型可识别纠错候选，Task 只在你确认后更新</span><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
+            <textarea v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" :placeholder="useProfessionalAssistant ? '提出技术问题、粘贴日志，或接着上一轮继续…' : '询问当前证据、任务状态，或继续上一轮对话…'" @keydown.enter="submitOnEnter"></textarea>
+            <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 正式业务输入更正需要确认</span><button v-if="useProfessionalAssistant && taskId && canCreateTask" class="text-button" type="button" data-testid="assistant-critical-correction" :disabled="!draft.trim() || busy || !csrf" @click="correctionDraft = draft; submitCriticalCorrection()">将此条作为正式更正</button><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
           </form>
           <div class="composer-footnote">回答只解释已授权信息。审批、修复和交付需要后续的可信控制流程。</div>
         </div>
@@ -1641,7 +1811,7 @@ onBeforeUnmount(() => {
             <div v-for="item in sessionEventProjection.slice(0, 12)" :key="item.event_seq" class="timeline-item"><span class="timeline-dot"></span><div><strong>{{ item.event_kind.replaceAll('_', ' ') }}</strong><small>{{ dateLabel(item.happened_at) }} · #{{ item.event_seq }}</small></div></div>
           </div>
         </template>
-        <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>等待关联 Task</h3><p>新建 S1 调查并输入真实故障描述后，这里会显示来源引用、可信 Evidence 和确定性 Gate。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="showTaskForm = true">新建调查任务</button></div>
+        <div v-else class="inspector-empty"><div class="inspector-empty-icon">◈</div><h3>可以先直接提问</h3><p>概念解释与材料分析无需业务任务。需要当前订单事实时，确认授权订单即可在本会话继续只读调查。</p><button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="openAssistantOrderForm">关联授权订单</button></div>
         <footer class="inspector-footer"><span>OpsPilot vNext · M4-01</span><span>LOOPBACK ONLY</span></footer>
       </aside>
     </section>

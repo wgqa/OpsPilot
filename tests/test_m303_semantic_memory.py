@@ -279,7 +279,7 @@ def test_m303_schema_v11_migration_is_repeatable_and_scoped(demo_db: Path) -> No
             "SELECT tenant_id, project_id, actor_id, active FROM semantic_memory_project_approvers ORDER BY tenant_id, actor_id"
         )]
         foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
-    assert version == 17
+    assert version == 18
     assert grants == [
         ("tenant-a", "service:orders-demo", "approver-a", 1),
         ("tenant-b", "service:orders-demo", "approver-b", 1),

@@ -507,7 +507,7 @@ def _observation_scope(connection, task_id, evidence_rows, run_id, observation_i
     ).fetchone()
     if (
         run is None or str(run["task_id"]) != str(task_id)
-        or str(run["kind"]) == "CHAT_READONLY"
+        or (str(run["kind"]) == "CHAT_READONLY" and not connection.execute("SELECT 1 FROM assistant_runs WHERE run_id=? AND core='ASSISTANT_V1'",(run_id,)).fetchone())
         or str(run["status"]) not in {"RUNNING", "SUCCEEDED"}
     ):
         return str(run_id), pins, "S3_RUN_ASSOCIATION_INVALID"
@@ -555,7 +555,7 @@ def _s3_observation(connection, *, task_id, evidence, run_id, observation_id=Non
         or str(item["attempt_task_id"]) != str(task_id)
         or str(item["attempt_run_id"]) != str(run_id)
         or str(item["run_task_id"]) != str(task_id)
-        or str(item["run_kind"]) == "CHAT_READONLY"
+        or (str(item["run_kind"]) == "CHAT_READONLY" and not connection.execute("SELECT 1 FROM assistant_runs WHERE run_id=? AND core='ASSISTANT_V1'",(run_id,)).fetchone())
         or str(item["run_status"]) not in {"RUNNING", "SUCCEEDED"}
         or str(item["attempt_kind"]) != "MCP"
         or str(item["attempt_status"]) != "OK"
