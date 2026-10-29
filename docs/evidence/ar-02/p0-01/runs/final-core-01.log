@@ -1,0 +1,40 @@
+HTTP Request: GET http://127.0.0.1:59883/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+Tool 'get_callback_transport_history' failed: 'Error executing tool get_callback_transport_history: S3_EVENT_NOT_AVAILABLE_WITHIN_BOUND_ORDER'
+HTTP Request: GET http://127.0.0.1:59898/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+....OS BEFORE 86  HTTP Request: GET http://127.0.0.1:59937/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+
+OS AFTER 0 {'status': 'SUCCEEDED', 'run_id': 'run-9772ebbe-9b18-4a2f-9abf-868beabfeb76', 'message_id': 'message-bc54e169-4cf4-46f4-a75c-3ed684a1a00e', 'attempt_id': 'chat-attempt-e3812cc7-e2e5-4714-bafc-6457d6e7d357', 'manifest_id': 'chat-manifest-42a20733-07dd-45c0-bd31-09fa8a3f9302', 'body_digest': '7cc55db47bcf45f103af34a0c4f89f57e14b1d378a08ee6065432f9e4ab4bc2f'}
+ 
+HTTP Request: GET http://127.0.0.1:60005/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:60028/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:60054/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+......F.............
+================================== FAILURES ===================================
+_____ test_revocation_between_tool_and_model_stops_and_source_api_denies ______
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-final-core-01/test_revocation_between_tool_a0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-final-core-01/test_revocation_between_tool_a0')
+
+    def test_revocation_between_tool_and_model_stops_and_source_api_denies(demo_db,tmp_path):
+        from test_ar02_assistant import client_for
+        prepare_s3_fixture(demo_db,'PROCESSING',order_id='ar02-order',contract_version=2)
+        created=setup_run(demo_db,'查询本订单','revoke',bind=True)
+        owner='revoke-worker';register_worker_owner(demo_db,owner,os.getpid())
+        claim_task_run(demo_db,trusted_identity(demo_db,'support-a'),created['run_id'])
+        model=FixtureModel(mode='business')
+        def revoke(event,**values):
+            if event=='tool_observation':
+                with connect(demo_db) as c:c.execute("UPDATE principals SET status='DISABLED',version=version+1 WHERE principal_id='async-principal-a'")
+        result=asyncio.run(run_assistant(demo_db,tmp_path/'cp.sqlite3',owner,created['run_id'],model=model,trace=revoke))
+        assert result['status']=='NOT_COMPLETED' and len(model.seen)==1
+        client,_=client_for(demo_db)
+>       assert client.get('/api/runs/'+created['run_id']+'/assistant-sources').status_code==403
+E       AssertionError: assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+E        +    where <Response [200 OK]> = get((('/api/runs/' + 'run-ff4ac3a5-326d-4b4b-8a39-80ddf0a7a03e') + '/assistant-sources'))
+E        +      where get = <starlette.testclient.TestClient object at 0x00000219D7640550>.get
+
+tests\test_ar02_runtime.py:247: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_runtime.py::test_revocation_between_tool_and_model_stops_and_source_api_denies
+1 failed, 23 passed in 36.48s

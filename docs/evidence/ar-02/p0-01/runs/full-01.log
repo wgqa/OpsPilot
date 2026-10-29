@@ -1,0 +1,247 @@
+........................................................................ [ 16%]
+..............................F................F........................ [ 33%]
+..........................F.......................F....................F [ 50%]
+.......................F................................................ [ 67%]
+........................................................................ [ 84%]
+................................F..................................      [100%]
+================================== FAILURES ===================================
+________ test_schema_v3_database_adds_context_input_provenance_columns ________
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-full-01/test_schema_v3_database_adds_c0/domain.sqlite3')
+
+    def test_schema_v3_database_adds_context_input_provenance_columns(demo_db: Path) -> None:
+        from opspilot.domain.database import initialize
+    
+        with connect(demo_db) as connection:
+            connection.execute("ALTER TABLE d5_context_provenance DROP COLUMN selected_input_messages_json")
+            connection.execute("ALTER TABLE d5_context_provenance DROP COLUMN task_run_control_json")
+            connection.execute("PRAGMA user_version = 3")
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(d5_context_provenance)")}
+        # M3-03 adds the semantic-memory lifecycle in v11.
+>       assert version == 17
+E       assert 18 == 17
+
+tests\test_m1_dynamic_investigation.py:289: AssertionError
+_____ test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash ______
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-full-01/test_schema_migration_is_idemp0/domain.sqlite3')
+live_api = 'http://127.0.0.1:51483'
+
+    def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
+        demo_db: Path, live_api: str
+    ) -> None:
+        from opspilot.domain.database import initialize
+    
+        binding, _, plan = _ready_task(demo_db, live_api, "migration")
+        task_id = str(binding["task_id"])
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_controls WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM session_task_links WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM sessions WHERE session_id = ?", (binding["session_id"],))
+            connection.execute("PRAGMA user_version = 0")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            control = connection.execute("SELECT terminal_state, control_revision FROM task_controls WHERE task_id = ?", (task_id,)).fetchone()
+            session_link = connection.execute("SELECT COUNT(*) FROM session_task_links WHERE task_id = ?", (task_id,)).fetchone()[0]
+            migrated_plan = connection.execute("SELECT plan_hash FROM d3_plans WHERE task_id = ?", (task_id,)).fetchone()[0]
+            plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        assert tuple(control) == ("ACTIVE", 0)
+>       assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 17
+E       AssertionError: assert (1 == 1 and '3b9ada9f3f21...72a7d5dde54e1' == '3b9ada9f3f21...72a7d5dde54e1'
+E         
+E         Skipping 53 identical leading characters in diff, use -v to show
+E           a7d5dde54e1 and 1 == 1 and 18 == 17)
+
+tests\test_m1_task_control.py:644: AssertionError
+__ test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero __
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-full-01/test_m2_01_s2fact09_migration_0/domain.sqlite3')
+live_api = 'http://127.0.0.1:64772'
+
+    def test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero(
+        demo_db: Path, live_api: str
+    ) -> None:
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            connection.execute("DROP INDEX IF EXISTS ux_auth_events_request_id")
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(auth_events)")}
+            if "credential_policy_version" in columns:
+                connection.execute("ALTER TABLE auth_events DROP COLUMN credential_policy_version")
+            if "request_id" in columns:
+                connection.execute("ALTER TABLE auth_events DROP COLUMN request_id")
+            connection.execute("PRAGMA user_version = 5")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            # M3-03 adds the semantic-memory lifecycle in v11.
+>           assert connection.execute("PRAGMA user_version").fetchone()[0] == 17
+E           assert 18 == 17
+
+tests\test_m2_01_facts.py:368: AssertionError
+___________ test_m203_migration_from_v7_is_additive_and_idempotent ____________
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-full-01/test_m203_migration_from_v7_is0/domain.sqlite3')
+
+    def test_m203_migration_from_v7_is_additive_and_idempotent(demo_db: Path) -> None:
+        from opspilot.domain.database import initialize
+    
+        with connect(demo_db) as connection:
+            connection.execute("DROP TABLE s2_handoff_receipts")
+            connection.execute("DROP TABLE s2_handoff_queue_entries")
+            connection.execute("PRAGMA user_version = 7")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+>           assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 17
+E           assert 18 == 17
+E            +  where 18 = int(18)
+
+tests\test_m2_03_handoff.py:56: AssertionError
+______ test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun ______
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-full-01/test_v8_schema_migration_prese0/domain.sqlite3')
+
+    def test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun(demo_db: Path) -> None:
+        binding = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a")
+        task_id = str(binding["task_id"])
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with connect(demo_db) as connection:
+            connection.execute("DROP INDEX IF EXISTS ix_d5_memories_lookup")
+            connection.execute("DROP TABLE d5_memory_events")
+            connection.execute("DROP TABLE d5_memories")
+            connection.execute(
+                """CREATE TABLE d5_memories (
+                     memory_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+                     project_id TEXT NOT NULL, type TEXT NOT NULL CHECK(type='EPISODIC'), problem_type TEXT NOT NULL,
+                     summary TEXT NOT NULL, applicability_constraints_json TEXT NOT NULL,
+                     source_task_id TEXT NOT NULL REFERENCES task_bindings(task_id), source_evidence_ids_json TEXT NOT NULL,
+                     source_report_ref TEXT NOT NULL, source_verification_id TEXT NOT NULL,
+                     state TEXT NOT NULL CHECK(state IN ('CANDIDATE','ACTIVE','REVOKED')), version INTEGER NOT NULL,
+                     confirmed_by TEXT, confirmed_at TEXT, revoked_by TEXT, revoked_at TEXT,
+                     expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+                     UNIQUE(tenant_id, project_id, problem_type, source_task_id))"""
+            )
+            connection.execute(
+                """CREATE TABLE d5_memory_events (
+                     event_id TEXT PRIMARY KEY, memory_id TEXT NOT NULL REFERENCES d5_memories(memory_id),
+                     tenant_id TEXT NOT NULL, project_id TEXT NOT NULL,
+                     event_type TEXT NOT NULL CHECK(event_type IN ('CANDIDATE_CREATED','CONFIRMED','REVOKED')),
+                     actor_id TEXT NOT NULL, memory_version INTEGER NOT NULL, occurred_at TEXT NOT NULL,
+                     details_json TEXT NOT NULL)"""
+            )
+            connection.execute(
+                """INSERT INTO d3_verification_receipts
+                   (verification_id, tenant_id, task_id, plan_hash, repair_action_id, service_id, integration_id,
+                    principal_id, business_route, probe_observed_versions_json, observed_at, response_status,
+                    business_assertions_json, recovery_verified, result_digest)
+                   VALUES ('migration-verification', 'tenant-a', ?, 'migration-plan', 'migration-action',
+                           'orders-demo', 'integration-a', 'principal-a', '/api/orders/demo-order', '{}', ?, 200,
+                           '{}', 1, 'verification-digest')""",
+                (task_id, now),
+            )
+            connection.execute(
+                """INSERT INTO d3_report_artifacts
+                   (report_ref, tenant_id, task_id, plan_hash, repair_action_id, verification_id, report_version,
+                    content_digest, immutable_content_json, created_at)
+                   VALUES ('migration-report', 'tenant-a', ?, 'migration-plan', 'migration-action',
+                           'migration-verification', 1, 'report-digest', '{}', ?)""",
+                (task_id, now),
+            )
+            connection.execute(
+                """INSERT INTO d2_evidence
+                   (evidence_id, tenant_id, task_id, call_id, tool_call_id, resource_id, principal_id,
+                    data_source, fetched_at, observed_versions_json, fact_type, facts_json,
+                    original_result_ref, trust_class, digest)
+                   VALUES ('migration-evidence', 'tenant-a', ?, 'c', 't', 'r', 'principal-a', 'MCP', ?, '{}',
+                           'endpoint_probe', '{}', 'ref', 'untrusted_tool_observation', 'evidence-digest')""",
+                (task_id, now),
+            )
+            connection.execute(
+                """INSERT INTO d5_memories
+                   (memory_id, tenant_id, project_id, type, problem_type, summary, applicability_constraints_json,
+                    source_task_id, source_evidence_ids_json, source_report_ref, source_verification_id,
+                    state, version, expires_at, created_at)
+                   VALUES ('legacy-memory', 'tenant-a', 'service:orders-demo', 'EPISODIC', 'auth_401',
+                           'preserved fixed D5 guidance', '{}', ?, '[\"migration-evidence\"]',
+                           'migration-report', 'migration-verification', 'ACTIVE', 4, '2999-01-01T00:00:00+00:00', ?)""",
+                (task_id, now),
+            )
+            connection.execute(
+                """INSERT INTO d5_memory_events
+                   VALUES ('legacy-event', 'legacy-memory', 'tenant-a', 'service:orders-demo',
+                           'CANDIDATE_CREATED', 'support-a', 1, ?, '{}')""",
+                (now,),
+            )
+            connection.execute("PRAGMA user_version = 8")
+    
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+>           assert int(connection.execute("PRAGMA user_version").fetchone()[0]) == 17
+E           assert 18 == 17
+E            +  where 18 = int(18)
+
+tests\test_m301_memory.py:476: AssertionError
+___________ test_m303_schema_v11_migration_is_repeatable_and_scoped ___________
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-full-01/test_m303_schema_v11_migration0/domain.sqlite3')
+
+    def test_m303_schema_v11_migration_is_repeatable_and_scoped(demo_db: Path) -> None:
+        initialize(demo_db)
+        _session_and_task(demo_db, "migration-a")
+        other_identity = trusted_identity(demo_db, "support-b")
+        other_session = str(create_session(demo_db, other_identity)["session_id"])
+        _create_task(demo_db, other_session, "migration-b", actor_id="support-b", integration_id="integration-b")
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM semantic_memory_project_approvers")
+            connection.execute("PRAGMA user_version = 10")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            grants = [tuple(row) for row in connection.execute(
+                "SELECT tenant_id, project_id, actor_id, active FROM semantic_memory_project_approvers ORDER BY tenant_id, actor_id"
+            )]
+            foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
+>       assert version == 17
+E       assert 18 == 17
+
+tests\test_m303_semantic_memory.py:282: AssertionError
+_________ test_vs09_schema_v15_migration_preserves_existing_business __________
+
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-full-01/test_vs09_schema_v15_migration0')
+
+    def test_vs09_schema_v15_migration_preserves_existing_business(tmp_path):
+        from opspilot.domain.database import initialize
+        from opspilot.domain.d2 import task_attempt_limits
+        db, _, task = _history_task(tmp_path)
+        before=_business_only(db,task["task_id"])
+        with connect(db) as c:
+            c.execute("ALTER TABLE task_execution_budgets DROP COLUMN model_limit")
+            c.execute("ALTER TABLE task_execution_budgets DROP COLUMN mcp_limit")
+            c.execute("ALTER TABLE task_execution_budgets DROP COLUMN policy_version")
+            c.execute("ALTER TABLE task_execution_budgets DROP COLUMN aux_provider_limit")
+            c.execute("PRAGMA user_version=15")
+        initialize(db)
+        assert _business_only(db,task["task_id"]) == before
+        assert task_attempt_limits(db,task["task_id"]) == {"MODEL":8,"MCP":6}
+        with connect(db) as c:
+>           assert c.execute("PRAGMA user_version").fetchone()[0] == 17
+E           assert 18 == 17
+
+tests\test_m4_continuous_vs01.py:365: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_dynamic_investigation.py::test_schema_v3_database_adds_context_input_provenance_columns
+FAILED tests/test_m1_task_control.py::test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash
+FAILED tests/test_m2_01_facts.py::test_m2_01_s2fact09_migration_is_idempotent_and_scope_write_count_is_zero
+FAILED tests/test_m2_03_handoff.py::test_m203_migration_from_v7_is_additive_and_idempotent
+FAILED tests/test_m301_memory.py::test_v8_schema_migration_preserves_rows_events_refs_and_can_rerun
+FAILED tests/test_m303_semantic_memory.py::test_m303_schema_v11_migration_is_repeatable_and_scoped
+FAILED tests/test_m4_continuous_vs01.py::test_vs09_schema_v15_migration_preserves_existing_business
+7 failed, 420 passed in 563.42s (0:09:23)

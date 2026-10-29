@@ -1,0 +1,57 @@
+FFF.                                                                     [100%]
+================================== FAILURES ===================================
+________________ test_concept_without_task_and_reopen_history _________________
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-loop-01/test_concept_without_task_and_0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-loop-01/test_concept_without_task_and_0')
+
+    def test_concept_without_task_and_reopen_history(demo_db,tmp_path):
+        first=setup_run(demo_db,'解释 202；材料标记 ORION-42','first')
+        model=FixtureModel()
+        result,_=execute(demo_db,first,model,tmp_path/'cp.sqlite3')
+>       assert result['status']=='SUCCEEDED',result
+E       AssertionError: {'status': 'NOT_COMPLETED', 'reason': "'Runtime' object has no attribute 'config'"}
+E       assert 'NOT_COMPLETED' == 'SUCCEEDED'
+E         
+E         - SUCCEEDED
+E         + NOT_COMPLETED
+
+tests\test_ar02_runtime.py:70: AssertionError
+____________ test_knowledge_then_bound_investigation_same_session _____________
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-loop-01/test_knowledge_then_bound_inve0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-loop-01/test_knowledge_then_bound_inve0')
+
+    def test_knowledge_then_bound_investigation_same_session(demo_db,tmp_path):
+        first=setup_run(demo_db,'请查适用协议。粘贴日志：ORION-42；HTTP 202','knowledge')
+        result,_=execute(demo_db,first,FixtureModel(mode='knowledge'),tmp_path/'cp.sqlite3')
+>       assert result['status']=='SUCCEEDED',result
+E       AssertionError: {'status': 'NOT_COMPLETED', 'reason': "'Runtime' object has no attribute 'config'"}
+E       assert 'NOT_COMPLETED' == 'SUCCEEDED'
+E         
+E         - SUCCEEDED
+E         + NOT_COMPLETED
+
+tests\test_ar02_runtime.py:83: AssertionError
+_________________ test_mixed_scope_denial_retains_legal_query _________________
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-loop-01/test_mixed_scope_denial_retain0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-loop-01/test_mixed_scope_denial_retain0')
+
+    def test_mixed_scope_denial_retains_legal_query(demo_db,tmp_path):
+        prepare_s3_fixture(demo_db,'PROCESSING',order_id='ar02-order',contract_version=2)
+        created=setup_run(demo_db,'查 event-outside 别的订单，再查本订单','mixed',bind=True)
+        result,events=execute(demo_db,created,FixtureModel(mode='mixed'),tmp_path/'cp.sqlite3')
+>       assert result['status']=='SUCCEEDED',result
+E       AssertionError: {'status': 'NOT_COMPLETED', 'reason': "'Runtime' object has no attribute 'config'"}
+E       assert 'NOT_COMPLETED' == 'SUCCEEDED'
+E         
+E         - SUCCEEDED
+E         + NOT_COMPLETED
+
+tests\test_ar02_runtime.py:102: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_runtime.py::test_concept_without_task_and_reopen_history
+FAILED tests/test_ar02_runtime.py::test_knowledge_then_bound_investigation_same_session
+FAILED tests/test_ar02_runtime.py::test_mixed_scope_denial_retains_legal_query
+3 failed, 1 passed in 5.87s
