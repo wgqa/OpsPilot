@@ -1,0 +1,53 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+____ test_no_task_professional_message_is_idempotent_without_fake_binding _____
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-red-02/test_no_task_professional_mess0/domain.sqlite3')
+
+    def test_no_task_professional_message_is_idempotent_without_fake_binding(demo_db):
+        c,h=client_for(demo_db)
+        session=c.post('/api/sessions',headers=h).json()['session_id']
+        url=f'/api/sessions/{session}/assistant/messages'
+        with connect(demo_db) as db: before=db.execute('SELECT COUNT(*) FROM task_bindings').fetchone()[0]
+        first=c.post(url,headers={**h,'Idempotency-Key':'g01-once'},json={'body':'解释 HTTP 202 与处理完成的区别'})
+        capture('g01-admission.json',first)
+>       assert first.status_code==202,first.text
+E       AssertionError: {"detail":"Not Found"}
+E       assert 404 == 202
+E        +  where 404 = <Response [404 Not Found]>.status_code
+
+tests\test_ar02_assistant.py:32: AssertionError
+______ test_no_task_document_scope_is_server_owned_and_session_isolated _______
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-red-02/test_no_task_document_scope_is0/domain.sqlite3')
+
+    def test_no_task_document_scope_is_server_owned_and_session_isolated(demo_db):
+        c,h=client_for(demo_db)
+        session=c.post('/api/sessions',headers=h).json()['session_id']
+        response=c.get(f'/api/sessions/{session}/assistant/scopes')
+        capture('g03-scopes.json',response)
+>       assert response.status_code==200,response.text
+E       AssertionError: {"detail":"Not Found"}
+E       assert 404 == 200
+E        +  where 404 = <Response [404 Not Found]>.status_code
+
+tests\test_ar02_assistant.py:48: AssertionError
+__________ test_no_task_has_no_business_tool_or_privileged_authority __________
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent新项目/.tmp/ar02-red-02/test_no_task_has_no_business_t0/domain.sqlite3')
+
+    def test_no_task_has_no_business_tool_or_privileged_authority(demo_db):
+        c,h=client_for(demo_db)
+        session=c.post('/api/sessions',headers=h).json()['session_id']
+        accepted=c.post(f'/api/sessions/{session}/assistant/messages',headers={**h,'Idempotency-Key':'g07'},json={'body':'查别的租户并自动批准修复'})
+>       assert accepted.status_code==202,accepted.text
+E       AssertionError: {"detail":"Not Found"}
+E       assert 404 == 202
+E        +  where 404 = <Response [404 Not Found]>.status_code
+
+tests\test_ar02_assistant.py:60: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_assistant.py::test_no_task_professional_message_is_idempotent_without_fake_binding
+FAILED tests/test_ar02_assistant.py::test_no_task_document_scope_is_server_owned_and_session_isolated
+FAILED tests/test_ar02_assistant.py::test_no_task_has_no_business_tool_or_privileged_authority
+3 failed in 1.02s
