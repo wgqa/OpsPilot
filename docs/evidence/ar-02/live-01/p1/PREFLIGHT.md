@@ -1,0 +1,24 @@
+# AR-02-LIVE-01 P1 执行前预检
+
+- 状态：READY_TO_RUN
+- UTC：2026-10-31T17:00:51.000+00:00
+- Repo/branch：wgqa/OpsPilot / codex/ar02-live-01
+- Base/HEAD：b4e1c543fb5efbcae533bd37e131902f927611b2
+- 远端候选 HEAD：b4e1c543fb5efbcae533bd37e131902f927611b2
+- 工作树：开始时仅有本轮 P1 证据目录未跟踪；无跟踪源码修改。
+- PROJECT_NORTH_STAR Blob：1f737712c7a36ceb34433ac09c3fbba3c3305542；AGENTS Blob：32c45506cceeaa8c76a5c56bf8360ff476b58856；Skill Blob：d405c8d413d633824b279202cc1503dab4cf0b03。
+- 冻结 S01/S02 SHA-256：57548e0dfd2e50968bff3cf6458d7964662f8c3b15725d8fb15831741acd5eaf；Git blob：ee9b1623a2296905c425449709a2f9ae6563caca。
+- P1 执行卡 SHA-256：08d19ba95304a8bd57c6b381331b8422daf7afd0e8331534ca5186cb1130a8b6。
+- 参数：DeepSeek Flash alias deepseek-flash，non-thinking，max_tokens=2048，tool_choice=auto，parallel_tool_calls=false，timeout=30s，max_retries=0。
+- 官方资料（2026-11-01 核对）：https://api-docs.deepseek.com/quick_start/pricing/；https://api-docs.deepseek.com/api/create-chat-completion/；https://api-docs.deepseek.com/guides/thinking_mode/。
+- 费率版本：DEEPSEEK_FLASH_PEAK_2026-11-01；峰值输入 USD 0.30/M、输出 USD 1.20/M；单次预留 USD 0.645600。
+- 限额：Provider 16，MCP 12，费用 USD 10.50；16 次最坏预留 USD 10.329600，余量 USD 0.170400。
+- 这是应用账本上限，不是供应商账户硬限额；账户硬限额未验证。
+- 凭据：存在；SHA256 指纹前缀 fae7fd341000；未记录密钥。
+- 真实模型客户端仅本地构造，构造无网络；真实发送体逐次拦截核对。
+- 隔离 DB：D:\学习\agent新项目\.worktrees\ar02-live-01\.runtime\ar02-live-01-p1-20261101-01\domain.sqlite3；隔离 Checkpoint：D:\学习\agent新项目\.worktrees\ar02-live-01\.runtime\ar02-live-01-p1-20261101-01\checkpoints.sqlite3；Worker ready。
+- Worker health：{'status': 'ok', 'mode': 'local-single-instance', 'api': 'alive', 'worker': {'status': 'running', 'ready': True}}；可信身份：{'actor_id': 'support-a', 'role': 'SUPPORT', 'tenant_id': 'tenant-a'}。
+- Knowledge Scope：[{'selected_project': 'orders-callback', 'projects': [{'project_id': 'orders-callback', 'title': '订单与异步回调资料', 'configured_contract_version': 2, 'grant_version': 1}]}, {'selected_project': 'orders-callback', 'projects': [{'project_id': 'orders-callback', 'title': '订单与异步回调资料', 'configured_contract_version': 2, 'grant_version': 1}]}]；已授权订单 ar02-order：True。
+- 初始实验账本：{'budget': {'experiment_id': 'AR-02-LIVE-01', 'provider_limit': 16, 'mcp_limit': 12, 'budget_usd_micro': 10500000, 'price_version': 'DEEPSEEK_FLASH_PEAK_2026-11-01', 'status': 'OPEN', 'created_at': '2026-10-31T17:00:50.886+00:00', 'updated_at': '2026-10-31T17:00:50.886+00:00'}, 'groups': [], 'counts': {'model_count': 0, 'mcp_count': 0, 'reserved': 0, 'settled': 0}}；消息/Run/Provider/MCP 初始数：{'messages': 0, 'task_runs': 0, 'assistant_runs': 0, 'assistant_calls': 0, 'd3_action_intents': 0, 's3_handoff_receipts': 0}。
+- 本地 Fixture 准备：Event event-ac96fc6e-8bb9-435f-be3f-8e13b35b560e，Transport transport-45498062-8d98-410d-b983-24d08d934780，HTTP 202，Receiver QUEUED；只写隔离库。
+- 预检记录于 S01 发出前。其后 S01 被 API 受理，但模型调用失败为 OpenAIConnectionError；应用账本保留一笔 UNKNOWN 预留，未重试。
