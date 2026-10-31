@@ -22,6 +22,14 @@
 
 完整测试期间，既有 C1 行为测试向 `docs/evidence/vnext/m4-autonomy-c1/runs/rev1/behavior-red-trace.jsonl` 追加了一条新运行记录。该路径不属于本修复，且测试前已核对为与 HEAD Blob 一致。运行后将其恢复到该原始 Blob；最终差异中不包含此文件，旧记录保留。
 
+## 远端推送阻断
+
+- Git HTTPS `ls-remote` 与 `push` 均无法连接 `github.com:443`。
+- 已连接的 GitHub 集成可读取仓库，但 `create_blob` 与 `create_branch` 写操作均返回 `403 Resource not accessible by integration`。
+- SSH 推送因主机密钥未验证而失败；没有关闭主机密钥校验。
+
+因此 `codex/ar02-hf-01` 当前只存在于本地 worktree，远端未发布；没有创建 PR、改写远端引用或触碰 `main`。源码与证据提交 SHA 保留，可在网络/权限恢复后安全推送。
+
 ## 未解决 / 未执行
 
 - 真实模型是否遵循来源提示：未验证，Provider 调用 0 次。
