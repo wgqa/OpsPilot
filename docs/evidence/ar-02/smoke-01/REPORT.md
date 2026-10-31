@@ -17,6 +17,8 @@ There is no real model choice to report. The only newly captured outbound body i
 
 One earlier protocol RED showed that `ChatOpenAI(max_tokens=2048)` serialized as `max_completion_tokens`, while the current DeepSeek API reference specifies `max_tokens`. The adapter now emits the documented top-level field for DeepSeek model IDs and retains standard `ChatOpenAI` behavior for other model IDs. The official API also says thinking defaults on when both thinking controls are omitted; the current local body omits them, so this remains a preflight decision for a future paid run. [DeepSeek API](https://api-docs.deepseek.com/api/create-chat-completion/)
 
+The local body includes `parallel_tool_calls: false`, but the official API reference did not document that field; acceptance is unverified and needs an authorized protocol probe. No fallback request without the field was sent.
+
 ## 3. User result
 
 The user did not receive a new S01/S02 answer, diagnosis, or draft from this slice. The code now wires the official Web server to the existing `ASSISTANT_V1` factory, disabled by default; missing enabled configuration fails before dispatch. Existing business authority remains in MCP/Domain, and no business-write path was added.

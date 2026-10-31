@@ -16,6 +16,8 @@ The pinned `langchain-openai==1.7.2` maps its `ChatOpenAI(max_tokens=...)` field
 
 The local capture omitted `thinking` and `reasoning_effort`; consequently the eventual DeepSeek mode is not explicitly frozen by this adapter. Before any paid run, the authorizing plan should explicitly settle the mode. A proposed continuation consistent with the earlier Flash non-thinking experiment is `thinking: {"type":"disabled"}`; it was **not** added or tested against the real Provider in this slice.
 
+The official API reference documents `tool_choice: auto`, but the page search did not find a `parallel_tool_calls` definition. That absence does not prove the Provider rejects the field. The local request contains `parallel_tool_calls: false`; remote acceptance remains `REQUIRES_AUTHORIZED_PROVIDER_PROBE`. Do not remove or retry with altered parameters without an authorized decision.
+
 The factory sets `timeout=30`, `max_retries=0`, `temperature=0`, and usage capture. The local wire test does not establish that DeepSeek accepts every response/header behavior or returns usage as expected.
 
 ## Existing budgets and the missing global envelope
