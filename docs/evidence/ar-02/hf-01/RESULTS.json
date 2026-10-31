@@ -1,0 +1,77 @@
+{
+  "task": "AR-02-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/ar02-hf-01",
+  "base_sha": "0beb5b16d98e0036011ac87c1ada055063ea0bc1",
+  "main_sha_at_start": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "freeze_commit": "6fb540c6a6ab5f3e38c82e8c5f905ec561d63840",
+  "red_commit": "6d5748cfbfdf180bcff69f2cc6b9aa8e933477d3",
+  "implementation_commit": "1aa9564fc6d2775b29ef656e7e3a4cea05be8a68",
+  "source_files": [
+    "opspilot/assistant.py",
+    "opspilot/assistant_mcp.py",
+    "tests/test_ar02_runtime.py",
+    "tests/test_ar02_hf01.py"
+  ],
+  "schema_migration": false,
+  "dependency_changes": false,
+  "runs": [
+    {
+      "name": "frozen_red",
+      "command": "python -m pytest -q tests/test_ar02_hf01.py --basetemp .tmp/ar02-hf01-red-01",
+      "exit_code": 1,
+      "result": "3 failed, 3 passed",
+      "log": "runs/red-01.log",
+      "failure_classes": [
+        "empty Knowledge result represented as cited source",
+        "TaskBinding version represented as verified deployment",
+        "binding default overwrote explicit user-request field"
+      ]
+    },
+    {
+      "name": "focused_green_01",
+      "command": "python -m pytest -q tests/test_ar02_hf01.py tests/test_ar02_knowledge.py tests/test_ar02_runtime.py",
+      "exit_code": 0,
+      "result": "30 passed",
+      "log": "runs/focused-01.log"
+    },
+    {
+      "name": "focused_green_with_trace_capture",
+      "command": "python -m pytest -q tests/test_ar02_hf01.py tests/test_ar02_knowledge.py tests/test_ar02_runtime.py",
+      "environment": {
+        "AR02_TRACE_DIR": "docs/evidence/ar-02/hf-01/runs/mcp-runtime-traces"
+      },
+      "exit_code": 0,
+      "result": "30 passed",
+      "log": "runs/focused-02.log",
+      "captured_local_run_traces": 18
+    },
+    {
+      "name": "full_active_pytest",
+      "command": "python -m pytest -q tests --ignore=tests/test_m4_autonomy_c1_red.py --basetemp .tmp/ar02-hf01-full-01",
+      "exit_code": 0,
+      "result": "439 passed in 588.05 seconds",
+      "log": "runs/full-01.log",
+      "excluded_historical_file": "tests/test_m4_autonomy_c1_red.py",
+      "exclusion_reason": "historical RED uses a deprecated intent contract; file and its expected failure were not changed"
+    }
+  ],
+  "trace": {
+    "path": "TRACE.jsonl",
+    "lines": 5,
+    "sha256_lf": "bbd75ea82b7b822ebf6ea99dcd757929a022146de7310e26d4c6b95e7bc1e0ed",
+    "raw_local_run_files": 18,
+    "index": "TRACE_INDEX.json"
+  },
+  "real_provider_calls": 0,
+  "browser_runs": 0,
+  "paid_smoke": "NOT_RUN",
+  "production_writes": 0,
+  "known_scope_limits": [
+    "FixtureModel verifies wiring and source honesty, not real model compliance or autonomy",
+    "No live deployment version observation exists; deployment_version_verified remains false",
+    "Paid request upper bound remains unresolved; see COST_GAP.md"
+  ],
+  "evidence_commit_note": "The evidence commit SHA is reported in the handoff because embedding the commit's own hash here would be self-referential."
+}
