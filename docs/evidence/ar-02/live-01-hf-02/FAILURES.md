@@ -35,3 +35,16 @@ RED-01 测试同时冻结了安全 UI/API 语义：现基线程序提示预期�
 - 当前锁定 SDK 的 MockTransport 证明：base URL `https://api.deepseek.com` 产生 `POST /chat/completions`，而 base URL `https://api.deepseek.com/v1` 产生 `POST /v1/chat/completions`。因此该历史捕获器对根 base URL 存在盲区。
 - 当前原工作区 `.env` 的脱敏状态为 DeepSeek base URL 路径 `/v1`；隔离候选 worktree 没有 `.env`，其进程环境也没有模型变量。原 P1 没有持久记录其精确 base URL 快照，故不能证明历史运行使用了哪个 path，也不能把捕获器盲区断定为实际原因。
 - 当前捕获器的 transport 类型不兼容已被证实为 P1 零捕获的重要观测缺陷；但它不能反推历史请求是否到达 DNS/TCP/TLS，也不能定位真正连接失败层。当前 DNS/TCP/TLS 成功只能描述本轮网络状态，不能回溯证明 P1 当时状态。历史 Provider 连接失败的网络层根因仍是 `UNKNOWN`；本地 MockTransport 连接异常只证明 SDK→transport 的异常包装路径。
+
+## GREEN-01：定向修复及回归
+
+- **HF-02 定向命令：** `D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -q -s tests/test_ar02_live_hf02.py --basetemp=.runtime/hf02/pytest-green-05`
+- **退出码：** 0；7 passed。
+- **结果：** 当前 SDK URL/请求体和锁定默认 HTTPX2 路由由本地 MockTransport 捕获；连接错误无 HTTP 响应；Run 与 Chat Attempt 同事务进入 FAILED 且时间戳相等；API 返回 `PROGRAM_LIMIT` 清晰提示；Dispatch 仍 `UNKNOWN` / reserved 645600 / settled 0；相同失败关闭与相同 Operation 重放没有新增请求、Answer 或通知。
+- **原始日志与关联状态：** `runs/green-focused-05.log`、`runs/green-focused-05.exit`、`TRACE/green-runtime-state.json`。
+
+- **AR-02/恢复回归命令：** `D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -q tests/test_ar02_runtime.py tests/test_ar02_assistant.py tests/test_ar02_live_budget.py tests/test_ar02_hf01.py tests/test_ar02_knowledge.py tests/test_ar02_smoke_provider_factory.py tests/test_m4_cont_ux_stage_a.py --basetemp=.runtime/hf02/pytest-regression-02`
+- **退出码：** 0；82 passed，覆盖真实 OS 子进程恢复、确定性 API 旅程、零工具解释、合法 Knowledge、预算以及正常 Chat/Assistant 路径。
+- **原始日志：** `runs/regression-focused-02.log`、`runs/regression-focused-02.exit`。
+
+没有运行全量 pytest、浏览器或真实 Provider；定向回归不代表 Stage B 或真实模型验收。

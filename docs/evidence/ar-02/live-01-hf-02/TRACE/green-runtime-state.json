@@ -1,0 +1,123 @@
+{
+  "evidence_level": "LOCAL_LOCKED_SDK_HTTPX2_MOCKTRANSPORT_AND_TESTCLIENT_API",
+  "real_provider_requests": 0,
+  "captured_sdk_wire": {
+    "authorization_present": true,
+    "body": {
+      "max_tokens": 2048,
+      "messages": [
+        {
+          "content": "locked default transport local request",
+          "role": "user"
+        }
+      ],
+      "model": "deepseek-flash",
+      "parallel_tool_calls": false,
+      "stream": false,
+      "temperature": 0.0,
+      "thinking": {
+        "type": "disabled"
+      },
+      "tool_choice": "auto",
+      "tools": [
+        {
+          "function": {
+            "description": "Search the authorized Session document scope.",
+            "name": "search_project_knowledge",
+            "parameters": {
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "function"
+        }
+      ]
+    },
+    "host": "api.deepseek.com",
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "url": "https://api.deepseek.com/v1/chat/completions"
+  },
+  "default_transport": {
+    "historical_capture_hook_target": "httpx.AsyncClient.send",
+    "hook_can_observe_default_client": false,
+    "internal_client_type": "langchain_openai.chat_models._client_utils._AsyncHttpxClientWrapper",
+    "is_httpx2_async_client": true,
+    "is_legacy_httpx_async_client": false,
+    "openai_sdk": "3.33.0"
+  },
+  "injected_local_failure": {
+    "exception_type_chain": [
+      "OpenAIConnectionError",
+      "APIConnectionError",
+      "ConnectError"
+    ],
+    "host": "api.deepseek.com",
+    "http_response": "NONE",
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "phase": "httpx2.MockTransport handler before any response"
+  },
+  "runtime": {
+    "run": {
+      "run_id": "run-cff1fb92-01bd-4b6a-818b-df70e2e21ef1",
+      "status": "FAILED",
+      "blocked_reason": "ASSISTANT_STOP:OpenAIConnectionError:Connection error.",
+      "ended_at": "2026-10-31T17:41:12.065+00:00"
+    },
+    "chat_attempt": {
+      "attempt_id": "chat-attempt-df897a14-2eeb-45c7-9940-af09adb32da6",
+      "run_id": "run-cff1fb92-01bd-4b6a-818b-df70e2e21ef1",
+      "status": "FAILED",
+      "error_class": "OpenAIConnectionError",
+      "completed_at": "2026-10-31T17:41:12.065+00:00",
+      "model_id": "deepseek-flash"
+    },
+    "dispatch": {
+      "dispatch_id": "ar02-live-dispatch-ec5084c7-dede-4552-a292-27a5e033766c",
+      "run_id": "run-cff1fb92-01bd-4b6a-818b-df70e2e21ef1",
+      "status": "UNKNOWN",
+      "reserved_usd_micro": 645600,
+      "settled_usd_micro": 0,
+      "error_code": "OpenAIConnectionError"
+    },
+    "program_notice": {
+      "message_id": "message-9ad8b10c-5ef7-428d-becd-79f5962baefc",
+      "body": "模型服务连接失败，本次解释未完成。此次请求结果或计费状态未能确认，已预留额度仍保留，系统不会自动重试。",
+      "command_id": "budget-notice:run-cff1fb92-01bd-4b6a-818b-df70e2e21ef1",
+      "created_at": "2026-10-31T17:41:12.065+00:00"
+    },
+    "answer_kind": "PROGRAM_LIMIT",
+    "answer_run_id": "run-cff1fb92-01bd-4b6a-818b-df70e2e21ef1",
+    "model_answer_count": 0,
+    "provider_send_attempts_to_mocktransport": 1,
+    "outbox_events": [
+      {
+        "event_kind": "CHAT_ATTEMPT_FAILED",
+        "source_kind": "CHAT_ATTEMPT",
+        "source_id": "chat-attempt-df897a14-2eeb-45c7-9940-af09adb32da6",
+        "created_at": "2026-10-31T17:41:12.065+00:00"
+      },
+      {
+        "event_kind": "CHAT_BUDGET_STOP",
+        "source_kind": "RUN",
+        "source_id": "run-cff1fb92-01bd-4b6a-818b-df70e2e21ef1",
+        "created_at": "2026-10-31T17:41:12.065+00:00"
+      },
+      {
+        "event_kind": "RUN_STATUS_FAILED",
+        "source_kind": "RUN",
+        "source_id": "run-cff1fb92-01bd-4b6a-818b-df70e2e21ef1",
+        "created_at": "2026-10-31T17:41:12.065+00:00"
+      }
+    ],
+    "same_operation_replay": "same message_id and run_id; no second capture"
+  }
+}

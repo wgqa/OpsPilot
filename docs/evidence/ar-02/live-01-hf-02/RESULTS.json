@@ -1,0 +1,106 @@
+{
+  "task": "AR-02-LIVE-01-HF-02",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/ar02-live-01",
+  "base_sha": "204cd2ec1dc292954e1c0b09da129fcab4476d57",
+  "frozen_red_commits": [
+    "98bef3490027e4bfd8f2e87a3004e8078c9d6225",
+    "8b0246cffb628ab08e389b52801368591855d977"
+  ],
+  "implementation_commit": "dae50427890f2b6f1d6f11b9a9267b130ecb9cf1",
+  "environment": {
+    "os": "Windows",
+    "python": "3.14.0",
+    "dependencies": {
+      "langchain-openai": "1.7.2",
+      "openai": "3.33.0",
+      "httpx": "0.28.1",
+      "httpx2": "2.13.1"
+    }
+  },
+  "provider_activity": {
+    "real_completion_requests": 0,
+    "local_mocktransport_capture_in_runtime_failure_test": 1,
+    "frozen_s01_replayed": false,
+    "frozen_s02_replayed": false,
+    "browser_run": false
+  },
+  "runs": [
+    {
+      "id": "RED-01",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_live_hf02.py --basetemp=.runtime/hf02/pytest-red-01",
+      "exit_code": 1,
+      "result": "3 passed, 1 failed",
+      "failure": "Task Run FAILED while Chat Attempt remained STREAMING",
+      "raw_log": "runs/red-01.log"
+    },
+    {
+      "id": "RED-02",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_live_hf02.py --basetemp=.runtime/hf02/pytest-red-02",
+      "exit_code": 1,
+      "result": "6 passed, 1 failed",
+      "failure": "Task Run FAILED while Chat Attempt remained STREAMING; observed UNKNOWN Dispatch USD 0.645600 reservation and leaked internal marker in the user notice snapshot",
+      "raw_log": "runs/red-02.log"
+    },
+    {
+      "id": "GREEN-HF02",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_live_hf02.py --basetemp=.runtime/hf02/pytest-green-05",
+      "exit_code": 0,
+      "result": "7 passed",
+      "raw_log": "runs/green-focused-05.log",
+      "trace": "TRACE/green-runtime-state.json"
+    },
+    {
+      "id": "GREEN-SUPPLEMENTARY-01-04",
+      "commands": [
+        "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_live_hf02.py --basetemp=.runtime/hf02/pytest-green-01",
+        "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_live_hf02.py --basetemp=.runtime/hf02/pytest-green-02",
+        "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_live_hf02.py --basetemp=.runtime/hf02/pytest-green-03",
+        "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_live_hf02.py --basetemp=.runtime/hf02/pytest-green-04"
+      ],
+      "exit_codes": [0, 0, 0, 0],
+      "results": ["7 passed", "7 passed", "7 passed", "7 passed"],
+      "raw_logs": [
+        "runs/green-focused-01.log",
+        "runs/green-focused-02.log",
+        "runs/green-focused-03.log",
+        "runs/green-focused-04.log"
+      ]
+    },
+    {
+      "id": "REGRESSION-AR02-RECOVERY",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_runtime.py tests/test_ar02_assistant.py tests/test_ar02_live_budget.py tests/test_ar02_hf01.py tests/test_ar02_knowledge.py tests/test_ar02_smoke_provider_factory.py tests/test_m4_cont_ux_stage_a.py --basetemp=.runtime/hf02/pytest-regression-02",
+      "exit_code": 0,
+      "result": "82 passed",
+      "raw_log": "runs/regression-focused-02.log"
+    },
+    {
+      "id": "REGRESSION-SUPPLEMENTARY-01",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_runtime.py tests/test_ar02_assistant.py tests/test_ar02_live_budget.py tests/test_ar02_hf01.py tests/test_ar02_knowledge.py tests/test_ar02_smoke_provider_factory.py tests/test_m4_cont_ux_stage_a.py --basetemp=.runtime/hf02/pytest-regression-01",
+      "exit_code": 0,
+      "result": "82 passed",
+      "raw_log": "runs/regression-focused-01.log"
+    }
+  ],
+  "network_diagnostics": {
+    "sandbox_tcp": "BLOCKED_BY_SANDBOX_PERMISSION",
+    "authorized_current_dns_tcp_tls": "SUCCEEDED; TLS 1.3; no HTTP request sent",
+    "historical_p1_failure_layer": "UNKNOWN",
+    "capture_blind_spot": "CONFIRMED: default openai SDK transport is httpx2; historical hook patched legacy httpx and matched only /v1/chat/completions"
+  },
+  "p1_unknown_dispatch_preservation": {
+    "dispatch_status": "UNKNOWN",
+    "reserved_usd_micro": 645600,
+    "settled_usd_micro": 0,
+    "original_database_sha256": "222f9cd2e4b909a7a26ee110101f039417786c8030751e2000b59694a7092899",
+    "current_database_matches_original_trace": true
+  },
+  "not_run": [
+    "real paid Provider request",
+    "S01/S02 replay",
+    "browser automation",
+    "business writes",
+    "full pytest suite"
+  ]
+}
