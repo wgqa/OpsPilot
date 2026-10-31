@@ -11,6 +11,14 @@
 - The D-drive main checkout has separate user changes and is not modified.
 - Existing untracked `.tmp/` data in the task worktree is preserved.
 
+## Current source read record
+
+- `PROJECT_NORTH_STAR.md` Blob: `1f737712c7a36ceb34433ac09c3fbba3c3305542`.
+- `AGENTS.md` Blob: `32c45506cceeaa8c76a5c56bf8360ff476b58856`.
+- `.agents/skills/opspilot-slice-review/SKILL.md` Blob: `d405c8d413d633824b279202cc1503dab4cf0b03`.
+- Frozen S01/S02 input `docs/evidence/ar-02/hf-01/SMOKE_INPUTS.md` Blob: `ee9b1623a2296905c425449709a2f9ae6563caca`.
+- Current Stage B `HOLD`, prior browser `STOP`, and AR-02 `DEFERRED_GATES.md` were read; none was treated as authority to run a browser or paid Provider call.
+
 ## User journey and unchanged Gold
 
 Use the existing S01/S02 verbatim from `../hf-01/SMOKE_INPUTS.md`. This slice only prepares the production API/Worker path and verifies its fail-closed model factory. It does not execute either paid journey.
