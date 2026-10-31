@@ -1633,7 +1633,10 @@ def _chat_attempt_counts(connection: sqlite3.Connection, run_id: str) -> tuple[i
     return answer_count, compression_count
 
 
-def record_chat_limit_in_transaction(connection: sqlite3.Connection, run_id: str, reason: str) -> None:
+def record_chat_limit_in_transaction(
+    connection: sqlite3.Connection, run_id: str, reason: str, *,
+    now: str | None = None, user_message: str | None = None,
+) -> None:
     """A durable non-model limit notice, never a successful Provider answer.
 
     Called only by existing trusted admission/reservation/failure transactions.
@@ -1642,10 +1645,11 @@ def record_chat_limit_in_transaction(connection: sqlite3.Connection, run_id: str
     run = connection.execute("SELECT * FROM task_runs WHERE run_id=? AND kind='CHAT_READONLY'",(run_id,)).fetchone()
     if run is None or run["status"] in {"SUCCEEDED","BLOCKED"}:
         return
-    now = _now_text()
+    now = now or _now_text()
+    was_failed = str(run["status"]) == "FAILED"
     command_id = f"budget-notice:{run_id}"
     if connection.execute("SELECT 1 FROM messages WHERE command_id=?",(command_id,)).fetchone() is None:
-        text = f"本次解释未完成：{reason}。这是程序生成的限制说明，未提交模型最终答复；此前已预留或失败的调用仍计入额度。本说明未重新取得业务事实，历史结论不能冒充本次新调查结果。Task 和既有业务授权保持不变。"
+        text = user_message or f"本次解释未完成：{reason}。这是程序生成的限制说明，未提交模型最终答复；此前已预留或失败的调用仍计入额度。本说明未重新取得业务事实，历史结论不能冒充本次新调查结果。Task 和既有业务授权保持不变。"
         sequence = int(connection.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM messages WHERE session_id=?",(run["session_id"],)).fetchone()[0])
         mid = f"message-{uuid.uuid4()}"
         connection.execute(
@@ -1663,9 +1667,10 @@ def record_chat_limit_in_transaction(connection: sqlite3.Connection, run_id: str
             session_id=str(run["session_id"]),source_kind="RUN",source_id=run_id,event_kind="CHAT_BUDGET_STOP",
             payload={"run_id":run_id,"answer_message_id":mid,"reason_code":reason,"model_generated":False},created_at=now)
     connection.execute("UPDATE task_runs SET status='FAILED',blocked_reason=?,ended_at=? WHERE run_id=?",(reason,now,run_id))
-    write_outbox_event(connection,tenant_id=str(run["tenant_id"]),task_id=run["task_id"],
-        session_id=str(run["session_id"]),source_kind="RUN",source_id=run_id,event_kind="RUN_STATUS_FAILED",
-        payload={"run_id":run_id,"run_status":"FAILED","reason_code":reason},created_at=now)
+    if not was_failed:
+        write_outbox_event(connection,tenant_id=str(run["tenant_id"]),task_id=run["task_id"],
+            session_id=str(run["session_id"]),source_kind="RUN",source_id=run_id,event_kind="RUN_STATUS_FAILED",
+            payload={"run_id":run_id,"run_status":"FAILED","reason_code":reason},created_at=now)
 
 
 def _stop_at_auxiliary_limit(connection, run):
@@ -2277,7 +2282,10 @@ def complete_chat_attempt(
             "attempt_id": attempt_id, "manifest_id": str(manifest["manifest_id"]), "body_digest": body_digest}
 
 
-def fail_chat_attempt(path: str | Path, worker_id: str, attempt_id: str, error_class: str) -> dict[str, Any]:
+def fail_chat_attempt(
+    path: str | Path, worker_id: str, attempt_id: str, error_class: str, *,
+    terminal_reason: str | None = None, user_message: str | None = None,
+) -> dict[str, Any]:
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         _check_worker_fence(connection, worker_id)
@@ -2292,6 +2300,25 @@ def fail_chat_attempt(path: str | Path, worker_id: str, attempt_id: str, error_c
             (error_class[:100], now, attempt_id),
         )
         run = connection.execute("SELECT * FROM task_runs WHERE run_id = ?", (attempt["run_id"],)).fetchone()
+        if terminal_reason is not None:
+            if run is None:
+                return {"status": "UNKNOWN", "run_id": str(attempt["run_id"])}
+            write_outbox_event(
+                connection, tenant_id=str(attempt["tenant_id"]), task_id=str(attempt["task_id"]) if attempt["task_id"] else None,
+                session_id=str(attempt["session_id"]), source_kind="CHAT_ATTEMPT", source_id=attempt_id,
+                event_kind="CHAT_ATTEMPT_FAILED", payload={"run_id": str(attempt["run_id"]),
+                    "model_attempt_id": attempt_id, "status": "FAILED", "reason_code": terminal_reason[:100]}, created_at=now,
+            )
+            record_chat_limit_in_transaction(
+                connection, str(run["run_id"]), terminal_reason,
+                now=now, user_message=user_message,
+            )
+            answer_count, compression_count = _chat_attempt_counts(connection, str(attempt["run_id"]))
+            return {
+                "status": "FAILED", "run_id": str(attempt["run_id"]),
+                "error_class": error_class[:100], "attempt_count": answer_count + compression_count,
+                "terminal_reason": terminal_reason,
+            }
         answer_count, compression_count = _chat_attempt_counts(connection, str(attempt["run_id"]))
         attempt_count = answer_count + compression_count
         status = "INTERRUPTED_RECOVERABLE" if attempt_count < MAX_CHAT_ATTEMPTS else "FAILED"

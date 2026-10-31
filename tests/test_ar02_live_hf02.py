@@ -405,6 +405,19 @@ def test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservati
         terminal_reason=run["blocked_reason"],
     )
     assert replay["status"] == "FAILED"
+    duplicate_message = admit_task_message(
+        demo_db,
+        identity,
+        session_id=session_id,
+        task_id=None,
+        input_kind="CHAT_READONLY",
+        body="解释 HTTP 202，但不要读取订单事实。",
+        idempotency_key="hf02-local-connect-failure",
+        assistant_core=True,
+    )
+    assert duplicate_message["message_id"] == accepted["message_id"]
+    assert duplicate_message["run_id"] == accepted["run_id"]
+    assert len(captured) == 1
     with connect(demo_db) as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM ar02_live_dispatches WHERE run_id=?", (accepted["run_id"],)
@@ -416,6 +429,15 @@ def test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservati
         assert connection.execute(
             "SELECT COUNT(*) FROM chat_run_answers WHERE run_id=?", (accepted["run_id"],)
         ).fetchone()[0] == 0
+        outbox_counts = dict(connection.execute(
+            "SELECT event_kind,COUNT(*) FROM domain_outbox WHERE source_id IN (?,?) GROUP BY event_kind",
+            (accepted["run_id"], attempt["attempt_id"]),
+        ).fetchall())
+    assert outbox_counts == {
+        "CHAT_ATTEMPT_FAILED": 1,
+        "CHAT_BUDGET_STOP": 1,
+        "RUN_STATUS_FAILED": 1,
+    }
     print("HF02_RUNTIME_TRACE=" + json.dumps({
         "run_id": accepted["run_id"],
         "attempt_id": attempt["attempt_id"],
@@ -426,5 +448,7 @@ def test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservati
         "settled_usd_micro": dispatches[0]["settled_usd_micro"],
         "answer_kind": program["answer_kind"],
         "user_message_id": program["message_id"],
+        "program_notice_body": program["body"],
+        "answer_run_id": program["answer_run_id"],
         "model_answer_count": answer_count,
     }, sort_keys=True))
