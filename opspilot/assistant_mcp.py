@@ -20,18 +20,23 @@ async def run(path,run_id):
     else: server=MCPServer('OpsPilot professional assistant document reader')
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def search_project_knowledge(query:str,contract_version:int|None=None)->dict:
-        """Search the authenticated Session's document scope. Optional version is a lookup preference, never deployment proof. Return versioned sources; not current business facts."""
+        """Search the authenticated Session's document scope. Optional version is a lookup preference, never deployment proof. Cite only returned documents with matching source_refs; empty lists mean no document was retrieved. Documents are not current business facts."""
         current,actor=read_run(path,run_id)
         configured=None
         if current['task_id']:
             from opspilot.domain.database import connect
             from opspilot.domain.s3 import get_s3_binding
             with connect(path) as c: configured=get_s3_binding(c,current['task_id'])['contract_version']
-        result=search(path,actor,current['session_id'],query,contract_version=contract_version if contract_version is not None else configured)
+        # A user version is a lookup preference. The effective lookup may
+        # default to a trusted binding version; preserve those facts separately.
+        lookup_version=contract_version if contract_version is not None else configured
+        result=search(path,actor,current['session_id'],query,contract_version=lookup_version)
         result['user_requested_contract_version']=contract_version
+        result['requested_contract_version']=contract_version
         result['trusted_binding_contract_version']=configured
         result['applicable_contract_version']=configured if configured is not None else result['configured_contract_version']
-        result['deployment_version_verified']=configured is not None
+        # The binding selects applicable documentation, not live deployment truth.
+        result['deployment_version_verified']=False
         return result
     try: await server.run_stdio_async()
     finally:

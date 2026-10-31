@@ -47,9 +47,13 @@ class KnowledgeAwareFixture(BaseChatModel):
             if documents and refs:
                 doc = documents[0]
                 ref = refs[0]
+                summary = next(
+                    line.strip() for line in doc["content"].splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")
+                )
                 answer = AIMessage(content=(
                     f"检索资料 {doc['document_id']} ({doc['version']})，"
-                    f"来源 {ref['source']}，摘要：{doc['title']}。"
+                    f"来源 {ref['source']}，摘要：{summary}"
                 ))
             else:
                 answer = AIMessage(content=(
@@ -102,6 +106,11 @@ def test_positive_callback_query_returns_actual_document_and_citation(demo_db, t
         assert doc[field] == ref[field]
     answer = _answer(events)
     assert doc["document_id"] in answer and doc["version"] in answer and ref["source"] in answer
+    summary = next(
+        line.strip() for line in doc["content"].splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+    assert summary in answer
 
 
 def test_empty_query_allows_general_explanation_without_document_claim(demo_db, tmp_path):

@@ -38,7 +38,14 @@ class FixtureModel(BaseChatModel):
             msg=AIMessage(content='',tool_calls=[{'name':name,'args':args,'id':'fixture-call-'+str(len(results))}])
         else:
             text='HTTP 202 只表示受理，不能证明处理完成；不判断当前订单。'
-            if self.mode=='knowledge':text='按本次检索的版本化协议，受理与处理完成不同；引用见工具来源。'
+            if self.mode=='knowledge':
+                payload=json.loads(results[-1].content)
+                if isinstance(payload,dict) and set(payload)=={'result'}:payload=payload['result']
+                documents=payload.get('documents',[]);refs=payload.get('source_refs',[])
+                if documents and refs:
+                    doc,ref=documents[0],refs[0]
+                    text=f"检索资料 {doc['document_id']} ({doc['version']})，来源 {ref['source']}；受理与处理完成不同。"
+                else:text='本次检索没有命中文档；以下是一般 HTTP 语义，不是协议引用：202 表示受理，不能证明处理完成。'
             elif self.mode=='business':
                 last=json.loads(results[-1].content)
                 text='本 Run 当前事实：'+json.dumps(last.get('facts'),ensure_ascii=False)+'；同事件 202 不是 PROCESSED。'
