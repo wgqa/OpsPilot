@@ -1,0 +1,106 @@
+HF02_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"local request path check","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/chat/completions","url":"https://api.deepseek.com/chat/completions"}
+.HF02_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"local request path check","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/v1/chat/completions","url":"https://api.deepseek.com/v1/chat/completions"}
+.HF02_LOCAL_FAILURE={"authorization_present": true, "exception_type_chain": ["OpenAIConnectionError", "APIConnectionError", "ConnectError"], "host": "api.deepseek.com", "http_response": "NONE", "method": "POST", "path": "/chat/completions", "phase": "httpx.MockTransport handler before any response"}
+.HF02_DEFAULT_TRANSPORT={"historical_capture_hook_target": "httpx.AsyncClient.send", "hook_can_observe_default_client": false, "internal_client_type": "langchain_openai.chat_models._client_utils._AsyncHttpxClientWrapper", "is_httpx2_async_client": true, "is_legacy_httpx_async_client": false, "openai_sdk": "3.33.0"}
+.HF02_HTTPX2_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"locked default transport local request","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/v1/chat/completions","url":"https://api.deepseek.com/v1/chat/completions"}
+.HF02_HTTPX2_LOCAL_FAILURE={"exception_type_chain": ["OpenAIConnectionError", "APIConnectionError", "ConnectError"], "host": "api.deepseek.com", "http_response": "NONE", "method": "POST", "path": "/v1/chat/completions", "phase": "httpx2.MockTransport handler before any response"}
+.F
+================================== FAILURES ===================================
+_ test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservation _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/hf02/pytest-red-02/test_assistant_connection_fail0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/hf02/pytest-red-02/test_assistant_connection_fail0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001ED3CA93C50>
+
+    def test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservation(
+        demo_db, tmp_path, monkeypatch
+    ):
+        from fastapi.testclient import TestClient
+    
+        from opspilot.assistant import run_assistant
+        from opspilot.domain.assistant_experiment import EXPERIMENT_ID, read_budget
+        from opspilot.domain.database import connect
+        from opspilot.domain.task_control import (
+            admit_task_message,
+            claim_task_run,
+            create_session,
+            register_worker_owner,
+            trusted_identity,
+        )
+        from opspilot.web.app import create_app
+    
+        async def fail(request, _body):
+            raise httpx.ConnectError("HF02_LOCAL_CONNECT_FAILURE", request=request)
+    
+        model, client, captured, httpx2 = _mock_assistant_model(
+            monkeypatch, fail, base_url="https://api.deepseek.com/v1", transport_library="httpx2"
+        )
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = create_session(demo_db, identity)["session_id"]
+        accepted = admit_task_message(
+            demo_db,
+            identity,
+            session_id=session_id,
+            task_id=None,
+            input_kind="CHAT_READONLY",
+            body="���� HTTP 202������Ҫ��ȡ������ʵ��",
+            idempotency_key="hf02-local-connect-failure",
+            assistant_core=True,
+        )
+        worker_id = "ar02-hf02-worker"
+        register_worker_owner(demo_db, worker_id, os.getpid())
+        claim_task_run(demo_db, identity, accepted["run_id"])
+        events = []
+    
+        async def execute():
+            try:
+                return await run_assistant(
+                    demo_db,
+                    tmp_path / "hf02-checkpoint.sqlite3",
+                    worker_id,
+                    accepted["run_id"],
+                    model=model,
+                    trace=lambda event, **values: events.append({"event": event, **values}),
+                    experiment_id=EXPERIMENT_ID,
+                )
+            finally:
+                await client.aclose()
+    
+        result = asyncio.run(execute())
+        assert result["status"] == "NOT_COMPLETED"
+        assert len(captured) == 1
+    
+        with connect(demo_db) as connection:
+            run = connection.execute(
+                "SELECT status, blocked_reason, ended_at FROM task_runs WHERE run_id=?",
+                (accepted["run_id"],),
+            ).fetchone()
+            attempt = connection.execute(
+                "SELECT attempt_id, run_id, status, error_class, completed_at FROM chat_attempts WHERE run_id=?",
+                (accepted["run_id"],),
+            ).fetchone()
+            dispatches = connection.execute(
+                "SELECT dispatch_id, status, reserved_usd_micro, settled_usd_micro, error_code FROM ar02_live_dispatches WHERE run_id=?",
+                (accepted["run_id"],),
+            ).fetchall()
+            answer_count = connection.execute(
+                "SELECT COUNT(*) FROM chat_run_answers WHERE run_id=?", (accepted["run_id"],)
+            ).fetchone()[0]
+            notices = connection.execute(
+                "SELECT message_id, body, command_id FROM messages WHERE session_id=? AND command_id=?",
+                (session_id, "budget-notice:" + accepted["run_id"]),
+            ).fetchall()
+    
+        # These assertions intentionally fail on the original HF-02 baseline:
+        # run_assistant() marks the Run FAILED but leaves its Chat Attempt STREAMING.
+        assert run["status"] == "FAILED"
+>       assert attempt["status"] == "FAILED"
+E       AssertionError: assert 'STREAMING' == 'FAILED'
+E         
+E         - FAILED
+E         + STREAMING
+
+tests\test_ar02_live_hf02.py:357: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_live_hf02.py::test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservation
+1 failed, 6 passed in 3.60s
