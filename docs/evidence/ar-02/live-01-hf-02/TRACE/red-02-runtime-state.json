@@ -1,0 +1,97 @@
+{
+  "source_log": "runs/red-02.log",
+  "sdk_wire": {
+    "authorization_present": true,
+    "body": {
+      "max_tokens": 2048,
+      "messages": [
+        {
+          "content": "locked default transport local request",
+          "role": "user"
+        }
+      ],
+      "model": "deepseek-flash",
+      "parallel_tool_calls": false,
+      "stream": false,
+      "temperature": 0.0,
+      "thinking": {
+        "type": "disabled"
+      },
+      "tool_choice": "auto",
+      "tools": [
+        {
+          "function": {
+            "description": "Search the authorized Session document scope.",
+            "name": "search_project_knowledge",
+            "parameters": {
+              "properties": {
+                "query": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "function"
+        }
+      ]
+    },
+    "host": "api.deepseek.com",
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "url": "https://api.deepseek.com/v1/chat/completions"
+  },
+  "default_transport": {
+    "historical_capture_hook_target": "httpx.AsyncClient.send",
+    "hook_can_observe_default_client": false,
+    "internal_client_type": "langchain_openai.chat_models._client_utils._AsyncHttpxClientWrapper",
+    "is_httpx2_async_client": true,
+    "is_legacy_httpx_async_client": false,
+    "openai_sdk": "3.33.0"
+  },
+  "local_connection_error": {
+    "exception_type_chain": [
+      "OpenAIConnectionError",
+      "APIConnectionError",
+      "ConnectError"
+    ],
+    "host": "api.deepseek.com",
+    "http_response": "NONE",
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "phase": "httpx2.MockTransport handler before any response"
+  },
+  "runtime_db": ".runtime/hf02/pytest-red-02/test_assistant_connection_fail0/domain.sqlite3",
+  "runtime_state": {
+    "run": {
+      "run_id": "run-38773c2b-2355-4501-9ad3-31e9c76a8bee",
+      "status": "FAILED",
+      "blocked_reason": "ASSISTANT_STOP:OpenAIConnectionError:Connection error.",
+      "ended_at": "2026-10-31T17:29:29.011+00:00"
+    },
+    "attempt": {
+      "attempt_id": "chat-attempt-a19afb47-91cc-452d-a8aa-73a4ffd04d18",
+      "run_id": "run-38773c2b-2355-4501-9ad3-31e9c76a8bee",
+      "status": "STREAMING",
+      "error_class": null,
+      "completed_at": null
+    },
+    "dispatch": {
+      "dispatch_id": "ar02-live-dispatch-69788003-5876-4093-9088-f9bea1aadd70",
+      "run_id": "run-38773c2b-2355-4501-9ad3-31e9c76a8bee",
+      "status": "UNKNOWN",
+      "reserved_usd_micro": 645600,
+      "settled_usd_micro": 0,
+      "error_code": "OpenAIConnectionError"
+    },
+    "model_answer_count": 0,
+    "program_notice": {
+      "message_id": "message-38e49d84-4f90-4cf1-935b-24f89d696ac6",
+      "body": "本次解释未完成：ASSISTANT_STOP:OpenAIConnectionError:Connection error.。这是程序生成的限制说明，未提交模型最终答复；此前已预留或失败的调用仍计入额度。本说明未重新取得业务事实，历史结论不能冒充本次新调查结果。Task 和既有业务授权保持不变。",
+      "command_id": "budget-notice:run-38773c2b-2355-4501-9ad3-31e9c76a8bee"
+    }
+  }
+}
