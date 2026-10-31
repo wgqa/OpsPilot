@@ -1,0 +1,78 @@
+{
+  "task": "AR-02-SMOKE-01",
+  "base_sha": "d2d53796811691a2ac90f76dce9f140165f1f2b8",
+  "branch": "codex/ar02-hf-01",
+  "main_sha_observed": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "status": "FREE_ADAPTER_PASS_REAL_SMOKE_HOLD",
+  "provider_configuration": {
+    "dotenv_present": false,
+    "api_key_present": false,
+    "model_id_present": false,
+    "base_url_present": false,
+    "explicit_opt_in_enabled": false
+  },
+  "provider_activity": {
+    "successful_model_completions": 0,
+    "provider_usage_reported": false,
+    "accidental_auth_failure_http_requests": 1,
+    "accidental_request_status": 401,
+    "billing_status_independently_verified": false,
+    "paid_s01_s02_runs": 0,
+    "browser_b11": "NOT_RUN_BLOCKED_BY_PRIOR_STOP"
+  },
+  "deterministic_product_path": {
+    "executed": true,
+    "test_file": "tests/test_ar02_runtime.py",
+    "model": "fixture_model",
+    "api_worker_assistant_v1": true,
+    "local_mcp_http_sqlite": true,
+    "real_provider_evidence": false
+  },
+  "tests": [
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_ar02_smoke_provider_factory.py -q -s --basetemp D:\\OpsPilotTestTemp\\AR02-SMOKE-01\\focused-08",
+      "log": "runs/green-provider-preflight-final.log",
+      "result": "PASS",
+      "passed": 7,
+      "failed": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_ar02_smoke_provider_factory.py tests/test_ar02_runtime.py tests/test_ar02_assistant.py tests/test_ar02_knowledge.py tests/test_ar02_hf01.py -q --basetemp D:\\OpsPilotTestTemp\\AR02-SMOKE-01\\regression-09",
+      "log": "runs/ar02-related-regression-final.log",
+      "result": "PASS",
+      "passed": 40,
+      "failed": 0,
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "log": "runs/diff-check-final.log",
+      "result": "PASS",
+      "exit_code": 0
+    }
+  ],
+  "local_mock_wire": {
+    "result": "PASS",
+    "log": "runs/green-provider-wire-mock-05.log",
+    "external_provider_called_by_this_test": false,
+    "max_tokens": 2048,
+    "max_completion_tokens_present": false,
+    "tool_choice": "auto",
+    "parallel_tool_calls": false
+  },
+  "frozen_journeys": {
+    "S01": "NOT_RUN_NO_PAID_AUTHORIZATION_AND_PROVIDER_CONFIGURATION",
+    "S02": "NOT_RUN_NO_PAID_AUTHORIZATION_AND_PROVIDER_CONFIGURATION"
+  },
+  "full_repository_pytest": "NOT_RUN",
+  "cost_gate": {
+    "durable_global_provider_count_cap": false,
+    "durable_global_mcp_cap": false,
+    "durable_usd_reservation_ledger": false,
+    "proposed_provider_request_limit": 16,
+    "proposed_mcp_attempt_limit": 12,
+    "proposed_usd_cap": 10.5,
+    "proposal_is_authorization": false
+  }
+}
