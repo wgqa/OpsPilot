@@ -1,0 +1,96 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- C:\Users\tu me manques\.codex\worktrees\c1-approved-integration-20261025\agent����Ŀ\.venv-stageb\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\tu me manques\.codex\worktrees\ar02-p0-01\agent����Ŀ
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 6 items
+
+tests/test_ar02_hf01.py::test_empty_mcp_knowledge_result_is_not_described_as_a_citation FAILED [ 16%]
+tests/test_ar02_hf01.py::test_positive_callback_query_returns_actual_document_and_citation PASSED [ 33%]
+tests/test_ar02_hf01.py::test_empty_query_allows_general_explanation_without_document_claim PASSED [ 50%]
+tests/test_ar02_hf01.py::test_task_binding_old_version_request_is_not_deployment_verification FAILED [ 66%]
+tests/test_ar02_hf01.py::test_task_binding_default_uses_binding_version_but_not_deployment_claim FAILED [ 83%]
+tests/test_ar02_hf01.py::test_no_task_old_version_request_keeps_preference_and_configuration_separate PASSED [100%]
+
+================================== FAILURES ===================================
+_______ test_empty_mcp_knowledge_result_is_not_described_as_a_citation ________
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent����Ŀ/.tmp/ar02-hf01-red-01/test_empty_mcp_knowledge_resul0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent����Ŀ/.tmp/ar02-hf01-red-01/test_empty_mcp_knowledge_resul0')
+
+    def test_empty_mcp_knowledge_result_is_not_described_as_a_citation(demo_db, tmp_path):
+        """Reproduces the old fixture claiming a source for a real empty MCP result."""
+        from test_ar02_runtime import FixtureModel
+    
+        model = FixtureModel(mode="knowledge")
+        created = setup_run(demo_db, "HTTP 202 acceptance processing ��һ�㺬����ʲô��", "hf01-empty-red")
+        result, events = execute(demo_db, created, model, tmp_path / "empty-red.sqlite3")
+        assert result["status"] == "SUCCEEDED", result
+        knowledge = _tool_payload(model)
+        assert knowledge["documents"] == []
+        assert knowledge["source_refs"] == []
+>       assert "�����μ���" not in _answer(events)
+E       AssertionError: assert '�����μ���' not in '�����μ����İ汾��Э�飬�����봦����ɲ�ͬ�����ü�������Դ��'
+E         
+E         '�����μ���' is contained here:
+E           �����μ����İ汾��Э�飬�����봦����ɲ�ͬ�����ü�������Դ��
+E         ? +++++
+
+tests\test_ar02_hf01.py:87: AssertionError
+____ test_task_binding_old_version_request_is_not_deployment_verification _____
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent����Ŀ/.tmp/ar02-hf01-red-01/test_task_binding_old_version_0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent����Ŀ/.tmp/ar02-hf01-red-01/test_task_binding_old_version_0')
+
+    def test_task_binding_old_version_request_is_not_deployment_verification(demo_db, tmp_path):
+        prepare_s3_fixture(demo_db, "PROCESSING", order_id="ar02-order", contract_version=2)
+        created = setup_run(
+            demo_db, "�����ʷ v1 �ص� Receiver Э�顣", "hf01-old-version", bind=True
+        )
+        model = KnowledgeAwareFixture(
+            query="callback receiver processing", requested_version=1
+        )
+        result, events = execute(demo_db, created, model, tmp_path / "binding-version.sqlite3")
+    
+        assert result["status"] == "SUCCEEDED", result
+        payload = model.seen_results[0]
+        assert payload["user_requested_contract_version"] == 1
+        assert payload["requested_contract_version"] == 1
+        assert payload["configured_contract_version"] == 2
+        assert payload["trusted_binding_contract_version"] == 2
+        assert payload["latest_available_contract_version"] == 2
+        assert payload["retrieved_contract_version"] == 1
+        assert payload["applicable_contract_version"] == 2
+        assert payload["version_conflict"] is True
+>       assert payload["deployment_version_verified"] is False
+E       assert True is False
+
+tests\test_ar02_hf01.py:139: AssertionError
+___ test_task_binding_default_uses_binding_version_but_not_deployment_claim ___
+
+demo_db = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent����Ŀ/.tmp/ar02-hf01-red-01/test_task_binding_default_uses0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/.codex/worktrees/ar02-p0-01/agent����Ŀ/.tmp/ar02-hf01-red-01/test_task_binding_default_uses0')
+
+    def test_task_binding_default_uses_binding_version_but_not_deployment_claim(demo_db, tmp_path):
+        prepare_s3_fixture(demo_db, "PROCESSING", order_id="ar02-order", contract_version=2)
+        created = setup_run(demo_db, "������õĻص�Э�顣", "hf01-binding-default", bind=True)
+        model = KnowledgeAwareFixture(query="callback receiver protocol HTTP 202 processing")
+        result, events = execute(demo_db, created, model, tmp_path / "binding-default.sqlite3")
+    
+        assert result["status"] == "SUCCEEDED", result
+        payload = model.seen_results[0]
+        assert payload["user_requested_contract_version"] is None
+>       assert payload["requested_contract_version"] is None
+E       assert 2 is None
+
+tests\test_ar02_hf01.py:155: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_hf01.py::test_empty_mcp_knowledge_result_is_not_described_as_a_citation - AssertionError: assert '�����μ���' not in '�����μ����İ汾��Э�飬�����봦����ɲ�ͬ�����ü�������Դ��'
+  
+  '�����μ���' is contained here:
+    �����μ����İ汾��Э�飬�����봦����ɲ�ͬ�����ü�������Դ��
+  ? +++++
+FAILED tests/test_ar02_hf01.py::test_task_binding_old_version_request_is_not_deployment_verification - assert True is False
+FAILED tests/test_ar02_hf01.py::test_task_binding_default_uses_binding_version_but_not_deployment_claim - assert 2 is None
+======================== 3 failed, 3 passed in 11.28s =========================
