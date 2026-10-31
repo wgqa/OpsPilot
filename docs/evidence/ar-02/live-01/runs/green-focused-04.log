@@ -1,0 +1,74 @@
+....F................                                                    [100%]
+================================== FAILURES ===================================
+____ test_experiment_budget_uses_one_persistent_scope_and_usage_settlement ____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/pytest/ar02-live-01-focused-04/test_experiment_budget_uses_on0/domain.sqlite3')
+
+    def test_experiment_budget_uses_one_persistent_scope_and_usage_settlement(demo_db):
+        from opspilot.domain.database import connect
+        from opspilot.domain.assistant_experiment import (
+            complete_dispatch,
+            initialize_experiment,
+            read_budget,
+            reserve_dispatch,
+        )
+    
+        initialize_experiment(demo_db, EXPERIMENT_ID)
+        with connect(demo_db) as connection:
+            version_before = connection.execute("PRAGMA user_version").fetchone()[0]
+        first = _assistant_run(demo_db, "budget-first")
+        second = _assistant_run(demo_db, "budget-second")
+    
+        model_reservation = reserve_dispatch(
+            demo_db,
+            experiment_id=EXPERIMENT_ID,
+            run_id=first["run_id"],
+            kind="MODEL",
+            logical_key="model:0",
+            request={"digest_only": "fixture-model-request"},
+        )
+        complete_dispatch(
+            demo_db,
+            experiment_id=EXPERIMENT_ID,
+            run_id=first["run_id"],
+            kind="MODEL",
+            logical_key="model:0",
+            usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+        replay = reserve_dispatch(
+            demo_db,
+            experiment_id=EXPERIMENT_ID,
+            run_id=first["run_id"],
+            kind="MODEL",
+            logical_key="model:0",
+            request={"digest_only": "fixture-model-request"},
+        )
+        assert replay["dispatch"] is False and replay["replay"] is True
+        mcp_reservation = reserve_dispatch(
+            demo_db,
+            experiment_id=EXPERIMENT_ID,
+            run_id=second["run_id"],
+            kind="MCP",
+            logical_key="mcp:0",
+            request={"tool": "search_project_knowledge", "args": {"query": "202"}},
+        )
+        complete_dispatch(
+            demo_db,
+            experiment_id=EXPERIMENT_ID,
+            run_id=second["run_id"],
+            kind="MCP",
+            logical_key="mcp:0",
+        )
+    
+        assert model_reservation["dispatch"] is True
+        assert mcp_reservation["dispatch"] is True
+        snapshot = read_budget(demo_db, EXPERIMENT_ID)
+        assert snapshot["provider_used"] == 1
+        assert snapshot["mcp_used"] == 1
+>       assert snapshot["usd_settled_micro"] == 10
+E       assert 9 == 10
+
+tests\test_ar02_live_budget.py:156: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_live_budget.py::test_experiment_budget_uses_one_persistent_scope_and_usage_settlement
+1 failed, 20 passed in 9.98s

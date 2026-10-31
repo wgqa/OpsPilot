@@ -150,10 +150,21 @@ def create_app(
     expected_origin: str | None = None,
     heartbeat_seconds: float = 10.0,
     assistant_model_factory=None,
+    assistant_experiment_id: str | None = None,
 ) -> FastAPI:
     from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
 
     load_local_environment()
+    from opspilot.domain.assistant_experiment import EXPERIMENT_ENV, EXPERIMENT_ID
+
+    configured_experiment = os.environ.get(EXPERIMENT_ENV, "").strip() or None
+    if assistant_experiment_id is not None and assistant_experiment_id != EXPERIMENT_ID:
+        raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+    if assistant_experiment_id is not None and configured_experiment is not None and assistant_experiment_id != configured_experiment:
+        raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_MISMATCH")
+    resolved_experiment = assistant_experiment_id or configured_experiment
+    if resolved_experiment is not None and resolved_experiment != EXPERIMENT_ID:
+        raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
     resolved_db = database_path(str(db_path) if db_path is not None else None)
     checkpoint_path = Path(checkpoint_db_path or os.environ.get("OPSPILOT_CHECKPOINT_DB_PATH") or DEFAULT_CHECKPOINT_DB_PATH)
     if not checkpoint_path.is_absolute():
@@ -173,6 +184,10 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         initialize(resolved_db)
+        if resolved_experiment is not None:
+            from opspilot.domain.assistant_experiment import initialize_experiment
+
+            initialize_experiment(resolved_db, resolved_experiment)
         reconcile_legacy_action_events(str(resolved_db))
         project_outbox(str(resolved_db))
         worker = None
@@ -196,6 +211,7 @@ def create_app(
                     executor_id=executor_id,
                     worker_epoch=worker.epoch,
                     assistant_model_factory=assistant_model_factory,
+                    assistant_experiment_id=resolved_experiment,
                 ),
                 name="opspilot-domain-run-worker",
             )
@@ -220,6 +236,7 @@ def create_app(
     app.state.heartbeat_seconds = max(0.05, heartbeat_seconds)
     app.state.cookie_secure = origin.lower().startswith("https://")
     app.state.worker_configured = bool(start_worker)
+    app.state.assistant_experiment_id = resolved_experiment
     app.state.worker_task = None
     app.state.worker_id = None
     app.state.worker_epoch = None

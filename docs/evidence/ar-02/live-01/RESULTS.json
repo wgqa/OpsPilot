@@ -1,0 +1,95 @@
+{
+  "task": "AR-02-LIVE-01 P0",
+  "status": "P0_READY_P1_NOT_AUTHORIZED",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/ar02-live-01",
+  "base_sha": "88e00126aaca7af0cbfd454e8f833eae90eae39c",
+  "worktree": "D:/学习/agent新项目/.worktrees/ar02-live-01",
+  "python": "3.14.0",
+  "dependencies": {
+    "fastapi": "0.137.1",
+    "httpx": "0.28.1",
+    "langchain": "1.4.1",
+    "langchain-core": "1.6.12",
+    "langchain-openai": "1.7.2",
+    "langgraph": "1.2.16",
+    "mcp": "2.3.0",
+    "pydantic": "2.14.1"
+  },
+  "frozen_limits": {
+    "experiment_id": "AR-02-LIVE-01",
+    "provider_dispatches": 16,
+    "mcp_tools_call_attempts": 12,
+    "budget_usd": 10.5,
+    "reservation_per_provider_dispatch_usd": 0.6456,
+    "unknown_usage_policy": "retain full reservation and count; never retry the same external dispatch"
+  },
+  "runs": [
+    {
+      "command": "& 'D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe' -m pytest tests/test_ar02_live_budget.py tests/test_ar02_smoke_provider_factory.py --basetemp .runtime\\pytest\\ar02-live-01-focused-final-02 -q",
+      "result": "PASS",
+      "passed": 24,
+      "failed": 0,
+      "exit_code": 0,
+      "log": "runs/green-focused-final-02.log"
+    },
+    {
+      "command": "& 'D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe' -m pytest tests/test_ar02_live_budget.py tests/test_ar02_smoke_provider_factory.py tests/test_ar02_runtime.py tests/test_ar02_assistant.py tests/test_ar02_knowledge.py tests/test_ar02_hf01.py tests/test_m1_task_control.py tests/test_m1_hf_worker.py --basetemp .runtime\\pytest\\ar02-live-01-regression-final-02 -q",
+      "result": "PASS",
+      "passed": 73,
+      "failed": 0,
+      "exit_code": 0,
+      "log": "runs/regression-final-02.log"
+    },
+    {
+      "command": "git diff --cached --check -- . ':(exclude)docs/evidence/ar-02/live-01/runs/*.log'",
+      "result": "PASS",
+      "exit_code": 0,
+      "note": "Raw pytest logs are preserved byte-for-byte; pytest output includes trailing spaces, so they were excluded from the whitespace check."
+    }
+  ],
+  "red_runs": [
+    {
+      "log": "runs/red-freeze-01.log",
+      "result": "ENVIRONMENT_FAILURE",
+      "exit_code": 1,
+      "detail": "system Python 3.14 did not have the locked LangChain dependency installed"
+    },
+    {
+      "log": "runs/red-frozen-02.log",
+      "result": "RED_REPRODUCED",
+      "failed": 9,
+      "exit_code": 1,
+      "detail": "old provider factory/scope and missing experiment ledger contract"
+    },
+    {
+      "log": "runs/green-focused-01.log",
+      "result": "INTERMEDIATE_FAILURE",
+      "passed": 14,
+      "failed": 2,
+      "exit_code": 1
+    },
+    {
+      "log": "runs/green-focused-04.log",
+      "result": "INTERMEDIATE_FAILURE",
+      "passed": 20,
+      "failed": 1,
+      "exit_code": 1
+    }
+  ],
+  "verification_scope": {
+    "formal_api_worker_fixture_runs": 2,
+    "fixture_model_dispatches": 3,
+    "local_mcp_tools_call_dispatches": 1,
+    "user_answers_persisted": 2,
+    "actual_paid_provider_requests": 0,
+    "browser_automation": "NOT_RUN_BY_INSTRUCTION",
+    "business_write_actions": 0,
+    "full_repository_pytest": "NOT_RUN"
+  },
+  "limitations": [
+    "Deterministic fixture results prove API/Worker/MCP wiring and ledger accounting only; they do not prove real model behavior or real user S01/S02 completion.",
+    "The provider request was captured only with local httpx.MockTransport; no remote Provider compatibility probe was sent.",
+    "The USD limit is an application-side reserve based on current documented price/context bounds, not a provider-account hard billing cap."
+  ]
+}

@@ -1,0 +1,160 @@
+FFFFFFFFF                                                                [100%]
+================================== FAILURES ===================================
+_________ test_real_provider_requires_explicit_live_experiment_scope __________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002ABB7129220>
+
+    def test_real_provider_requires_explicit_live_experiment_scope(monkeypatch):
+        from opspilot.assistant import create_assistant_model
+    
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
+        monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
+        monkeypatch.delenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", raising=False)
+    
+>       with pytest.raises(RuntimeError, match="AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE RuntimeError
+
+tests\test_ar02_live_budget.py:45: Failed
+_________________ test_real_provider_requires_frozen_model_id _________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002ABBB09A3F0>
+
+    def test_real_provider_requires_frozen_model_id(monkeypatch):
+        from opspilot.assistant import create_assistant_model
+    
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "some-other-model")
+        monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://example.invalid/v1")
+    
+>       with pytest.raises(RuntimeError, match="AR02_LIVE_MODEL_CONFIGURATION_MISMATCH"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE RuntimeError
+
+tests\test_ar02_live_budget.py:58: Failed
+______ test_deepseek_factory_pins_nonthinking_max_tokens_and_no_retries _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002ABBB218830>
+
+    def test_deepseek_factory_pins_nonthinking_max_tokens_and_no_retries(monkeypatch):
+        from opspilot.assistant import create_assistant_model
+    
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
+        monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
+    
+        model = create_assistant_model()
+    
+        assert model.model_name == "deepseek-flash"
+>       assert model.extra_body == {
+            "max_tokens": 2048,
+            "thinking": {"type": "disabled"},
+        }
+E       AssertionError: assert {'max_tokens': 2048} == {'max_tokens'...: 'disabled'}}
+E         
+E         Omitting 1 identical items, use -vv to show
+E         Right contains 1 more item:
+E         {'thinking': {'type': 'disabled'}}
+E         Use -v to get more diff
+
+tests\test_ar02_live_budget.py:74: AssertionError
+____ test_experiment_budget_uses_one_persistent_scope_and_usage_settlement ____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/pytest/ar02-live-red-02/test_experiment_budget_uses_on0/domain.sqlite3')
+
+    def test_experiment_budget_uses_one_persistent_scope_and_usage_settlement(demo_db):
+>       from opspilot.domain.assistant_experiment import (
+            complete_dispatch,
+            initialize_experiment,
+            read_budget,
+            reserve_dispatch,
+        )
+E       ModuleNotFoundError: No module named 'opspilot.domain.assistant_experiment'
+
+tests\test_ar02_live_budget.py:83: ModuleNotFoundError
+_ test_unknown_provider_result_keeps_reserve_and_rejects_replay_after_reopen __
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/pytest/ar02-live-red-02/test_unknown_provider_result_k0/domain.sqlite3')
+
+    def test_unknown_provider_result_keeps_reserve_and_rejects_replay_after_reopen(demo_db):
+>       from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            initialize_experiment,
+            mark_unknown,
+            read_budget,
+            reserve_dispatch,
+        )
+E       ModuleNotFoundError: No module named 'opspilot.domain.assistant_experiment'
+
+tests\test_ar02_live_budget.py:136: ModuleNotFoundError
+___ test_provider_money_reservation_stops_before_any_sixteenth_unknown_send ___
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/pytest/ar02-live-red-02/test_provider_money_reservatio0/domain.sqlite3')
+
+    def test_provider_money_reservation_stops_before_any_sixteenth_unknown_send(demo_db):
+>       from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            initialize_experiment,
+            read_budget,
+            reserve_dispatch,
+        )
+E       ModuleNotFoundError: No module named 'opspilot.domain.assistant_experiment'
+
+tests\test_ar02_live_budget.py:189: ModuleNotFoundError
+___________ test_provider_and_mcp_count_limits_are_experiment_wide ____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/pytest/ar02-live-red-02/test_provider_and_mcp_count_li0/domain.sqlite3')
+
+    def test_provider_and_mcp_count_limits_are_experiment_wide(demo_db):
+>       from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            complete_dispatch,
+            initialize_experiment,
+            reserve_dispatch,
+        )
+E       ModuleNotFoundError: No module named 'opspilot.domain.assistant_experiment'
+
+tests\test_ar02_live_budget.py:226: ModuleNotFoundError
+_______ test_separate_sqlite_connections_cannot_exceed_campaign_counts ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/pytest/ar02-live-red-02/test_separate_sqlite_connectio0/domain.sqlite3')
+
+    def test_separate_sqlite_connections_cannot_exceed_campaign_counts(demo_db):
+>       from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            complete_dispatch,
+            initialize_experiment,
+            reserve_dispatch,
+        )
+E       ModuleNotFoundError: No module named 'opspilot.domain.assistant_experiment'
+
+tests\test_ar02_live_budget.py:291: ModuleNotFoundError
+________ test_live_budget_is_used_by_formal_api_worker_across_sessions ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/pytest/ar02-live-red-02/test_live_budget_is_used_by_fo0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/pytest/ar02-live-red-02/test_live_budget_is_used_by_fo0')
+
+    def test_live_budget_is_used_by_formal_api_worker_across_sessions(demo_db, tmp_path):
+        from fastapi.testclient import TestClient
+    
+>       from opspilot.domain.assistant_experiment import EXPERIMENT_ID as LIVE_ID, read_budget
+E       ModuleNotFoundError: No module named 'opspilot.domain.assistant_experiment'
+
+tests\test_ar02_live_budget.py:358: ModuleNotFoundError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_live_budget.py::test_real_provider_requires_explicit_live_experiment_scope
+FAILED tests/test_ar02_live_budget.py::test_real_provider_requires_frozen_model_id
+FAILED tests/test_ar02_live_budget.py::test_deepseek_factory_pins_nonthinking_max_tokens_and_no_retries
+FAILED tests/test_ar02_live_budget.py::test_experiment_budget_uses_one_persistent_scope_and_usage_settlement
+FAILED tests/test_ar02_live_budget.py::test_unknown_provider_result_keeps_reserve_and_rejects_replay_after_reopen
+FAILED tests/test_ar02_live_budget.py::test_provider_money_reservation_stops_before_any_sixteenth_unknown_send
+FAILED tests/test_ar02_live_budget.py::test_provider_and_mcp_count_limits_are_experiment_wide
+FAILED tests/test_ar02_live_budget.py::test_separate_sqlite_connections_cannot_exceed_campaign_counts
+FAILED tests/test_ar02_live_budget.py::test_live_budget_is_used_by_formal_api_worker_across_sessions
+9 failed in 3.13s

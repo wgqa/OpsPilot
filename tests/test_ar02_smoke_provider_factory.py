@@ -46,6 +46,7 @@ def test_provider_factory_requires_existing_model_configuration_after_explicit_e
     from opspilot.assistant import create_assistant_model
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "AR-02-LIVE-01")
     monkeypatch.delenv("OPSPILOT_MODEL_API_KEY", raising=False)
     monkeypatch.delenv("OPSPILOT_MODEL_NAME", raising=False)
 
@@ -57,6 +58,7 @@ def test_provider_factory_does_not_default_deepseek_to_openai_endpoint(monkeypat
     from opspilot.assistant import create_assistant_model
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "AR-02-LIVE-01")
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
     monkeypatch.delenv("OPSPILOT_MODEL_BASE_URL", raising=False)
@@ -69,6 +71,7 @@ def test_provider_factory_builds_bounded_no_retry_chatopenai_without_network(mon
     from opspilot.assistant import create_assistant_model
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "AR-02-LIVE-01")
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
@@ -77,7 +80,10 @@ def test_provider_factory_builds_bounded_no_retry_chatopenai_without_network(mon
 
     assert model.model_name == "deepseek-flash"
     assert model.max_tokens is None
-    assert model.extra_body == {"max_tokens": 2048}
+    assert model.extra_body == {
+        "max_tokens": 2048,
+        "thinking": {"type": "disabled"},
+    }
     assert model.request_timeout == 30
     assert model.max_retries == 0
     assert model.temperature == 0
@@ -85,19 +91,17 @@ def test_provider_factory_builds_bounded_no_retry_chatopenai_without_network(mon
     assert model.openai_api_base == "https://api.deepseek.com"
 
 
-def test_provider_factory_keeps_standard_limit_for_non_deepseek_chatopenai(monkeypatch):
+def test_provider_factory_rejects_model_outside_frozen_experiment(monkeypatch):
     from opspilot.assistant import create_assistant_model
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "AR-02-LIVE-01")
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "fixture-compatible-model")
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://example.invalid/v1")
 
-    model = create_assistant_model()
-
-    assert model.max_tokens == 2048
-    assert model.extra_body is None
-    assert model.max_retries == 0
+    with pytest.raises(RuntimeError, match="AR02_LIVE_MODEL_CONFIGURATION_MISMATCH"):
+        create_assistant_model()
 
 
 def test_assistant_factory_emits_deepseek_max_tokens_on_local_mock_wire(monkeypatch):
@@ -105,6 +109,7 @@ def test_assistant_factory_emits_deepseek_max_tokens_on_local_mock_wire(monkeypa
     import langchain_openai
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "AR-02-LIVE-01")
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
@@ -163,6 +168,7 @@ def test_assistant_factory_emits_deepseek_max_tokens_on_local_mock_wire(monkeypa
     print("LOCAL_MOCK_WIRE_BODY=" + json.dumps(body, sort_keys=True, separators=(",", ":")))
     assert body["model"] == "deepseek-flash"
     assert body["max_tokens"] == 2048
+    assert body["thinking"] == {"type": "disabled"}
     assert "max_completion_tokens" not in body
     assert body["tool_choice"] == "auto"
     assert body["parallel_tool_calls"] is False

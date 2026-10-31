@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import sys
+from urllib.parse import urlparse
 from pathlib import Path
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
@@ -38,24 +39,34 @@ def create_assistant_model():
     if os.environ.get('OPSPILOT_ASSISTANT_PROVIDER_ENABLED', '').strip() != '1':
         return None
     from opspilot.config import MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME
+    from opspilot.domain.assistant_experiment import EXPERIMENT_ENV, EXPERIMENT_ID
+
+    if os.environ.get(EXPERIMENT_ENV, "").strip() != EXPERIMENT_ID:
+        raise RuntimeError("AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED")
     model_id = os.environ.get(MODEL_NAME, '').strip()
     api_key = os.environ.get(MODEL_API_KEY, '').strip()
     if not model_id or not api_key:
         raise RuntimeError(f'Missing required model configuration: {MODEL_API_KEY}, {MODEL_NAME}.')
+    if model_id != "deepseek-flash":
+        raise RuntimeError("AR02_LIVE_MODEL_CONFIGURATION_MISMATCH")
     base_url = os.environ.get(MODEL_BASE_URL, '').strip()
-    is_deepseek = model_id.lower().startswith('deepseek-')
-    if is_deepseek and not base_url:
+    if not base_url:
         raise RuntimeError(f'Missing required model configuration: {MODEL_BASE_URL}.')
+    endpoint = urlparse(base_url)
+    if (
+        endpoint.scheme != "https"
+        or endpoint.hostname != "api.deepseek.com"
+        or endpoint.port not in (None, 443)
+        or endpoint.username is not None
+        or endpoint.password is not None
+        or endpoint.query
+        or endpoint.fragment
+        or endpoint.path not in ("", "/", "/v1")
+    ):
+        raise RuntimeError("AR02_LIVE_PROVIDER_ENDPOINT_MISMATCH")
     from langchain_openai import ChatOpenAI
-    # DeepSeek's Chat Completions API names this cap `max_tokens`. The pinned
-    # ChatOpenAI maps its `max_tokens` field to `max_completion_tokens`, so use
-    # the SDK's provider-extra-body merge for DeepSeek. Other OpenAI-compatible
-    # providers keep ChatOpenAI's standard parameter mapping.
-    output_limit = (
-        {'extra_body': {'max_tokens': 2048}}
-        if is_deepseek
-        else {'max_tokens': 2048}
-    )
+    # DeepSeek Chat Completions requires its own `max_tokens` wire field and
+    # explicit non-thinking mode; the pinned SDK's native alias differs.
     return ChatOpenAI(
         model=model_id,
         api_key=api_key,
@@ -65,14 +76,80 @@ def create_assistant_model():
         max_retries=0,
         stream_usage=True,
         include_response_headers=True,
-        **output_limit,
+        extra_body={"max_tokens": 2048, "thinking": {"type": "disabled"}},
     )
 
 class Loop(AgentMiddleware):
-    def __init__(self,path,run_id,worker_id,client,specs,trace,model_id):
+    def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None):
         self.path,self.run_id,self.worker_id,self.client,self.specs,self.trace=path,run_id,worker_id,client,specs,trace
         self.run,self.actor=domain.read_run(path,run_id,worker_id=worker_id)
         self.model_id=model_id
+        self.experiment_id=experiment_id
+
+    @staticmethod
+    def _usage_from_messages(messages):
+        input_tokens = output_tokens = total_tokens = 0
+        observed = False
+        total_known = True
+        for message in messages:
+            usage = getattr(message, "usage_metadata", None)
+            if not isinstance(usage, dict):
+                continue
+            observed = True
+            current_input = usage.get("input_tokens")
+            current_output = usage.get("output_tokens")
+            current_total = usage.get("total_tokens")
+            if type(current_input) is not int or type(current_output) is not int:
+                return None
+            input_tokens += current_input
+            output_tokens += current_output
+            if type(current_total) is int:
+                total_tokens += current_total
+            else:
+                total_known = False
+        if not observed:
+            return None
+        result = {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        if total_known:
+            result["total_tokens"] = total_tokens
+        return result
+
+    def _campaign_usage_for_cached_call(self, call):
+        if not self.experiment_id or not call.get("usage_json"):
+            return None
+        try:
+            values = json.loads(call["usage_json"])
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(values, list):
+            return None
+        class UsageMessage:
+            def __init__(self, value):
+                self.usage_metadata = value
+        return self._usage_from_messages([UsageMessage(value) for value in values])
+
+    def _settle_cached_campaign_dispatch(self, kind, logical_key, usage=None):
+        if not self.experiment_id:
+            return
+        from opspilot.domain.assistant_experiment import read_dispatch, complete_dispatch
+        prior = read_dispatch(
+            self.path,
+            experiment_id=self.experiment_id,
+            run_id=self.run_id,
+            kind=kind,
+            logical_key=logical_key,
+        )
+        # A result produced before this isolated campaign was explicitly enabled
+        # is a replay, not a newly dispatched campaign call.
+        if prior is None:
+            return
+        if prior["status"] == "RESERVED":
+            complete_dispatch(
+                self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                kind=kind, logical_key=logical_key, usage=usage,
+            )
+        elif prior["status"] not in {"OK", "UNKNOWN"}:
+            raise TaskControlError("AR02_LIVE_DISPATCH_STATE_INVALID")
 
     def context(self):
         with connect(self.path) as c:
@@ -108,18 +185,48 @@ class Loop(AgentMiddleware):
         call,fresh=domain.reserve(self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',wire,self.worker_id)
         self.trace('model_request',call_id=call['call_id'],replay=not fresh,**wire)
         if not fresh:
+            self._settle_cached_campaign_dispatch(
+                'MODEL', call['logical_key'], self._campaign_usage_for_cached_call(call)
+            )
             from langchain.agents.middleware.types import ModelResponse
             return ModelResponse(result=messages_from_dict(json.loads(call['result_json'])))
+        if self.experiment_id:
+            from opspilot.domain.assistant_experiment import reserve_dispatch
+            try:
+                campaign = reserve_dispatch(
+                    self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                    kind='MODEL', logical_key=call['logical_key'], request=wire,
+                )
+            except Exception as error:
+                domain.finish(self.path,call['call_id'],'FAILED',{'error':getattr(error,'code',type(error).__name__)})
+                raise
+            if not campaign.get('dispatch'):
+                domain.finish(self.path,call['call_id'],'FAILED',{'error':'AR02_LIVE_CAMPAIGN_REPLAY_CONFLICT'})
+                raise TaskControlError('AR02_LIVE_CAMPAIGN_REPLAY_CONFLICT')
         try:
             # The factory pins the output cap using the configured provider's
             # wire parameter. Re-injecting `max_tokens` here would make the
             # pinned ChatOpenAI emit DeepSeek's unsupported alias.
             result=await asyncio.wait_for(handler(request.override(system_message=system,model_settings={**request.model_settings,'parallel_tool_calls':False})),30)
             domain.finish(self.path,call['call_id'],'OK',messages_to_dict(result.result),[getattr(m,'usage_metadata',None) for m in result.result])
+            if self.experiment_id:
+                from opspilot.domain.assistant_experiment import complete_dispatch
+                complete_dispatch(
+                    self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                    kind='MODEL', logical_key=call['logical_key'],
+                    usage=self._usage_from_messages(result.result),
+                )
             self.trace('model_response',call_id=call['call_id'],messages=messages_to_dict(result.result))
             return result
-        except BaseException:
+        except BaseException as error:
             domain.finish(self.path,call['call_id'],'UNKNOWN')
+            if self.experiment_id:
+                from opspilot.domain.assistant_experiment import mark_unknown
+                mark_unknown(
+                    self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                    kind='MODEL', logical_key=call['logical_key'],
+                    error_code=type(error).__name__,
+                )
             raise
 
     async def awrap_tool_call(self,request,handler):
@@ -127,16 +234,35 @@ class Loop(AgentMiddleware):
         domain.read_run(self.path,self.run_id,worker_id=self.worker_id)
         row,fresh=domain.reserve(self.path,self.run_id,'MCP',call['id'],{'name':name,'args':args},self.worker_id)
         if not fresh:
+            self._settle_cached_campaign_dispatch('MCP', row['logical_key'])
             with connect(self.path) as c:
                 if not domain.sources_current(c,self.run_id)[0]:
                     raise TaskControlError('ASSISTANT_CACHED_SOURCE_INVALIDATED')
             return ToolMessage(content=canonical_json(json.loads(row['result_json'])),tool_call_id=call['id'])
         attempt=None
+        campaign_reserved=False
+        dispatch_started=False
+        campaign_completed=False
         try:
+            if self.experiment_id:
+                from opspilot.domain.assistant_experiment import reserve_dispatch
+                campaign=reserve_dispatch(
+                    self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                    kind='MCP', logical_key=row['logical_key'],
+                    request={'name':name,'args':args},
+                )
+                campaign_reserved=bool(campaign.get('dispatch'))
+                if not campaign_reserved:
+                    raise TaskControlError('AR02_LIVE_CAMPAIGN_REPLAY_CONFLICT')
             if self.run['task_id']:
                 from opspilot.domain.d2 import task_attempt_limits
                 attempt,_=reserve_attempt(self.path,self.run['task_id'],'MCP',task_attempt_limits(self.path,self.run['task_id'])['MCP'],call_id=row['call_id'],tool_call_id=call['id'],tool_name=name,argument_digest=digest_json(args),run_id=self.run_id)
+            dispatch_started=True
             result=await asyncio.wait_for(handler(request),12)
+            if campaign_reserved:
+                from opspilot.domain.assistant_experiment import complete_dispatch
+                complete_dispatch(self.path,experiment_id=self.experiment_id,run_id=self.run_id,kind='MCP',logical_key=row['logical_key'])
+                campaign_completed=True
             value=result.artifact
             observation=None
             if isinstance(value,dict) and 'fact_type' in value:
@@ -148,6 +274,12 @@ class Loop(AgentMiddleware):
             if os.environ.get('OPSPILOT_AR02_TEST_CRASH_AFTER_OBSERVATION')=='1': os._exit(86)
             return result
         except Exception as error:
+            if campaign_reserved and not campaign_completed:
+                from opspilot.domain.assistant_experiment import mark_unknown, mark_not_dispatched
+                if dispatch_started:
+                    mark_unknown(self.path,experiment_id=self.experiment_id,run_id=self.run_id,kind='MCP',logical_key=row['logical_key'],error_code=type(error).__name__)
+                else:
+                    mark_not_dispatched(self.path,experiment_id=self.experiment_id,run_id=self.run_id,kind='MCP',logical_key=row['logical_key'],reason_code=getattr(error,'code',type(error).__name__))
             if attempt: finish_attempt(self.path,attempt,'ERROR',error_class=type(error).__name__)
             if attempt:
                 record_tool_observation(self.path,task_id=self.run['task_id'],call_id=row['call_id'],attempt_id=attempt,tool_call_id=call['id'],tool_name=name,arguments=args,status='ERROR',result=None,error_class=type(error).__name__)
@@ -155,18 +287,18 @@ class Loop(AgentMiddleware):
             self.trace('tool_error',name=name,arguments=args,error=type(error).__name__,reason=str(error)[:400])
             return ToolMessage(content=canonical_json({'error':str(error),'authority':'TOOL_REFUSAL_NOT_FACT'}),tool_call_id=call['id'])
 
-async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None):
+async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None):
     from opspilot.domain.execution_budget import begin_execution_interval,end_execution_interval
     from opspilot.web.worker import _heartbeat_budget
     run,_=domain.read_run(path,run_id,worker_id=worker_id)
     if not run['task_id'] or model is None:
-        return await _run_assistant(path,checkpoint_path,worker_id,run_id,model=model,trace=trace)
+        return await _run_assistant(path,checkpoint_path,worker_id,run_id,model=model,trace=trace,experiment_id=experiment_id)
     remaining=begin_execution_interval(path,run['task_id'])
     stopped=asyncio.Event()
     heartbeat=asyncio.create_task(_heartbeat_budget(str(path),run['task_id'],stopped))
     try:
         if remaining<=0:raise TaskControlError('ACTIVE_TIME_LIMIT')
-        return await asyncio.wait_for(_run_assistant(path,checkpoint_path,worker_id,run_id,model=model,trace=trace),min(60,remaining/1000))
+        return await asyncio.wait_for(_run_assistant(path,checkpoint_path,worker_id,run_id,model=model,trace=trace,experiment_id=experiment_id),min(60,remaining/1000))
     except (asyncio.TimeoutError,TaskControlError) as error:
         with connect(path) as c:
             c.execute('BEGIN IMMEDIATE')
@@ -178,7 +310,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
         except asyncio.CancelledError:pass
         end_execution_interval(path,run['task_id'])
 
-async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None):
+async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None):
     trace=trace or (lambda event,**values:None)
     run,actor=domain.read_run(path,run_id,worker_id=worker_id)
     if model is None:
@@ -219,7 +351,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
                     return canonical_json(value),value
                 return call
             tools.append(StructuredTool.from_function(coroutine=adapter(t.name),name=t.name,description=t.description or '',args_schema=schema,response_format='content_and_artifact'))
-        loop=Loop(path,run_id,worker_id,client,specs,trace,getattr(model,'model_name',model._llm_type))
+        loop=Loop(path,run_id,worker_id,client,specs,trace,getattr(model,'model_name',model._llm_type),experiment_id=experiment_id)
         prepared,_=loop.context()
         initial=[]
         for item in prepared['messages']:
