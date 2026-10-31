@@ -33,3 +33,10 @@
 - 单次授权已消耗；禁止 retry、切换网络、换模型或使用用户凭据再发请求。`TRACE/STOPPED_NO_RETRY.json` 是仓库内停止标志，`probe_once.py` 现已先检查该标志再运行预检。
 
 失败分类：安全控制失败（发送前授权预留没有生效）；协议/连接结果失败（只观察到 401，不是有效 Completion）；根因未确定。原 P1 UNKNOWN dispatch 仍为 UNKNOWN、USD 0.645600 保留，数据库 SHA 前后相同。
+
+## 追加：隔离候选发布受阻
+
+- 第一次 `git push origin codex/ar02-live-01`：`Recv failure: Connection was reset`。
+- 第二次相同推送：`Failed to connect to github.com port 443`。
+- 已授权的 GitHub 连接器 `github_create_tree` 返回 HTTP 403 `Resource not accessible by integration`；未创建远端 tree、commit 或 ref。
+- 远端 `codex/ar02-live-01` 仍为 `606adea415962f74d53db67cf55493c1bcb59bc9`，`main` 仍为 `ec8c3582f6d145eec9979c43607302731411ead8`。本地候选提交保留，未尝试其他上传方式。
