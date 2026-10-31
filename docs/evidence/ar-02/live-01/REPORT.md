@@ -50,4 +50,4 @@
 3. **观察驱动：** MCP 返回空文档/引用后，最终替身答复不声称引用了资料；实际模型是否遵循仍未知。
 4. **新增约束与合法任务影响：** 实验额度保护限定 Provider/MCP 次数及应用预留；预算内零工具回答、Knowledge 和只读 MCP 正例仍通过。额度拒绝发生在外发前。
 5. **简化结果：** 只增加单实验 SQLite 账本并沿用现有 Run/Task 预留、Worker 与 MCP，不新增通用费用服务、状态机或业务 Gate。
-6. **证据与停止线：** focused 23/23、相关回归 72/72、全量 pytest 未跑；Provider/浏览器/真实 S01/S02 为 NOT_RUN。状态为 `P0_READY / P1_NOT_AUTHORIZED`，现在停止等待裁决。
+6. **证据与停止线：** focused 24/24、相关回归 73/73、全量 pytest 未跑；Provider/浏览器/真实 S01/S02 为 NOT_RUN。状态为 `P0_READY / P1_NOT_AUTHORIZED`，现在停止等待裁决。
