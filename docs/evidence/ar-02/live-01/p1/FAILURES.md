@@ -18,7 +18,7 @@
 ## F-02：冻结 S01 的 Provider 连接失败（强制停止）
 
 - 真实 API：S01 Message `message-0bada149-3f9d-4944-94fc-708f225723c3` 被接受，Run `run-5ca4293b-872c-4806-bd1a-2a48cb66fd1a`，Session `session-ade03c4c-b6a8-48a6-aa80-ea5c3817f4e8`。
-- Run 终态：`FAILED`，持久原因 `ASSISTANT_STOP:OpenAIConnectionError:Connection error.`；没有答案 Message/Answer，也没有 Model response、Completion ID 或 Usage。
+- Run 终态：`FAILED`，持久原因 `ASSISTANT_STOP:OpenAIConnectionError:Connection error.`；没有模型最终答复、Provider response、Completion ID 或 Usage。真实 `/messages` 响应有一条 `PROGRAM_LIMIT` 程序提示，消息 ID `message-ae13f67b-d70f-487c-a64a-656dd8235ba9`，source 指回 S01；浏览器未运行，页面显示未验证。
 - 应用账本：MODEL dispatch `ar02-live-dispatch-59a12db9-c08a-4531-915e-2f71150211e8` = `UNKNOWN/UNKNOWN`，预留 USD 0.645600、结算 USD 0。供应商实际是否收到请求及是否计费：`UNKNOWN`。HTTP 捕获器没有观察到请求，不能据此宣称免费。
 - 尝试数按持久账本计 1/16，MCP 0/12，应用已保留 USD 0.645600/10.50。无自动重试，未再次发送。
 - S02 五轮均 `NOT_RUN`。S01 不属于模型行为或质量评价样本。
@@ -33,3 +33,10 @@
 
 - S02 五轮、所有真实 Knowledge/业务 MCP、订单绑定、HTTP 事实核验、草稿交付、Usage/实际费用分析：`NOT_RUN`。
 - 浏览器和全量 pytest：任务明确禁止/本次未执行。
+
+
+## F-04：第一次 Trace 提取漏掉程序提示（报告提取错误，已纠正）
+
+- 第一次汇总用 `source_message_id` / `command_id` 筛选 Assistant 消息，但真实 API JSON 使用 `answer_source_message_id` / `answer_run_id`。因此 `turn-01.json` 初版把持久的 `PROGRAM_LIMIT` 放在完整 `messages.items` 中，却将专用 `user_visible_assistant_messages` 留空。
+- 修正：用捕获到的原始 API 响应来源字段重新投影；现在已在 `RESULTS.json`、`TRACE/turn-01.json`、`JOURNEY.md` 与 `REPORT.md` 明确记录。原始消息及字段未修改。
+- 影响：该修正改变的是报告的用户结果描述，不改变运行、模型调用次数、Domain 状态或实验停止结论。浏览器页面是否渲染该提示仍为 `NOT_RUN`。
