@@ -1,0 +1,119 @@
+{
+  "release": "AR-03-REAL-LLM-01-PREP-v1",
+  "status": "READY_FOR_LIVE_AUTHORIZATION",
+  "authorization": {
+    "offline_preparation": "AUTHORIZED",
+    "real_provider": "NOT_AUTHORIZED_IN_THIS_TASK",
+    "real_provider_requests": 0,
+    "browser_actions": 0,
+    "external_business_writes": 0
+  },
+  "repository": {
+    "base_sha": "11e86b4606074495ab448630b3017f14a3e0f6dd",
+    "freeze_commit_sha": "6f9074e84c185553cfeab0f225e81640b8b525f0",
+    "implementation_commit_sha": "1f557ecd124a6ae9ac1ff9ccdba1dad0b4cc9284",
+    "branch": "codex/ar03-real-llm-01",
+    "main_modified": false,
+    "remote_state": "UNVERIFIED_GITHUB_PORT_443_UNREACHABLE"
+  },
+  "preflight": {
+    "formal_api_worker_assistant_path": "PASS_WITH_HTTPX_MOCKTRANSPORT",
+    "mock_provider_requests": 1,
+    "mock_request_url": "https://api.deepseek.com/v1/chat/completions",
+    "mock_model": "deepseek-flash",
+    "wire_parameters": {
+      "thinking_type": "disabled",
+      "max_tokens": 2048,
+      "tool_choice": "auto",
+      "parallel_tool_calls": false,
+      "stream": false,
+      "max_completion_tokens_present": false
+    },
+    "mock_usage_tokens": {
+      "input": 71,
+      "output": 28,
+      "total": 99,
+      "real_provider_usage": false
+    },
+    "persisted_context_estimate_within_12000": true,
+    "provider_key_alone_enables_provider": false,
+    "legacy_schema_rejects_new_experiment_id": true,
+    "new_experiment_ledger_isolated": true,
+    "old_experiment_rows_modified": false
+  },
+  "paired_fixture": {
+    "cases": ["AR03-LLM-01-QUEUED", "AR03-LLM-01-PROCESSED"],
+    "same_prompt": true,
+    "same_order": "ar02-order",
+    "same_target_event_id": "event-00000000-0000-4000-8000-000000000001",
+    "binding_method": "trusted Assistant order API",
+    "delivery_both_cases": "HTTP_202_ACKNOWLEDGED",
+    "queued_observation": "QUEUED",
+    "processed_observation": "PROCESSED",
+    "mcp_calls_across_final_pair_trace": 10,
+    "persisted_business_observations_across_final_pair_trace": 6,
+    "model_evidence_level": "DETERMINISTIC_FIXTURE_NOT_REAL_PROVIDER"
+  },
+  "tests": [
+    {
+      "id": "test-runner-path-setup-error",
+      "command": "& .venv\\Scripts\\python.exe -m pytest tests/test_ar03_real_llm_01_prep.py -q",
+      "log": "runs/pre-test-setup-error.txt",
+      "process_started": false,
+      "exit_code": null,
+      "classification": "SETUP_ERROR_NOT_A_TEST_RESULT"
+    },
+    {
+      "id": "frozen-prep-red",
+      "command": "python -m pytest tests/test_ar03_real_llm_01_prep.py -q --basetemp D:\\学习\\agent新项目\\.pytest-ar03-real-llm-01-red",
+      "log": "runs/red-offline-preflight-valid.log",
+      "exit_code": 1,
+      "passed": 1,
+      "failed": 3
+    },
+    {
+      "id": "formal-prep-green",
+      "command": "python -m pytest tests/test_ar03_real_llm_01_prep.py -q --basetemp D:\\学习\\agent新项目\\.pytest-ar03-prep-final-safety",
+      "log": "runs/prep-tests-final-safety.log",
+      "exit_code": 0,
+      "passed": 4,
+      "failed": 0
+    },
+    {
+      "id": "protocol-worker-and-scope-regression",
+      "command": "python -m pytest tests/test_ar02_ar03_integration_01.py tests/test_ar03_02_scoped_protocol_comparison.py tests/test_ar03_protocol_comparison.py -q --basetemp D:\\学习\\agent新项目\\.pytest-ar03-prep-final-safety-reg-a",
+      "log": "runs/protocol-worker-regression-final-safety.log",
+      "exit_code": 0,
+      "passed": 50,
+      "failed": 0
+    },
+    {
+      "id": "provider-budget-knowledge-regression",
+      "command": "python -m pytest tests/test_ar02_smoke_provider_factory.py tests/test_ar02_live_budget.py tests/test_ar02_real_journey_budget_scope.py tests/test_ar02_real_journey_03_prep.py tests/test_ar02_knowledge.py -q --basetemp D:\\学习\\agent新项目\\.pytest-ar03-prep-final-safety-reg-b",
+      "log": "runs/provider-budget-knowledge-regression-final-safety.log",
+      "exit_code": 0,
+      "passed": 42,
+      "failed": 0
+    },
+    {
+      "id": "paired-receiver-rerun-after-fixed-event-ids",
+      "command": "python -m pytest tests/test_ar02_ar03_integration_01.py -k test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation -q --basetemp D:\\学习\\agent新项目\\.pytest-ar03-prep-pair-final-safety",
+      "log": "runs/paired-receiver-regression-final-safety.log",
+      "exit_code": 0,
+      "passed": 2,
+      "deselected": 5
+    },
+    {
+      "id": "modified-python-files-compile",
+      "command": "python -m compileall -q opspilot/domain/assistant_experiment.py tests/test_ar03_real_llm_01_prep.py tests/test_ar02_ar03_integration_01.py",
+      "log": "runs/compileall-final.log",
+      "exit_code": 0
+    }
+  ],
+  "full_pytest": "NOT_RUN",
+  "real_deepseek_autonomy": "NOT_RUN",
+  "browser": "NOT_RUN",
+  "live_price_recheck": "NOT_RUN_REQUIRED_BEFORE_LIVE_AUTHORIZATION",
+  "trace": "TRACE.jsonl",
+  "initial_random_event_trace": "TRACE-random-id-first-run.jsonl"
+}

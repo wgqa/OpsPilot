@@ -1,0 +1,177 @@
+FF.F                                                                     [100%]
+================================== FAILURES ===================================
+_______ test_new_experiment_id_initializes_an_independent_fixed_budget ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-ar03-real-llm-01-red/test_new_experiment_id_initial0/domain.sqlite3')
+
+    def test_new_experiment_id_initializes_an_independent_fixed_budget(demo_db):
+        from opspilot.domain.assistant_experiment import (
+            BUDGET_USD_MICRO,
+            MCP_LIMIT,
+            PROVIDER_LIMIT,
+            read_budget,
+            initialize_experiment,
+        )
+    
+>       initialize_experiment(demo_db, EXPERIMENT_ID)
+
+tests\test_ar03_real_llm_01_prep.py:61: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\assistant_experiment.py:141: in initialize_experiment
+    _validate_experiment_id(experiment_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+experiment_id = 'AR-03-REAL-LLM-01'
+
+    def _validate_experiment_id(experiment_id: str) -> None:
+        if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
+>           raise ExperimentBudgetError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+E           opspilot.domain.assistant_experiment.ExperimentBudgetError: AR02_LIVE_EXPERIMENT_SCOPE_INVALID
+
+opspilot\domain\assistant_experiment.py:88: ExperimentBudgetError
+_________ test_new_experiment_id_fails_closed_against_a_legacy_schema _________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-ar03-real-llm-01-red/test_new_experiment_id_fails_c0')
+
+    def test_new_experiment_id_fails_closed_against_a_legacy_schema(tmp_path):
+        from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            initialize_experiment,
+        )
+    
+        stale_db = tmp_path / "legacy-experiment-schema.sqlite3"
+        with connect(stale_db) as connection:
+            connection.execute(
+                """CREATE TABLE ar02_live_experiment_budgets (
+                    experiment_id TEXT PRIMARY KEY CHECK (experiment_id IN (
+                        'AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01',
+                        'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03'
+                    )),
+                    provider_limit INTEGER NOT NULL,
+                    mcp_limit INTEGER NOT NULL,
+                    budget_usd_micro INTEGER NOT NULL,
+                    price_version TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )"""
+            )
+    
+>       with pytest.raises(ExperimentBudgetError, match="AR02_LIVE_SCHEMA_ID_NOT_SUPPORTED"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'AR02_LIVE_SCHEMA_ID_NOT_SUPPORTED'
+E         Actual message: 'AR02_LIVE_EXPERIMENT_SCOPE_INVALID'
+
+tests\test_ar03_real_llm_01_prep.py:98: AssertionError
+______ test_formal_api_worker_mocktransport_uses_new_isolated_experiment ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-ar03-real-llm-01-red/test_formal_api_worker_mocktra0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-ar03-real-llm-01-red/test_formal_api_worker_mocktra0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001FF25AB6EA0>
+
+    def test_formal_api_worker_mocktransport_uses_new_isolated_experiment(
+        demo_db, tmp_path, monkeypatch,
+    ):
+        from opspilot.assistant import create_assistant_model
+        from opspilot.domain.assistant_experiment import (
+            EXPERIMENT_ENV,
+            read_budget,
+        )
+    
+        monkeypatch.setenv(EXPERIMENT_ENV, EXPERIMENT_ID)
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-placeholder-not-a-credential")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
+        monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com/v1")
+    
+        captured: list[dict] = []
+        captured_urls: list[str] = []
+    
+        async def respond(request: httpx.Request) -> httpx.Response:
+            captured_urls.append(str(request.url))
+            captured.append(json.loads((await request.aread()).decode("utf-8")))
+            return httpx.Response(
+                200,
+                headers={"x-request-id": "offline-ar03-mock-request"},
+                json={
+                    "id": "offline-ar03-mock-completion",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "deepseek-flash",
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                "HTTP 202 ��ʾ���������������֤�� Receiver �Ѵ�����ɣ�"
+                                "����û�ж����󶨻�ǰ Receiver Observation�����ҵ��״̬δ֪��"
+                            ),
+                        },
+                        "finish_reason": "stop",
+                    }],
+                    "usage": {
+                        "prompt_tokens": 71,
+                        "completion_tokens": 28,
+                        "total_tokens": 99,
+                    },
+                },
+            )
+    
+        def model_factory():
+            return create_assistant_model(
+                transport_async=httpx.MockTransport(respond),
+                transport_sync=httpx.MockTransport(lambda request: httpx.Response(500)),
+            )
+    
+>       app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "ar03-prep-checkpoint.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=model_factory,
+            assistant_experiment_id=EXPERIMENT_ID,
+        )
+
+tests\test_ar03_real_llm_01_prep.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-ar03-real-llm-01-red/test_formal_api_worker_mocktra0/domain.sqlite3')
+checkpoint_db_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.pytest-ar03-real-llm-01-red/test_formal_api_worker_mocktra0/ar03-prep-checkpoint.sqlite3')
+start_worker = True
+credentials = {'support-a': 'free-local-a', 'support-b': 'free-local-b', 'approver-a': 'free-approver'}
+expected_origin = 'http://testserver', heartbeat_seconds = 10.0
+assistant_model_factory = <function test_formal_api_worker_mocktransport_uses_new_isolated_experiment.<locals>.model_factory at 0x000001FF28770930>
+assistant_experiment_id = 'AR-03-REAL-LLM-01'
+
+    def create_app(
+        *,
+        db_path: str | Path | None = None,
+        checkpoint_db_path: str | Path | None = None,
+        start_worker: bool = True,
+        credentials: dict[str, str] | None = None,
+        expected_origin: str | None = None,
+        heartbeat_seconds: float = 10.0,
+        assistant_model_factory=None,
+        assistant_experiment_id: str | None = None,
+    ) -> FastAPI:
+        from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
+    
+        load_local_environment()
+        from opspilot.domain.assistant_experiment import (
+            EXPERIMENT_ENV,
+            SUPPORTED_EXPERIMENT_IDS,
+        )
+    
+        configured_experiment = os.environ.get(EXPERIMENT_ENV, "").strip() or None
+        if assistant_experiment_id is not None and assistant_experiment_id not in SUPPORTED_EXPERIMENT_IDS:
+>           raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+E           ValueError: AR02_LIVE_EXPERIMENT_SCOPE_INVALID
+
+opspilot\web\app.py:165: ValueError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_real_llm_01_prep.py::test_new_experiment_id_initializes_an_independent_fixed_budget
+FAILED tests/test_ar03_real_llm_01_prep.py::test_new_experiment_id_fails_closed_against_a_legacy_schema
+FAILED tests/test_ar03_real_llm_01_prep.py::test_formal_api_worker_mocktransport_uses_new_isolated_experiment
+3 failed, 1 passed in 1.88s
