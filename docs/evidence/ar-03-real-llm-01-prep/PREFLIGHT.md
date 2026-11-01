@@ -12,7 +12,7 @@
 - `PROJECT_NORTH_STAR.md` Blob: `1f737712c7a36ceb34433ac09c3fbba3c3305542` (read)
 - `AGENTS.md` Blob: `32c45506cceeaa8c76a5c56bf8360ff476b58856` (read)
 - `.agents/skills/opspilot-slice-review/SKILL.md` Blob: `d405c8d413d633824b279202cc1503dab4cf0b03` (read and applied at start/closeout)
-- Read-only remote query failed to connect to GitHub port 443. Remote `main` and candidate branch are `UNVERIFIED`; no remote SHA is inferred.
+- The initial read-only remote query failed to connect to GitHub port 443. The final candidate branch push then succeeded at `ead1fc8d9fadeb70e8ff5ff29d9dc822ae3ea18c`; the remote-tracking ref matches that SHA. A subsequent `git ls-remote` again failed, so current remote `main` is `UNVERIFIED`; no SHA is inferred.
 - Historical `docs/evidence/ar-02/real-journey-03/REPORT.md` remains `PARTIAL`; it was not changed.
 
 ## Provider and API/Worker path
@@ -57,4 +57,4 @@ The provider switch remains off by default; having an API key alone still return
 
 ## Remote delivery
 
-`git ls-remote` could not reach GitHub from this environment. Local commits are available on the isolated branch, but push/delivery to the remote is not verified. This does not affect offline test results and must be resolved before remote independent review.
+`git push -u origin codex/ar03-real-llm-01` succeeded and created the isolated remote branch at `ead1fc8d9fadeb70e8ff5ff29d9dc822ae3ea18c`. A subsequent read-only query could not verify the current remote `main`; no main update was attempted. The pushed candidate is available for independent review.

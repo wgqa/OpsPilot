@@ -10,4 +10,4 @@ Historical AR-02 failures and Gold were not edited. The following records are on
 
 After the allowlist/schema correction, the four preparation tests passed. The final relevant regression commands and exact exits are in `RESULTS.json`; all selected final commands passed. No Provider call was sent, so there is no real-model failure or paid result to report.
 
-The remaining blockers for live execution are procedural/time-sensitive, not repaired here: remote branch push is unverified because GitHub was unreachable, and current official model price must be rechecked before a separate live authorization.
+The remaining live-execution gates are procedural/time-sensitive, not repaired here: current remote `main` could not be re-read after the push, and current official model price must be rechecked before a separate live authorization. The isolated candidate branch push itself succeeded.

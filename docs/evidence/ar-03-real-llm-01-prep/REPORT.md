@@ -38,13 +38,13 @@ The paired regression fixture now gives both isolated cases the same Event and T
 - Python compile check: exit 0.
 - Full `pytest`: not run.
 - Real DeepSeek requests: 0. MockTransport requests: 1.
-- Remote GitHub state and branch push: `UNVERIFIED`; GitHub port 443 was unreachable.
+- Isolated candidate branch push: succeeded at `ead1fc8d9fadeb70e8ff5ff29d9dc822ae3ea18c`. A subsequent read-only check of remote `main` failed to connect to GitHub port 443; current `main` SHA is `UNVERIFIED`. No main update was attempted.
 
 The initial valid RED had 3 failures and 1 pass because the new experiment ID was absent from the allowlist/schema. It passed after the minimal ID wiring. A first test invocation also used a nonexistent worktree-local Python path and did not start pytest. Both records are preserved in `FAILURES.md` and `runs/`.
 
 ## Live authorization gates still open
 
-This report does not assert model quality, successful autonomous tool selection, cost, or a completed user journey. Before any paid run, the Main Agent and user must separately authorize it; current official price and request compatibility must be rechecked; the remote branch must be made available for review; and the isolated production-run database/checkpoint/ledger and stop conditions must be confirmed. No provider switch was enabled outside the test process.
+This report does not assert model quality, successful autonomous tool selection, cost, or a completed user journey. Before any paid run, the Main Agent and user must separately authorize it; current official price and request compatibility must be rechecked; and the isolated run database/checkpoint/ledger and stop conditions must be confirmed. No provider switch was enabled outside the test process.
 
 The proposed cap remains 16 Provider requests, 12 MCP calls, USD 10.50 app budget, USD 0.645600 reservation/request, zero retries, one in-flight request, 30-second timeout and 12,000 input tokens. The dated cost basis was not revalidated in this offline task.
 
