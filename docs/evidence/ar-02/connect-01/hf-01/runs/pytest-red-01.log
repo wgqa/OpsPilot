@@ -1,0 +1,106 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_________ test_offline_mock_is_explicitly_injected_into_openai_client _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E96CE50E90>
+
+    def test_offline_mock_is_explicitly_injected_into_openai_client(monkeypatch):
+        import httpx2
+    
+        probe = load_probe()
+        real_async_openai = probe.AsyncOpenAI
+        captured = []
+    
+        def require_injected_client(*args, **kwargs):
+            client = kwargs.get("http_client")
+            assert isinstance(client, httpx2.AsyncClient), (
+                "offline preflight tried to construct the SDK default HTTP client"
+            )
+            captured.append(client)
+            return real_async_openai(*args, **kwargs)
+    
+        monkeypatch.setattr(probe, "AsyncOpenAI", require_injected_client)
+>       result = asyncio.run(probe.local_mock_success("https://api.deepseek.com/v1"))
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar02_conn01_hf01.py:49: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+docs\evidence\ar-02\connect-01\probe_once.py:181: in local_mock_success
+    client = AsyncOpenAI(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+args = ()
+kwargs = {'api_key': 'LOCAL_MOCK_ONLY', 'base_url': 'https://api.deepseek.com/v1', 'max_retries': 0, 'timeout': 30}
+
+    def require_injected_client(*args, **kwargs):
+        client = kwargs.get("http_client")
+>       assert isinstance(client, httpx2.AsyncClient), (
+            "offline preflight tried to construct the SDK default HTTP client"
+        )
+E       AssertionError: offline preflight tried to construct the SDK default HTTP client
+E       assert False
+E        +  where False = isinstance(None, <class 'httpx2.AsyncClient'>)
+E        +    where <class 'httpx2.AsyncClient'> = <module 'httpx2' from 'D:\\ѧϰ\\agent����Ŀ\\.venv\\Lib\\site-packages\\httpx2\\__init__.py'>.AsyncClient
+
+tests\test_ar02_conn01_hf01.py:42: AssertionError
+_ test_consumed_send_once_authorization_is_hard_stopped_without_marker_or_ledger _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E96D9DB950>
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/ar02-conn01-hf01/red-01/test_consumed_send_once_author0')
+
+    def test_consumed_send_once_authorization_is_hard_stopped_without_marker_or_ledger(
+        monkeypatch, tmp_path
+    ):
+        probe = load_probe()
+        # Simulate a fresh copy with no repository STOP file; the spent authorization
+        # must not be restored by copying or deleting local files.
+        monkeypatch.setattr(probe, "__file__", str(tmp_path / "probe_once.py"))
+    
+        def config_read_is_forbidden(*_args, **_kwargs):
+            pytest.fail("send-once must stop before reading credentials/configuration")
+    
+        monkeypatch.setattr(probe, "read_config", config_read_is_forbidden)
+        ledger = tmp_path / "fresh" / "single-use.sqlite3"
+        trace = tmp_path / "fresh" / "trace.json"
+        result = tmp_path / "fresh" / "result.json"
+    
+        with pytest.raises(RuntimeError, match="HF01_NO_REPLAY"):
+>           asyncio.run(probe.send_once(tmp_path / ".env", ledger, trace, result))
+
+tests\test_ar02_conn01_hf01.py:74: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+docs\evidence\ar-02\connect-01\probe_once.py:463: in send_once
+    key, base_url, model, source = read_config(env_file)
+                                   ^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+_args = (WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/ar02-conn01-hf01/red-01/test_consumed_send_once_author0/.env'),)
+_kwargs = {}
+
+    def config_read_is_forbidden(*_args, **_kwargs):
+>       pytest.fail("send-once must stop before reading credentials/configuration")
+E       Failed: send-once must stop before reading credentials/configuration
+
+tests\test_ar02_conn01_hf01.py:66: Failed
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_conn01_hf01.py::test_offline_mock_is_explicitly_injected_into_openai_client
+FAILED tests/test_ar02_conn01_hf01.py::test_consumed_send_once_authorization_is_hard_stopped_without_marker_or_ledger
+2 failed in 0.87s
