@@ -1,6 +1,6 @@
 """Protocol Knowledge Version Comparison Domain Module.
 
-Independent vertical slice for AR-03-01.
+Independent vertical slice for AR-03-01 (with HF01 enhancements).
 Reads versioned protocol documents by verified references from trusted catalogs,
 performs deterministic structural difference comparison, produces traceable evidence,
 and enforces epistemic boundaries (documents cannot prove live deployment state).
@@ -28,6 +28,11 @@ DEFAULT_CATALOG_DIRS: tuple[Path, ...] = (
 )
 
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+_NEGATIVE_OR_HISTORICAL_PATTERN = re.compile(
+    r"\b(historically|historical|legacy|older drafts?|example(?:\s+of)?|not(?:\s+yet)?|never adopted|deprecated|obsolete|do not infer)\b",
+    re.IGNORECASE,
+)
 
 
 class ProtocolComparisonError(RuntimeError):
@@ -153,6 +158,28 @@ class ResolvedDocument:
 
 
 @dataclass(frozen=True)
+class MarkdownSection:
+    """Represents a discrete heading-delimited section, preserving duplicate titles."""
+
+    section_index: int
+    title: str
+    occurrence: int
+    start_line: int
+    end_line: int
+    text: str
+
+    @property
+    def key(self) -> tuple[str, int]:
+        return (self.title, self.occurrence)
+
+    @property
+    def display_title(self) -> str:
+        if self.occurrence == 1:
+            return self.title
+        return f"{self.title} (#{self.occurrence})"
+
+
+@dataclass(frozen=True)
 class DiffEvidence:
     """Verifiable, cryptographically anchored excerpt evidence for a difference."""
 
@@ -260,7 +287,6 @@ def _find_catalog_entry(
         for entry in manifest_content["documents"]:
             if not isinstance(entry, dict):
                 continue
-            # Match document_id and version (exact version match)
             if entry.get("document_id") == document_id and entry.get("version") == version:
                 return entry, catalog_dir, manifest_path
     raise DocumentNotFoundError(f"DOCUMENT_NOT_FOUND: No catalog entry found for document '{document_id}' v'{version}'")
@@ -388,60 +414,207 @@ def resolve_document(
     )
 
 
-def _split_markdown_sections(text: str) -> dict[str, tuple[int, int, str]]:
-    """Parse markdown text into sections by heading. Returns {heading_title: (start_line, end_line, body_text)}."""
+def _split_markdown_sections(text: str) -> list[MarkdownSection]:
+    """Parse markdown text into sections by heading, tracking occurrences to avoid collisions."""
     lines = text.splitlines()
     if not lines:
-        return {"Root": (1, 1, "")}
+        return [MarkdownSection(section_index=0, title="Root", occurrence=1, start_line=1, end_line=1, text="")]
 
-    sections: dict[str, tuple[int, int, str]] = {}
+    sections: list[MarkdownSection] = []
     current_title = "Root"
     current_start = 1
     current_lines: list[str] = []
+    title_counts: dict[str, int] = {}
+    sec_idx = 0
+
+    def _flush_section(end_line: int) -> None:
+        nonlocal sec_idx
+        trimmed_lines = list(current_lines)
+        while trimmed_lines and not trimmed_lines[-1].strip():
+            trimmed_lines.pop()
+        title_counts[current_title] = title_counts.get(current_title, 0) + 1
+        occ = title_counts[current_title]
+        sec_text = "\n".join(trimmed_lines)
+        sections.append(
+            MarkdownSection(
+                section_index=sec_idx,
+                title=current_title,
+                occurrence=occ,
+                start_line=current_start,
+                end_line=end_line,
+                text=sec_text,
+            )
+        )
+        sec_idx += 1
 
     for idx, line in enumerate(lines, start=1):
         heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
         if heading_match:
             if current_lines or current_title != "Root":
-                sections[current_title] = (current_start, idx - 1, "\n".join(current_lines))
+                _flush_section(idx - 1)
             current_title = heading_match.group(2).strip()
             current_start = idx
             current_lines = [line]
         else:
             current_lines.append(line)
 
-    sections[current_title] = (current_start, len(lines), "\n".join(current_lines))
+    _flush_section(len(lines))
     return sections
 
 
-def _extract_protocol_features(text: str) -> dict[str, set[str]]:
-    """Deterministically extract protocol-relevant indicators from untrusted document text.
+def _extract_diff_excerpt(
+    sec_start_line: int,
+    sec_end_line: int,
+    b_text: str,
+    t_text: str,
+    *,
+    max_chars: int = 600,
+    context_lines: int = 2,
+) -> tuple[str, str, str, str, bool]:
+    """Extract excerpt window focused on actual changed lines between b_text and t_text.
 
-    Text is treated purely as data strings; no execution or directive evaluation.
+    Returns:
+        (base_excerpt, target_excerpt, base_loc_str, target_loc_str, is_truncated)
+    """
+    b_lines = b_text.splitlines()
+    t_lines = t_text.splitlines()
+
+    # Case A: section added in target
+    if not b_text:
+        base_excerpt = ""
+        base_loc_str = "ABSENT"
+        if len(t_text) <= max_chars:
+            target_excerpt = t_text
+            target_loc_str = f"Lines {sec_start_line}-{sec_end_line}"
+            is_trunc = False
+        else:
+            target_excerpt = t_text[:max_chars - 7] + " [...]"
+            target_loc_str = f"Lines {sec_start_line}-{sec_start_line + len(target_excerpt.splitlines()) - 1} [truncated] (section L{sec_start_line}-L{sec_end_line})"
+            is_trunc = True
+        return base_excerpt, target_excerpt, base_loc_str, target_loc_str, is_trunc
+
+    # Case B: section removed in target
+    if not t_text:
+        target_excerpt = ""
+        target_loc_str = "OMITTED"
+        if len(b_text) <= max_chars:
+            base_excerpt = b_text
+            base_loc_str = f"Lines {sec_start_line}-{sec_end_line}"
+            is_trunc = False
+        else:
+            base_excerpt = b_text[:max_chars - 7] + " [...]"
+            base_loc_str = f"Lines {sec_start_line}-{sec_start_line + len(base_excerpt.splitlines()) - 1} [truncated] (section L{sec_start_line}-L{sec_end_line})"
+            is_trunc = True
+        return base_excerpt, target_excerpt, base_loc_str, target_loc_str, is_trunc
+
+    # Case C: section present in both with differences
+    if len(b_text) <= max_chars and len(t_text) <= max_chars:
+        b_loc = f"Lines {sec_start_line}-{sec_end_line}" if b_lines else "Lines 1-1"
+        t_loc = f"Lines {sec_start_line}-{sec_end_line}" if t_lines else "Lines 1-1"
+        return b_text, t_text, b_loc, t_loc, False
+
+    matcher = difflib.SequenceMatcher(None, b_lines, t_lines)
+    opcodes = matcher.get_opcodes()
+    changed_ops = [op for op in opcodes if op[0] != "equal"]
+
+    if not changed_ops:
+        return b_text[:max_chars], t_text[:max_chars], f"Lines {sec_start_line}-{sec_end_line}", f"Lines {sec_start_line}-{sec_end_line}", False
+
+    b_ch_start = min(op[1] for op in changed_ops)
+    b_ch_end = max(op[2] for op in changed_ops)
+    t_ch_start = min(op[3] for op in changed_ops)
+    t_ch_end = max(op[4] for op in changed_ops)
+
+    # Base window
+    b_win_start = max(0, b_ch_start - context_lines)
+    b_win_end = min(len(b_lines), b_ch_end + context_lines)
+    b_sub_text = "\n".join(b_lines[b_win_start:b_win_end])
+    b_is_trunc = False
+
+    if len(b_sub_text) > max_chars:
+        b_sub_text = b_sub_text[:max_chars - 7] + " [...]"
+        b_is_trunc = True
+    else:
+        if b_win_start > 0:
+            b_sub_text = "[...] " + b_sub_text
+            b_is_trunc = True
+        if b_win_end < len(b_lines):
+            b_sub_text = b_sub_text + " [...]"
+            b_is_trunc = True
+
+    b_abs_start = sec_start_line + b_win_start
+    b_abs_end = sec_start_line + max(b_win_start, b_win_end - 1)
+    b_loc_desc = f"Lines {b_abs_start}-{b_abs_end}"
+    if b_is_trunc:
+        b_loc_desc += f" (section L{sec_start_line}-L{sec_end_line})"
+
+    # Target window
+    t_win_start = max(0, t_ch_start - context_lines)
+    t_win_end = min(len(t_lines), t_ch_end + context_lines)
+    t_sub_text = "\n".join(t_lines[t_win_start:t_win_end])
+    t_is_trunc = False
+
+    if len(t_sub_text) > max_chars:
+        t_sub_text = t_sub_text[:max_chars - 7] + " [...]"
+        t_is_trunc = True
+    else:
+        if t_win_start > 0:
+            t_sub_text = "[...] " + t_sub_text
+            t_is_trunc = True
+        if t_win_end < len(t_lines):
+            t_sub_text = t_sub_text + " [...]"
+            t_is_trunc = True
+
+    t_abs_start = sec_start_line + t_win_start
+    t_abs_end = sec_start_line + max(t_win_start, t_win_end - 1)
+    t_loc_desc = f"Lines {t_abs_start}-{t_abs_end}"
+    if t_is_trunc:
+        t_loc_desc += f" (section L{sec_start_line}-L{sec_end_line})"
+
+    return b_sub_text, t_sub_text, b_loc_desc, t_loc_desc, (b_is_trunc or t_is_trunc)
+
+
+def _extract_protocol_features(text: str) -> dict[str, set[str]]:
+    """Extract candidate lexical cues while respecting negative and historical contexts.
+
+    Lexical hits serve purely as candidate search hints for investigation; they
+    never constitute proof of runtime protocol rule adoption or online deployment behavior.
     """
     status_codes = set(re.findall(r"\b([1-5]\d\d)\b", text))
-    known_states = {"COMPLETED", "PROCESSING", "QUEUED", "PROCESSED", "UNKNOWN", "RETRYABLE", "EXHAUSTED", "SCHEDULED"}
-    found_states = {state for state in known_states if re.search(rf"\b{state}\b", text, re.IGNORECASE)}
-
     known_parameters = {
         "processing_sla_seconds", "event_id", "delivery_version", "attempt_count",
         "max_attempts", "order_version", "order_id", "missing_scopes", "required_scopes", "granted_scopes"
     }
-    found_params = {param for param in known_parameters if param in text}
 
-    behavior_restrictions = set()
-    if re.search(r"never resend", text, re.IGNORECASE):
-        behavior_restrictions.add("PROHIBIT_AUTO_RESEND")
-    if re.search(r"not(?:.*?)(?:prove|mean)(?:.*?)completed", text, re.IGNORECASE):
-        behavior_restrictions.add("ACCEPTANCE_NOT_COMPLETION")
-    if re.search(r"asynchronous", text, re.IGNORECASE):
-        behavior_restrictions.add("ASYNC_PUBLICATION")
+    sentences = re.split(r"[.!?\n;]+", text)
+    found_params: set[str] = set()
+    candidate_directives: set[str] = set()
+
+    for sentence in sentences:
+        s_clean = sentence.strip()
+        if not s_clean:
+            continue
+
+        is_negated_or_historical = bool(_NEGATIVE_OR_HISTORICAL_PATTERN.search(s_clean))
+
+        # Parameter references
+        for param in known_parameters:
+            if param in s_clean:
+                if not is_negated_or_historical:
+                    found_params.add(param)
+
+        # Behavioral cues
+        if "never resend" in s_clean.lower() and not is_negated_or_historical:
+            candidate_directives.add("PROHIBIT_AUTO_RESEND")
+        if ("asynchronous" in s_clean.lower() or "async" in s_clean.lower()) and not is_negated_or_historical:
+            candidate_directives.add("ASYNC_PUBLICATION")
+        if re.search(r"not(?:.*?)(?:prove|mean)(?:.*?)completed", s_clean, re.IGNORECASE) and not is_negated_or_historical:
+            candidate_directives.add("ACCEPTANCE_NOT_COMPLETION")
 
     return {
         "status_codes": status_codes,
-        "states": found_states,
         "parameters": found_params,
-        "restrictions": behavior_restrictions,
+        "candidate_directives": candidate_directives,
     }
 
 
@@ -521,23 +694,30 @@ def compare_protocol_versions(
             comparison_digest=digest_json(res_data),
         )
 
-    # 2. Structural and feature comparison
+    # 2. Structural and feature comparison (duplicate-heading safe)
     base_sections = _split_markdown_sections(resolved_base.content)
     target_sections = _split_markdown_sections(resolved_target.content)
+
+    base_map = {sec.key: sec for sec in base_sections}
+    target_map = {sec.key: sec for sec in target_sections}
+
+    all_keys = list(dict.fromkeys(list(base_map.keys()) + list(target_map.keys())))
 
     differences: list[dict[str, Any]] = []
     diff_evidence: list[dict[str, Any]] = []
     counter = 1
 
-    # Section-level diffs
-    all_section_titles = list(dict.fromkeys(list(base_sections.keys()) + list(target_sections.keys())))
+    for key in all_keys:
+        sec_title, sec_occ = key
+        b_sec = base_map.get(key)
+        t_sec = target_map.get(key)
+        disp_title = b_sec.display_title if b_sec else (t_sec.display_title if t_sec else sec_title)
 
-    for title in all_section_titles:
-        in_base = title in base_sections
-        in_target = title in target_sections
-
-        if in_base and not in_target:
-            start_l, end_l, text = base_sections[title]
+        if b_sec is not None and t_sec is None:
+            # Section removed in target
+            b_excerpt, t_excerpt, b_loc, t_loc, is_trunc = _extract_diff_excerpt(
+                b_sec.start_line, b_sec.end_line, b_sec.text, ""
+            )
             evidence_id = f"EVID-{counter:03d}"
             diff_id = f"DIFF-{counter:03d}"
             counter += 1
@@ -547,30 +727,33 @@ def compare_protocol_versions(
                 diff_type="SECTION_REMOVED",
                 base_doc_id=resolved_base.document_id,
                 base_version=resolved_base.version,
-                base_location=f"Lines {start_l}-{end_l}",
-                base_excerpt=text[:500],
-                base_excerpt_digest=_digest_text(text[:500]),
+                base_location=b_loc,
+                base_excerpt=b_excerpt,
+                base_excerpt_digest=_digest_text(b_excerpt),
                 target_doc_id=resolved_target.document_id,
                 target_version=resolved_target.version,
-                target_location="OMITTED",
-                target_excerpt="",
-                target_excerpt_digest=_digest_text(""),
-                traceability=f"Base section '{title}' removed in target v{resolved_target.version}",
+                target_location=t_loc,
+                target_excerpt=t_excerpt,
+                target_excerpt_digest=_digest_text(t_excerpt),
+                traceability=f"Base section '{disp_title}' removed in target v{resolved_target.version}",
             )
             diff = ProtocolDifference(
                 difference_id=diff_id,
                 category="SECTION_STRUCTURE",
-                title=f"Section removed: {title}",
-                description=f"Section '{title}' present in v{resolved_base.version} is omitted in v{resolved_target.version}.",
-                base_location=f"Lines {start_l}-{end_l}",
-                target_location="OMITTED",
+                title=f"Section removed: {disp_title}",
+                description=f"Section '{disp_title}' present in v{resolved_base.version} is omitted in v{resolved_target.version}.",
+                base_location=b_loc,
+                target_location=t_loc,
                 evidence_id=evidence_id,
             )
             differences.append(diff.to_dict())
             diff_evidence.append(evidence.to_dict())
 
-        elif not in_base and in_target:
-            start_l, end_l, text = target_sections[title]
+        elif b_sec is None and t_sec is not None:
+            # Section added in target
+            b_excerpt, t_excerpt, b_loc, t_loc, is_trunc = _extract_diff_excerpt(
+                t_sec.start_line, t_sec.end_line, "", t_sec.text
+            )
             evidence_id = f"EVID-{counter:03d}"
             diff_id = f"DIFF-{counter:03d}"
             counter += 1
@@ -580,89 +763,86 @@ def compare_protocol_versions(
                 diff_type="SECTION_ADDED",
                 base_doc_id=resolved_base.document_id,
                 base_version=resolved_base.version,
-                base_location="ABSENT",
-                base_excerpt="",
-                base_excerpt_digest=_digest_text(""),
+                base_location=b_loc,
+                base_excerpt=b_excerpt,
+                base_excerpt_digest=_digest_text(b_excerpt),
                 target_doc_id=resolved_target.document_id,
                 target_version=resolved_target.version,
-                target_location=f"Lines {start_l}-{end_l}",
-                target_excerpt=text[:500],
-                target_excerpt_digest=_digest_text(text[:500]),
-                traceability=f"Target section '{title}' added in v{resolved_target.version}",
+                target_location=t_loc,
+                target_excerpt=t_excerpt,
+                target_excerpt_digest=_digest_text(t_excerpt),
+                traceability=f"Target section '{disp_title}' added in v{resolved_target.version}",
             )
             diff = ProtocolDifference(
                 difference_id=diff_id,
                 category="SECTION_STRUCTURE",
-                title=f"Section added: {title}",
-                description=f"New section '{title}' introduced in v{resolved_target.version}.",
-                base_location="ABSENT",
-                target_location=f"Lines {start_l}-{end_l}",
+                title=f"Section added: {disp_title}",
+                description=f"New section '{disp_title}' introduced in v{resolved_target.version}.",
+                base_location=b_loc,
+                target_location=t_loc,
                 evidence_id=evidence_id,
             )
             differences.append(diff.to_dict())
             diff_evidence.append(evidence.to_dict())
 
-        else:
-            # Present in both: check content difference
-            b_start, b_end, b_text = base_sections[title]
-            t_start, t_end, t_text = target_sections[title]
-
-            if b_text != t_text:
+        elif b_sec is not None and t_sec is not None:
+            # Present in both: check text difference
+            if b_sec.text != t_sec.text:
+                b_excerpt, t_excerpt, b_loc, t_loc, is_trunc = _extract_diff_excerpt(
+                    b_sec.start_line, b_sec.end_line, b_sec.text, t_sec.text
+                )
                 evidence_id = f"EVID-{counter:03d}"
                 diff_id = f"DIFF-{counter:03d}"
                 counter += 1
 
-                b_features = _extract_protocol_features(b_text)
-                t_features = _extract_protocol_features(t_text)
+                b_features = _extract_protocol_features(b_sec.text)
+                t_features = _extract_protocol_features(t_sec.text)
 
-                feature_changes: list[str] = []
-                added_params = t_features["parameters"] - b_features["parameters"]
-                removed_params = b_features["parameters"] - t_features["parameters"]
-                if added_params:
-                    feature_changes.append(f"added fields/parameters: {', '.join(sorted(added_params))}")
-                if removed_params:
-                    feature_changes.append(f"removed fields/parameters: {', '.join(sorted(removed_params))}")
+                candidate_param_additions = t_features["parameters"] - b_features["parameters"]
+                candidate_directive_additions = t_features["candidate_directives"] - b_features["candidate_directives"]
 
-                added_restr = t_features["restrictions"] - b_features["restrictions"]
-                if added_restr:
-                    feature_changes.append(f"added restrictions: {', '.join(sorted(added_restr))}")
+                lexical_cues: list[str] = []
+                if candidate_param_additions:
+                    lexical_cues.append(f"parameters: {', '.join(sorted(candidate_param_additions))}")
+                if candidate_directive_additions:
+                    lexical_cues.append(f"candidate behavioral cues: {', '.join(sorted(candidate_directive_additions))}")
 
-                detail_desc = (
-                    f"Section '{title}' content modified. Changes include: {'; '.join(feature_changes)}"
-                    if feature_changes
-                    else f"Section '{title}' text formulation updated between versions."
-                )
-
-                category = "PROTOCOL_SPECIFICATION" if feature_changes else "TEXT_MODIFICATION"
+                if lexical_cues:
+                    detail_desc = (
+                        f"Section '{disp_title}' content modified. Changes include candidate "
+                        f"{'; '.join(lexical_cues)} (advisory lexical hint; does not prove runtime rule adoption)."
+                    )
+                else:
+                    detail_desc = f"Section '{disp_title}' text formulation updated between versions without keyword trigger."
 
                 evidence = DiffEvidence(
                     evidence_id=evidence_id,
                     diff_type="SECTION_MODIFIED",
                     base_doc_id=resolved_base.document_id,
                     base_version=resolved_base.version,
-                    base_location=f"Lines {b_start}-{b_end}",
-                    base_excerpt=b_text[:500],
-                    base_excerpt_digest=_digest_text(b_text[:500]),
+                    base_location=b_loc,
+                    base_excerpt=b_excerpt,
+                    base_excerpt_digest=_digest_text(b_excerpt),
                     target_doc_id=resolved_target.document_id,
                     target_version=resolved_target.version,
-                    target_location=f"Lines {t_start}-{t_end}",
-                    target_excerpt=t_text[:500],
-                    target_excerpt_digest=_digest_text(t_text[:500]),
-                    traceability=f"Content difference verified in section '{title}' between v{resolved_base.version} and v{resolved_target.version}",
+                    target_location=t_loc,
+                    target_excerpt=t_excerpt,
+                    target_excerpt_digest=_digest_text(t_excerpt),
+                    traceability=f"Content difference verified in section '{disp_title}' between v{resolved_base.version} and v{resolved_target.version}",
                 )
                 diff = ProtocolDifference(
                     difference_id=diff_id,
-                    category=category,
-                    title=f"Section modified: {title}",
+                    category="TEXT_DIFFERENCE",
+                    title=f"Section modified: {disp_title}",
                     description=detail_desc,
-                    base_location=f"Lines {b_start}-{b_end}",
-                    target_location=f"Lines {t_start}-{t_end}",
+                    base_location=b_loc,
+                    target_location=t_loc,
                     evidence_id=evidence_id,
                 )
                 differences.append(diff.to_dict())
                 diff_evidence.append(evidence.to_dict())
 
-    # Document-level feature change summary
+    # Document-level candidate lexical summary
     base_full_feats = _extract_protocol_features(resolved_base.content)
     target_full_feats = _extract_protocol_features(resolved_target.content)
 
@@ -673,12 +853,19 @@ def compare_protocol_versions(
     ]
 
     all_added_params = target_full_feats["parameters"] - base_full_feats["parameters"]
-    if all_added_params:
-        summary_parts.append(f"Target introduces parameters: {', '.join(sorted(all_added_params))}.")
+    all_added_directives = target_full_feats["candidate_directives"] - base_full_feats["candidate_directives"]
 
-    all_added_restr = target_full_feats["restrictions"] - base_full_feats["restrictions"]
-    if all_added_restr:
-        summary_parts.append(f"Target introduces behavioral directives: {', '.join(sorted(all_added_restr))}.")
+    cues_detected: list[str] = []
+    if all_added_params:
+        cues_detected.append(f"parameters: {', '.join(sorted(all_added_params))}")
+    if all_added_directives:
+        cues_detected.append(f"behavioral cues: {', '.join(sorted(all_added_directives))}")
+
+    if cues_detected:
+        summary_parts.append(
+            f"Candidate lexical cues detected in target text ({'; '.join(cues_detected)}). "
+            f"Notice: Lexical keywords serve as investigation cues only; protocol semantics and runtime adoption must be verified via context and live telemetry."
+        )
 
     summary_text = " ".join(summary_parts)
 

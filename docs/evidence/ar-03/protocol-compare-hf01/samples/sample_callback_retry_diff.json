@@ -1,0 +1,60 @@
+{
+  "base_ref": {
+    "document_id": "callback-retry-contract",
+    "version": "1.0.0",
+    "digest": "a5974f46bf50e2bfcd63ed1e6528d473560854204d12a50dfb3f82b9e61bc0c3",
+    "source": "local:orders-async-demo/contract-v1",
+    "valid_from": "2026-10-01T00:00:00+00:00",
+    "expires_at": "2030-01-01T00:00:00+00:00",
+    "title": "Callback failure and retry policy v1"
+  },
+  "target_ref": {
+    "document_id": "callback-retry-contract-v2",
+    "version": "2.0.0",
+    "digest": "9ad3f5a67a5f40da986769c66a78317027d3e57803371a0674d3b14fe412e238",
+    "source": "local:orders-async-demo/contract-v2",
+    "valid_from": "2026-10-01T00:00:00+00:00",
+    "expires_at": "2030-01-01T00:00:00+00:00",
+    "title": "Callback failure classification and retry policy v2"
+  },
+  "identical": false,
+  "summary": "Compared callback-retry-contract (v1.0.0) with callback-retry-contract-v2 (v2.0.0): 1 structural differences detected. Candidate lexical cues detected in target text (parameters: attempt_count, max_attempts). Notice: Lexical keywords serve as investigation cues only; protocol semantics and runtime adoption must be verified via context and live telemetry.",
+  "diff_count": 1,
+  "differences": [
+    {
+      "difference_id": "DIFF-001",
+      "category": "TEXT_DIFFERENCE",
+      "title": "Section modified: Root",
+      "description": "Section 'Root' content modified. Changes include candidate parameters: attempt_count, max_attempts (advisory lexical hint; does not prove runtime rule adoption).",
+      "base_location": "Lines 1-1",
+      "target_location": "Lines 1-1",
+      "evidence_id": "EVID-001"
+    }
+  ],
+  "diff_evidence": [
+    {
+      "evidence_id": "EVID-001",
+      "diff_type": "SECTION_MODIFIED",
+      "base_doc_id": "callback-retry-contract",
+      "base_version": "1.0.0",
+      "base_location": "Lines 1-1",
+      "base_excerpt": "Protocol v1 retry contract. A 503 response with TEMPORARY_UNAVAILABLE is retriable. Retry state SCHEDULED and a trusted retry_at mean the sender will make another attempt; wait for that attempt rather than creating a parallel resend. Contact the callback operator only when the attempt limit is reached and the trusted retry state is EXHAUSTED. Correlate response request, event, order and attempt count.",
+      "base_excerpt_digest": "8a46f09d593090e628c9516f44c9e5f2e0afab8dc314b575496185bd71f6f409",
+      "target_doc_id": "callback-retry-contract-v2",
+      "target_version": "2.0.0",
+      "target_location": "Lines 1-1",
+      "target_excerpt": "Protocol v2 error handling. A 503 response is retriable only when the server records a retryable failure code and a current retry policy. Retry state SCHEDULED with retry_at is still pending. EXHAUSTED is actionable only when attempt_count reaches max_attempts and the failure response digest/event/request all match the current delivery row. This document describes method; current Domain Evidence decides the incident.",
+      "target_excerpt_digest": "de606609dd942c0920ccc1114c0667417848927e7e25e38b3d089e9adf5aff2d",
+      "traceability": "Content difference verified in section 'Root' between v1.0.0 and v2.0.0"
+    }
+  ],
+  "unconfirmed_aspects": [
+    "LIVE_DEPLOYMENT_VERSION_UNVERIFIED: Static protocol documents describe specifications only. They cannot prove which version is actually running in production/cluster environments without live probing.",
+    "RUNTIME_CONSUMER_READINESS_UNVERIFIED: Cannot determine whether live callers, queues, or consumers have adopted this target contract version without runtime observation.",
+    "HISTORICAL_SPECIFICATION_BOUNDARY: Comparison reflects documented specifications as authored; runtime bug fixes or unannounced gateway routing behaviors are not verified by document text."
+  ],
+  "deployment_version_verified": false,
+  "authority": "DOCUMENTED_SPECIFICATION_ONLY_NOT_LIVE_DEPLOYMENT_EVIDENCE",
+  "compared_at": "2026-11-01T07:40:17.658+00:00",
+  "comparison_digest": "4bcf0584cd593d376c283415eefe876ea2083810196020eb854c71c9480cacc3"
+}
