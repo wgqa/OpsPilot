@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -71,11 +72,22 @@ def test_real_journey_has_independent_durable_budget_identity(demo_db):
         logical_key="journey-first",
         request={"prompt": "isolated new experiment"},
     )
+    journey_mcp = reserve_dispatch(
+        demo_db,
+        experiment_id=NEW_EXPERIMENT_ID,
+        run_id=journey_run["run_id"],
+        kind="MCP",
+        logical_key="journey-mcp",
+        request={"tool": "get_order_status", "arguments": {"reason": "test"}},
+    )
 
     assert legacy["dispatch_id"] != journey["dispatch_id"]
+    assert journey_mcp["reserved_usd_micro"] == 0
     assert read_budget(demo_db, LEGACY_EXPERIMENT_ID)["provider_used"] == 1
+    assert read_budget(demo_db, LEGACY_EXPERIMENT_ID)["mcp_used"] == 0
     assert read_budget(demo_db, LEGACY_EXPERIMENT_ID)["usd_reserved_micro"] == 645600
     assert read_budget(demo_db, NEW_EXPERIMENT_ID)["provider_used"] == 1
+    assert read_budget(demo_db, NEW_EXPERIMENT_ID)["mcp_used"] == 1
     assert read_budget(demo_db, NEW_EXPERIMENT_ID)["usd_reserved_micro"] == 645600
     with pytest.raises(ExperimentBudgetError, match="AR02_LIVE_CALL_OUTCOME_UNKNOWN"):
         reserve_dispatch(
@@ -142,6 +154,90 @@ def test_formal_app_initializes_new_identity_without_provider_io(
         assert snapshot["provider_limit"] == 16
         assert snapshot["mcp_limit"] == 12
         assert snapshot["budget_usd_micro"] == 10_500_000
+
+
+def test_formal_worker_uses_new_budget_identity_with_deterministic_model(
+    demo_db, tmp_path, monkeypatch
+):
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from opspilot.domain.assistant_experiment import read_budget
+    from opspilot.web.app import create_app
+    from test_ar02_assistant import ORIGIN, PASSWORDS
+    from test_ar02_runtime import FixtureModel
+
+    monkeypatch.delenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", raising=False)
+    monkeypatch.delenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", raising=False)
+    model = FixtureModel(mode="concept")
+    app = create_app(
+        db_path=demo_db,
+        checkpoint_db_path=tmp_path / "real-journey-worker-checkpoint.sqlite3",
+        start_worker=True,
+        credentials=PASSWORDS,
+        expected_origin=ORIGIN,
+        assistant_experiment_id=NEW_EXPERIMENT_ID,
+        assistant_model_factory=lambda: model,
+    )
+    with TestClient(app) as client:
+        csrf = client.post(
+            "/api/auth/login",
+            headers={"Origin": ORIGIN},
+            json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+        ).json()["csrf_token"]
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf}
+        session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+        accepted = client.post(
+            f"/api/sessions/{session_id}/assistant/messages",
+            headers={**headers, "Idempotency-Key": "real-journey-formal-worker"},
+            json={"body": "请解释 HTTP 202 不代表接收方已经完成处理。"},
+        )
+        assert accepted.status_code == 202, accepted.text
+        run_id = accepted.json()["run_id"]
+        deadline = time.monotonic() + 12
+        while True:
+            run = client.get(f"/api/runs/{run_id}").json()
+            if run["status"] in {"SUCCEEDED", "FAILED", "BLOCKED"}:
+                break
+            assert time.monotonic() < deadline, run
+            time.sleep(0.05)
+        assert run["status"] == "SUCCEEDED", run
+        messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+        answers = [
+            row
+            for row in messages
+            if row["role"] == "ASSISTANT" and "HTTP 202" in row["body"]
+        ]
+        assert answers
+
+    snapshot = read_budget(demo_db, NEW_EXPERIMENT_ID)
+    assert snapshot["provider_used"] == 1
+    assert snapshot["mcp_used"] == 0
+    print(
+        "LOCAL_FORMAL_WORKER_TRACE="
+        + json.dumps(
+            {
+                "model_source": "deterministic_FixtureModel",
+                "provider_network_requests": 0,
+                "acceptance_http_status": accepted.status_code,
+                "session_id": session_id,
+                "source_message_id": accepted.json()["message_id"],
+                "run_id": run_id,
+                "run_status": run["status"],
+                "assistant_message_id": answers[0]["message_id"],
+                "assistant_answer": answers[0]["body"],
+                "assistant_answer_source_message_id": answers[0].get(
+                    "answer_source_message_id"
+                ),
+                "experiment_id": NEW_EXPERIMENT_ID,
+                "provider_dispatches": snapshot["provider_used"],
+                "mcp_tools_call_attempts": snapshot["mcp_used"],
+                "business_writes": 0,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def test_legacy_database_schema_fails_closed_for_new_experiment_id(demo_db):

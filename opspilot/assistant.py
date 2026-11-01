@@ -83,9 +83,12 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     if os.environ.get('OPSPILOT_ASSISTANT_PROVIDER_ENABLED', '').strip() != '1':
         return None
     from opspilot.config import MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME
-    from opspilot.domain.assistant_experiment import EXPERIMENT_ENV, EXPERIMENT_ID
+    from opspilot.domain.assistant_experiment import (
+        EXPERIMENT_ENV,
+        SUPPORTED_EXPERIMENT_IDS,
+    )
 
-    if os.environ.get(EXPERIMENT_ENV, "").strip() != EXPERIMENT_ID:
+    if os.environ.get(EXPERIMENT_ENV, "").strip() not in SUPPORTED_EXPERIMENT_IDS:
         raise RuntimeError("AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED")
     model_id = os.environ.get(MODEL_NAME, '').strip()
     api_key = os.environ.get(MODEL_API_KEY, '').strip()

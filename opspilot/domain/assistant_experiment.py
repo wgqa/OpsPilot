@@ -1,7 +1,7 @@
-"""Durable, isolated dispatch budget for the AR-02-LIVE-01 experiment only.
+"""Durable, isolated dispatch budgets for explicitly allowlisted AR-02 runs.
 
 This ledger is deliberately not a general billing service. It is activated only
-when the formal assistant Worker is explicitly scoped to this frozen experiment.
+when the formal assistant Worker is explicitly scoped to a frozen experiment ID.
 """
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from opspilot.domain.database import connect
 from opspilot.domain.d2 import canonical_json, digest_json, utc_now
 
 EXPERIMENT_ID = "AR-02-LIVE-01"
+REAL_JOURNEY_EXPERIMENT_ID = "AR-02-REAL-JOURNEY-01"
+SUPPORTED_EXPERIMENT_IDS = frozenset({EXPERIMENT_ID, REAL_JOURNEY_EXPERIMENT_ID})
 EXPERIMENT_ENV = "OPSPILOT_ASSISTANT_EXPERIMENT_ID"
 PROVIDER_LIMIT = 16
 MCP_LIMIT = 12
@@ -33,7 +35,9 @@ MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ar02_live_experiment_budgets (
-    experiment_id TEXT PRIMARY KEY CHECK (experiment_id = 'AR-02-LIVE-01'),
+    experiment_id TEXT PRIMARY KEY CHECK (
+        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01')
+    ),
     provider_limit INTEGER NOT NULL,
     mcp_limit INTEGER NOT NULL,
     budget_usd_micro INTEGER NOT NULL,
@@ -73,8 +77,18 @@ class ExperimentBudgetError(RuntimeError):
 
 
 def _validate_experiment_id(experiment_id: str) -> None:
-    if experiment_id != EXPERIMENT_ID:
+    if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
         raise ExperimentBudgetError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+
+
+def _require_schema_experiment_id(connection, experiment_id: str) -> None:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+        ("ar02_live_experiment_budgets",),
+    ).fetchone()
+    schema = str(row["sql"] or "") if row is not None else ""
+    if f"'{experiment_id}'" not in schema:
+        raise ExperimentBudgetError("AR02_LIVE_SCHEMA_ID_NOT_SUPPORTED")
 
 
 def _table_exists(connection, table: str) -> bool:
@@ -120,6 +134,9 @@ def initialize_experiment(path: str | Path, experiment_id: str = EXPERIMENT_ID) 
     _validate_experiment_id(experiment_id)
     with connect(path) as connection:
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        # Existing LIVE-01 databases keep their original CHECK constraint. Do not
+        # rebuild or migrate them as a side effect of opening a new campaign.
+        _require_schema_experiment_id(connection, experiment_id)
         _ensure_row(connection, experiment_id)
 
 

@@ -155,15 +155,18 @@ def create_app(
     from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
 
     load_local_environment()
-    from opspilot.domain.assistant_experiment import EXPERIMENT_ENV, EXPERIMENT_ID
+    from opspilot.domain.assistant_experiment import (
+        EXPERIMENT_ENV,
+        SUPPORTED_EXPERIMENT_IDS,
+    )
 
     configured_experiment = os.environ.get(EXPERIMENT_ENV, "").strip() or None
-    if assistant_experiment_id is not None and assistant_experiment_id != EXPERIMENT_ID:
+    if assistant_experiment_id is not None and assistant_experiment_id not in SUPPORTED_EXPERIMENT_IDS:
         raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
     if assistant_experiment_id is not None and configured_experiment is not None and assistant_experiment_id != configured_experiment:
         raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_MISMATCH")
     resolved_experiment = assistant_experiment_id or configured_experiment
-    if resolved_experiment is not None and resolved_experiment != EXPERIMENT_ID:
+    if resolved_experiment is not None and resolved_experiment not in SUPPORTED_EXPERIMENT_IDS:
         raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
     resolved_db = database_path(str(db_path) if db_path is not None else None)
     checkpoint_path = Path(checkpoint_db_path or os.environ.get("OPSPILOT_CHECKPOINT_DB_PATH") or DEFAULT_CHECKPOINT_DB_PATH)
