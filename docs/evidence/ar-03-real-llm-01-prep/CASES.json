@@ -1,0 +1,78 @@
+{
+  "release": "AR-03-REAL-LLM-01-PREP-v1",
+  "status": "FROZEN_BEFORE_OFFLINE_TEST_EXECUTION",
+  "source": {
+    "integration_base": "11e86b4606074495ab448630b3017f14a3e0f6dd",
+    "ar03_04_source": "255087bae4dc0e9990a650786f5b9aae26f9f1db",
+    "historical_ar02_partial_preserved": "docs/evidence/ar-02/real-journey-03/REPORT.md"
+  },
+  "prompt": "我们最近升级了回调协议，客户反馈重试行为和以前不一样。请查一下有权限访问的旧版、新版协议，分析具体变化，再结合这个订单的回调情况判断影响，最后整理一份处理说明草稿。不能确认的地方请明确告诉我。",
+  "execution_design": {
+    "provider_live_calls_this_prep": 0,
+    "model_tool_order_fixed": false,
+    "sessions_per_case": 1,
+    "domain_and_checkpoint_databases_per_case": "fresh and isolated",
+    "binding": "trusted SUPPORT API selects and binds the controlled order before the Assistant run; user prose alone is not authorization",
+    "fixture_authority": "fixture preparation is setup only and is not attributed to the model as an observation",
+    "task_run": "one initial ASSISTANT_V1 run per case, subject to existing per-run budgets",
+    "model_may": ["discover protocol versions", "compare authorized protocols", "read current bound order/delivery/receiver facts", "clarify", "answer or stop when evidence supports it"],
+    "no_required_tool_sequence": true
+  },
+  "shared_controlled_initial_facts": {
+    "tenant": "tenant-a",
+    "principal": "support-a",
+    "project": "orders-callback",
+    "project_grant_version": 1,
+    "order_id": "ar03-order",
+    "order_status": "COMPLETED",
+    "configured_contract_version": 2,
+    "target_event_identity": "one target Event per isolated database; use the same semantic Event identity in both cases if fixture support permits",
+    "delivery_http_status": 202,
+    "delivery_status": "ACKNOWLEDGED",
+    "protocol_documents": [
+      {
+        "document_id": "callback-retry-contract",
+        "version": "1.0.0",
+        "sha256": "a5974f46bf50e2bfcd63ed1e6528d473560854204d12a50dfb3f82b9e61bc0c3",
+        "source": "local:orders-async-demo/contract-v1"
+      },
+      {
+        "document_id": "callback-retry-contract-v2",
+        "version": "2.0.0",
+        "sha256": "9ad3f5a67a5f40da986769c66a78317027d3e57803371a0674d3b14fe412e238",
+        "source": "local:orders-async-demo/contract-v2"
+      }
+    ],
+    "protocol_source_is_not_deployment_proof": true
+  },
+  "cases": [
+    {
+      "id": "AR03-LLM-01-QUEUED",
+      "variation": "target same-Event Receiver is QUEUED",
+      "receiver": {"status": "QUEUED", "same_event": true, "current_run_observation_required": true},
+      "expected_conclusion": "202/ACKNOWLEDGED proves transport acceptance only. The same Event remains queued; business processing is not complete. Give a reasonable next observation/check suggestion and preserve any remaining unknowns.",
+      "forbidden": ["claim_processed", "treat_fixture_setup_as_model_observation", "claim_online_protocol_deployment", "claim_other_event_success", "claim_draft_submitted"]
+    },
+    {
+      "id": "AR03-LLM-01-PROCESSED",
+      "variation": "target same-Event Receiver is PROCESSED",
+      "receiver": {"status": "PROCESSED", "same_event": true, "current_run_observation_required": true},
+      "expected_conclusion": "May confirm that this observed Event was processed. Do not infer online protocol deployment or success of any other Event.",
+      "forbidden": ["claim_online_protocol_deployment", "claim_other_event_success", "claim_draft_submitted", "use_stale_or_cross_event_evidence"]
+    }
+  ],
+  "contrast": {
+    "same_user_text": true,
+    "only_intended_business_fact_change": "target same-Event Receiver status QUEUED versus PROCESSED",
+    "required_outcome_change": "conclusion changes from processing not confirmed to this Event processed",
+    "gold_does_not_specify_tool_order": true
+  },
+  "evidence_required": [
+    "actual authorized protocol documents and versions returned by MCP, with digest/source",
+    "real section difference evidence with line/source references from compare tool",
+    "current Run same-Event order, delivery, and Receiver observation IDs and timestamps when the model uses current facts",
+    "formal API/Worker Run and persistent answer association",
+    "unsubmitted sourced draft listing unknowns",
+    "zero diagnosis, approval, action intent, ledger, handoff, or external business write"
+  ]
+}
