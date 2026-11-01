@@ -65,6 +65,13 @@ def reserve(path,run_id,kind,logical_key,request,worker_id):
         if old:
             if old['request_digest']!=digest_json(request): raise TaskControlError('ASSISTANT_REPLAY_CONTEXT_CHANGED')
             if old['status']!='OK': raise TaskControlError('ASSISTANT_EXTERNAL_RESULT_UNKNOWN')
+            if kind == 'MCP':
+                try:
+                    cached_result = json.loads(old['result_json']) if old['result_json'] is not None else None
+                except (TypeError, json.JSONDecodeError):
+                    cached_result = None
+                if not isinstance(cached_result, dict):
+                    raise TaskControlError('ASSISTANT_CACHED_RESULT_INVALID')
             return dict(old),False
         used=c.execute('SELECT COUNT(*) FROM assistant_calls WHERE run_id=? AND kind=?',(run_id,kind)).fetchone()[0]
         if used >= (8 if kind=='MODEL' else 6): raise TaskControlError('ASSISTANT_RUN_'+kind+'_LIMIT')
@@ -92,7 +99,12 @@ def sources_current(connection, run_id):
                 return False,'TASK_CONTROL_CHANGED'
         calls=connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' AND status='OK'",(run_id,)).fetchall()
         for row in calls:
-            value=json.loads(row['result_json'])
+            try:
+                value = json.loads(row['result_json']) if row['result_json'] is not None else None
+            except (TypeError, json.JSONDecodeError):
+                return False,'ASSISTANT_SOURCE_RESULT_INVALID'
+            if not isinstance(value, dict):
+                return False,'ASSISTANT_SOURCE_RESULT_INVALID'
             if row['evidence_id']:
                 facts,excluded=current_s3_evidence(connection,run['task_id'],[row['evidence_id']],run_id=run_id,observation_ids={row['evidence_id']:row['observation_id']})
                 if excluded or not facts: return False,'BUSINESS_SOURCE_INVALIDATED'

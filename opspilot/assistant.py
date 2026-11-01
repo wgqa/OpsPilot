@@ -315,6 +315,30 @@ class Loop(AgentMiddleware):
         call=request.tool_call; name=call['name']; args=call['args']
         domain.read_run(self.path,self.run_id,worker_id=self.worker_id)
         row,fresh=domain.reserve(self.path,self.run_id,'MCP',call['id'],{'name':name,'args':args},self.worker_id)
+        exposed_names = {
+            item.get('function', {}).get('name')
+            for item in self.specs
+            if isinstance(item, dict) and isinstance(item.get('function'), dict)
+        }
+        if name not in exposed_names:
+            if fresh:
+                domain.finish(
+                    self.path,
+                    row['call_id'],
+                    'FAILED',
+                    {'error': 'ASSISTANT_TOOL_NOT_EXPOSED', 'dispatch': 'NOT_STARTED'},
+                )
+            self.trace(
+                'tool_rejected', call_id=row['call_id'], tool_call_id=call['id'],
+                name=name, reason='ASSISTANT_TOOL_NOT_EXPOSED', dispatch_started=False,
+            )
+            return ToolMessage(
+                content=canonical_json({
+                    'error': 'ASSISTANT_TOOL_NOT_EXPOSED',
+                    'authority': 'TOOL_REFUSAL_NOT_FACT',
+                }),
+                tool_call_id=call['id'],
+            )
         if not fresh:
             self._settle_cached_campaign_dispatch('MCP', row['logical_key'])
             with connect(self.path) as c:
@@ -345,7 +369,9 @@ class Loop(AgentMiddleware):
                 from opspilot.domain.assistant_experiment import complete_dispatch
                 complete_dispatch(self.path,experiment_id=self.experiment_id,run_id=self.run_id,kind='MCP',logical_key=row['logical_key'])
                 campaign_completed=True
-            value=result.artifact
+            value=getattr(result, 'artifact', None)
+            if not isinstance(value, dict):
+                raise TaskControlError('ASSISTANT_MCP_RESULT_INVALID')
             observation=None
             if isinstance(value,dict) and 'fact_type' in value:
                 observation=record_tool_observation(self.path,task_id=self.run['task_id'],call_id=row['call_id'],attempt_id=attempt,tool_call_id=call['id'],tool_name=name,arguments=args,status='OK',result=value)

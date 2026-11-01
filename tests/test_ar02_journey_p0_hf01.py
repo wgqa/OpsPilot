@@ -343,11 +343,16 @@ def test_unbound_explicit_order_tool_proposal_is_not_executed_and_binding_allows
             ).fetchall()
             # The middleware records the model's attempted name before the
             # ToolNode rejects it. This is not an MCP server result or read.
-            # Preserve the row/status as evidence; require no result/fact.
+            # The durable refusal is FAILED/NOT_STARTED, never an OK/null fact.
             assert len(unbound_mcp_rows) == 1
             unbound_mcp = unbound_mcp_rows[0]
             assert json.loads(unbound_mcp["request_json"])["name"] == "get_order_status"
-            assert json.loads(unbound_mcp["result_json"]) is None
+            assert unbound_mcp["status"] == "FAILED"
+            refusal = json.loads(unbound_mcp["result_json"])
+            assert refusal == {
+                "dispatch": "NOT_STARTED",
+                "error": "ASSISTANT_TOOL_NOT_EXPOSED",
+            }
             assert unbound_mcp["observation_id"] is None
             assert unbound_mcp["evidence_id"] is None
             assert connection.execute(
