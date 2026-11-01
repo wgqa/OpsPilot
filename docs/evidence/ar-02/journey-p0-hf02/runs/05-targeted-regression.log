@@ -1,0 +1,55 @@
+Tool 'get_receiver_processing' raised an unexpected exception
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py", line 179, in run
+    result = await self.fn_metadata.call_fn(self.fn, self.is_async, validated, pass_directly)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\utilities\func_metadata.py", line 164, in call_fn
+    return await anyio.to_thread.run_sync(functools.partial(fn, **kwargs))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "D:\ѧϰ\agent����Ŀ\.worktrees\ar02-live-01\opspilot\domain\s3_mcp.py", line 54, in get_receiver_processing
+    return D2ToolFact.model_validate(get_receiver_processing_fact(db_path, task_id))
+                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.worktrees\ar02-live-01\docs\evidence\ar-02\journey-p0-hf02\runs\tmp-regression-05\test_receiver_tool_failure_aft0\receiver-failure-hook\sitecustomize.py", line 7, in _fail_receiver
+    raise RuntimeError('HF02_CONTROLLED_RECEIVER_UNAVAILABLE')
+RuntimeError: HF02_CONTROLLED_RECEIVER_UNAVAILABLE
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\server.py", line 442, in _handle_call_tool
+    return await self.call_tool(params.name, params.arguments or {}, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\server.py", line 548, in call_tool
+    return await self._tool_manager.call_tool(name, arguments, context, convert_result=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\tool_manager.py", line 87, in call_tool
+    return await tool.run(arguments, context, convert_result=convert_result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py", line 213, in run
+    raise UnexpectedToolError(f"Error executing tool {self.name}") from exc
+mcp.server.mcpserver.exceptions.UnexpectedToolError: Error executing tool get_receiver_processing
+HTTP Request: GET http://127.0.0.1:57253/api/async-orders/async-order?order_id=hf01-bound-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:57278/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.................LOCAL_MOCK_WIRE_BODY={"max_tokens":2048,"messages":[{"content":"Read the authorized order.","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Read the bound order.","name":"get_order_status","parameters":{"properties":{"reason":{"type":"string"}},"required":["reason"],"type":"object"}},"type":"function"}]}
+..................HF02_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"local request path check","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/chat/completions","url":"https://api.deepseek.com/chat/completions"}
+.HF02_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"local request path check","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/v1/chat/completions","url":"https://api.deepseek.com/v1/chat/completions"}
+.HF02_LOCAL_FAILURE={"authorization_present": true, "exception_type_chain": ["OpenAIConnectionError", "APIConnectionError", "ConnectError"], "host": "api.deepseek.com", "http_response": "NONE", "method": "POST", "path": "/chat/completions", "phase": "httpx.MockTransport handler before any response"}
+.HF02_DEFAULT_TRANSPORT={"async_client_type": "httpx.AsyncClient", "explicit_async_transport": true, "explicit_sync_transport": true, "follow_redirects": false, "sync_client_type": "httpx.Client", "trust_env": false}
+.HF02_EXPLICIT_HTTPX_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"locked default transport local request","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/v1/chat/completions","url":"https://api.deepseek.com/v1/chat/completions"}
+.HF02_EXPLICIT_HTTPX_LOCAL_FAILURE={"exception_type_chain": ["OpenAIConnectionError", "APIConnectionError", "ConnectError"], "host": "api.deepseek.com", "http_response": "NONE", "method": "POST", "path": "/v1/chat/completions", "phase": "httpx.MockTransport handler before any response"}
+.HF02_RUNTIME_TRACE={"answer_kind": "PROGRAM_LIMIT", "answer_run_id": "run-00cdfe42-6ac6-4519-b250-c9bae12f8d8d", "attempt_id": "chat-attempt-cd49c813-b407-4b68-9252-2b9b7294405f", "dispatch_id": "ar02-live-dispatch-35029607-429c-495d-9a44-13f7b0535178", "model_answer_count": 0, "program_notice_body": "\u6a21\u578b\u670d\u52a1\u8fde\u63a5\u5931\u8d25\uff0c\u672c\u6b21\u89e3\u91ca\u672a\u5b8c\u6210\u3002\u6b64\u6b21\u8bf7\u6c42\u7ed3\u679c\u6216\u8ba1\u8d39\u72b6\u6001\u672a\u80fd\u786e\u8ba4\uff0c\u5df2\u9884\u7559\u989d\u5ea6\u4ecd\u4fdd\u7559\uff0c\u7cfb\u7edf\u4e0d\u4f1a\u81ea\u52a8\u91cd\u8bd5\u3002", "reservation_usd_micro": 645600, "result": {"attempt": "FAILED", "dispatch": "UNKNOWN", "run": "FAILED"}, "run_id": "run-00cdfe42-6ac6-4519-b250-c9bae12f8d8d", "sdk_wire": {"authorization_present": true, "method": "POST", "path": "/v1/chat/completions", "url": "https://api.deepseek.com/v1/chat/completions"}, "settled_usd_micro": 0, "user_message_id": "message-f9711140-29ea-47d9-ab4b-d9a08add573f"}
+.
+42 passed in 44.71s
+EXIT_CODE=0

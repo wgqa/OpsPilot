@@ -1,0 +1,45 @@
+Tool 'get_receiver_processing' raised an unexpected exception
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py", line 179, in run
+    result = await self.fn_metadata.call_fn(self.fn, self.is_async, validated, pass_directly)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\utilities\func_metadata.py", line 164, in call_fn
+    return await anyio.to_thread.run_sync(functools.partial(fn, **kwargs))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "D:\ѧϰ\agent����Ŀ\.worktrees\ar02-live-01\opspilot\domain\s3_mcp.py", line 54, in get_receiver_processing
+    return D2ToolFact.model_validate(get_receiver_processing_fact(db_path, task_id))
+                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.worktrees\ar02-live-01\docs\evidence\ar-02\journey-p0-hf02\runs\tmp-green-01\test_receiver_tool_failure_aft0\receiver-failure-hook\sitecustomize.py", line 7, in _fail_receiver
+    raise RuntimeError('HF02_CONTROLLED_RECEIVER_UNAVAILABLE')
+RuntimeError: HF02_CONTROLLED_RECEIVER_UNAVAILABLE
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\server.py", line 442, in _handle_call_tool
+    return await self.call_tool(params.name, params.arguments or {}, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\server.py", line 548, in call_tool
+    return await self._tool_manager.call_tool(name, arguments, context, convert_result=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\tool_manager.py", line 87, in call_tool
+    return await tool.run(arguments, context, convert_result=convert_result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py", line 213, in run
+    raise UnexpectedToolError(f"Error executing tool {self.name}") from exc
+mcp.server.mcpserver.exceptions.UnexpectedToolError: Error executing tool get_receiver_processing
+..
+2 passed in 7.46s
+EXIT_CODE=0

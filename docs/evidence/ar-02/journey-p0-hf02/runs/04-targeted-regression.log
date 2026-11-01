@@ -1,0 +1,128 @@
+Tool 'get_receiver_processing' raised an unexpected exception
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py", line 179, in run
+    result = await self.fn_metadata.call_fn(self.fn, self.is_async, validated, pass_directly)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\utilities\func_metadata.py", line 164, in call_fn
+    return await anyio.to_thread.run_sync(functools.partial(fn, **kwargs))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\to_thread.py", line 65, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2706, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 1100, in run
+    result = context.run(func, *args)
+  File "D:\ѧϰ\agent����Ŀ\.worktrees\ar02-live-01\opspilot\domain\s3_mcp.py", line 54, in get_receiver_processing
+    return D2ToolFact.model_validate(get_receiver_processing_fact(db_path, task_id))
+                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.worktrees\ar02-live-01\docs\evidence\ar-02\journey-p0-hf02\runs\tmp-regression-04\test_receiver_tool_failure_aft0\receiver-failure-hook\sitecustomize.py", line 7, in _fail_receiver
+    raise RuntimeError('HF02_CONTROLLED_RECEIVER_UNAVAILABLE')
+RuntimeError: HF02_CONTROLLED_RECEIVER_UNAVAILABLE
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\server.py", line 442, in _handle_call_tool
+    return await self.call_tool(params.name, params.arguments or {}, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\server.py", line 548, in call_tool
+    return await self._tool_manager.call_tool(name, arguments, context, convert_result=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\tool_manager.py", line 87, in call_tool
+    return await tool.run(arguments, context, convert_result=convert_result)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ѧϰ\agent����Ŀ\.venv\Lib\site-packages\mcp\server\mcpserver\tools\base.py", line 213, in run
+    raise UnexpectedToolError(f"Error executing tool {self.name}") from exc
+mcp.server.mcpserver.exceptions.UnexpectedToolError: Error executing tool get_receiver_processing
+HTTP Request: GET http://127.0.0.1:61655/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+...F.............LOCAL_MOCK_WIRE_BODY={"max_tokens":2048,"messages":[{"content":"Read the authorized order.","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Read the bound order.","name":"get_order_status","parameters":{"properties":{"reason":{"type":"string"}},"required":["reason"],"type":"object"}},"type":"function"}]}
+..................HF02_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"local request path check","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/chat/completions","url":"https://api.deepseek.com/chat/completions"}
+.HF02_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"local request path check","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/v1/chat/completions","url":"https://api.deepseek.com/v1/chat/completions"}
+.HF02_LOCAL_FAILURE={"authorization_present": true, "exception_type_chain": ["OpenAIConnectionError", "APIConnectionError", "ConnectError"], "host": "api.deepseek.com", "http_response": "NONE", "method": "POST", "path": "/chat/completions", "phase": "httpx.MockTransport handler before any response"}
+.HF02_DEFAULT_TRANSPORT={"async_client_type": "httpx.AsyncClient", "explicit_async_transport": true, "explicit_sync_transport": true, "follow_redirects": false, "sync_client_type": "httpx.Client", "trust_env": false}
+.HF02_EXPLICIT_HTTPX_SDK_WIRE={"authorization_present":true,"body":{"max_tokens":2048,"messages":[{"content":"locked default transport local request","role":"user"}],"model":"deepseek-flash","parallel_tool_calls":false,"stream":false,"temperature":0.0,"thinking":{"type":"disabled"},"tool_choice":"auto","tools":[{"function":{"description":"Search the authorized Session document scope.","name":"search_project_knowledge","parameters":{"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"}},"type":"function"}]},"host":"api.deepseek.com","method":"POST","path":"/v1/chat/completions","url":"https://api.deepseek.com/v1/chat/completions"}
+.HF02_EXPLICIT_HTTPX_LOCAL_FAILURE={"exception_type_chain": ["OpenAIConnectionError", "APIConnectionError", "ConnectError"], "host": "api.deepseek.com", "http_response": "NONE", "method": "POST", "path": "/v1/chat/completions", "phase": "httpx.MockTransport handler before any response"}
+.HF02_RUNTIME_TRACE={"answer_kind": "PROGRAM_LIMIT", "answer_run_id": "run-0e01fef7-bb43-40aa-8fc1-b96a3c468e9e", "attempt_id": "chat-attempt-6d11af74-b40f-4352-9709-52b4de654829", "dispatch_id": "ar02-live-dispatch-f2b2aa81-09fd-466c-8d25-989e92934e9a", "model_answer_count": 0, "program_notice_body": "\u6a21\u578b\u670d\u52a1\u8fde\u63a5\u5931\u8d25\uff0c\u672c\u6b21\u89e3\u91ca\u672a\u5b8c\u6210\u3002\u6b64\u6b21\u8bf7\u6c42\u7ed3\u679c\u6216\u8ba1\u8d39\u72b6\u6001\u672a\u80fd\u786e\u8ba4\uff0c\u5df2\u9884\u7559\u989d\u5ea6\u4ecd\u4fdd\u7559\uff0c\u7cfb\u7edf\u4e0d\u4f1a\u81ea\u52a8\u91cd\u8bd5\u3002", "reservation_usd_micro": 645600, "result": {"attempt": "FAILED", "dispatch": "UNKNOWN", "run": "FAILED"}, "run_id": "run-0e01fef7-bb43-40aa-8fc1-b96a3c468e9e", "sdk_wire": {"authorization_present": true, "method": "POST", "path": "/v1/chat/completions", "url": "https://api.deepseek.com/v1/chat/completions"}, "settled_usd_micro": 0, "user_message_id": "message-2129905c-5472-4e89-a1f8-d6233a183748"}
+.
+================================== FAILURES ===================================
+_ test_unbound_explicit_order_tool_proposal_is_not_executed_and_binding_allows_same_request _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf02/runs/tmp-regression-04/test_unbound_explicit_order_to0/domain.sqlite3')
+tmp_path = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf02/runs/tmp-regression-04/test_unbound_explicit_order_to0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E5067BB020>
+
+    def test_unbound_explicit_order_tool_proposal_is_not_executed_and_binding_allows_same_request(
+        demo_db, tmp_path, monkeypatch
+    ):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        prepare_s3_fixture(demo_db, "PROCESSING", order_id="hf01-bound-order", contract_version=2)
+        unbound_model = ExplicitOrderProposalFixture(mode="unused")
+        bound_model = ExplicitOrderProposalFixture(mode="unused")
+        models = deque([unbound_model, bound_model])
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "hf01-binding.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.popleft(),
+        )
+        question = "请查询订单 hf01-bound-order 的当前订单状态。"
+        trace_records = []
+    
+        with TestClient(app) as client:
+            headers = _login(client, ORIGIN, PASSWORDS)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+    
+            with connect(demo_db) as connection:
+                http_before = connection.execute("SELECT COUNT(*) FROM s3_http_observations").fetchone()[0]
+            unbound_response = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "hf01-order-unbound"},
+                json={"body": question},
+            )
+            assert unbound_response.status_code == 202, unbound_response.text
+            unbound = unbound_response.json()
+            unbound_run = _wait_run(client, unbound["run_id"])
+            assert unbound_run["status"] in {"SUCCEEDED", "FAILED", "BLOCKED"}
+            assert unbound_model.proposals == [{
+                "name": "get_order_status",
+                "args": {"reason": "按用户请求查询当前绑定订单状态"},
+            }]
+            assert "get_order_status" not in unbound_model.offered_tool_names
+    
+            from opspilot.domain.database import connect
+            with connect(demo_db) as connection:
+                run_row = connection.execute("SELECT task_id FROM task_runs WHERE run_id=?", (unbound["run_id"],)).fetchone()
+                assert run_row["task_id"] is None
+                assert connection.execute("SELECT COUNT(*) FROM task_bindings").fetchone()[0] == 0
+                unbound_mcp_rows = connection.execute(
+                    "SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP'", (unbound["run_id"],)
+                ).fetchall()
+                # The middleware records the model's attempted name before the
+                # ToolNode rejects it. This is not an MCP server result or read.
+                # Preserve the row/status as evidence; require no result/fact.
+                assert len(unbound_mcp_rows) == 1
+                unbound_mcp = unbound_mcp_rows[0]
+                assert json.loads(unbound_mcp["request_json"])["name"] == "get_order_status"
+>               assert json.loads(unbound_mcp["result_json"]) is None
+E               assert {'dispatch': 'NOT_STARTED', 'error': 'ASSISTANT_TOOL_NOT_EXPOSED'} is None
+E                +  where {'dispatch': 'NOT_STARTED', 'error': 'ASSISTANT_TOOL_NOT_EXPOSED'} = <function loads at 0x000001E57B602560>('{"dispatch":"NOT_STARTED","error":"ASSISTANT_TOOL_NOT_EXPOSED"}')
+E                +    where <function loads at 0x000001E57B602560> = json.loads
+
+tests\test_ar02_journey_p0_hf01.py:350: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_journey_p0_hf01.py::test_unbound_explicit_order_tool_proposal_is_not_executed_and_binding_allows_same_request
+1 failed, 41 passed in 44.92s
+EXIT_CODE=1

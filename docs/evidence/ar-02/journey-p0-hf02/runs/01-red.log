@@ -1,0 +1,170 @@
+Error in sitecustomize; set PYTHONVERBOSE for traceback:
+ModuleNotFoundError: No module named 'opspilot'
+FF
+================================== FAILURES ===================================
+_ test_unexposed_tool_is_failed_and_legacy_null_cannot_replay_or_enter_history _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf02/runs/tmp-red-02/test_unexposed_tool_is_failed_0/domain.sqlite3')
+tmp_path = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf02/runs/tmp-red-02/test_unexposed_tool_is_failed_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002630C00F100>
+
+    def test_unexposed_tool_is_failed_and_legacy_null_cannot_replay_or_enter_history(
+        demo_db, tmp_path, monkeypatch
+    ):
+        from fastapi.testclient import TestClient
+        from opspilot.domain import assistant as assistant_domain
+        from opspilot.domain.database import connect
+        from opspilot.domain.task_control import TaskControlError
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        model = ExplicitOrderProposalFixture(mode="unused")
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "hf02-unexposed.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: model,
+        )
+        question = "请查询当前绑定订单的订单状态。"
+        trace: list[dict] = []
+    
+        with TestClient(app) as client:
+            headers = _login(client, ORIGIN, PASSWORDS)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "hf02-unexposed-order-read"},
+                json={"body": question},
+            )
+            assert accepted.status_code == 202, accepted.text
+            item = accepted.json()
+            run = _wait_run(client, item["run_id"])
+            assert run["status"] == "FAILED"
+            assert model.proposals == [{
+                "name": "get_order_status",
+                "args": {"reason": "按用户请求查询当前绑定订单状态"},
+            }]
+            assert "get_order_status" not in model.offered_tool_names
+    
+            with connect(demo_db) as connection:
+                before_http = connection.execute("SELECT COUNT(*) FROM s3_http_observations").fetchone()[0]
+                calls = connection.execute(
+                    "SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP'", (item["run_id"],)
+                ).fetchall()
+                assert len(calls) == 1
+                call = dict(calls[0])
+                request = json.loads(call["request_json"])
+                assert request["name"] == "get_order_status"
+                # RED against 990d977: this was recorded as OK with a JSON null result.
+>               assert call["status"] == "FAILED"
+E               AssertionError: assert 'OK' == 'FAILED'
+E                 
+E                 - FAILED
+E                 + OK
+
+tests\test_ar02_journey_p0_hf02.py:81: AssertionError
+_ test_receiver_tool_failure_after_queued_observation_produces_unknown_not_success _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf02/runs/tmp-red-02/test_receiver_tool_failure_aft0/domain.sqlite3')
+tmp_path = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf02/runs/tmp-red-02/test_receiver_tool_failure_aft0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002630C57CD60>
+
+    def test_receiver_tool_failure_after_queued_observation_produces_unknown_not_success(
+        demo_db, tmp_path, monkeypatch
+    ):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        fixture = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", order_id="hf02-receiver-order", contract_version=2,
+        )
+        event_id = fixture["transport_trace"][0]["request"]["event_id"]
+        bind_model = JourneyFixtureModel(mode="s01")
+        queued_model = ReceiverAvailabilityFixture(mode="unused", query_receiver=True)
+        failed_model = ReceiverAvailabilityFixture(mode="unused", query_receiver=True)
+        models = deque([bind_model, queued_model, failed_model])
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "hf02-receiver-failure.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.popleft(),
+        )
+        question = "请依据当前 Receiver 查询，说明同一订单回调是否已经处理完成；若查询失败请明确说明无法确认。"
+        trace: list[dict] = []
+    
+        with TestClient(app) as client:
+            headers = _login(client, ORIGIN, PASSWORDS)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            binding_response = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": "hf02-receiver-bind"},
+                json={"order_id": "hf02-receiver-order", "initial_message": "请绑定并开始核查该授权订单。"},
+            )
+            assert binding_response.status_code == 202, binding_response.text
+            binding = binding_response.json()
+            assert _wait_run(client, binding["run_id"])["status"] == "SUCCEEDED"
+            task_id = binding["task_id"]
+    
+            first = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "hf02-receiver-queued"},
+                json={"body": question, "task_id": task_id},
+            )
+            assert first.status_code == 202, first.text
+            queued = first.json()
+            assert _wait_run(client, queued["run_id"])["status"] == "SUCCEEDED"
+            assert any(item.get("tool") == "get_receiver_processing" for item in queued_model.decisions)
+    
+            hook_dir = tmp_path / "receiver-failure-hook"
+            hook_dir.mkdir()
+            marker = tmp_path / "receiver-tool-invoked.marker"
+            (hook_dir / "sitecustomize.py").write_text(
+                "import os\n"
+                "from pathlib import Path\n"
+                "if os.environ.get('OPSPILOT_HF02_FAIL_RECEIVER') == '1':\n"
+                "    from opspilot.domain import s3_mcp\n"
+                "    def _fail_receiver(db_path, task_id):\n"
+                "        Path(os.environ['OPSPILOT_HF02_RECEIVER_MARKER']).write_text('called', encoding='utf-8')\n"
+                "        raise RuntimeError('HF02_CONTROLLED_RECEIVER_UNAVAILABLE')\n"
+                "    s3_mcp.get_receiver_processing_fact = _fail_receiver\n",
+                encoding="utf-8",
+            )
+            prior_pythonpath = os.environ.get("PYTHONPATH", "")
+            monkeypatch.setenv(
+                "PYTHONPATH",
+                str(hook_dir) + (os.pathsep + prior_pythonpath if prior_pythonpath else ""),
+            )
+            monkeypatch.setenv("OPSPILOT_HF02_FAIL_RECEIVER", "1")
+            monkeypatch.setenv("OPSPILOT_HF02_RECEIVER_MARKER", str(marker))
+    
+            with connect(demo_db) as connection:
+                receiver_evidence_before = connection.execute(
+                    "SELECT COUNT(*) FROM d2_evidence WHERE task_id=? AND fact_type='s3_receiver'", (task_id,)
+                ).fetchone()[0]
+    
+            second = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "hf02-receiver-query-fails"},
+                json={"body": question, "task_id": task_id},
+            )
+            assert second.status_code == 202, second.text
+            failed = second.json()
+            assert _wait_run(client, failed["run_id"])["status"] == "SUCCEEDED"
+>           assert marker.exists() and marker.read_text(encoding="utf-8") == "called"
+E           AssertionError: assert (False)
+E            +  where False = exists()
+E            +    where exists = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf02/runs/tmp-red-02/test_receiver_tool_failure_aft0/receiver-tool-invoked.marker').exists
+
+tests\test_ar02_journey_p0_hf02.py:231: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_journey_p0_hf02.py::test_unexposed_tool_is_failed_and_legacy_null_cannot_replay_or_enter_history
+FAILED tests/test_ar02_journey_p0_hf02.py::test_receiver_tool_failure_after_queued_observation_produces_unknown_not_success
+2 failed in 8.88s
+EXIT_CODE=1

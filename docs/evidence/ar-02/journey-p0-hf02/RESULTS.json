@@ -1,0 +1,90 @@
+{
+  "task": "AR-02-JOURNEY-P0-HF02",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/ar02-live-01",
+  "base_sha": "990d977755854100f1718a5266499859a09dbacd",
+  "freeze_commit_sha": "2a10306cc4a05ce2915b81cc8232740673afad9f",
+  "implementation_commit_sha": "4ced0dde8e61947ba7840bd4cd7c9a16eef519c5",
+  "final_candidate_sha": null,
+  "external_provider_requests": 0,
+  "browser_automation": "NOT_RUN",
+  "full_pytest": "NOT_RUN",
+  "historical_full_pytest": {
+    "passed": 489,
+    "failed": 4,
+    "source": "AR-02-JOURNEY-P0-HF01 historical report; not rerun or counted in this task"
+  },
+  "scope": {
+    "production_files": [
+      "opspilot/assistant.py",
+      "opspilot/domain/assistant.py"
+    ],
+    "test_files": [
+      "tests/test_ar02_journey_p0_hf02.py",
+      "tests/test_ar02_journey_p0_hf01.py"
+    ],
+    "business_side_effects": "No REPAIR, Approval, ActionIntent, Ledger, Queue, Receipt, or external business mutation. Isolated test DB persisted TaskBinding, read Observations and audit records needed by the approved read-only journey."
+  },
+  "runs": [
+    {
+      "id": "HF02-RED-01",
+      "command": "python -X utf8 -m pytest tests/test_ar02_journey_p0_hf02.py --basetemp=docs/evidence/ar-02/journey-p0-hf02/runs/tmp-red-03 -q -s",
+      "exit_code": 1,
+      "result": "1 failed, 1 passed",
+      "failure": "Unexposed get_order_status was persisted as status OK with JSON null result. Receiver controlled failure case passed and created no successful new Receiver Evidence.",
+      "log": "runs/02-red-after-fixture-fix.log",
+      "trace": "runs/TRACE-02-red-after-fixture-fix.jsonl"
+    },
+    {
+      "id": "HF02-GREEN-01",
+      "command": "python -X utf8 -m pytest tests/test_ar02_journey_p0_hf02.py --basetemp=docs/evidence/ar-02/journey-p0-hf02/runs/tmp-green-01 -q -s",
+      "exit_code": 0,
+      "result": "2 passed",
+      "log": "runs/03-targeted-green.log",
+      "trace": "runs/TRACE-03-green.jsonl"
+    },
+    {
+      "id": "HF02-REGRESSION-01",
+      "command": "python -X utf8 -m pytest tests/test_ar02_journey_p0_hf02.py tests/test_ar02_journey_p0_hf01.py tests/test_ar02_journey_p0.py tests/test_ar02_smoke_provider_factory.py tests/test_ar02_live_budget.py tests/test_ar02_live_hf02.py --basetemp=docs/evidence/ar-02/journey-p0-hf02/runs/tmp-regression-04 -q -s",
+      "exit_code": 1,
+      "result": "41 passed, 1 failed",
+      "failure": "The sole failure was the existing HF01 assertion expecting JSON null; the fixed implementation intentionally persists an explicit FAILED/NOT_STARTED refusal object.",
+      "log": "runs/04-targeted-regression.log"
+    },
+    {
+      "id": "HF02-REGRESSION-02",
+      "command": "python -X utf8 -m pytest tests/test_ar02_journey_p0_hf02.py tests/test_ar02_journey_p0_hf01.py tests/test_ar02_journey_p0.py tests/test_ar02_smoke_provider_factory.py tests/test_ar02_live_budget.py tests/test_ar02_live_hf02.py --basetemp=docs/evidence/ar-02/journey-p0-hf02/runs/tmp-regression-05 -q -s",
+      "exit_code": 0,
+      "result": "42 passed, 0 failed, 44.71 seconds",
+      "log": "runs/05-targeted-regression.log",
+      "trace": "runs/TRACE-05-regression.jsonl"
+    }
+  ],
+  "failure_history": [
+    "runs/00-log-directory-setup-error.txt",
+    "runs/01-red.log",
+    "runs/02-red-after-fixture-fix.log",
+    "runs/04-targeted-regression.log"
+  ],
+  "known_limits": [
+    "Deterministic FixtureModel only; no real LLM behavior claim.",
+    "No real browser validation.",
+    "No full pytest rerun.",
+    "Remote refs were not refreshed because direct GitHub HTTPS transport was unavailable at preflight."
+  ],
+  "final_candidate_sha_location": "provided in final handoff after evidence commit",
+  "artifact_sha256": {
+    "TRACE.jsonl": "0DDD0CEF1D8F28C8AE7BF1BB359C2BD00E32B4E54B587905BAE6E530322FA759",
+    "runs/00-log-directory-setup-error.txt": "9DAA1C947F298406C7AC542013FBB2D11E2D1B785C832BF34943671136E98012",
+    "runs/01-red.log": "78E54A43A3E35C20D429D7CDFD8C0666CE304FCE5854E2B2FE7E7BC5E316B4D4",
+    "runs/02-red-after-fixture-fix.log": "A3E9059C11CE0A66ED275F50459C25EF4E227B199A3F350931123B72A5AC26BD",
+    "runs/03-targeted-green.log": "B22ACE7A7C0289D14E186BB9CE053B865FA1BC48B5A305A2868F14E5B49AA645",
+    "runs/04-targeted-regression.log": "575849CDB58E668FF0D36ED7CC79DD98FE47C670321822E66A414AFF4D570595",
+    "runs/05-targeted-regression.log": "583E5AEF588AB35CFA5E1F660337DD5C3EE9BA90FD996B80427FBA8E8FEBD52D",
+    "runs/TRACE-02-red-after-fixture-fix.jsonl": "A6A7294ACBA59BFE05C9FBE6376D81334897DCF592151ABF6EEBF898146E76B2",
+    "runs/TRACE-03-green.jsonl": "1C7FA565FE904A258198F8AE4BB1B4EDB1CBF119588B0176D6588BECB7D6D89D",
+    "runs/TRACE-05-regression.jsonl": "0DDD0CEF1D8F28C8AE7BF1BB359C2BD00E32B4E54B587905BAE6E530322FA759"
+  },
+  "artifact_checksum_basis": "SHA256 of generated worktree file bytes before Git indexing; raw test logs were not normalized."
+}
