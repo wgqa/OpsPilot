@@ -16,4 +16,12 @@
 - 其中包含实际 ChatOpenAI/HTTPX MockTransport 线协议检查、精确 body、请求身份与美元预留 SQLite 持久化、重复账本拒绝、CAS 单一发送权、未知出站状态重放拒绝及峰值费用估算。
 - 没有在测试或预检中调用付费 Provider；没有修改历史 CONN-01、P1 账本或生产代码。
 
-所有失败与补充运行按原文件保留；尚无真实 Provider 结果。后续若唯一真实请求失败或结果未知，追加原始状态，不重试。
+所有失败与补充运行按原文件保留。唯一真实请求返回 HTTP 200、有效 Completion、输出 OK 和 Usage；没有 Provider 失败或重试。GitHub push 与只读 ls-remote 均连接重置，远端分支更新尚未确认；这是仓库传输失败，不改变本地已提交的一次性账本，也不触发第二次模型请求。
+
+
+## 4. 远端 GitHub 连接重置
+
+- reservation commit f0ec8e05b0852562315b137de9c60f565336a627 已在本地提交。
+- git push origin codex/ar02-live-01 返回 Recv failure: Connection was reset。
+- 随后的只读 git ls-remote origin refs/heads/codex/ar02-live-01 也返回同样连接重置；不能断言远端分支是否已更新。
+- 本报告完成后会再按用户要求尝试推送最终候选；若仍失败，保留准确阻断状态，不改写本地提交或主线。
