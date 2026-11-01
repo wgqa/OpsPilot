@@ -1,6 +1,6 @@
 # Failures and stops
 
-All attempts are retained; no paid Provider request has been made as of this file's creation.
+All attempts are retained. The first two entries are preflight-only failures. The live journey result is recorded below; no request was retried.
 
 ## Offline preflight RED 1: missing dependencies in default Python
 
@@ -17,6 +17,17 @@ All attempts are retained; no paid Provider request has been made as of this fil
 - Both reached the product path and failed specifically because the new experiment ID was not supported by the existing allowlist. This confirms the authorization-scope/schema wiring gap before repair.
 - Raw log: `runs/preflight-red-project-env.log`.
 
-## Post-fix verification
+## Offline post-fix verification (before the live run)
 
-The first GREEN run of the focused offline wire and AR-02 regressions is recorded in `runs/preflight-green.log`. Paid execution remains unstarted until the final preflight is recorded and the formal worker can run in the approved network-enabled execution context.
+The focused offline wire and AR-02 regressions first passed in `runs/preflight-green.log`; the final relevant regression result (80 passed) is in `runs/ar02-regression-final.log`. At the time of those logs, no paid Provider request had been made. The later authorized live run is recorded in the next section.
+
+## Authorized live journey stop: S02-4 context budget
+
+- The formal API accepted S02-4, but its `ASSISTANT_V1` Run ended `FAILED` before any Provider or MCP dispatch.
+- Persisted program notice: `ContextBudgetExceeded: INVESTIGATOR_CONTEXT_EXCEEDS_BUDGET (12029 > 12000 tokens)`.
+- Per-run `assistant_trace` and dispatch list are empty; campaign counts stayed at 7 Provider / 7 MCP. No model result was unknown, no Usage was missing, and the campaign remained `OPEN`.
+- The runner stopped at its terminal Run-failure condition. S02-5 was not submitted. No Worker restart, rerun, prompt change, or context-budget increase occurred.
+- This is a product/continuity failure caused by the existing context limit on the accumulated S02 session, not a Provider connectivity failure or safety violation.
+- Raw evidence: `RESULTS.json`, `TRACE.jsonl`, `runs/live.log`, and `PROVIDER_HTTP.jsonl`.
+- Final app ledger: 7 HTTP 200 Provider responses, all with known Usage; USD 0.013902 settled; USD 0 reserved; 7/16 Provider and 7/12 MCP used.
+- S02-4 and S02-5 are incomplete; the required support-note draft was not produced. This run is not a full-journey PASS.
