@@ -1,4 +1,4 @@
-"""Durable, isolated dispatch budgets for explicitly allowlisted AR-02 runs.
+"""Durable, isolated dispatch budgets for explicitly allowlisted Agent experiments.
 
 This ledger is deliberately not a general billing service. It is activated only
 when the formal assistant Worker is explicitly scoped to a frozen experiment ID.
@@ -18,11 +18,13 @@ EXPERIMENT_ID = "AR-02-LIVE-01"
 REAL_JOURNEY_EXPERIMENT_ID = "AR-02-REAL-JOURNEY-01"
 REAL_JOURNEY_02_EXPERIMENT_ID = "AR-02-REAL-JOURNEY-02"
 REAL_JOURNEY_03_EXPERIMENT_ID = "AR-02-REAL-JOURNEY-03"
+AR03_REAL_LLM_01_EXPERIMENT_ID = "AR-03-REAL-LLM-01"
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPERIMENT_ID,
     REAL_JOURNEY_EXPERIMENT_ID,
     REAL_JOURNEY_02_EXPERIMENT_ID,
     REAL_JOURNEY_03_EXPERIMENT_ID,
+    AR03_REAL_LLM_01_EXPERIMENT_ID,
 })
 EXPERIMENT_ENV = "OPSPILOT_ASSISTANT_EXPERIMENT_ID"
 PROVIDER_LIMIT = 16
@@ -43,7 +45,7 @@ MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ar02_live_experiment_budgets (
     experiment_id TEXT PRIMARY KEY CHECK (
-        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03')
+        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01')
     ),
     provider_limit INTEGER NOT NULL,
     mcp_limit INTEGER NOT NULL,

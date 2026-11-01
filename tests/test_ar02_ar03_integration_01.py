@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import time
+import uuid
 from collections import deque
 from pathlib import Path
 
@@ -443,7 +444,7 @@ def test_formal_mcp_refuses_unauthorized_protocol_comparison(demo_db, tmp_path):
 
 @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
 def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation(
-    demo_db, tmp_path, receiver_state,
+    demo_db, tmp_path, receiver_state, monkeypatch,
 ):
     from fastapi.testclient import TestClient
     from opspilot.domain.database import connect
@@ -451,8 +452,17 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
     from opspilot.web.app import create_app
     from test_ar02_assistant import ORIGIN, PASSWORDS
 
-    fixture = prepare_s3_fixture(
-        demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2,
+    paired_ids = iter((
+        uuid.UUID("00000000-0000-4000-8000-000000000001"),
+        uuid.UUID("00000000-0000-4000-8000-000000000002"),
+    ))
+    with monkeypatch.context() as patcher:
+        patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+        fixture = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2,
+        )
+    assert fixture["transport_trace"][0]["request"]["event_id"] == (
+        "event-00000000-0000-4000-8000-000000000001"
     )
     if receiver_state == "PROCESSED":
         with connect(demo_db) as connection:
