@@ -61,6 +61,7 @@ def test_real_provider_requires_frozen_model_id(monkeypatch):
 
 def test_deepseek_factory_pins_nonthinking_max_tokens_and_no_retries(monkeypatch):
     from opspilot.assistant import create_assistant_model
+    import httpx
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
     monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
@@ -68,7 +69,10 @@ def test_deepseek_factory_pins_nonthinking_max_tokens_and_no_retries(monkeypatch
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
 
-    model = create_assistant_model()
+    model = create_assistant_model(
+        transport_async=httpx.MockTransport(lambda request: httpx.Response(500, request=request)),
+        transport_sync=httpx.MockTransport(lambda request: httpx.Response(500, request=request)),
+    )
 
     assert model.model_name == "deepseek-flash"
     assert model.extra_body == {
@@ -77,6 +81,8 @@ def test_deepseek_factory_pins_nonthinking_max_tokens_and_no_retries(monkeypatch
     }
     assert model.request_timeout == 30
     assert model.max_retries == 0
+    asyncio.run(model.http_async_client.aclose())
+    model.http_client.close()
 
 
 def test_real_provider_endpoint_must_be_official_https(monkeypatch):

@@ -76,7 +76,10 @@ def test_provider_factory_builds_bounded_no_retry_chatopenai_without_network(mon
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
 
-    model = create_assistant_model()
+    model = create_assistant_model(
+        transport_async=httpx.MockTransport(lambda request: httpx.Response(500)),
+        transport_sync=httpx.MockTransport(lambda request: httpx.Response(500)),
+    )
 
     assert model.model_name == "deepseek-flash"
     assert model.max_tokens is None
@@ -89,6 +92,12 @@ def test_provider_factory_builds_bounded_no_retry_chatopenai_without_network(mon
     assert model.temperature == 0
     assert model.stream_usage is True
     assert model.openai_api_base == "https://api.deepseek.com"
+    assert model.http_async_client.trust_env is False
+    assert model.http_async_client.follow_redirects is False
+    assert model.http_client.trust_env is False
+    assert model.http_client.follow_redirects is False
+    asyncio.run(model.http_async_client.aclose())
+    model.http_client.close()
 
 
 def test_provider_factory_rejects_model_outside_frozen_experiment(monkeypatch):
@@ -106,7 +115,6 @@ def test_provider_factory_rejects_model_outside_frozen_experiment(monkeypatch):
 
 def test_assistant_factory_emits_deepseek_max_tokens_on_local_mock_wire(monkeypatch):
     from opspilot.assistant import create_assistant_model
-    import langchain_openai
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
     monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "AR-02-LIVE-01")
@@ -146,21 +154,18 @@ def test_assistant_factory_emits_deepseek_max_tokens_on_local_mock_wire(monkeypa
                 },
             )
 
-        client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
-        original_chat_openai = langchain_openai.ChatOpenAI
-
-        def local_chat_openai(**kwargs):
-            return original_chat_openai(**kwargs, http_async_client=client)
-
-        monkeypatch.setattr(langchain_openai, "ChatOpenAI", local_chat_openai)
-        model = create_assistant_model()
+        model = create_assistant_model(
+            transport_async=httpx.MockTransport(respond),
+            transport_sync=httpx.MockTransport(lambda request: httpx.Response(500)),
+        )
         try:
             response = await model.bind_tools(
                 [tool], tool_choice="auto", parallel_tool_calls=False,
             ).ainvoke([HumanMessage(content="Read the authorized order.")])
             assert response.content == "The local mock answered."
         finally:
-            await client.aclose()
+            await model.http_async_client.aclose()
+            model.http_client.close()
 
     asyncio.run(run())
     assert len(captured) == 1

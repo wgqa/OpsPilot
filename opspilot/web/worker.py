@@ -516,13 +516,27 @@ async def _dispatch_run(
         use_assistant = assistant_selected(connection, str(run["run_id"]))
     if use_assistant:
         from opspilot.assistant import run_assistant
+        from contextlib import suppress
         actor_id=await asyncio.to_thread(_chat_run_actor,db_path,str(run['run_id']))
         await asyncio.to_thread(claim_task_run,db_path,trusted_identity(db_path,actor_id),str(run['run_id']))
         model=assistant_model_factory() if assistant_model_factory else None
-        await run_assistant(
-            db_path, checkpoint_path, worker_id, str(run["run_id"]), model=model,
-            experiment_id=assistant_experiment_id,
-        )
+        try:
+            await run_assistant(
+                db_path, checkpoint_path, worker_id, str(run["run_id"]), model=model,
+                experiment_id=assistant_experiment_id,
+            )
+        finally:
+            # The formal factory owns one explicit HTTPX client pair per Run.
+            # Fixture models generally have no clients, so this remains a
+            # no-op for offline tests while preventing long-running Worker leaks.
+            async_client = getattr(model, "http_async_client", None)
+            if async_client is not None:
+                with suppress(Exception):
+                    await async_client.aclose()
+            sync_client = getattr(model, "http_client", None)
+            if sync_client is not None:
+                with suppress(Exception):
+                    sync_client.close()
         return
     if str(run["kind"]) == "CHAT_READONLY":
         await _process_chat_run(db_path, worker_id, run)

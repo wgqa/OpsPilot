@@ -74,7 +74,7 @@ def _close_terminal_assistant_failure(
     return {"status": "FAILED", "run_id": run_id, "reason": reason}
 
 
-def create_assistant_model():
+def create_assistant_model(*, transport_async=None, transport_sync=None):
     """Build the real Assistant provider only after an explicit local opt-in.
 
     The opt-in is deliberately separate from API-key presence: credentials alone
@@ -108,20 +108,58 @@ def create_assistant_model():
         or endpoint.path not in ("", "/", "/v1")
     ):
         raise RuntimeError("AR02_LIVE_PROVIDER_ENDPOINT_MISMATCH")
+    import httpx
     from langchain_openai import ChatOpenAI
+
+    if (transport_async is None) != (transport_sync is None):
+        raise ValueError("Both explicit Provider transports must be supplied together")
+    if transport_async is not None and (
+        not isinstance(transport_async, httpx.AsyncBaseTransport)
+        or not isinstance(transport_sync, httpx.BaseTransport)
+    ):
+        raise TypeError("Explicit Provider transports must be HTTPX transports")
+
+    timeout = httpx.Timeout(30)
+    async_client = httpx.AsyncClient(
+        timeout=timeout,
+        trust_env=False,
+        follow_redirects=False,
+        transport=transport_async or httpx.AsyncHTTPTransport(retries=0),
+    )
+    sync_client = httpx.Client(
+        timeout=timeout,
+        trust_env=False,
+        follow_redirects=False,
+        transport=transport_sync or httpx.HTTPTransport(retries=0),
+    )
     # DeepSeek Chat Completions requires its own `max_tokens` wire field and
     # explicit non-thinking mode; the pinned SDK's native alias differs.
-    return ChatOpenAI(
-        model=model_id,
-        api_key=api_key,
-        base_url=base_url or None,
-        temperature=0,
-        timeout=30,
-        max_retries=0,
-        stream_usage=True,
-        include_response_headers=True,
-        extra_body={"max_tokens": 2048, "thinking": {"type": "disabled"}},
-    )
+    try:
+        return ChatOpenAI(
+            model=model_id,
+            api_key=api_key,
+            base_url=base_url or None,
+            temperature=0,
+            timeout=30,
+            max_retries=0,
+            stream_usage=True,
+            include_response_headers=True,
+            http_async_client=async_client,
+            http_client=sync_client,
+            http_socket_options=(),
+            extra_body={"max_tokens": 2048, "thinking": {"type": "disabled"}},
+        )
+    except BaseException:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(async_client.aclose())
+        else:
+            # Factory use is synchronous inside the async Worker. If SDK model
+            # construction fails, schedule closure on that already-running loop.
+            loop.create_task(async_client.aclose())
+        sync_client.close()
+        raise
 
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None):

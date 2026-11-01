@@ -25,17 +25,8 @@ _KNOWLEDGE_TOOL = {
 }
 
 
-def _mock_assistant_model(
-    monkeypatch, handler, base_url="https://api.deepseek.com", transport_library="httpx"
-):
-    import langchain_openai
-
+def _mock_assistant_model(monkeypatch, handler, base_url="https://api.deepseek.com"):
     from opspilot.assistant import create_assistant_model
-
-    if transport_library == "httpx2":
-        import httpx2 as transport_api
-    else:
-        transport_api = httpx
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
     monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "AR-02-LIVE-01")
@@ -56,18 +47,15 @@ def _mock_assistant_model(
         })
         return await handler(request, body)
 
-    client = transport_api.AsyncClient(
-        transport=transport_api.MockTransport(capture),
-        timeout=30,
-        trust_env=False,
+    async_transport = httpx.MockTransport(capture)
+    sync_transport = httpx.MockTransport(
+        lambda request: httpx.Response(500, request=request)
     )
-    sdk_chat_openai = langchain_openai.ChatOpenAI
-    monkeypatch.setattr(
-        langchain_openai,
-        "ChatOpenAI",
-        lambda **kwargs: sdk_chat_openai(**kwargs, http_async_client=client),
+    model = create_assistant_model(
+        transport_async=async_transport,
+        transport_sync=sync_transport,
     )
-    return create_assistant_model(), client, captured, transport_api
+    return model, model.http_async_client, model.http_client, captured
 
 
 def _mock_success(response_module=httpx):
@@ -99,7 +87,7 @@ def test_locked_openai_sdk_posts_to_observed_base_url_path(monkeypatch, base_url
     async def respond(_request, _body):
         return _mock_success()
 
-    model, client, captured, _transport_api = _mock_assistant_model(monkeypatch, respond, base_url)
+    model, async_client, sync_client, captured = _mock_assistant_model(monkeypatch, respond, base_url)
 
     async def invoke():
         try:
@@ -108,7 +96,8 @@ def test_locked_openai_sdk_posts_to_observed_base_url_path(monkeypatch, base_url
             )
             assert answer.content == "local mock only"
         finally:
-            await client.aclose()
+            await async_client.aclose()
+            sync_client.close()
 
     asyncio.run(invoke())
     assert len(captured) == 1
@@ -130,7 +119,7 @@ def test_mock_transport_connection_error_exposes_sdk_to_httpx_cause_chain(monkey
     async def fail(request, _body):
         raise httpx.ConnectError("HF02_LOCAL_CONNECT_FAILURE", request=request)
 
-    model, client, captured, _transport_api = _mock_assistant_model(monkeypatch, fail)
+    model, async_client, sync_client, captured = _mock_assistant_model(monkeypatch, fail)
 
     async def invoke():
         try:
@@ -154,14 +143,13 @@ def test_mock_transport_connection_error_exposes_sdk_to_httpx_cause_chain(monkey
                 "authorization_present": captured[0]["authorization_present"],
             }, sort_keys=True))
         finally:
-            await client.aclose()
+            await async_client.aclose()
+            sync_client.close()
 
     asyncio.run(invoke())
 
 
-def test_locked_openai_sdk_default_transport_is_httpx2_and_not_legacy_httpx(monkeypatch):
-    import httpx2
-
+def test_formal_factory_uses_explicit_offline_httpx_clients(monkeypatch):
     from opspilot.assistant import create_assistant_model
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
@@ -170,44 +158,42 @@ def test_locked_openai_sdk_default_transport_is_httpx2_and_not_legacy_httpx(monk
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com/v1")
 
-    model = create_assistant_model()
-    assert model.http_async_client is None
-    sdk_client = model.root_async_client
-    internal_client = sdk_client._client
+    async_transport = httpx.MockTransport(lambda request: httpx.Response(500, request=request))
+    sync_transport = httpx.MockTransport(lambda request: httpx.Response(500, request=request))
+    model = create_assistant_model(
+        transport_async=async_transport,
+        transport_sync=sync_transport,
+    )
     try:
-        assert isinstance(internal_client, httpx2.AsyncClient)
-        assert not isinstance(internal_client, httpx.AsyncClient)
+        assert isinstance(model.http_async_client, httpx.AsyncClient)
+        assert isinstance(model.http_client, httpx.Client)
+        assert model.http_async_client._transport is async_transport
+        assert model.http_client._transport is sync_transport
+        assert model.http_async_client.trust_env is False
+        assert model.http_async_client.follow_redirects is False
+        assert model.http_client.trust_env is False
+        assert model.http_client.follow_redirects is False
         print("HF02_DEFAULT_TRANSPORT=" + json.dumps({
-            "openai_sdk": "3.33.0",
-            "internal_client_type": type(internal_client).__module__ + "." + type(internal_client).__name__,
-            "is_httpx2_async_client": True,
-            "is_legacy_httpx_async_client": False,
-            "historical_capture_hook_target": "httpx.AsyncClient.send",
-            "hook_can_observe_default_client": False,
+            "async_client_type": type(model.http_async_client).__module__ + "." + type(model.http_async_client).__name__,
+            "sync_client_type": type(model.http_client).__module__ + "." + type(model.http_client).__name__,
+            "explicit_async_transport": True,
+            "explicit_sync_transport": True,
+            "trust_env": False,
+            "follow_redirects": False,
         }, sort_keys=True))
     finally:
-        asyncio.run(sdk_client.close())
+        asyncio.run(model.http_async_client.aclose())
+        model.http_client.close()
 
-def test_locked_openai_sdk_default_httpx2_transport_captures_v1_path(monkeypatch):
-    import httpx2
-
+def test_explicit_transport_captures_v1_path(monkeypatch):
     async def respond(_request, _body):
-        return _mock_success(httpx2)
+        return _mock_success()
 
-    model, client, captured, _transport_api = _mock_assistant_model(
+    model, async_client, sync_client, captured = _mock_assistant_model(
         monkeypatch,
         respond,
         base_url="https://api.deepseek.com/v1",
-        transport_library="httpx2",
     )
-    legacy_send_calls = []
-    original_legacy_send = httpx.AsyncClient.send
-
-    async def capture_legacy_send(self, request, *args, **kwargs):
-        legacy_send_calls.append(str(request.url))
-        return await original_legacy_send(self, request, *args, **kwargs)
-
-    monkeypatch.setattr(httpx.AsyncClient, "send", capture_legacy_send)
 
     async def invoke():
         try:
@@ -216,7 +202,8 @@ def test_locked_openai_sdk_default_httpx2_transport_captures_v1_path(monkeypatch
             )
             assert answer.content == "local mock only"
         finally:
-            await client.aclose()
+            await async_client.aclose()
+            sync_client.close()
 
     asyncio.run(invoke())
     wire = captured[0]
@@ -229,28 +216,24 @@ def test_locked_openai_sdk_default_httpx2_transport_captures_v1_path(monkeypatch
     assert wire["body"]["thinking"] == {"type": "disabled"}
     assert wire["body"]["tool_choice"] == "auto"
     assert wire["body"]["parallel_tool_calls"] is False
-    assert legacy_send_calls == []
-    print("HF02_HTTPX2_SDK_WIRE=" + json.dumps(wire, sort_keys=True, separators=(",", ":")))
+    print("HF02_EXPLICIT_HTTPX_SDK_WIRE=" + json.dumps(wire, sort_keys=True, separators=(",", ":")))
 
 
-def test_locked_openai_sdk_httpx2_connection_error_chain_is_local(monkeypatch):
-    import httpx2
-
+def test_explicit_httpx_connection_error_chain_is_local(monkeypatch):
     async def fail(request, _body):
-        raise httpx2.ConnectError("HF02_LOCAL_HTTPX2_CONNECT_FAILURE", request=request)
+        raise httpx.ConnectError("HF02_LOCAL_HTTPX_CONNECT_FAILURE", request=request)
 
-    model, client, captured, _transport_api = _mock_assistant_model(
+    model, async_client, sync_client, captured = _mock_assistant_model(
         monkeypatch,
         fail,
         base_url="https://api.deepseek.com/v1",
-        transport_library="httpx2",
     )
 
     async def invoke():
         try:
             with pytest.raises(Exception) as caught:
                 await model.bind_tools([_KNOWLEDGE_TOOL], tool_choice="auto", parallel_tool_calls=False).ainvoke(
-                    [HumanMessage(content="local httpx2 failure injection")]
+                    [HumanMessage(content="local httpx failure injection")]
                 )
             chain = []
             current = caught.value
@@ -258,8 +241,8 @@ def test_locked_openai_sdk_httpx2_connection_error_chain_is_local(monkeypatch):
                 chain.append(type(current).__name__)
                 current = current.__cause__ or current.__context__
             assert "ConnectError" in chain
-            print("HF02_HTTPX2_LOCAL_FAILURE=" + json.dumps({
-                "phase": "httpx2.MockTransport handler before any response",
+            print("HF02_EXPLICIT_HTTPX_LOCAL_FAILURE=" + json.dumps({
+                "phase": "httpx.MockTransport handler before any response",
                 "host": captured[0]["host"],
                 "path": captured[0]["path"],
                 "method": captured[0]["method"],
@@ -267,7 +250,8 @@ def test_locked_openai_sdk_httpx2_connection_error_chain_is_local(monkeypatch):
                 "exception_type_chain": chain,
             }, sort_keys=True))
         finally:
-            await client.aclose()
+            await async_client.aclose()
+            sync_client.close()
 
     asyncio.run(invoke())
 
@@ -292,8 +276,8 @@ def test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservati
     async def fail(request, _body):
         raise httpx.ConnectError("HF02_LOCAL_CONNECT_FAILURE", request=request)
 
-    model, client, captured, httpx2 = _mock_assistant_model(
-        monkeypatch, fail, base_url="https://api.deepseek.com/v1", transport_library="httpx2"
+    model, async_client, sync_client, captured = _mock_assistant_model(
+        monkeypatch, fail, base_url="https://api.deepseek.com/v1"
     )
     identity = trusted_identity(demo_db, "support-a")
     session_id = create_session(demo_db, identity)["session_id"]
@@ -324,7 +308,8 @@ def test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservati
                 experiment_id=EXPERIMENT_ID,
             )
         finally:
-            await client.aclose()
+            await async_client.aclose()
+            sync_client.close()
 
     result = asyncio.run(execute())
     assert result["status"] == "NOT_COMPLETED"
