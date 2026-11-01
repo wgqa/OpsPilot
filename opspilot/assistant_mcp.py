@@ -80,6 +80,39 @@ async def run(path,run_id):
                 "authority": "TOOL_REFUSAL_NOT_FACT",
                 "deployment_version_verified": False,
             }
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+    def list_scoped_protocol_documents(topic: str | None = None) -> dict:
+        """List and discover protocol specification documents authorized under the authenticated Session.
+
+        Returns authorized protocol document IDs, versions, and titles filtered by optional topic keyword.
+        Allows discovering valid base and target document IDs for protocol comparison without guessing internal IDs.
+        Does not prove live cluster deployment state.
+        """
+        from opspilot.domain.scoped_protocol_comparison import list_scoped_protocols
+        from opspilot.domain.protocol_comparison import ProtocolComparisonError
+        from opspilot.domain.assistant_knowledge import KnowledgeScopeDenied
+        from opspilot.domain.task_control import TaskControlError
+
+        current, actor = read_run(path, run_id)
+        try:
+            res = list_scoped_protocols(
+                path,
+                actor,
+                current['session_id'],
+                topic=topic,
+            )
+            res["success"] = True
+            return res
+        except (ProtocolComparisonError, KnowledgeScopeDenied, TaskControlError) as err:
+            return {
+                "success": False,
+                "error": str(err),
+                "reason_code": getattr(err, "reason_code", type(err).__name__),
+                "authority": "TOOL_REFUSAL_NOT_FACT",
+                "deployment_version_verified": False,
+            }
+
     try: await server.run_stdio_async()
     finally:
         if api:

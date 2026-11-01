@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Sequence
 
@@ -407,6 +408,192 @@ def scoped_comparison_is_current(
 
             if resolved_b.digest != base_ref.get("digest") or resolved_t.digest != target_ref.get("digest"):
                 return False, "DOCUMENT_INTEGRITY_OR_EXPIRED"
+        except (DocumentIntegrityError, DocumentNotFoundError):
+            return False, "DOCUMENT_INTEGRITY_OR_EXPIRED"
+
+        return True, None
+    except (KnowledgeScopeDenied, TaskControlError, ProtocolComparisonError, ValueError, KeyError):
+        return False, "KNOWLEDGE_SCOPE_OR_SOURCE_INVALID"
+
+
+def _infer_family(document_id: str) -> str:
+    """Infer protocol family grouping key from document_id."""
+    stem = re.sub(r"-v\d+.*$", "", document_id)
+    stem = re.sub(r"-(contract|spec|protocol)$", "", stem)
+    return stem or document_id
+
+
+def list_scoped_protocols(
+    db: sqlite3.Connection | str | Path,
+    identity: TrustedIdentity,
+    session_id: str,
+    *,
+    topic: str | None = None,
+    catalog_dirs: Sequence[Path | str] | None = None,
+) -> dict[str, Any]:
+    """List and discover authorized protocol documents and versions under the authenticated session.
+
+    Enforces:
+    1. Caller identity and session ownership in SQLite.
+    2. Active project selection and authorization under assistant-access registry.
+    3. Strict isolation: only documents in project['document_ids'] can be discovered.
+    4. Optional topic filtering by substring in document_id, title, file, or keywords.
+    5. Grouping into protocol families with versions for easy Agent discovery.
+    6. Epistemic boundary: discovery results do not prove cluster deployment state.
+    """
+    project = get_session_project(db, identity, session_id)
+    allowed_doc_ids = set(project.get("document_ids", []))
+
+    resolved_catalogs = _ensure_catalog_dirs(catalog_dirs)
+    topic_str = topic.strip().lower() if (isinstance(topic, str) and topic.strip()) else None
+
+    discovered_docs: dict[str, dict[str, Any]] = {}
+
+    for catalog_dir in resolved_catalogs:
+        manifest_path = catalog_dir / "manifest.json"
+        if not manifest_path.is_file():
+            continue
+        try:
+            manifest_content = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest_content, dict) or not isinstance(manifest_content.get("documents"), list):
+            continue
+
+        for entry in manifest_content["documents"]:
+            if not isinstance(entry, dict):
+                continue
+            doc_id = entry.get("document_id")
+            if not doc_id or doc_id not in allowed_doc_ids:
+                continue
+
+            if topic_str:
+                keywords = [str(kw).lower() for kw in entry.get("keywords", [])]
+                title = str(entry.get("title", "")).lower()
+                doc_id_lower = str(doc_id).lower()
+                file_str = str(entry.get("file", "")).lower()
+                if (
+                    topic_str not in doc_id_lower
+                    and topic_str not in title
+                    and topic_str not in file_str
+                    and not any(topic_str in kw for kw in keywords)
+                ):
+                    continue
+
+            if doc_id not in discovered_docs:
+                discovered_docs[doc_id] = {
+                    "document_id": doc_id,
+                    "title": entry.get("title", doc_id),
+                    "version": str(entry.get("version", "1.0.0")),
+                    "contract_versions": entry.get("contract_versions", []),
+                    "source": entry.get("source", ""),
+                    "digest": entry.get("digest", ""),
+                    "valid_from": entry.get("valid_from"),
+                    "expires_at": entry.get("expires_at"),
+                    "keywords": entry.get("keywords", []),
+                }
+
+    doc_list = list(discovered_docs.values())
+    doc_list.sort(key=lambda d: d["document_id"])
+
+    families_map: dict[str, list[dict[str, Any]]] = {}
+    for doc in doc_list:
+        family = _infer_family(doc["document_id"])
+        families_map.setdefault(family, []).append(doc)
+
+    protocols = []
+    for family_name, f_docs in sorted(families_map.items()):
+        protocols.append({
+            "family": family_name,
+            "document_ids": [d["document_id"] for d in f_docs],
+            "versions": [d["version"] for d in f_docs],
+            "documents": f_docs,
+        })
+
+    return {
+        "session_id": session_id,
+        "project_id": project["project_id"],
+        "tenant_id": project["tenant_id"],
+        "actor_id": identity.actor_id,
+        "grant_version": project["grant_version"],
+        "scope_digest": digest_json(project),
+        "topic": topic,
+        "protocol_documents": doc_list,
+        "protocols": protocols,
+        "document_count": len(doc_list),
+        "deployment_version_verified": False,
+        "authority": "SESSION_AUTHORIZED_DISCOVERY_NOT_ACTION_AUTHORIZATION",
+    }
+
+
+def scoped_discovery_is_current(
+    db: sqlite3.Connection | str | Path,
+    identity: TrustedIdentity,
+    session_id: str,
+    discovery_result: dict[str, Any],
+    *,
+    catalog_dirs: Sequence[Path | str] | None = None,
+) -> tuple[bool, str | None]:
+    """Revalidate that previously executed protocol discovery remains valid under current state.
+
+    Never trusts old discovery JSON as an enduring grant. Rechecks:
+    1. Session ownership and tenant matching in SQLite.
+    2. Selected project is still active, granted, and matching result's project_id.
+    3. Project grant_version and scope_digest match current registry.
+    4. All discovered documents remain in authorized document_ids.
+    5. Underlying catalog files and digests have not been tampered with or revoked.
+    """
+    try:
+        if not isinstance(discovery_result, dict):
+            return False, "DISCOVERY_RESULT_MALFORMED"
+
+        if "session_id" not in discovery_result or discovery_result.get("session_id") != session_id:
+            return False, "CROSS_SESSION_DISCOVERY_REJECTED"
+
+        if "tenant_id" not in discovery_result or discovery_result.get("tenant_id") != identity.tenant_id:
+            return False, "CROSS_TENANT_DISCOVERY_REJECTED"
+
+        if "actor_id" not in discovery_result or discovery_result.get("actor_id") != identity.actor_id:
+            return False, "ACTOR_MISMATCH"
+
+        try:
+            project = get_session_project(db, identity, session_id)
+        except KnowledgeScopeDenied as err:
+            return False, str(err)
+
+        if discovery_result.get("project_id") != project["project_id"]:
+            return False, "KNOWLEDGE_SESSION_SCOPE_CHANGED"
+
+        if discovery_result.get("grant_version") != project["grant_version"] or discovery_result.get("scope_digest") != digest_json(project):
+            return False, "KNOWLEDGE_GRANT_CHANGED"
+
+        allowed_docs = set(project.get("document_ids", []))
+        docs = discovery_result.get("protocol_documents", [])
+        if not isinstance(docs, list):
+            return False, "DISCOVERY_RESULT_MALFORMED"
+
+        for doc in docs:
+            if not isinstance(doc, dict):
+                return False, "DISCOVERY_RESULT_MALFORMED"
+            doc_id = doc.get("document_id")
+            if not doc_id or doc_id not in allowed_docs:
+                return False, "DOCUMENT_AUTHORIZATION_REVOKED"
+
+        try:
+            resolved_catalogs = _ensure_catalog_dirs(catalog_dirs)
+            for doc in docs:
+                ref = DocumentRef(
+                    document_id=doc["document_id"],
+                    version=str(doc.get("version", "1.0.0")),
+                    digest=str(doc.get("digest", "")),
+                    source=str(doc.get("source", "")),
+                    valid_from=doc.get("valid_from"),
+                    expires_at=doc.get("expires_at"),
+                    title=doc.get("title", doc["document_id"]),
+                )
+                resolved = resolve_document(ref, catalog_dirs=resolved_catalogs)
+                if resolved.digest != doc.get("digest"):
+                    return False, "DOCUMENT_INTEGRITY_OR_EXPIRED"
         except (DocumentIntegrityError, DocumentNotFoundError):
             return False, "DOCUMENT_INTEGRITY_OR_EXPIRED"
 

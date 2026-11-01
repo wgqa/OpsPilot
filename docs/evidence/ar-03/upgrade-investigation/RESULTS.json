@@ -1,0 +1,86 @@
+{
+  "task": "AR-03-04",
+  "name": "协议升级影响调查业务闭环",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "7dfdf2525243fe9049703fd47703e2b1a7257345",
+  "branch": "antigravity/ar03-04-upgrade-investigation",
+  "worktree": ".worktrees/ar03-04-upgrade-investigation",
+  "verification_time": "2026-11-01T17:36:00+08:00",
+  "metrics": {
+    "ar03_04_specialized_passed": 4,
+    "ar03_04_specialized_total": 4,
+    "full_regression_passed": 72,
+    "full_regression_total": 72,
+    "failed": 0,
+    "skipped": 0,
+    "duration_seconds": 40.13,
+    "real_provider_paid_calls": 0,
+    "external_business_writes": 0
+  },
+  "tests": [
+    {
+      "node": "tests/test_ar03_04_upgrade_investigation.py::test_journey_a_unbound_order_discovers_and_compares_protocols",
+      "status": "PASSED",
+      "description": "自然语言咨询协议变化 -> 自主发现版本 -> 比对 -> 诚实指出未绑定订单无法核查状态并给出绑定建议"
+    },
+    {
+      "node": "tests/test_ar03_04_upgrade_investigation.py::test_journey_b_bound_order_queued_vs_processed_distinction[QUEUED]",
+      "status": "PASSED",
+      "description": "绑定订单 -> 接收端 QUEUED -> 准确区分 202 受理与处理中 -> 结论为尚未处理完成并输出交接草稿"
+    },
+    {
+      "node": "tests/test_ar03_04_upgrade_investigation.py::test_journey_b_bound_order_queued_vs_processed_distinction[PROCESSED]",
+      "status": "PASSED",
+      "description": "绑定订单 -> 接收端 PROCESSED -> 结论为已处理完成并输出交接草稿"
+    },
+    {
+      "node": "tests/test_ar03_04_upgrade_investigation.py::test_scoped_protocol_discovery_safety_and_revalidation",
+      "status": "PASSED",
+      "description": "未授权文档隔离、主题过滤与 scoped_discovery_is_current 跨会话/跨租户/防篡改强校验"
+    }
+  ],
+  "regression_suite": [
+    {
+      "suite": "tests/test_ar03_04_upgrade_investigation.py",
+      "passed": 4,
+      "total": 4
+    },
+    {
+      "suite": "tests/test_ar03_03_agent_integration.py",
+      "passed": 5,
+      "total": 5
+    },
+    {
+      "suite": "tests/test_ar03_02_scoped_protocol_comparison.py",
+      "passed": 15,
+      "total": 15
+    },
+    {
+      "suite": "tests/test_ar03_protocol_comparison.py",
+      "passed": 28,
+      "total": 28
+    },
+    {
+      "suite": "tests/test_ar02_assistant.py",
+      "passed": 3,
+      "total": 3
+    },
+    {
+      "suite": "tests/test_ar02_knowledge.py",
+      "passed": 10,
+      "total": 10
+    },
+    {
+      "suite": "tests/test_ar02_journey_p0.py",
+      "passed": 7,
+      "total": 7
+    }
+  ],
+  "artifacts": [
+    "docs/evidence/ar-03/upgrade-investigation/ACCEPTANCE_PLAN.md",
+    "docs/evidence/ar-03/upgrade-investigation/REPORT.md",
+    "docs/evidence/ar-03/upgrade-investigation/RESULTS.json",
+    "docs/evidence/ar-03/upgrade-investigation/FAILURES.md",
+    "docs/evidence/ar-03/upgrade-investigation/dialog_trace.json"
+  ]
+}
