@@ -12,7 +12,7 @@
 
 **本地缓存 `origin/main` 快照：** `ec8c3582f6d145eec9979c43607302731411ead8`
 
-**最终证据提交 SHA：** 由最终交付消息给出。GitHub 443 连接曾阻止远端 SHA 复核，最新远端状态仍需在 push 时核实。
+**远端最终核验：** `codex/ar02-live-01@8006bfec41ddea391cffa32bd1600a245d790bf7` 已成功推送；`main@ec8c3582f6d145eec9979c43607302731411ead8` 未改变。最终证据文档更新提交 SHA 由最终交付消息给出。
 
 ## 用户这次实际完成了什么
 
@@ -48,7 +48,7 @@ Python 3.14.0；依赖来自 `requirements.lock.txt`：pytest 9.1.1、LangChain 
 - 最终定向 Provider/旅程/HF-02：38 passed，29.73 秒。
 - 全量 pytest：489 passed、4 failed，512.04 秒，退出码 1。失败及隔离复跑见 [FAILURES.md](FAILURES.md)。这些失败没有被隐去，实施方不签全量回归通过。
 - `TRACE.jsonl`：6 个持久 Run（均 SUCCEEDED）、12 个 Session Message、6 条 Answer 来源关联、16 条 Assistant call 记录、5 次 MCP 调用及 4 条 D2 tool Observation。实际目标事件接收状态为 QUEUED，不是已处理。
-- GitHub HTTPS 443 在本轮环境不可用，远端更新状态和 push 结果不得伪称已确认。实施代码未合并 main。
+- 首次 GitHub HTTPS 443 远端核验失败；之后成功核对并推送候选。`main` 仍为 `ec8c3582f6d145eec9979c43607302731411ead8`，候选远端为 `8006bfec41ddea391cffa32bd1600a245d790bf7`。实施代码未合并 main。
 - 浏览器自动化、真实 Provider、真实 Agent 自主效果、正式业务写入均按授权为 `NOT_RUN`。
 
 ## 主 Agent 六问与停止线

@@ -27,3 +27,7 @@
 4. `tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix`：历史 RED 使用旧 Intent 契约，当前接口返回 `502 INVALID_MODEL_CLASSIFICATION`。保持历史失败，不添加旧 Intent 兼容逻辑。
 
 以上三类失败都没有通过修改冻结 Gold、扩大预算、改变业务权限或隐藏旧 RED 来处理。除目标范围内 provider/worker 和 AR-02 回归文件外，未改动生产代码。
+
+## 远端核验与推送记录
+
+首次 `git ls-remote` 遇到 GitHub HTTPS 443 连接失败，因此当时没有声称远端已更新。之后重新核验成功：候选分支从 `09613b2d858313a0b11ff865ee2dfeb66dd52e09` 推送至 `8006bfec41ddea391cffa32bd1600a245d790bf7`；远端 `main` 仍为 `ec8c3582f6d145eec9979c43607302731411ead8`。这属于交付网络重试记录，不改变上述测试失败分类。
