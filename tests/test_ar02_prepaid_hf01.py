@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
+import subprocess
+import sys
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -195,11 +198,82 @@ def test_provider_unknown_is_a_durable_campaign_stop_after_reopen(demo_db):
             demo_db, experiment_id=EXPERIMENT_ID, run_id=other_run["run_id"], kind="MODEL",
             logical_key="new:logical:key", request={"prompt": "must not bypass unknown"},
         )
+    child_code = """
+import sys
+from opspilot.domain.assistant_experiment import ExperimentBudgetError, reserve_dispatch
+try:
+    reserve_dispatch(sys.argv[1], experiment_id=sys.argv[2], run_id=sys.argv[3],
+        kind='MODEL', logical_key='after-process-restart', request={'prompt': 'must stay stopped'})
+except ExperimentBudgetError as exc:
+    print(exc.code)
+    raise SystemExit(0 if exc.code == 'AR02_LIVE_SPEND_BOUND_BREACHED' else 2)
+raise SystemExit(3)
+"""
+    restarted = subprocess.run(
+        [sys.executable, "-c", child_code, str(demo_db), EXPERIMENT_ID, other_run["run_id"]],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+    )
+    assert restarted.returncode == 0, (restarted.stdout, restarted.stderr)
+    assert restarted.stdout.strip() == "AR02_LIVE_SPEND_BOUND_BREACHED"
     snapshot = read_budget(demo_db, EXPERIMENT_ID)
     assert snapshot["status"] == "BUDGET_BREACH"
     assert snapshot["provider_used"] == 1
     assert snapshot["usd_reserved_micro"] == 645_600
     assert snapshot["usd_settled_micro"] == 0
+
+
+def test_historical_unknown_dispatch_blocks_without_rewriting_ledger(demo_db):
+    from opspilot.domain.assistant_experiment import (
+        ExperimentBudgetError,
+        initialize_experiment,
+        reserve_dispatch,
+    )
+    from opspilot.domain.database import connect
+
+    initialize_experiment(demo_db, EXPERIMENT_ID)
+    first = _new_run(demo_db, "historical-unknown-row")
+    later = _new_run(demo_db, "after-historical-unknown-row")
+    reserve_dispatch(
+        demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+        logical_key="old:model:key", request={"prompt": "old campaign row"},
+    )
+    with connect(demo_db) as connection:
+        connection.execute(
+            """UPDATE ar02_live_dispatches SET status='UNKNOWN', error_code='HISTORICAL_UNKNOWN',
+               completed_at='2026-10-28T00:00:00Z'
+               WHERE experiment_id=? AND run_id=? AND logical_key='old:model:key'""",
+            (EXPERIMENT_ID, first["run_id"]),
+        )
+        historical_before = dict(connection.execute(
+            "SELECT * FROM ar02_live_dispatches WHERE experiment_id=? AND run_id=?",
+            (EXPERIMENT_ID, first["run_id"]),
+        ).fetchone())
+        budget_before = connection.execute(
+            "SELECT status FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+            (EXPERIMENT_ID,),
+        ).fetchone()["status"]
+
+    with pytest.raises(ExperimentBudgetError, match="AR02_LIVE_SPEND_BOUND_BREACHED"):
+        reserve_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=later["run_id"], kind="MODEL",
+            logical_key="new:model:key", request={"prompt": "must remain stopped"},
+        )
+
+    with connect(demo_db) as connection:
+        historical_after = dict(connection.execute(
+            "SELECT * FROM ar02_live_dispatches WHERE experiment_id=? AND run_id=?",
+            (EXPERIMENT_ID, first["run_id"]),
+        ).fetchone())
+        budget_after = connection.execute(
+            "SELECT status FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+            (EXPERIMENT_ID,),
+        ).fetchone()["status"]
+    assert historical_after == historical_before
+    assert budget_after == budget_before == "OPEN"
 
 
 @pytest.mark.parametrize(
@@ -217,7 +291,7 @@ def test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known(
 
     created = _new_run(demo_db, f"assistant-abnormal-{usage}", task_binding=True)
     worker_id = f"hf01-worker-{created['run_id']}"
-    register_worker_owner(demo_db, worker_id, __import__("os").getpid())
+    register_worker_owner(demo_db, worker_id, os.getpid())
     claim_task_run(demo_db, trusted_identity(demo_db, "support-a"), created["run_id"])
     model = ToolCallModel(usage=usage)
     events = []
@@ -261,7 +335,14 @@ def test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known(
     assert dispatch[0]["status"] == "OK"
     assert dispatch[0]["usage_state"] == ("UNKNOWN" if usage is None else "VIOLATION")
     assert dispatch[0]["reserved_usd_micro"] == (645_600 if usage is None else 0)
-    assert dispatch[0]["settled_usd_micro"] == (0 if usage is None else 20)
+    if usage is None:
+        assert dispatch[0]["settled_usd_micro"] == 0
+    else:
+        from opspilot.domain.assistant_experiment import _actual_cost_micro
+
+        assert dispatch[0]["settled_usd_micro"] == _actual_cost_micro(
+            usage["input_tokens"], usage["output_tokens"]
+        )
     assert answers == 0
     assert observations == 0
     assert run_status == "FAILED"

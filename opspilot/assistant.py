@@ -229,12 +229,19 @@ class Loop(AgentMiddleware):
         if prior is None:
             return
         if prior["status"] == "RESERVED":
-            complete_dispatch(
+            settled = complete_dispatch(
                 self.path, experiment_id=self.experiment_id, run_id=self.run_id,
                 kind=kind, logical_key=logical_key, usage=usage,
             )
-        elif prior["status"] not in {"OK", "UNKNOWN"}:
+        elif prior["status"] != "OK":
             raise TaskControlError("AR02_LIVE_DISPATCH_STATE_INVALID")
+        else:
+            settled = prior
+        if kind == "MODEL" and settled.get("usage_state") != "KNOWN":
+            state = settled.get("usage_state")
+            raise TaskControlError(
+                "AR02_LIVE_USAGE_VIOLATION" if state == "VIOLATION" else "AR02_LIVE_USAGE_UNKNOWN"
+            )
 
     def context(self):
         with connect(self.path) as c:
@@ -293,14 +300,29 @@ class Loop(AgentMiddleware):
             # wire parameter. Re-injecting `max_tokens` here would make the
             # pinned ChatOpenAI emit DeepSeek's unsupported alias.
             result=await asyncio.wait_for(handler(request.override(system_message=system,model_settings={**request.model_settings,'parallel_tool_calls':False})),30)
-            domain.finish(self.path,call['call_id'],'OK',messages_to_dict(result.result),[getattr(m,'usage_metadata',None) for m in result.result])
+            messages_result = messages_to_dict(result.result)
+            usage_result = [getattr(m,'usage_metadata',None) for m in result.result]
             if self.experiment_id:
                 from opspilot.domain.assistant_experiment import complete_dispatch
-                complete_dispatch(
+                settlement = complete_dispatch(
                     self.path, experiment_id=self.experiment_id, run_id=self.run_id,
                     kind='MODEL', logical_key=call['logical_key'],
                     usage=self._usage_from_messages(result.result),
                 )
+                if settlement.get('usage_state') != 'KNOWN':
+                    state = settlement.get('usage_state')
+                    code = 'AR02_LIVE_USAGE_VIOLATION' if state == 'VIOLATION' else 'AR02_LIVE_USAGE_UNKNOWN'
+                    domain.finish(
+                        self.path, call['call_id'], 'FAILED',
+                        {'error': code, 'model_result': messages_result, 'settlement': settlement},
+                        usage_result,
+                    )
+                    self.trace(
+                        'model_response_rejected', call_id=call['call_id'],
+                        usage_state=state, reason=code, messages=messages_result,
+                    )
+                    raise TaskControlError(code)
+            domain.finish(self.path,call['call_id'],'OK',messages_result,usage_result)
             self.trace('model_response',call_id=call['call_id'],messages=messages_to_dict(result.result))
             return result
         except BaseException as error:

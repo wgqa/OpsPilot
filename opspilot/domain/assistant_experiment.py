@@ -185,8 +185,6 @@ def reserve_dispatch(
         ).fetchone()
         if budget is None:
             raise ExperimentBudgetError("AR02_LIVE_BUDGET_NOT_INITIALIZED")
-        if budget["status"] != "OPEN":
-            raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
 
         old = connection.execute(
             """SELECT * FROM ar02_live_dispatches
@@ -197,10 +195,28 @@ def reserve_dispatch(
             if str(old["request_digest"]) != request_digest:
                 raise ExperimentBudgetError("AR02_LIVE_IDEMPOTENCY_CONFLICT")
             if old["status"] == "OK":
+                if kind == "MODEL" and old["usage_state"] != "KNOWN":
+                    raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
                 return {"dispatch": False, "replay": True, "dispatch_id": old["dispatch_id"]}
             if old["status"] == "NOT_DISPATCHED":
                 raise ExperimentBudgetError("AR02_LIVE_ALREADY_NOT_DISPATCHED")
             raise ExperimentBudgetError("AR02_LIVE_CALL_OUTCOME_UNKNOWN")
+
+        if budget["status"] != "OPEN":
+            raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+
+        # Older ledger rows may contain UNKNOWN/invalid Usage while their
+        # campaign row still says OPEN. Treat those durable dispatch facts as a
+        # stop marker without rewriting historical ledger or budget rows.
+        prior_unknown = connection.execute(
+            """SELECT 1 FROM ar02_live_dispatches
+               WHERE experiment_id=? AND kind='MODEL'
+                 AND (status='UNKNOWN' OR (status='OK' AND usage_state!='KNOWN'))
+               LIMIT 1""",
+            (experiment_id,),
+        ).fetchone()
+        if prior_unknown is not None:
+            raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
 
         count = _used_count(connection, experiment_id, kind)
         count_limit = PROVIDER_LIMIT if kind == "MODEL" else MCP_LIMIT
@@ -314,8 +330,14 @@ def complete_dispatch(
         if normalized is None:
             connection.execute(
                 """UPDATE ar02_live_dispatches SET status='OK', usage_state='UNKNOWN',
-                   usage_json=NULL, completed_at=? WHERE dispatch_id=?""",
+                   usage_json=NULL, error_code='AR02_LIVE_USAGE_UNKNOWN', completed_at=?
+                   WHERE dispatch_id=?""",
                 (now, row["dispatch_id"]),
+            )
+            connection.execute(
+                """UPDATE ar02_live_experiment_budgets
+                   SET status='BUDGET_BREACH', updated_at=? WHERE experiment_id=?""",
+                (now, experiment_id),
             )
             return {
                 "status": "OK",
@@ -341,11 +363,14 @@ def complete_dispatch(
         connection.execute(
             """UPDATE ar02_live_dispatches
                SET status='OK', reserved_usd_micro=0, settled_usd_micro=?,
-                   usage_state=?, usage_json=?, completed_at=? WHERE dispatch_id=?""",
+                   usage_state=?, usage_json=?,
+                   error_code=CASE WHEN ? THEN 'AR02_LIVE_USAGE_VIOLATION' ELSE NULL END,
+                   completed_at=? WHERE dispatch_id=?""",
             (
                 actual_micro,
                 "VIOLATION" if violation else "KNOWN",
                 canonical_json(usage_payload),
+                int(violation),
                 now,
                 row["dispatch_id"],
             ),
@@ -377,12 +402,21 @@ def mark_unknown(
     _validate_experiment_id(experiment_id)
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        connection.execute(
+        changed = connection.execute(
             """UPDATE ar02_live_dispatches SET status='UNKNOWN', error_code=?, completed_at=?
                WHERE experiment_id=? AND run_id=? AND kind=? AND logical_key=?
                  AND status='RESERVED'""",
             (str(error_code)[:120], utc_now(), experiment_id, run_id, kind, logical_key),
-        )
+        ).rowcount
+        if changed and kind == "MODEL":
+            # UNKNOWN Provider outcomes retain their reservation and close the
+            # existing campaign row in the same transaction. No resend path is
+            # available after process/worker restart.
+            connection.execute(
+                """UPDATE ar02_live_experiment_budgets
+                   SET status='BUDGET_BREACH', updated_at=? WHERE experiment_id=?""",
+                (utc_now(), experiment_id),
+            )
 
 
 def read_dispatch(
