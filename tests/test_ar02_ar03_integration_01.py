@@ -459,7 +459,7 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
     with monkeypatch.context() as patcher:
         patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
         fixture = prepare_s3_fixture(
-            demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2,
+            demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
         )
     assert fixture["transport_trace"][0]["request"]["event_id"] == (
         "event-00000000-0000-4000-8000-000000000001"
@@ -467,7 +467,7 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
     if receiver_state == "PROCESSED":
         with connect(demo_db) as connection:
             connection.execute(
-                "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar02-order'"
+                "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
             )
 
     bind_model = IntegrationFixtureModel(mode="binding")
@@ -483,8 +483,8 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
         session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
         binding = client.post(
             f"/api/sessions/{session_id}/assistant/order",
-            headers={**headers, "Idempotency-Key": f"ar02-ar03-bind-{receiver_state}"},
-            json={"order_id": "ar02-order", "initial_message": "通过可信资源选择确认订单绑定。"},
+            headers={**headers, "Idempotency-Key": f"ar03-prep-bind-{receiver_state}"},
+            json={"order_id": "ar03-order", "initial_message": "通过可信资源选择确认订单绑定。"},
         )
         assert binding.status_code == 202, binding.text
         bound = binding.json()
@@ -492,7 +492,7 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
 
         accepted = client.post(
             f"/api/sessions/{session_id}/assistant/messages",
-            headers={**headers, "Idempotency-Key": f"ar02-ar03-investigate-{receiver_state}"},
+            headers={**headers, "Idempotency-Key": f"ar03-prep-investigate-{receiver_state}"},
             json={
                 "body": "比较授权回调协议版本，并结合本订单当前 Event 分析升级影响，整理未提交的支持说明。",
                 "task_id": bound["task_id"],
@@ -513,6 +513,17 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
             assert "尚未证明处理完成" not in answer
 
         with connect(demo_db) as connection:
+            from opspilot.domain.s3 import get_s3_binding
+
+            trusted_binding = get_s3_binding(connection, bound["task_id"])
+            assert trusted_binding["order_id"] == "ar03-order"
+            assert trusted_binding["tenant_id"] == "tenant-a"
+            assert trusted_binding["actor_id"] == "support-a"
+            assert trusted_binding["resource_confirmed_by"] == "support-a"
+            assert trusted_binding["principal_status"] == "ENABLED"
+            assert trusted_binding["scope_policy_version"] > 0
+            assert trusted_binding["grant_version"] > 0
+
             calls = connection.execute(
                 "SELECT request_json,result_json,evidence_id,observation_id FROM assistant_calls "
                 "WHERE run_id=? AND kind='MCP' ORDER BY created_at", (item["run_id"],),
@@ -525,6 +536,12 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
                     "get_receiver_processing", "get_callback_delivery", "get_order_status"} <= set(results_by_name)
             receiver, receiver_row = results_by_name["get_receiver_processing"]
             delivery, delivery_row = results_by_name["get_callback_delivery"]
+            order, _ = results_by_name["get_order_status"]
+            assert order["facts"]["body"]["order_id"] == "ar03-order"
+            assert delivery["facts"]["order_id"] == "ar03-order"
+            assert receiver["facts"]["order_id"] == "ar03-order"
+            assert delivery["facts"]["status"] == "ACKNOWLEDGED"
+            assert delivery["facts"]["receiver_http_status"] == 202
             assert receiver["facts"]["status"] == receiver_state
             assert receiver["facts"]["event_id"] == delivery["facts"]["event_id"] == fixture["transport_trace"][0]["request"]["event_id"]
             assert receiver_row["evidence_id"] and receiver_row["observation_id"]
@@ -537,8 +554,52 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
                 json.loads(row["request_json"])["context_budget"]["estimated_input_tokens"] <= 12_000
                 for row in model_calls
             )
-            for table in ("s3_diagnoses", "d3_action_intents", "d3_action_ledgers", "s3_handoff_receipts"):
-                assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+            zero_business_write_counts = {}
+            for table in (
+                "s3_diagnoses", "d3_plans", "d3_plan_authorizations", "d3_approvals",
+                "d3_action_permissions", "d3_action_intents", "d3_action_ledgers",
+                "d3_verification_receipts", "d3_report_artifacts", "d3_delivery_records",
+                "s3_handoff_queue_entries", "s3_handoff_receipts",
+            ):
+                zero_business_write_counts[table] = connection.execute(
+                    f"SELECT COUNT(*) FROM {table}"
+                ).fetchone()[0]
+                assert zero_business_write_counts[table] == 0
         _append_formal_trace(
             demo_db, session_id, [bound["run_id"], item["run_id"]], [bind_model, journey_model],
         )
+        alignment_trace_path = os.environ.get("AR03_ORDER_ALIGNMENT_TRACE_PATH")
+        if alignment_trace_path:
+            trace_row = {
+                "record_type": "persisted_domain_alignment_check",
+                "evidence_level": "DETERMINISTIC_FORMAL_WORKER_AND_SQLITE_TEST",
+                "case_id": f"AR03-LLM-01-{receiver_state}",
+                "session_id": session_id,
+                "task_id": bound["task_id"],
+                "run_id": item["run_id"],
+                "order_id": trusted_binding["order_id"],
+                "tenant_id": trusted_binding["tenant_id"],
+                "actor_id": trusted_binding["actor_id"],
+                "resource_confirmed_by": trusted_binding["resource_confirmed_by"],
+                "authorization_source": "authenticated trusted Assistant order API; verified from current get_s3_binding row",
+                "principal_status": trusted_binding["principal_status"],
+                "scope_policy_version": trusted_binding["scope_policy_version"],
+                "grant_version": trusted_binding["grant_version"],
+                "required_scopes": trusted_binding["required_scopes"],
+                "granted_scopes": trusted_binding["granted_scopes"],
+                "event_id": receiver["facts"]["event_id"],
+                "delivery_event_id": delivery["facts"]["event_id"],
+                "receiver_status": receiver["facts"]["status"],
+                "delivery_status": delivery["facts"]["status"],
+                "delivery_http_status": delivery["facts"]["receiver_http_status"],
+                "delivery_observation_id": delivery_row["observation_id"],
+                "delivery_evidence_id": delivery_row["evidence_id"],
+                "receiver_observation_id": receiver_row["observation_id"],
+                "receiver_evidence_id": receiver_row["evidence_id"],
+                "zero_business_write_counts": zero_business_write_counts,
+                "real_provider_requests": 0,
+            }
+            path = Path(alignment_trace_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(json.dumps(trace_row, ensure_ascii=False, sort_keys=True) + "\n")
