@@ -1,0 +1,78 @@
+{
+  "task": "AR-02-CONTEXT-CONTINUITY-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "e090e994ff29685249dc8a76f1ddf6d8f0e7508a",
+  "acceptance_freeze_sha": "5c157ea8290b9900eb70cd925fa37cba149abb18",
+  "implementation_commit": "da2e8ca85df26f4d887e1b503467aad948051b8c",
+  "branch": "codex/ar02-context-continuity-01",
+  "main_modified": false,
+  "real_provider_calls": 0,
+  "browser_runs": 0,
+  "business_writes": 0,
+  "input_budget_tokens": 12000,
+  "measurements": {
+    "historical_real_failure_estimated_tokens": 12029,
+    "offline_red_estimated_tokens": 12064,
+    "final_offline_max_outbound_estimated_tokens": 6553,
+    "offline_red_to_final_saving_tokens": 5511,
+    "offline_red_to_final_saving_percent": 45.7,
+    "final_s02_4_model_dispatches": 3,
+    "final_s02_4_actual_mcp_tools": [
+      "get_callback_delivery",
+      "get_receiver_processing"
+    ],
+    "current_receiver_status": "QUEUED",
+    "same_event_delivery_and_receiver": true
+  },
+  "tests": [
+    {
+      "name": "frozen_baseline_red_boundary",
+      "command": "python -m pytest -q tests/test_ar02_context_continuity_01.py::test_formal_s02_context_stays_bounded_through_s02_4_and_s02_5",
+      "exit_code": 1,
+      "result": "EXPECTED_RED",
+      "detail": "S02-4 stopped before dispatch: INVESTIGATOR_CONTEXT_EXCEEDS_BUDGET (12064 > 12000)",
+      "log": "runs/red-boundary.log"
+    },
+    {
+      "name": "focused_final",
+      "command": "python -m pytest -q --basetemp=D:\\学习\\agent新项目\\.pytest-temp\\ar02-context-continuity-acceptance tests/test_ar02_context_continuity_01.py",
+      "exit_code": 0,
+      "passed": 2,
+      "failed": 0,
+      "duration": "8.38s",
+      "log": "runs/acceptance-focused.log"
+    },
+    {
+      "name": "related_regression_final",
+      "command": "python -m pytest -q --basetemp=D:\\学习\\agent新项目\\.pytest-temp\\ar02-context-continuity-regression-final tests/test_ar02_context_continuity_01.py tests/test_ar02_journey_p0.py tests/test_ar02_journey_p0_hf02.py tests/test_ar02_knowledge.py tests/test_ar02_runtime.py tests/test_m302_context.py tests/test_m4_ttl_fix_01.py tests/test_m4_03_hf_02.py",
+      "exit_code": 0,
+      "passed": 71,
+      "failed": 0,
+      "duration": "94.40s",
+      "log": "runs/regression-acceptance.log",
+      "final_repeat": {
+        "exit_code": 0,
+        "passed": 71,
+        "failed": 0,
+        "duration": "94.81s",
+        "log": "runs/regression-final-final.log"
+      }
+    }
+  ],
+  "evidence": {
+    "trace_final": "TRACE_ACCEPTANCE.jsonl",
+    "failures": "FAILURES.md",
+    "report": "REPORT.md",
+    "full_pytest": "NOT_RUN",
+    "real_provider_effectiveness": "NOT_RUN",
+    "browser": "NOT_RUN"
+  },
+  "runtime_versions": {
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "langchain": "1.4.1",
+    "langchain_core": "1.6.12",
+    "langgraph": "1.2.16",
+    "fastapi": "0.137.1"
+  }
+}

@@ -1,0 +1,111 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+________ test_formal_s02_context_stays_bounded_through_s02_4_and_s02_5 ________
+
+demo_db = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/pytest-of-tu me manques/pytest-54/test_formal_s02_context_stays_0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/pytest-of-tu me manques/pytest-54/test_formal_s02_context_stays_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014053F2B230>
+
+    def test_formal_s02_context_stays_bounded_through_s02_4_and_s02_5(
+        demo_db, tmp_path, monkeypatch
+    ):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        setup = prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-continuity-order", contract_version=2)
+        models = [
+            InflatedHistoryFixture(mode="knowledge", padding_chars=1600),
+            InflatedHistoryFixture(mode="knowledge", padding_chars=1600),
+            InflatedHistoryFixture(mode="order", padding_chars=3500),
+            JourneyFixtureModel(mode="receiver"),
+            JourneyFixtureModel(mode="draft"),
+        ]
+        queue = deque(models)
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "context-continuity-checkpoint.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: queue.popleft(),
+        )
+    
+        with TestClient(app) as client:
+            login = client.post(
+                "/api/auth/login", headers={"Origin": ORIGIN},
+                json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+    
+            first_inputs = [
+                "请记住下面是待核实的示例线索，不是你已验证的业务事实：`event_id=event-e1, transport_request_id=req-e1-1, delivery_http_status=202, receiver_status=unknown`。请查适用的回调/Receiver 协议，说明 202 能证明和不能证明什么。",
+                "我现在确认要查询资料范围中已授权的回调协议；没有特别指定旧版，请按本问题适用范围核对。说明检索到的版本、摘要和来源。",
+            ]
+            prior = []
+            for index, body in enumerate(first_inputs, start=1):
+                response = client.post(
+                    f"/api/sessions/{session_id}/assistant/messages",
+                    headers={**headers, "Idempotency-Key": f"ctx-cont-s02-{index}"},
+                    json={"body": body},
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                prior.append(item)
+                run = _wait_run(client, item["run_id"])
+                assert run["status"] == "SUCCEEDED", run
+    
+            resources = client.get("/api/s3/order-resources", headers=headers)
+            assert resources.status_code == 200, resources.text
+            assert any(row["order_id"] == "ar02-continuity-order" for row in resources.json()["items"])
+            binding = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": "ctx-cont-s02-bind"},
+                json={
+                    "order_id": "ar02-continuity-order",
+                    "initial_message": "请绑定我有权访问的订单 `ar02-continuity-order` 并核查当前状态。",
+                },
+            )
+            assert binding.status_code == 202, binding.text
+            binding_item = binding.json()
+            task_id = binding_item["task_id"]
+            assert _wait_run(client, binding_item["run_id"])["status"] == "SUCCEEDED"
+    
+            questions = [
+                "对照刚才的 E1 线索和本次真实查询，接收方现在处理完成了吗？",
+                "基于刚才本 Run 的同 Event 观察整理一份处理说明草稿，并明确仍未知的部分。",
+            ]
+            final_items = []
+            for index, body in enumerate(questions, start=4):
+                response = client.post(
+                    f"/api/sessions/{session_id}/assistant/messages",
+                    headers={**headers, "Idempotency-Key": f"ctx-cont-s02-{index}"},
+                    json={"body": body, "task_id": task_id},
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                final_items.append(item)
+                run = _wait_run(client, item["run_id"])
+                if run["status"] != "SUCCEEDED":
+                    answers = [
+                        row for row in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+                        if row["role"] == "ASSISTANT" and row.get("answer_source_message_id") == item["message_id"]
+                    ]
+                    failure_body = answers[-1]["body"][:240] if answers else "NO_PERSISTED_NOTICE"
+>                   raise AssertionError({
+                        "turn": f"S02-{index}", "status": run["status"],
+                        "blocked_reason": run.get("blocked_reason"), "notice": failure_body,
+                    })
+E                   AssertionError: {'turn': 'S02-4', 'status': 'FAILED', 'blocked_reason': None, 'notice': '本次解释未完成：ASSISTANT_STOP:ContextBudgetExceeded:INVESTIGATOR_CONTEXT_EXCEEDS_BUDGET (15512 > 12000 tokens)。这是程序生成的限制说明，未提交模型最终答复；此前已预留或失败的调用仍计入额度。本说明未重新取得业务事实，历史结论不能冒充本次新调查结果。Task 和既有业务授权保持不变。'}
+
+tests\test_ar02_context_continuity_01.py:113: AssertionError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:50858/api/async-orders/async-order?order_id=ar02-continuity-order "HTTP/1.0 200 OK"
+
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_context_continuity_01.py::test_formal_s02_context_stays_bounded_through_s02_4_and_s02_5
+1 failed in 7.00s
