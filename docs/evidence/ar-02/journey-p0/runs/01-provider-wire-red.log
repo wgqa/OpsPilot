@@ -1,0 +1,76 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_formal_provider_factory_serializes_frozen_wire_with_explicit_mock_transport _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001604E836EA0>
+
+    def test_formal_provider_factory_serializes_frozen_wire_with_explicit_mock_transport(monkeypatch):
+        """Exercise the actual ChatOpenAI factory and SDK serializer without network access."""
+        from opspilot.assistant import create_assistant_model
+    
+        _enable_provider_factory(monkeypatch)
+        captured = []
+    
+        async def async_response(request):
+            captured.append({"url": str(request.url), "method": request.method,
+                             "body": json.loads((await request.aread()).decode("utf-8"))})
+            return httpx.Response(200, json={
+                "id": "journey-p0-mock-completion", "object": "chat.completion", "created": 1,
+                "model": "deepseek-flash", "choices": [{"index": 0,
+                    "message": {"role": "assistant", "content": "���� Mock ��"},
+                    "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 4, "total_tokens": 11},
+            })
+    
+        async_transport = httpx.MockTransport(async_response)
+        sync_transport = httpx.MockTransport(lambda request: httpx.Response(500))
+        model = None
+    
+        async def invoke():
+            nonlocal model
+            model = create_assistant_model(
+                transport_async=async_transport,
+                transport_sync=sync_transport,
+            )
+            tool = {
+                "type": "function",
+                "function": {
+                    "name": "get_order_status",
+                    "description": "Read the trusted bound order.",
+                    "parameters": {"type": "object", "properties": {
+                        "reason": {"type": "string"}}, "required": ["reason"]},
+                },
+            }
+            response = await model.bind_tools(
+                [tool], tool_choice="auto", parallel_tool_calls=False,
+            ).ainvoke([HumanMessage(content="Read the authorized order.")])
+            assert response.content == "���� Mock ��"
+    
+        try:
+>           asyncio.run(invoke())
+
+tests\test_ar02_journey_p0.py:66: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def invoke():
+        nonlocal model
+>       model = create_assistant_model(
+            transport_async=async_transport,
+            transport_sync=sync_transport,
+        )
+E       TypeError: create_assistant_model() got an unexpected keyword argument 'transport_async'
+
+tests\test_ar02_journey_p0.py:47: TypeError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_journey_p0.py::test_formal_provider_factory_serializes_frozen_wire_with_explicit_mock_transport
+1 failed in 0.88s

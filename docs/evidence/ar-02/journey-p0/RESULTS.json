@@ -1,0 +1,114 @@
+{
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/ar02-live-01",
+  "base_sha": "09613b2d858313a0b11ff865ee2dfeb66dd52e09",
+  "freeze_commit_sha": "4b19e60c65df041ab20e8eb0d442f51cd1861cb8",
+  "implementation_commit_sha": "9f04c15109e8d222b7365079b5b345a7a40bf573",
+  "cached_origin_main_sha": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "remote_sha_verification": "UNVERIFIED_GITHUB_HTTPS_443_FAILURE",
+  "environment": {
+    "os": "Windows 11 10.0.26200",
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "langchain": "1.4.1",
+    "langchain_core": "1.6.12",
+    "langchain_openai": "1.7.2",
+    "langgraph": "1.2.16",
+    "mcp": "2.3.0",
+    "httpx": "0.28.1",
+    "fastapi": "0.137.1",
+    "pydantic": "2.14.1",
+    "dependency_lock": "requirements.lock.txt"
+  },
+  "provider": {
+    "real_provider_http_requests": 0,
+    "paid_calls": 0,
+    "real_autonomy_status": "NOT_RUN",
+    "mock_transport_used_for_sdk_wire_test": true,
+    "fixture_model_used_for_api_worker_journey": true,
+    "provider_enable_experiment_id_and_api_key_environment_removed_for_full_pytest": true
+  },
+  "business_writes": {
+    "repair": 0,
+    "approval": 0,
+    "action_intent": 0,
+    "action_ledger": 0,
+    "handoff_queue": 0,
+    "handoff_receipt": 0,
+    "external_business_write": 0
+  },
+  "journey_trace": {
+    "path": "docs/evidence/ar-02/journey-p0/TRACE.jsonl",
+    "evidence_level": "DETERMINISTIC_FIXTURE_AND_REAL_LOCAL_API_MCP_HTTP_SQLITE",
+    "persisted_runs": 6,
+    "run_statuses": {
+      "SUCCEEDED": 6
+    },
+    "persisted_session_messages": 12,
+    "persisted_answer_source_links": 6,
+    "assistant_call_rows": 16,
+    "business_mcp_calls": 5,
+    "d2_tool_observations": 4,
+    "knowledge_hit": {
+      "document_id": "receiver-ack-contract-v2",
+      "version": "2.1.0",
+      "source": "local:orders-async-demo/contract-v2.1"
+    },
+    "knowledge_empty_result_negative": "PASSED",
+    "order_http_status": 200,
+    "delivery_http_status": 202,
+    "receiver_state": "QUEUED",
+    "paired_receiver_state": "NOT_RECEIVED",
+    "unknown_state_representable_in_schema": false
+  },
+  "test_runs": [
+    {
+      "name": "pre-change AR-02 baseline",
+      "command": "python -X utf8 -m pytest [frozen relevant AR-02 suite] --basetemp=docs/evidence/ar-02/journey-p0/runs/pytest-baseline -q",
+      "exit_code": 0,
+      "passed": 58,
+      "failed": 0,
+      "log": "docs/evidence/ar-02/journey-p0/runs/00-baseline-ar02.log"
+    },
+    {
+      "name": "final AR-02 wiring and journey regression",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -X utf8 -m pytest tests/test_ar02_journey_p0.py tests/test_ar02_smoke_provider_factory.py tests/test_ar02_live_budget.py tests/test_ar02_live_hf02.py --basetemp=docs/evidence/ar-02/journey-p0/runs/pytest-green-14 -q -s",
+      "exit_code": 0,
+      "passed": 38,
+      "failed": 0,
+      "duration_seconds": 29.73,
+      "log": "docs/evidence/ar-02/journey-p0/runs/14-ar02-free-targeted.log"
+    },
+    {
+      "name": "fresh full pytest",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -X utf8 -m pytest --basetemp=docs/evidence/ar-02/journey-p0/runs/pytest-full-15 -q -s",
+      "exit_code": 1,
+      "passed": 489,
+      "failed": 4,
+      "duration_seconds": 512.04,
+      "log": "docs/evidence/ar-02/journey-p0/runs/15-full-pytest.log",
+      "failures": [
+        "tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death (business assertions passed; Windows server-process teardown timed out)",
+        "tests/test_m1_web_server.py::test_server_uses_configured_vue_origin_for_exact_origin_guard (stale exact kwargs expectation omits existing assistant_model_factory injection)",
+        "tests/test_m1_web_server.py::test_server_defaults_origin_to_same_loopback_api_origin (stale exact kwargs expectation omits existing assistant_model_factory injection)",
+        "tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix (preserved historical obsolete-intent RED: 502 INVALID_MODEL_CLASSIFICATION)"
+      ]
+    },
+    {
+      "name": "isolated M1 N2-01 process recovery reproduction",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -X utf8 -m pytest tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death --basetemp=docs/evidence/ar-02/journey-p0/runs/pytest-m1-n2-16 -q -s",
+      "exit_code": 1,
+      "passed": 0,
+      "failed": 1,
+      "duration_seconds": 17.38,
+      "log": "docs/evidence/ar-02/journey-p0/runs/16-m1-n2-isolated.log",
+      "note": "HTTP history returned 200 and receipt/event/config assertions passed; failure occurred in the existing Windows taskkill/wait cleanup helper. The spawned processes were stopped after the run."
+    }
+  ],
+  "failed_attempt_logs_preserved": true,
+  "old_p1_unknown_and_conn01_history_modified": false,
+  "main_modified": false,
+  "browser_automation": "NOT_RUN_AS_AUTHORIZED",
+  "paid_provider": "NOT_RUN_AS_AUTHORIZED"
+}

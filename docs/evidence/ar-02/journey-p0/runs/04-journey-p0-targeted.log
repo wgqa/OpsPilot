@@ -1,0 +1,132 @@
+.F...........                                                            [100%]
+================================== FAILURES ===================================
+_ test_formal_api_worker_s01_and_five_turn_s02_are_persisted_and_source_linked _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0/runs/pytest-targeted/test_formal_api_worker_s01_and0/domain.sqlite3')
+tmp_path = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0/runs/pytest-targeted/test_formal_api_worker_s01_and0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001F14424F950>
+
+    def test_formal_api_worker_s01_and_five_turn_s02_are_persisted_and_source_linked(demo_db, tmp_path, monkeypatch):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        setup = prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2)
+        models = deque([
+            JourneyFixtureModel(mode="s01"), JourneyFixtureModel(mode="knowledge"),
+            JourneyFixtureModel(mode="history"), JourneyFixtureModel(mode="order"),
+            JourneyFixtureModel(mode="receiver"), JourneyFixtureModel(mode="draft"),
+        ])
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "journey-worker.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.popleft(),
+        )
+        accepted, session_ids = [], []
+        with TestClient(app) as client:
+            login = client.post("/api/auth/login", headers={"Origin": ORIGIN},
+                                json={"actor_id": "support-a", "password": PASSWORDS["support-a"]})
+            assert login.status_code == 200
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+    
+            # S01 is a separate Session, without TaskBinding or current business evidence.
+            s01_session = client.post("/api/sessions", headers=headers).json()["session_id"]
+            session_ids.append(s01_session)
+            s01_text = ("HTTP 202 Accepted 是否意味着订单回调已经处理完成？请区分 HTTP/协议语义和当前订单事实。"
+                        "我没有提供订单、Event 或 Receiver 的当前状态。")
+            s01 = client.post(
+                f"/api/sessions/{s01_session}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "journey-p0-s01"},
+                json={"body": s01_text},
+            )
+            assert s01.status_code == 202, s01.text
+            s01_item = s01.json()
+            accepted.append(s01_item)
+            assert _wait_run(client, s01_item["run_id"])["status"] == "SUCCEEDED"
+            s01_messages = client.get(f"/api/sessions/{s01_session}/messages").json()["items"]
+            s01_answer = next(item for item in s01_messages if item["role"] == "ASSISTANT")
+            assert "受理" in s01_answer["body"] and "未知" in s01_answer["body"]
+            assert s01_answer["answer_source_message_id"] == s01_item["message_id"]
+            with connect(demo_db) as connection:
+                assert connection.execute(
+                    "SELECT COUNT(*) FROM assistant_calls WHERE run_id=? AND kind='MCP'", (s01_item["run_id"],)
+                ).fetchone()[0] == 0
+                assert connection.execute(
+                    "SELECT task_id FROM task_runs WHERE run_id=?", (s01_item["run_id"],)
+                ).fetchone()[0] is None
+    
+            # S02 has five user turns in one Session. Natural-language text does
+            # not bind an order; the authenticated endpoint below is the user action.
+            s02_session = client.post("/api/sessions", headers=headers).json()["session_id"]
+            session_ids.append(s02_session)
+            inputs = [
+                "请记住下面是待核实的示例线索，不是你已验证的业务事实：`event_id=event-e1, transport_request_id=req-e1-1, delivery_http_status=202, receiver_status=unknown`。请查适用的回调/Receiver 协议，说明 202 能证明和不能证明什么。",
+                "我现在确认要查询资料范围中已授权的回调协议；没有特别指定旧版，请按本问题适用范围核对。说明检索到的版本、摘要和来源。",
+            ]
+            for index, body in enumerate(inputs):
+                response = client.post(
+                    f"/api/sessions/{s02_session}/assistant/messages",
+                    headers={**headers, "Idempotency-Key": f"journey-p0-s02-{index + 1}"},
+                    json={"body": body},
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                accepted.append(item)
+                assert _wait_run(client, item["run_id"])["status"] == "SUCCEEDED"
+    
+            resources = client.get("/api/s3/order-resources", headers=headers)
+            assert resources.status_code == 200, resources.text
+            assert any(row["order_id"] == "ar02-order" for row in resources.json()["items"])
+            binding_input = "请绑定我有权访问的订单 `ar02-order` 并核查当前状态。"
+            binding = client.post(
+                f"/api/sessions/{s02_session}/assistant/order",
+                headers={**headers, "Idempotency-Key": "journey-p0-s02-bind"},
+                json={"order_id": "ar02-order", "initial_message": binding_input},
+            )
+            assert binding.status_code == 202, binding.text
+            binding_item = binding.json()
+            accepted.append(binding_item)
+            task_id = binding_item["task_id"]
+            assert _wait_run(client, binding_item["run_id"])["status"] == "SUCCEEDED"
+            with connect(demo_db) as connection:
+                binding_row = connection.execute(
+                    "SELECT order_id,confirmed_by FROM s3_task_resources WHERE task_id=?", (task_id,)
+                ).fetchone()
+                assert binding_row and binding_row["order_id"] == "ar02-order"
+                assert binding_row["confirmed_by"] == "support-a"
+    
+            followups = [
+                "对照刚才的 E1 线索和本次真实查询，接收方现在处理完成了吗？",
+                "基于目前有来源的事实整理一份处理说明草稿，并明确仍未知的部分。",
+            ]
+            for index, body in enumerate(followups, start=4):
+                response = client.post(
+                    f"/api/sessions/{s02_session}/assistant/messages",
+                    headers={**headers, "Idempotency-Key": f"journey-p0-s02-{index}"},
+                    json={"body": body, "task_id": task_id},
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                accepted.append(item)
+                assert _wait_run(client, item["run_id"])["status"] == "SUCCEEDED"
+    
+            s02_messages = client.get(f"/api/sessions/{s02_session}/messages").json()["items"]
+            users = [item for item in s02_messages if item["role"] == "USER"]
+            answers = [item for item in s02_messages if item["role"] == "ASSISTANT"]
+            assert len(users) == len(answers) == 5
+            assert {item["answer_source_message_id"] for item in answers} == {
+                item["message_id"] for item in accepted[1:]
+            }
+            answer_by_source = {item["answer_source_message_id"]: item["body"] for item in answers}
+>           assert "callback-ack-contract" in answer_by_source[accepted[1]["message_id"]]
+E           assert 'callback-ack-contract' in "检索到 receiver-ack-contract-v2 v2.1.0，摘要摘录：# Receiver acknowledgement and processing SLA v2.1\n\nAn HTTP 202 from the r...ness processing.\n\nCheck the receiver's current stat；来源：local:orders-async-demo/contract-v2.1。HTTP 202 仅表示受理，不证明处理完成。"
+
+tests\test_ar02_journey_p0.py:394: AssertionError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:49974/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_journey_p0.py::test_formal_api_worker_s01_and_five_turn_s02_are_persisted_and_source_linked
+1 failed, 12 passed in 17.30s
