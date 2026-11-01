@@ -299,7 +299,11 @@ class Loop(AgentMiddleware):
             # The factory pins the output cap using the configured provider's
             # wire parameter. Re-injecting `max_tokens` here would make the
             # pinned ChatOpenAI emit DeepSeek's unsupported alias.
-            result=await asyncio.wait_for(handler(request.override(system_message=system,model_settings={**request.model_settings,'parallel_tool_calls':False})),30)
+            model_settings={**request.model_settings,'parallel_tool_calls':False}
+            tool_choice='auto' if request.tools else request.tool_choice
+            result=await asyncio.wait_for(handler(request.override(
+                system_message=system,tool_choice=tool_choice,model_settings=model_settings,
+            )),30)
             messages_result = messages_to_dict(result.result)
             usage_result = [getattr(m,'usage_metadata',None) for m in result.result]
             if self.experiment_id:

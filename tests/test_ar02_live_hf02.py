@@ -437,3 +437,88 @@ def test_assistant_connection_failure_closes_attempt_and_keeps_unknown_reservati
         "answer_run_id": program["answer_run_id"],
         "model_answer_count": answer_count,
     }, sort_keys=True))
+
+
+def test_formal_assistant_run_sends_explicit_auto_for_offered_tools(
+    demo_db, tmp_path, monkeypatch
+):
+    """Exercise create_agent + Loop + the production model factory with no network."""
+    from opspilot.assistant import run_assistant
+    from opspilot.domain.assistant_experiment import EXPERIMENT_ID
+    from opspilot.domain.task_control import (
+        admit_task_message,
+        claim_task_run,
+        create_session,
+        register_worker_owner,
+        trusted_identity,
+    )
+
+    async def respond(request, _body):
+        return _mock_success()
+
+    model, async_client, sync_client, captured = _mock_assistant_model(
+        monkeypatch, respond, base_url="https://api.deepseek.com/v1"
+    )
+    identity = trusted_identity(demo_db, "support-a")
+    session_id = create_session(demo_db, identity)["session_id"]
+    accepted = admit_task_message(
+        demo_db,
+        identity,
+        session_id=session_id,
+        task_id=None,
+        input_kind="CHAT_READONLY",
+        body="解释 HTTP 202 的协议含义，不查询订单。",
+        idempotency_key="connection-diag-explicit-tool-choice",
+        assistant_core=True,
+    )
+    worker_id = "ar02-connection-diag-worker"
+    register_worker_owner(demo_db, worker_id, os.getpid())
+    claim_task_run(demo_db, identity, accepted["run_id"])
+
+    async def execute():
+        try:
+            return await run_assistant(
+                demo_db,
+                tmp_path / "connection-diag-checkpoints.sqlite3",
+                worker_id,
+                accepted["run_id"],
+                model=model,
+                trace=lambda *_args, **_kwargs: None,
+                experiment_id=EXPERIMENT_ID,
+            )
+        finally:
+            await async_client.aclose()
+            sync_client.close()
+
+    result = asyncio.run(execute())
+    assert result["status"] == "SUCCEEDED", result
+    assert len(captured) == 1
+    wire = captured[0]
+    assert wire["method"] == "POST"
+    assert wire["url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert wire["authorization_present"] is True
+    assert wire["body"]["model"] == "deepseek-flash"
+    assert wire["body"]["max_tokens"] == 2048
+    assert wire["body"]["thinking"] == {"type": "disabled"}
+    assert wire["body"]["parallel_tool_calls"] is False
+    assert wire["body"]["tool_choice"] == "auto"
+    assert any(
+        item["function"]["name"] == "search_project_knowledge"
+        for item in wire["body"]["tools"]
+    )
+    assert "max_completion_tokens" not in wire["body"]
+    print("CONNECTION_DIAG_FORMAL_WIRE=" + json.dumps({
+        "method": wire["method"],
+        "url": wire["url"],
+        "body": {
+            key: wire["body"][key]
+            for key in (
+                "model", "max_tokens", "thinking", "tool_choice",
+                "parallel_tool_calls", "stream", "temperature",
+            )
+            if key in wire["body"]
+        },
+        "tool_names": [item["function"]["name"] for item in wire["body"]["tools"]],
+        "authorization_logged": False,
+        "transport": "EXPLICIT_HTTPX_MOCKTRANSPORT",
+    }, sort_keys=True, separators=(",", ":")))

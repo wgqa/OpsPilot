@@ -1,0 +1,70 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______ test_formal_assistant_run_sends_explicit_auto_for_offered_tools _______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/connection-diag-01-green/test_formal_assistant_run_send0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/connection-diag-01-green/test_formal_assistant_run_send0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CFCE040050>
+
+    def test_formal_assistant_run_sends_explicit_auto_for_offered_tools(
+        demo_db, tmp_path, monkeypatch
+    ):
+        """Exercise create_agent + Loop + the production model factory with no network."""
+        from opspilot.assistant import run_assistant
+        from opspilot.domain.assistant_experiment import EXPERIMENT_ID
+        from opspilot.domain.task_control import (
+            admit_task_message,
+            claim_task_run,
+            create_session,
+            register_worker_owner,
+            trusted_identity,
+        )
+    
+        async def respond(request, _body):
+            return _mock_success()
+    
+        model, async_client, sync_client, captured = _mock_assistant_model(
+            monkeypatch, respond, base_url="https://api.deepseek.com/v1"
+        )
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = create_session(demo_db, identity)["session_id"]
+        accepted = admit_task_message(
+            demo_db,
+            identity,
+            session_id=session_id,
+            task_id=None,
+            input_kind="CHAT_READONLY",
+            body="���� HTTP 202 ��Э�麬�壬����ѯ������",
+            idempotency_key="connection-diag-explicit-tool-choice",
+            assistant_core=True,
+        )
+        worker_id = "ar02-connection-diag-worker"
+        register_worker_owner(demo_db, worker_id, os.getpid())
+        claim_task_run(demo_db, identity, accepted["run_id"])
+    
+        async def execute():
+            try:
+                return await run_assistant(
+                    demo_db,
+                    tmp_path / "connection-diag-checkpoints.sqlite3",
+                    worker_id,
+                    accepted["run_id"],
+                    model=model,
+                    trace=lambda *_args, **_kwargs: None,
+                    experiment_id=EXPERIMENT_ID,
+                )
+            finally:
+                await async_client.aclose()
+                sync_client.close()
+    
+        result = asyncio.run(execute())
+>       assert result["status"] == "SUCCEEDED"
+E       AssertionError: assert 'NOT_COMPLETED' == 'SUCCEEDED'
+E         
+E         - SUCCEEDED
+E         + NOT_COMPLETED
+
+tests\test_ar02_live_hf02.py:492: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_live_hf02.py::test_formal_assistant_run_sends_explicit_auto_for_offered_tools
+1 failed in 2.73s

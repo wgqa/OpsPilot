@@ -1,0 +1,61 @@
+{
+  "task": "AR-02-LIVE-CONNECTION-DIAG-01",
+  "submission_status": "ACCEPTANCE_CANDIDATE",
+  "provider_root_cause": "UNKNOWN_NOT_RECOVERABLE_FROM_SAVED_CAUSE_CHAIN",
+  "base_sha": "85ec4e89387229b581c8be19ec7dfd28d893b64e",
+  "branch": "codex/ar02-live-01",
+  "main_modified": false,
+  "external_provider_requests_during_diagnostic": 0,
+  "external_network_probes_during_diagnostic": 0,
+  "historical_live_dispatch": {
+    "run_id": "run-b5f22395-0792-47d1-857d-32525b5667e3",
+    "dispatch_id": "ar02-live-dispatch-a8efc5d8-a9d3-4402-93f1-317beedac996",
+    "run_status": "FAILED",
+    "dispatch_status": "UNKNOWN",
+    "usage_state": "UNKNOWN",
+    "reserved_micro_usd": 645600,
+    "settled_micro_usd": 0,
+    "saved_error": "OpenAIConnectionError: Connection error.",
+    "http_response_count": 0,
+    "cause_chain_status": "NOT_PERSISTED"
+  },
+  "confirmed_wire_difference": {
+    "conn02_url": "https://api.deepseek.com/chat/completions",
+    "formal_live_url": "https://api.deepseek.com/v1/chat/completions",
+    "formal_live_offered_tools": ["search_project_knowledge"],
+    "formal_live_missing_field": "tool_choice",
+    "provider_default_when_tools_present": "auto",
+    "provider_protocol_violation": false
+  },
+  "minimal_fix": {
+    "file": "opspilot/assistant.py",
+    "change": "Set ModelRequest.tool_choice to auto when the formal Assistant offers tools; leave tool-free requests unchanged.",
+    "cause_of_original_connection_failure": false
+  },
+  "offline_verification": [
+    {
+      "command": "python -m pytest -q tests/test_ar02_live_hf02.py tests/test_ar02_journey_p0.py::test_formal_provider_factory_serializes_frozen_wire_with_explicit_mock_transport",
+      "result": "PASS",
+      "passed": 9,
+      "failed": 0,
+      "exit_code": 0,
+      "log": "runs/07-focused-regression.log"
+    },
+    {
+      "command": "python -m pytest -q -s tests/test_ar02_live_hf02.py::test_formal_assistant_run_sends_explicit_auto_for_offered_tools",
+      "result": "PASS",
+      "passed": 1,
+      "failed": 0,
+      "exit_code": 0,
+      "log": "runs/08-formal-wire-capture.log"
+    }
+  ],
+  "full_pytest": "NOT_RUN",
+  "historical_unknown_or_reservation_modified": false,
+  "historical_unknown_readonly_check": {
+    "result": "PASS_READ_ONLY_MATCHES_ORIGINAL_RESULTS",
+    "log": "runs/09-historical-unknown-readonly-check.log",
+    "database_modified": false
+  },
+  "next_live_request_authorized": false
+}
