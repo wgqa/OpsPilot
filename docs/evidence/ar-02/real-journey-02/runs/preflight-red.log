@@ -1,0 +1,59 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_________ test_journey_02_initializes_an_independent_budget_identity __________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-real-journey-02/docs/evidence/ar-02/real-journey-02/runs/preflight-red-tmp/test_journey_02_initializes_an0')
+
+    def test_journey_02_initializes_an_independent_budget_identity(tmp_path):
+        from opspilot.domain.assistant_experiment import initialize_experiment, read_budget
+        from opspilot.domain.database import reset_fixture
+    
+        db_path = tmp_path / "ar02-journey-02.sqlite3"
+        reset_fixture(db_path, "S1_POS")
+>       initialize_experiment(db_path, EXPERIMENT)
+
+tests\test_ar02_real_journey_02_preflight.py:20: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\assistant_experiment.py:134: in initialize_experiment
+    _validate_experiment_id(experiment_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+experiment_id = 'AR-02-REAL-JOURNEY-02'
+
+    def _validate_experiment_id(experiment_id: str) -> None:
+        if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
+>           raise ExperimentBudgetError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+E           opspilot.domain.assistant_experiment.ExperimentBudgetError: AR02_LIVE_EXPERIMENT_SCOPE_INVALID
+
+opspilot\domain\assistant_experiment.py:81: ExperimentBudgetError
+_______ test_journey_02_offline_sdk_wire_is_the_frozen_deepseek_request _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E5BE8D95B0>
+
+    def test_journey_02_offline_sdk_wire_is_the_frozen_deepseek_request(monkeypatch):
+>       from opspilot.assistant import create_assistant_model
+
+tests\test_ar02_real_journey_02_preflight.py:40: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Single professional create_agent loop; trusted execution uses existing Domain.
+    
+    No business Outcome writer. Real Provider construction is deliberately unavailable
+    until a separately authorized smoke budget can pass its preflight.
+    """
+    from __future__ import annotations
+    import asyncio
+    import json
+    import os
+    import sys
+    from urllib.parse import urlparse
+    from pathlib import Path
+>   from langchain.agents import create_agent
+E   ModuleNotFoundError: No module named 'langchain'
+
+opspilot\assistant.py:13: ModuleNotFoundError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_real_journey_02_preflight.py::test_journey_02_initializes_an_independent_budget_identity
+FAILED tests/test_ar02_real_journey_02_preflight.py::test_journey_02_offline_sdk_wire_is_the_frozen_deepseek_request
+2 failed in 0.37s
+EXIT_CODE=1

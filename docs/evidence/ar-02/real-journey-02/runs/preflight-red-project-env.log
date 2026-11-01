@@ -1,0 +1,92 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_________ test_journey_02_initializes_an_independent_budget_identity __________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-real-journey-02/docs/evidence/ar-02/real-journey-02/runs/preflight-red-project-env-tmp/test_journey_02_initializes_an0')
+
+    def test_journey_02_initializes_an_independent_budget_identity(tmp_path):
+        from opspilot.domain.assistant_experiment import initialize_experiment, read_budget
+        from opspilot.domain.database import reset_fixture
+    
+        db_path = tmp_path / "ar02-journey-02.sqlite3"
+        reset_fixture(db_path, "S1_POS")
+>       initialize_experiment(db_path, EXPERIMENT)
+
+tests\test_ar02_real_journey_02_preflight.py:20: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\assistant_experiment.py:134: in initialize_experiment
+    _validate_experiment_id(experiment_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+experiment_id = 'AR-02-REAL-JOURNEY-02'
+
+    def _validate_experiment_id(experiment_id: str) -> None:
+        if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
+>           raise ExperimentBudgetError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+E           opspilot.domain.assistant_experiment.ExperimentBudgetError: AR02_LIVE_EXPERIMENT_SCOPE_INVALID
+
+opspilot\domain\assistant_experiment.py:81: ExperimentBudgetError
+_______ test_journey_02_offline_sdk_wire_is_the_frozen_deepseek_request _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B9A2536190>
+
+    def test_journey_02_offline_sdk_wire_is_the_frozen_deepseek_request(monkeypatch):
+        from opspilot.assistant import create_assistant_model
+    
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-mock-only")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
+        monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
+        captured = []
+    
+        async def mock_response(request: httpx.Request) -> httpx.Response:
+            captured.append({
+                "method": request.method,
+                "url": str(request.url),
+                "body": json.loads((await request.aread()).decode("utf-8")),
+            })
+            return httpx.Response(200, json={
+                "id": "offline-ar02-journey-02",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "deepseek-flash",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "offline"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            })
+    
+>       model = create_assistant_model(
+            transport_async=httpx.MockTransport(mock_response),
+            transport_sync=httpx.MockTransport(lambda request: httpx.Response(500)),
+        )
+
+tests\test_ar02_real_journey_02_preflight.py:64: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+transport_async = <httpx.MockTransport object at 0x000001B9A5125940>
+transport_sync = <httpx.MockTransport object at 0x000001B9A2599BD0>
+
+    def create_assistant_model(*, transport_async=None, transport_sync=None):
+        """Build the real Assistant provider only after an explicit local opt-in.
+    
+        The opt-in is deliberately separate from API-key presence: credentials alone
+        do not authorize paid requests. Construction is local and performs no I/O.
+        """
+        if os.environ.get('OPSPILOT_ASSISTANT_PROVIDER_ENABLED', '').strip() != '1':
+            return None
+        from opspilot.config import MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME
+        from opspilot.domain.assistant_experiment import (
+            EXPERIMENT_ENV,
+            SUPPORTED_EXPERIMENT_IDS,
+        )
+    
+        if os.environ.get(EXPERIMENT_ENV, "").strip() not in SUPPORTED_EXPERIMENT_IDS:
+>           raise RuntimeError("AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED")
+E           RuntimeError: AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED
+
+opspilot\assistant.py:92: RuntimeError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_real_journey_02_preflight.py::test_journey_02_initializes_an_independent_budget_identity
+FAILED tests/test_ar02_real_journey_02_preflight.py::test_journey_02_offline_sdk_wire_is_the_frozen_deepseek_request
+2 failed in 1.15s
+EXIT_CODE=1
