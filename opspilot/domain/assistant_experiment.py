@@ -30,6 +30,8 @@ EXPERIMENT_ENV = "OPSPILOT_ASSISTANT_EXPERIMENT_ID"
 PROVIDER_LIMIT = 16
 MCP_LIMIT = 12
 BUDGET_USD_MICRO = 10_500_000
+AR03_SCENARIO_PROVIDER_LIMIT = 8
+AR03_SCENARIO_MCP_LIMIT = 6
 
 # DeepSeek Flash peak cache-miss input/output rates checked 2026-11-01.
 # The reservation uses the documented maximum output/context envelope rather
@@ -90,6 +92,16 @@ def _validate_experiment_id(experiment_id: str) -> None:
         raise ExperimentBudgetError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
 
 
+def _limits_for_experiment(experiment_id: str) -> tuple[int, int]:
+    """Return the fixed per-database count envelope for this experiment."""
+    if experiment_id == AR03_REAL_LLM_01_EXPERIMENT_ID:
+        # This paired experiment uses independent scenario databases. Persist
+        # half of the aggregate allowance in each so local ledgers compose to
+        # no more than the signed 16 Provider / 12 MCP campaign ceiling.
+        return AR03_SCENARIO_PROVIDER_LIMIT, AR03_SCENARIO_MCP_LIMIT
+    return PROVIDER_LIMIT, MCP_LIMIT
+
+
 def _require_schema_experiment_id(connection, experiment_id: str) -> None:
     row = connection.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
@@ -107,6 +119,7 @@ def _table_exists(connection, table: str) -> bool:
 
 
 def _ensure_row(connection, experiment_id: str) -> None:
+    provider_limit, mcp_limit = _limits_for_experiment(experiment_id)
     row = connection.execute(
         "SELECT * FROM ar02_live_experiment_budgets WHERE experiment_id=?",
         (experiment_id,),
@@ -120,8 +133,8 @@ def _ensure_row(connection, experiment_id: str) -> None:
                VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?)""",
             (
                 experiment_id,
-                PROVIDER_LIMIT,
-                MCP_LIMIT,
+                provider_limit,
+                mcp_limit,
                 BUDGET_USD_MICRO,
                 PRICE_VERSION,
                 now,
@@ -130,8 +143,8 @@ def _ensure_row(connection, experiment_id: str) -> None:
         )
         return
     if (
-        int(row["provider_limit"]) != PROVIDER_LIMIT
-        or int(row["mcp_limit"]) != MCP_LIMIT
+        int(row["provider_limit"]) != provider_limit
+        or int(row["mcp_limit"]) != mcp_limit
         or int(row["budget_usd_micro"]) != BUDGET_USD_MICRO
         or str(row["price_version"]) != PRICE_VERSION
     ):
@@ -228,7 +241,9 @@ def reserve_dispatch(
             raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
 
         count = _used_count(connection, experiment_id, kind)
-        count_limit = PROVIDER_LIMIT if kind == "MODEL" else MCP_LIMIT
+        # Enforce the persisted, per-database allocation, not a process
+        # parameter that could differ between the two isolated scenarios.
+        count_limit = int(budget["provider_limit"] if kind == "MODEL" else budget["mcp_limit"])
         if count >= count_limit:
             label = "PROVIDER" if kind == "MODEL" else "MCP"
             raise ExperimentBudgetError(f"AR02_LIVE_{label}_LIMIT")

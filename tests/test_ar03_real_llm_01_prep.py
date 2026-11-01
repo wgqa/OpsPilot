@@ -64,8 +64,6 @@ def _append_trace(row):
 def test_new_experiment_id_initializes_an_independent_fixed_budget(demo_db):
     from opspilot.domain.assistant_experiment import (
         BUDGET_USD_MICRO,
-        MCP_LIMIT,
-        PROVIDER_LIMIT,
         read_budget,
         initialize_experiment,
     )
@@ -76,8 +74,10 @@ def test_new_experiment_id_initializes_an_independent_fixed_budget(demo_db):
     old_budget = read_budget(demo_db, LEGACY_EXPERIMENT_ID)
     assert new_budget["initialized"] is True
     assert new_budget["status"] == "OPEN"
-    assert new_budget["provider_limit"] == PROVIDER_LIMIT == 16
-    assert new_budget["mcp_limit"] == MCP_LIMIT == 12
+    # The live A/B run uses two separate databases, so each database receives
+    # half of the approved experiment-wide count ceiling.
+    assert new_budget["provider_limit"] == 8
+    assert new_budget["mcp_limit"] == 6
     assert new_budget["budget_usd_micro"] == BUDGET_USD_MICRO == 10_500_000
     assert new_budget["provider_used"] == new_budget["mcp_used"] == 0
     assert old_budget["initialized"] is False
