@@ -35,7 +35,7 @@
 | 模块 | 允许操作 | 实际范围 |
 |---|---|---|
 | `opspilot/domain/protocol_comparison.py` | 允许修改 | 实现 HF01-01（重名章节安全列表）、HF01-02（否定/历史上下文过滤、区分文本差异与候选线索）、HF01-03（基于 SequenceMatcher 的真实变更窗口摘录） |
-| `tests/test_ar03_protocol_comparison.py` | 允许新增测试 | 新增 7 项定向测试，总用例数达到 26 项 |
+| `tests/test_ar03_protocol_comparison.py` | 允许新增测试 | 新增 9 项定向测试，总用例数达到 28 项 |
 | `docs/evidence/ar-03/protocol-compare-hf01/` | 允许新增 | 新增 `ACCEPTANCE_PLAN.md`, `REPORT.md`, `RESULTS.json`, `FAILURES.md`, `INTEGRATION_CONTRACT.md` 及样例 JSON |
 | `opspilot/assistant*.py`, `worker.py`, `app.py`, `chat.py`, TaskControl | **绝对严禁修改** | 保持 0 修改 |
 | `main` 分支与 Codex 分支 | **绝对严禁合并或修改** | 保持 0 修改 |
@@ -54,7 +54,7 @@
   - 线上部署不可证明性（`deployment_version_verified=False`）
   - 提示词注入不可信数据防御
   - 清单路径遍历防御
-- **本轮新增 HF01 专项（7 项）：**
+- **本轮新增 HF01 专项（7 项）与主 Agent HOLD 定向修正（2 项），共 9 项：**
   - `test_duplicate_markdown_headings_both_compared_without_overwrite`：多重名章节均被提取与对比，无后者覆盖前者。
   - `test_duplicate_markdown_headings_identical_produces_zero_diff`：含重名章节的相同文档比对结果确为 zero-diff。
   - `test_duplicate_markdown_headings_count_mismatch`：新版本增加同名章节时正确识别为 `SECTION_ADDED`。
@@ -62,5 +62,7 @@
   - `test_negative_and_historical_context_avoids_over_assertion`：历史/否定语境下的关键词不提升为活跃行为指令。
   - `test_unrecognized_text_diff_categorized_without_false_assertions`：纯文本措辞变动如实作为 `TEXT_DIFFERENCE` 输出，不编造候选参数。
   - `test_excerpt_localization_at_end_of_long_section`：长段落尾部的微小变动能被摘录窗口精确捕获，避免摘录盲区。
+  - `test_single_line_over_900_chars_tail_excerpt_localization`（定向 1）：超过 900 字符超长单行正文尾部状态变更，摘录通过字符跨度居中包含变动，Digest 与实际摘录一致。
+  - `test_independent_line_number_locations_for_base_and_target`（定向 2）：新旧文档章节因前文行数变化导致起点不同，`base_location` 与 `target_location` 严格各自独立定位，不共用旧起点。
 - **关联回归：**
   - `tests/test_ar02_knowledge.py`（10 项通过）

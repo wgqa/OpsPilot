@@ -462,16 +462,74 @@ def _split_markdown_sections(text: str) -> list[MarkdownSection]:
     return sections
 
 
+def _truncate_around_span(
+    text: str,
+    span_start: int,
+    span_end: int,
+    *,
+    max_len: int = 600,
+    had_prior_left: bool = False,
+    had_prior_right: bool = False,
+) -> tuple[str, bool]:
+    """Window text to at most max_len characters centered around [span_start, span_end].
+
+    Maintains [truncated] markers and ensures changed spans are preserved in excerpts.
+    """
+    if len(text) <= max_len and not had_prior_left and not had_prior_right:
+        return text, False
+
+    budget = max_len - 14
+    span_len = max(1, span_end - span_start)
+
+    if len(text) <= budget:
+        slice_start = 0
+        slice_end = len(text)
+    elif span_len >= budget:
+        slice_start = span_start
+        slice_end = min(len(text), span_start + budget)
+    else:
+        avail = budget - span_len
+        left_avail = avail // 2
+        right_avail = avail - left_avail
+        slice_start = span_start - left_avail
+        slice_end = span_end + right_avail
+        if slice_start < 0:
+            slice_end += (0 - slice_start)
+            slice_start = 0
+        if slice_end > len(text):
+            excess = slice_end - len(text)
+            slice_start = max(0, slice_start - excess)
+            slice_end = len(text)
+
+    is_left = had_prior_left or (slice_start > 0)
+    is_right = had_prior_right or (slice_end < len(text))
+
+    parts: list[str] = []
+    if is_left:
+        parts.append("[...] ")
+    parts.append(text[slice_start:slice_end])
+    if is_right:
+        parts.append(" [...]")
+
+    final_str = "".join(parts)
+    return final_str, (is_left or is_right)
+
+
 def _extract_diff_excerpt(
-    sec_start_line: int,
-    sec_end_line: int,
+    b_start_line: int,
+    b_end_line: int,
+    t_start_line: int,
+    t_end_line: int,
     b_text: str,
     t_text: str,
     *,
     max_chars: int = 600,
     context_lines: int = 2,
 ) -> tuple[str, str, str, str, bool]:
-    """Extract excerpt window focused on actual changed lines between b_text and t_text.
+    """Extract excerpt window focused on actual changed content between b_text and t_text.
+
+    Supports both multi-line documents and long single-line sections, providing
+    independent line location tracking for base and target.
 
     Returns:
         (base_excerpt, target_excerpt, base_loc_str, target_loc_str, is_truncated)
@@ -485,11 +543,11 @@ def _extract_diff_excerpt(
         base_loc_str = "ABSENT"
         if len(t_text) <= max_chars:
             target_excerpt = t_text
-            target_loc_str = f"Lines {sec_start_line}-{sec_end_line}"
+            target_loc_str = f"Lines {t_start_line}-{t_end_line}"
             is_trunc = False
         else:
             target_excerpt = t_text[:max_chars - 7] + " [...]"
-            target_loc_str = f"Lines {sec_start_line}-{sec_start_line + len(target_excerpt.splitlines()) - 1} [truncated] (section L{sec_start_line}-L{sec_end_line})"
+            target_loc_str = f"Lines {t_start_line}-{t_start_line + len(target_excerpt.splitlines()) - 1} [truncated] (section L{t_start_line}-L{t_end_line})"
             is_trunc = True
         return base_excerpt, target_excerpt, base_loc_str, target_loc_str, is_trunc
 
@@ -499,79 +557,97 @@ def _extract_diff_excerpt(
         target_loc_str = "OMITTED"
         if len(b_text) <= max_chars:
             base_excerpt = b_text
-            base_loc_str = f"Lines {sec_start_line}-{sec_end_line}"
+            base_loc_str = f"Lines {b_start_line}-{b_end_line}"
             is_trunc = False
         else:
             base_excerpt = b_text[:max_chars - 7] + " [...]"
-            base_loc_str = f"Lines {sec_start_line}-{sec_start_line + len(base_excerpt.splitlines()) - 1} [truncated] (section L{sec_start_line}-L{sec_end_line})"
+            base_loc_str = f"Lines {b_start_line}-{b_start_line + len(base_excerpt.splitlines()) - 1} [truncated] (section L{b_start_line}-L{b_end_line})"
             is_trunc = True
         return base_excerpt, target_excerpt, base_loc_str, target_loc_str, is_trunc
 
     # Case C: section present in both with differences
+    # C.1 Both fit completely within max_chars
     if len(b_text) <= max_chars and len(t_text) <= max_chars:
-        b_loc = f"Lines {sec_start_line}-{sec_end_line}" if b_lines else "Lines 1-1"
-        t_loc = f"Lines {sec_start_line}-{sec_end_line}" if t_lines else "Lines 1-1"
+        b_loc = f"Lines {b_start_line}-{b_end_line}" if b_lines else "Lines 1-1"
+        t_loc = f"Lines {t_start_line}-{t_end_line}" if t_lines else "Lines 1-1"
         return b_text, t_text, b_loc, t_loc, False
 
+    # Line-level diff
     matcher = difflib.SequenceMatcher(None, b_lines, t_lines)
     opcodes = matcher.get_opcodes()
     changed_ops = [op for op in opcodes if op[0] != "equal"]
 
     if not changed_ops:
-        return b_text[:max_chars], t_text[:max_chars], f"Lines {sec_start_line}-{sec_end_line}", f"Lines {sec_start_line}-{sec_end_line}", False
+        b_loc = f"Lines {b_start_line}-{b_end_line}"
+        t_loc = f"Lines {t_start_line}-{t_end_line}"
+        b_trunc, b_tr = _truncate_around_span(b_text, 0, len(b_text), max_len=max_chars)
+        t_trunc, t_tr = _truncate_around_span(t_text, 0, len(t_text), max_len=max_chars)
+        return b_trunc, t_trunc, b_loc, t_loc, (b_tr or t_tr)
 
     b_ch_start = min(op[1] for op in changed_ops)
     b_ch_end = max(op[2] for op in changed_ops)
     t_ch_start = min(op[3] for op in changed_ops)
     t_ch_end = max(op[4] for op in changed_ops)
 
-    # Base window
+    # Base line window
     b_win_start = max(0, b_ch_start - context_lines)
     b_win_end = min(len(b_lines), b_ch_end + context_lines)
     b_sub_text = "\n".join(b_lines[b_win_start:b_win_end])
-    b_is_trunc = False
+    b_had_line_trunc_left = (b_win_start > 0)
+    b_had_line_trunc_right = (b_win_end < len(b_lines))
 
-    if len(b_sub_text) > max_chars:
-        b_sub_text = b_sub_text[:max_chars - 7] + " [...]"
-        b_is_trunc = True
-    else:
-        if b_win_start > 0:
-            b_sub_text = "[...] " + b_sub_text
-            b_is_trunc = True
-        if b_win_end < len(b_lines):
-            b_sub_text = b_sub_text + " [...]"
-            b_is_trunc = True
-
-    b_abs_start = sec_start_line + b_win_start
-    b_abs_end = sec_start_line + max(b_win_start, b_win_end - 1)
-    b_loc_desc = f"Lines {b_abs_start}-{b_abs_end}"
-    if b_is_trunc:
-        b_loc_desc += f" (section L{sec_start_line}-L{sec_end_line})"
-
-    # Target window
+    # Target line window
     t_win_start = max(0, t_ch_start - context_lines)
     t_win_end = min(len(t_lines), t_ch_end + context_lines)
     t_sub_text = "\n".join(t_lines[t_win_start:t_win_end])
-    t_is_trunc = False
+    t_had_line_trunc_left = (t_win_start > 0)
+    t_had_line_trunc_right = (t_win_end < len(t_lines))
 
-    if len(t_sub_text) > max_chars:
-        t_sub_text = t_sub_text[:max_chars - 7] + " [...]"
-        t_is_trunc = True
+    # Character-level diff within the extracted sub-texts
+    char_matcher = difflib.SequenceMatcher(None, b_sub_text, t_sub_text)
+    char_ops = [op for op in char_matcher.get_opcodes() if op[0] != "equal"]
+
+    if char_ops:
+        b_diff_start = min(op[1] for op in char_ops)
+        b_diff_end = max(op[2] for op in char_ops)
+        t_diff_start = min(op[3] for op in char_ops)
+        t_diff_end = max(op[4] for op in char_ops)
     else:
-        if t_win_start > 0:
-            t_sub_text = "[...] " + t_sub_text
-            t_is_trunc = True
-        if t_win_end < len(t_lines):
-            t_sub_text = t_sub_text + " [...]"
-            t_is_trunc = True
+        b_diff_start = 0
+        b_diff_end = len(b_sub_text)
+        t_diff_start = 0
+        t_diff_end = len(t_sub_text)
 
-    t_abs_start = sec_start_line + t_win_start
-    t_abs_end = sec_start_line + max(t_win_start, t_win_end - 1)
+    b_final_text, b_is_trunc = _truncate_around_span(
+        b_sub_text,
+        b_diff_start,
+        b_diff_end,
+        max_len=max_chars,
+        had_prior_left=b_had_line_trunc_left,
+        had_prior_right=b_had_line_trunc_right,
+    )
+    t_final_text, t_is_trunc = _truncate_around_span(
+        t_sub_text,
+        t_diff_start,
+        t_diff_end,
+        max_len=max_chars,
+        had_prior_left=t_had_line_trunc_left,
+        had_prior_right=t_had_line_trunc_right,
+    )
+
+    b_abs_start = b_start_line + b_win_start
+    b_abs_end = b_start_line + max(b_win_start, b_win_end - 1)
+    b_loc_desc = f"Lines {b_abs_start}-{b_abs_end}"
+    if b_is_trunc:
+        b_loc_desc += f" (section L{b_start_line}-L{b_end_line})"
+
+    t_abs_start = t_start_line + t_win_start
+    t_abs_end = t_start_line + max(t_win_start, t_win_end - 1)
     t_loc_desc = f"Lines {t_abs_start}-{t_abs_end}"
     if t_is_trunc:
-        t_loc_desc += f" (section L{sec_start_line}-L{sec_end_line})"
+        t_loc_desc += f" (section L{t_start_line}-L{t_end_line})"
 
-    return b_sub_text, t_sub_text, b_loc_desc, t_loc_desc, (b_is_trunc or t_is_trunc)
+    return b_final_text, t_final_text, b_loc_desc, t_loc_desc, (b_is_trunc or t_is_trunc)
 
 
 def _extract_protocol_features(text: str) -> dict[str, set[str]]:
@@ -716,7 +792,7 @@ def compare_protocol_versions(
         if b_sec is not None and t_sec is None:
             # Section removed in target
             b_excerpt, t_excerpt, b_loc, t_loc, is_trunc = _extract_diff_excerpt(
-                b_sec.start_line, b_sec.end_line, b_sec.text, ""
+                b_sec.start_line, b_sec.end_line, 0, 0, b_sec.text, ""
             )
             evidence_id = f"EVID-{counter:03d}"
             diff_id = f"DIFF-{counter:03d}"
@@ -752,7 +828,7 @@ def compare_protocol_versions(
         elif b_sec is None and t_sec is not None:
             # Section added in target
             b_excerpt, t_excerpt, b_loc, t_loc, is_trunc = _extract_diff_excerpt(
-                t_sec.start_line, t_sec.end_line, "", t_sec.text
+                0, 0, t_sec.start_line, t_sec.end_line, "", t_sec.text
             )
             evidence_id = f"EVID-{counter:03d}"
             diff_id = f"DIFF-{counter:03d}"
@@ -789,7 +865,7 @@ def compare_protocol_versions(
             # Present in both: check text difference
             if b_sec.text != t_sec.text:
                 b_excerpt, t_excerpt, b_loc, t_loc, is_trunc = _extract_diff_excerpt(
-                    b_sec.start_line, b_sec.end_line, b_sec.text, t_sec.text
+                    b_sec.start_line, b_sec.end_line, t_sec.start_line, t_sec.end_line, b_sec.text, t_sec.text
                 )
                 evidence_id = f"EVID-{counter:03d}"
                 diff_id = f"DIFF-{counter:03d}"

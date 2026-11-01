@@ -908,3 +908,159 @@ def test_excerpt_localization_at_end_of_long_section(tmp_path: Path):
     # Digest matches excerpt text exactly
     assert evidence["base_excerpt_digest"] == hashlib.sha256(evidence["base_excerpt"].encode("utf-8")).hexdigest()
     assert evidence["target_excerpt_digest"] == hashlib.sha256(evidence["target_excerpt"].encode("utf-8")).hexdigest()
+
+
+def test_single_line_over_900_chars_tail_excerpt_localization(tmp_path: Path) -> None:
+    """Validate that single-line documents exceeding 900 chars localize excerpts to the tail change."""
+    cat_dir = tmp_path / "long-single-line-cat"
+    cat_dir.mkdir(parents=True, exist_ok=True)
+
+    prefix = "A" * 880
+    b_text = prefix + " receiver_state=QUEUED"
+    t_text = prefix + " receiver_state=PROCESSED"
+
+    # Both documents are single-line and > 900 chars
+    assert len(b_text.splitlines()) == 1
+    assert len(t_text.splitlines()) == 1
+    assert len(b_text) > 900
+    assert len(t_text) > 900
+
+    b_bytes = b_text.encode("utf-8")
+    t_bytes = t_text.encode("utf-8")
+    (cat_dir / "single-v1.md").write_bytes(b_bytes)
+    (cat_dir / "single-v2.md").write_bytes(t_bytes)
+
+    manifest = {
+        "schema_version": 1,
+        "documents": [
+            {
+                "document_id": "single-line-spec",
+                "file": "single-v1.md",
+                "version": "1.0.0",
+                "digest": hashlib.sha256(b_bytes).hexdigest(),
+                "source": "local:single/v1",
+                "valid_from": "2026-01-01T00:00:00+00:00",
+                "active": True,
+            },
+            {
+                "document_id": "single-line-spec",
+                "file": "single-v2.md",
+                "version": "2.0.0",
+                "digest": hashlib.sha256(t_bytes).hexdigest(),
+                "source": "local:single/v2",
+                "valid_from": "2026-01-01T00:00:00+00:00",
+                "active": True,
+            },
+        ],
+    }
+    (cat_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    ref_1 = _get_catalog_ref(cat_dir, "single-line-spec", "1.0.0")
+    ref_2 = _get_catalog_ref(cat_dir, "single-line-spec", "2.0.0")
+
+    result = compare_protocol_versions(ref_1, ref_2, catalog_dirs=[cat_dir])
+
+    assert result.identical is False
+    assert result.diff_count == 1
+    evidence = result.diff_evidence[0]
+
+    # Length bounded within max_chars (600)
+    assert len(evidence["base_excerpt"]) <= 600
+    assert len(evidence["target_excerpt"]) <= 600
+
+    # Crucial assertion: changed content at the tail MUST be visible in both excerpts
+    assert "receiver_state=QUEUED" in evidence["base_excerpt"]
+    assert "receiver_state=PROCESSED" in evidence["target_excerpt"]
+
+    # Excerpts must not be identical prefixes
+    assert evidence["base_excerpt"] != evidence["target_excerpt"]
+
+    # Digest matches actual excerpt content exactly
+    assert evidence["base_excerpt_digest"] == hashlib.sha256(evidence["base_excerpt"].encode("utf-8")).hexdigest()
+    assert evidence["target_excerpt_digest"] == hashlib.sha256(evidence["target_excerpt"].encode("utf-8")).hexdigest()
+
+    # Truncation indicator is clearly present at the front
+    assert evidence["base_excerpt"].startswith("[...] ")
+    assert evidence["target_excerpt"].startswith("[...] ")
+
+
+def test_independent_line_number_locations_for_base_and_target(tmp_path: Path) -> None:
+    """Validate that base_location and target_location track independent line numbers when section offsets differ."""
+    cat_dir = tmp_path / "independent-loc-cat"
+    cat_dir.mkdir(parents=True, exist_ok=True)
+
+    # Base has # Core Section at lines 1-2
+    base_text = (
+        "# Core Section\n"
+        "Base operational mode active.\n"
+    )
+
+    # Target adds 5 preamble lines, placing # Core Section at lines 6-7
+    target_text = (
+        "# Preamble\n"
+        "Preamble line 1\n"
+        "Preamble line 2\n"
+        "Preamble line 3\n"
+        "\n"
+        "# Core Section\n"
+        "Target operational mode active.\n"
+    )
+
+    b_bytes = base_text.encode("utf-8")
+    t_bytes = target_text.encode("utf-8")
+    (cat_dir / "loc-v1.md").write_bytes(b_bytes)
+    (cat_dir / "loc-v2.md").write_bytes(t_bytes)
+
+    manifest = {
+        "schema_version": 1,
+        "documents": [
+            {
+                "document_id": "loc-spec",
+                "file": "loc-v1.md",
+                "version": "1.0.0",
+                "digest": hashlib.sha256(b_bytes).hexdigest(),
+                "source": "local:loc/v1",
+                "valid_from": "2026-01-01T00:00:00+00:00",
+                "active": True,
+            },
+            {
+                "document_id": "loc-spec",
+                "file": "loc-v2.md",
+                "version": "2.0.0",
+                "digest": hashlib.sha256(t_bytes).hexdigest(),
+                "source": "local:loc/v2",
+                "valid_from": "2026-01-01T00:00:00+00:00",
+                "active": True,
+            },
+        ],
+    }
+    (cat_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    ref_1 = _get_catalog_ref(cat_dir, "loc-spec", "1.0.0")
+    ref_2 = _get_catalog_ref(cat_dir, "loc-spec", "2.0.0")
+
+    result = compare_protocol_versions(ref_1, ref_2, catalog_dirs=[cat_dir])
+
+    # Find the difference for the modified "Core Section"
+    core_diffs = [d for d in result.differences if "Core Section" in d["title"]]
+    assert len(core_diffs) == 1
+    diff = core_diffs[0]
+
+    core_evids = [e for e in result.diff_evidence if e["evidence_id"] == diff["evidence_id"]]
+    assert len(core_evids) == 1
+    evid = core_evids[0]
+
+    # Verify base_location uses base document's actual line numbers (Lines 1-2)
+    assert diff["base_location"] == "Lines 1-2"
+    assert evid["base_location"] == "Lines 1-2"
+
+    # Verify target_location uses target document's actual line numbers (Lines 6-7)
+    assert "Lines 1-2" not in diff["target_location"]
+    assert "Lines 1-2" not in evid["target_location"]
+    assert diff["target_location"] == "Lines 6-7"
+    assert evid["target_location"] == "Lines 6-7"
+
+    # Confirm base and target locations are strictly distinct
+    assert diff["base_location"] != diff["target_location"]
+    assert evid["base_location"] != evid["target_location"]
+
