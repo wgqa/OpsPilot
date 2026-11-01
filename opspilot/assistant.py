@@ -251,9 +251,24 @@ class Loop(AgentMiddleware):
             own_valid,reason=domain.sources_current(c,self.run_id)
             if not own_valid: raise TaskControlError(reason)
             previous=[]
-            for row in c.execute("SELECT m.body,a.run_id FROM chat_run_answers a JOIN messages m ON m.message_id=a.message_id WHERE m.session_id=? AND m.tenant_id=? AND m.sequence<? AND (m.task_id IS NULL OR m.task_id IS ?) ORDER BY m.sequence DESC LIMIT 6",(run['session_id'],run['tenant_id'],run['consumed_message_seq'],run['task_id'])):
+            selected_ids=set(prepared.get('selected_message_ids',[]))
+            for row in c.execute("SELECT m.message_id,m.body,m.body_digest,m.created_at,m.sequence,a.run_id,r.source_message_id,r.task_id AS answer_task_id FROM chat_run_answers a JOIN messages m ON m.message_id=a.message_id JOIN task_runs r ON r.run_id=a.run_id WHERE m.session_id=? AND m.tenant_id=? AND m.sequence<? AND (r.task_id IS NULL OR r.task_id IS ?) ORDER BY m.sequence DESC LIMIT 6",(run['session_id'],run['tenant_id'],run['consumed_message_seq'],run['task_id'])):
+                selected=row['message_id'] in selected_ids
+                pre_binding_history=run['task_id'] is not None and row['answer_task_id'] is None
+                if not selected and not pre_binding_history:
+                    continue
                 if domain.selected(c,row['run_id']) and domain.sources_current(c,row['run_id'])[0]:
-                    previous.append({'run_id':row['run_id'],'answer':row['body'],'authority':'HISTORY_NOT_NEW_OBSERVATION'})
+                    item={
+                        'run_id':row['run_id'],'answer_message_id':row['message_id'],
+                        'source_message_id':row['source_message_id'],'sequence':row['sequence'],
+                        'created_at':row['created_at'],
+                        'answer_digest':row['body_digest'],
+                        'authority':'HISTORY_NOT_NEW_OBSERVATION',
+                        'content_location':'SELECTED_SESSION_MESSAGES' if selected else 'BOUNDED_PRE_BINDING_HISTORY_EXCERPT',
+                    }
+                    if not selected:
+                        item['answer_excerpt']=domain.history_excerpt(row['body'],220)
+                    previous.append(item)
         payload={'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
                  'authority':'EXPLANATION_ONLY_NO_BUSINESS_RECEIPT','source_message_id':run['source_message_id']}
         if run['task_id']:

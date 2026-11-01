@@ -33,6 +33,110 @@ CREATE TABLE IF NOT EXISTS assistant_calls (
 );
 """
 
+MAX_HISTORY_RUNS = 6
+MAX_HISTORY_SOURCE_RESULTS = 12
+MAX_HISTORY_KNOWLEDGE_DOCS = 2
+MAX_HISTORY_EXCERPT_CHARS = 320
+
+_HISTORICAL_FACT_FIELDS = (
+    "order_id", "order_version", "event_id", "transport_request_id", "request_id",
+    "delivery_id", "delivery_version", "receiver_id", "http_status",
+    "receiver_http_status", "status", "retry_state", "attempt_count",
+    "max_attempts", "failure_code", "accepted_at", "processed_at",
+    "processing_sla_seconds", "sla_deadline", "observed_at",
+)
+
+
+def history_excerpt(value: object, limit: int = MAX_HISTORY_EXCERPT_CHARS) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    if len(value) <= limit:
+        return value
+    marker = "…[historical excerpt truncated]"
+    if limit <= len(marker):
+        return value[:limit]
+    return value[:limit - len(marker)] + marker
+
+
+def _historical_result_summary(tool_name: str, result: dict[str, object]) -> dict[str, object]:
+    """Keep small, typed historical leads after their persisted sources were revalidated."""
+    if isinstance(result.get("documents"), list):
+        documents = result.get("documents")
+        refs = result.get("source_refs")
+        documents = documents if isinstance(documents, list) else []
+        refs = refs if isinstance(refs, list) else []
+        projected = []
+        for document, source_ref in zip(documents, refs):
+            if not isinstance(document, dict) or not isinstance(source_ref, dict):
+                continue
+            projected.append({
+                "document_id": document.get("document_id"),
+                "version": document.get("version"),
+                "digest": document.get("digest"),
+                "source": document.get("source"),
+                "valid_from": document.get("valid_from"),
+                "expires_at": document.get("expires_at"),
+                "excerpt": history_excerpt(document.get("summary") or document.get("content")),
+            })
+            if len(projected) >= MAX_HISTORY_KNOWLEDGE_DOCS:
+                break
+        refs_out = [{
+            key: ref.get(key) for key in (
+                "document_id", "version", "digest", "source", "valid_from", "expires_at",
+            )
+        } for ref in refs[:MAX_HISTORY_KNOWLEDGE_DOCS] if isinstance(ref, dict)]
+        return {
+            "authority": "HISTORICAL_METHOD_ONLY_NOT_CURRENT_BUSINESS_EVIDENCE",
+            "documents": projected,
+            "source_refs": refs_out,
+            "configured_contract_version": result.get("configured_contract_version"),
+            "retrieved_contract_version": result.get("retrieved_contract_version"),
+            "trusted_binding_contract_version": result.get("trusted_binding_contract_version"),
+            "latest_available_contract_version": result.get("latest_available_contract_version"),
+        }
+
+    facts = result.get("facts")
+    if isinstance(facts, dict):
+        projected_facts = {
+            key: facts.get(key) for key in _HISTORICAL_FACT_FIELDS if key in facts
+        }
+        # Transport history may contain multiple related attempts. Keep a few
+        # identity/status fields while making the historical scope explicit.
+        for list_key in ("attempts", "transport_attempts", "events"):
+            records = facts.get(list_key)
+            if isinstance(records, list):
+                projected_facts[list_key] = [
+                    {key: row.get(key) for key in _HISTORICAL_FACT_FIELDS if key in row}
+                    for row in records[:3] if isinstance(row, dict)
+                ]
+        return {
+            "authority": "HISTORICAL_RUN_ONLY",
+            "fact_type": result.get("fact_type"),
+            "resource_id": result.get("resource_id"),
+            "data_source": result.get("data_source"),
+            "trust_class": result.get("trust_class"),
+            "observed_at": result.get("observed_at"),
+            "observed_versions": result.get("observed_versions"),
+            "original_result_ref": result.get("original_result_ref"),
+            "facts": projected_facts,
+        }
+
+    skill = result.get("skill")
+    if isinstance(skill, dict):
+        return {
+            "authority": "HISTORICAL_METHOD_HINT_ONLY",
+            "skill": {
+                "name": skill.get("name"), "version": skill.get("version"),
+                "digest": skill.get("digest"), "contract_versions": skill.get("contract_versions"),
+                "description": history_excerpt(skill.get("description"), 240),
+            },
+            "selection_reason": history_excerpt(result.get("selection_reason"), 160),
+        }
+
+    # Unknown historical tool formats get a source reference, not arbitrary
+    # JSON copied into a future model prompt.
+    return {"authority": "HISTORICAL_TOOL_RESULT_REFERENCE_ONLY", "tool_name": tool_name}
+
 def register(connection, run_id):
     connection.execute("INSERT INTO assistant_runs(run_id,core,created_at) VALUES (?,'ASSISTANT_V1',?)",(run_id,utc_now()))
 
@@ -116,13 +220,36 @@ def sources_current(connection, run_id):
         return False,'ASSISTANT_SOURCE_SCOPE_INVALID'
 
 def history_sources(connection,run):
-    """Bounded prior references are leads, never this Run's current observations."""
+    """Return bounded prior source projections; never current observations for this Run."""
     output=[]
-    previous=connection.execute('SELECT r.run_id,r.task_id FROM task_runs r JOIN assistant_runs a ON a.run_id=r.run_id JOIN messages m ON m.message_id=r.source_message_id WHERE r.session_id=? AND r.tenant_id=? AND m.sequence < ? AND (r.task_id IS NULL OR r.task_id IS ?) ORDER BY m.sequence DESC LIMIT 6',(run['session_id'],run['tenant_id'],run['consumed_message_seq'],run['task_id'])).fetchall()
+    remaining=MAX_HISTORY_SOURCE_RESULTS
+    previous=connection.execute('SELECT r.run_id,r.task_id FROM task_runs r JOIN assistant_runs a ON a.run_id=r.run_id JOIN messages m ON m.message_id=r.source_message_id WHERE r.session_id=? AND r.tenant_id=? AND m.sequence < ? AND (r.task_id IS NULL OR r.task_id IS ?) ORDER BY m.sequence DESC LIMIT ?',(run['session_id'],run['tenant_id'],run['consumed_message_seq'],run['task_id'],MAX_HISTORY_RUNS)).fetchall()
     for old in previous:
         valid,reason=sources_current(connection,old['run_id'])
         refs=[]
+        omitted=0
         if valid:
-            refs=[{'call_id':r['call_id'],'observation_id':r['observation_id'],'evidence_id':r['evidence_id'],'result':json.loads(r['result_json'])} for r in connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' AND status='OK' ORDER BY created_at LIMIT 6",(old['run_id'],))]
-        output.append({'run_id':old['run_id'],'authority':'HISTORICAL_LEAD_NOT_CURRENT_OBSERVATION','current_source_valid':valid,'exclusion_reason':reason,'sources':refs})
+            rows=connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' AND status='OK' ORDER BY created_at DESC",(old['run_id'],)).fetchall()
+            selected=rows[:remaining]
+            omitted=max(0,len(rows)-len(selected))
+            for row in reversed(selected):
+                try:
+                    result=json.loads(row['result_json']) if row['result_json'] is not None else None
+                    request=json.loads(row['request_json']) if row['request_json'] is not None else None
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if not isinstance(result,dict):
+                    continue
+                tool_name=str(request.get('name','')) if isinstance(request,dict) else ''
+                refs.append({
+                    'call_id':row['call_id'],'request_digest':row['request_digest'],
+                    'observation_id':row['observation_id'],'evidence_id':row['evidence_id'],
+                    'created_at':row['created_at'],'completed_at':row['completed_at'],
+                    'observed_at':result.get('observed_at'),
+                    'result_digest':digest_json(result),
+                    'source_authority':'HISTORICAL_RUN_ONLY',
+                    'summary':_historical_result_summary(tool_name,result),
+                })
+            remaining=max(0,remaining-len(refs))
+        output.append({'run_id':old['run_id'],'task_id':old['task_id'],'authority':'HISTORICAL_LEAD_NOT_CURRENT_OBSERVATION','current_source_valid':valid,'exclusion_reason':reason,'sources':refs,'omitted_source_count':omitted})
     return output

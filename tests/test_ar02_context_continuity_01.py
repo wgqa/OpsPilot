@@ -154,7 +154,7 @@ def test_formal_s02_context_stays_bounded_through_s02_4_and_s02_5(
             assert all(source["source_authority"] == "HISTORICAL_RUN_ONLY" for source in sources)
             assert all("result" not in source for source in sources), "historical payloads must be bounded projections"
             answer_refs = refs["prior_answers"]
-            assert answer_refs and all(item.get("answer_digest") for item in answer_refs)
+            assert answer_refs and all(item.get("answer_digest") and item.get("created_at") for item in answer_refs)
             assert all("answer" not in item for item in answer_refs)
             pre_binding_refs = [
                 item for item in answer_refs
