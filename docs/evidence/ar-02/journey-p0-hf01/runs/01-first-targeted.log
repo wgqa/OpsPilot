@@ -1,0 +1,68 @@
+.F
+================================== FAILURES ===================================
+_ test_unbound_explicit_order_tool_proposal_is_not_executed_and_binding_allows_same_request _
+
+demo_db = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf01/runs/tmp-first-01/test_unbound_explicit_order_to0/domain.sqlite3')
+tmp_path = WindowsPath('D:/学习/agent新项目/.worktrees/ar02-live-01/docs/evidence/ar-02/journey-p0-hf01/runs/tmp-first-01/test_unbound_explicit_order_to0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000266E8853BB0>
+
+    def test_unbound_explicit_order_tool_proposal_is_not_executed_and_binding_allows_same_request(
+        demo_db, tmp_path, monkeypatch
+    ):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        prepare_s3_fixture(demo_db, "PROCESSING", order_id="hf01-bound-order", contract_version=2)
+        unbound_model = ExplicitOrderProposalFixture(mode="unused")
+        bound_model = ExplicitOrderProposalFixture(mode="unused")
+        models = deque([unbound_model, bound_model])
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "hf01-binding.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.popleft(),
+        )
+        question = "请查询订单 hf01-bound-order 的当前订单状态。"
+        trace_records = []
+    
+        with TestClient(app) as client:
+            headers = _login(client, ORIGIN, PASSWORDS)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+    
+            with connect(demo_db) as connection:
+                http_before = connection.execute("SELECT COUNT(*) FROM s3_http_observations").fetchone()[0]
+            unbound_response = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "hf01-order-unbound"},
+                json={"body": question},
+            )
+            assert unbound_response.status_code == 202, unbound_response.text
+            unbound = unbound_response.json()
+            unbound_run = _wait_run(client, unbound["run_id"])
+            assert unbound_run["status"] in {"SUCCEEDED", "FAILED", "BLOCKED"}
+            assert unbound_model.proposals == [{
+                "name": "get_order_status",
+                "args": {"reason": "按用户请求查询当前绑定订单状态"},
+            }]
+            assert "get_order_status" not in unbound_model.offered_tool_names
+    
+            from opspilot.domain.database import connect
+            with connect(demo_db) as connection:
+                run_row = connection.execute("SELECT task_id FROM task_runs WHERE run_id=?", (unbound["run_id"],)).fetchone()
+                assert run_row["task_id"] is None
+                assert connection.execute("SELECT COUNT(*) FROM task_bindings").fetchone()[0] == 0
+>               assert connection.execute(
+                    "SELECT COUNT(*) FROM assistant_calls WHERE run_id=? AND kind='MCP'", (unbound["run_id"],)
+                ).fetchone()[0] == 0
+E               assert 1 == 0
+
+tests\test_ar02_journey_p0_hf01.py:318: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_journey_p0_hf01.py::test_unbound_explicit_order_tool_proposal_is_not_executed_and_binding_allows_same_request
+1 failed, 1 passed in 7.27s
+EXIT_CODE=1
