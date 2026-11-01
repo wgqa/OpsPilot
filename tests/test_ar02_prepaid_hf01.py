@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 
 import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -25,15 +26,17 @@ def _new_run(db_path, key: str, *, task_binding: bool = False):
     identity = trusted_identity(db_path, "support-a")
     session_id = create_session(db_path, identity)["session_id"]
     if task_binding:
-        prepare_s3_fixture(db_path, "PROCESSING", order_id=f"hf01-{key}", contract_version=2)
+        fixture_suffix = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+        order_id = f"hf01-{fixture_suffix}"
+        prepare_s3_fixture(db_path, "PROCESSING", order_id=order_id, contract_version=2)
         return create_task_with_initial_run(
             db_path,
             identity,
             session_id=session_id,
             service_id="orders-async-demo",
             integration_id="async-integration-a",
-            ticket_id=f"INC-{key}",
-            s3_order_id=f"hf01-{key}",
+            ticket_id=f"INC-{fixture_suffix}",
+            s3_order_id=order_id,
             initial_message="核查当前绑定订单。",
             idempotency_key=f"hf01-{key}",
             assistant_core=True,
