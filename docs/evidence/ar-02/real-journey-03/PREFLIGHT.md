@@ -19,12 +19,14 @@ Sources:
 
 - https://api-docs.deepseek.com/quick_start/pricing/
 - https://api-docs.deepseek.com/api/create-chat-completion/
+- https://api-docs.deepseek.com/quick_start/agent_integrations/workbuddy/ (official example uses `https://api.deepseek.com/v1/chat/completions`)
 
 ## Local environment and wire checks
 
 - Existing local `.env` presence and expected key names were checked without displaying values. The API key is loaded in memory from that existing file only for the live process; no key is written into evidence.
 - Real provider remains opt-in by `OPSPILOT_ASSISTANT_PROVIDER_ENABLED=1` and the exact new experiment ID.
 - An explicit HTTPX MockTransport test exercises the actual ChatOpenAI serialization. It is required to assert the URL, model, `thinking`, `max_tokens`, tool schema, `tool_choice`, `parallel_tool_calls`, stream mode, no SDK retry, and absence of `max_completion_tokens` before live execution.
+- The existing local Base URL is `https://api.deepseek.com/v1`; only scheme/host/path and API-key presence were inspected, never secret values. The formal factory accepts `/v1`; the official integration example confirms the resulting `/v1/chat/completions` endpoint. The final MockTransport test asserts this exact configured endpoint.
 - Existing context-continuity tests keep the 12,000-token input limit and prove the frozen S02-4/S02-5 deterministic journey fits. A live over-budget context is fail-closed; this task will not raise the limit.
 - The formal runner uses a new ignored runtime directory and new Domain/Checkpoint SQLite files. It refuses to reuse either file.
 - No paid request is made by the preparation tests. No standalone provider connectivity probe is authorized or planned.
@@ -34,6 +36,10 @@ Sources:
 - Focused offline preflight and context continuity: 5 passed, exit code 0. Command: `python -m pytest -q --basetemp=D:\学习\agent新项目\.pytest-temp\ar02-rj03-prep-20261101-01 tests/test_ar02_real_journey_03_prep.py tests/test_ar02_context_continuity_01.py`.
 - Related AR-02 regression: 63 passed, exit code 0. Command: `python -m pytest -q --basetemp=D:\学习\agent新项目\.pytest-temp\ar02-rj03-regression-20261101-01 tests/test_ar02_real_journey_03_prep.py tests/test_ar02_real_journey_budget_scope.py tests/test_ar02_live_budget.py tests/test_ar02_context_continuity_01.py tests/test_ar02_journey_p0.py tests/test_ar02_journey_p0_hf02.py tests/test_ar02_knowledge.py tests/test_ar02_assistant.py tests/test_ar02_runtime.py`.
 - Python source syntax check passed. Runtime versions are recorded in the final report.
+
+## Retained preflight RED
+
+The first local preflight rejected the configured `/v1` Base URL because a copied runner condition required an empty path. This happened before runtime DB creation or any Provider/MCP dispatch. The official DeepSeek WorkBuddy integration page documents the same `/v1/chat/completions` endpoint, so the correction narrows the checker to accept only the two official factory-supported base paths (`""` and `/v1`) and records the exact derived endpoint. The failing traceback is retained in `runs/offline-live-preflight.log`; no request was sent.
 
 ## Execution gate
 

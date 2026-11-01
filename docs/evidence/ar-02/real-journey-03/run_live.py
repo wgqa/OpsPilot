@@ -213,8 +213,10 @@ def _fresh_preflight() -> dict[str, Any]:
     from urllib.parse import urlparse
 
     parsed = urlparse(base)
-    if (parsed.scheme, parsed.hostname, parsed.port, parsed.path, parsed.query, parsed.fragment) != (
-        "https", "api.deepseek.com", None, "", "", ""
+    if (
+        (parsed.scheme, parsed.hostname, parsed.port, parsed.query, parsed.fragment)
+        != ("https", "api.deepseek.com", None, "", "")
+        or parsed.path not in {"", "/v1"}
     ):
         raise RuntimeError("PROVIDER_ENDPOINT_MISMATCH")
     if os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED") != "1":
@@ -236,6 +238,8 @@ def _fresh_preflight() -> dict[str, Any]:
         "provider": "DeepSeek Chat Completions",
         "model": "deepseek-flash",
         "endpoint_origin": "https://api.deepseek.com",
+        "configured_base_path": parsed.path,
+        "chat_completions_endpoint": f"{base.rstrip('/')}/chat/completions",
         "secret_value_logged": False,
         "credential_source": "existing user-local environment file, loaded in memory for this process only",
         "httpx_trust_env": False,

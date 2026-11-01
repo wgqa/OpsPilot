@@ -66,7 +66,7 @@ def test_formal_assistant_sdk_wire_contract_uses_mock_transport_only(monkeypatch
     monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-test-key")
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
-    monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com/v1")
 
     assert create_assistant_model() is None
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
@@ -127,7 +127,7 @@ def test_formal_assistant_sdk_wire_contract_uses_mock_transport_only(monkeypatch
 
     assert len(captured) == 1
     request = captured[0]
-    assert str(request.url) == "https://api.deepseek.com/chat/completions"
+    assert str(request.url) == "https://api.deepseek.com/v1/chat/completions"
     body = json.loads(request.content)
     assert body["model"] == "deepseek-flash"
     assert body["thinking"] == {"type": "disabled"}
