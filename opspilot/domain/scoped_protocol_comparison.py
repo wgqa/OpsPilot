@@ -119,6 +119,8 @@ class ScopedProtocolComparisonResult:
             "actor_id": self.actor_id,
             "grant_version": self.grant_version,
             "scope_digest": self.scope_digest,
+            "base_document_id": self.base_document_id,
+            "target_document_id": self.target_document_id,
             "authority": "SESSION_AUTHORIZED_INVESTIGATION_EVIDENCE_NOT_ACTION_AUTHORIZATION",
             "deployment_version_verified": False,
             "base_ref": self.comparison.base_ref,
@@ -132,6 +134,22 @@ class ScopedProtocolComparisonResult:
             "comparison_digest": self.comparison.comparison_digest,
             "compared_at": self.comparison.compared_at,
         }
+
+
+def _matches_version(entry: dict[str, Any], requested_version: str | None) -> bool:
+    if requested_version is None:
+        return True
+    req_str = str(requested_version).strip()
+    ent_ver = str(entry.get("version", "")).strip()
+    if ent_ver == req_str:
+        return True
+    if ent_ver.startswith(f"{req_str}.") or req_str.startswith(f"{ent_ver}."):
+        return True
+    contract_vers = entry.get("contract_versions")
+    if isinstance(contract_vers, list):
+        if req_str in [str(v) for v in contract_vers]:
+            return True
+    return False
 
 
 def _resolve_catalog_ref(
@@ -160,7 +178,7 @@ def _resolve_catalog_ref(
             if not isinstance(entry, dict):
                 continue
             if entry.get("document_id") == document_id:
-                if version is None or entry.get("version") == version:
+                if _matches_version(entry, version):
                     matching_entries.append((entry, catalog_dir))
 
     if not matching_entries:
@@ -336,7 +354,17 @@ def scoped_comparison_is_current(
         if not isinstance(data, dict):
             return False, "COMPARISON_RESULT_MALFORMED"
 
-        # 1. Check session and active project
+        # 1. Session, Tenant, and Actor isolation checks
+        if "session_id" not in data or data.get("session_id") != session_id:
+            return False, "CROSS_SESSION_COMPARISON_REJECTED"
+
+        if "tenant_id" not in data or data.get("tenant_id") != identity.tenant_id:
+            return False, "CROSS_TENANT_COMPARISON_REJECTED"
+
+        if "actor_id" not in data or data.get("actor_id") != identity.actor_id:
+            return False, "ACTOR_MISMATCH"
+
+        # 2. Check session and active project in SQLite
         try:
             project = get_session_project(db, identity, session_id)
         except KnowledgeScopeDenied as err:
@@ -359,7 +387,19 @@ def scoped_comparison_is_current(
         if data.get("grant_version") != project["grant_version"] or data.get("scope_digest") != digest_json(project):
             return False, "KNOWLEDGE_GRANT_CHANGED"
 
-        # 4. Check underlying files on disk still resolve and verify
+        # 5. Tamper-evident digest check (prevent model or untrusted caller modifying diffs/flags)
+        res_data = {
+            "base_digest": base_ref.get("digest"),
+            "target_digest": target_ref.get("digest"),
+            "identical": data.get("identical"),
+            "diff_count": data.get("diff_count"),
+        }
+        if not data.get("identical"):
+            res_data["differences"] = data.get("differences", [])
+        if data.get("comparison_digest") != digest_json(res_data):
+            return False, "COMPARISON_DIGEST_MISMATCH"
+
+        # 6. Check underlying files on disk still resolve and verify
         try:
             resolved_catalogs = _ensure_catalog_dirs(catalog_dirs)
             resolved_b = resolve_document(base_ref, catalog_dirs=resolved_catalogs)

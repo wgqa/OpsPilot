@@ -38,6 +38,48 @@ async def run(path,run_id):
         # The binding selects applicable documentation, not live deployment truth.
         result['deployment_version_verified']=False
         return result
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+    def compare_scoped_protocols(
+        base_document_id: str,
+        target_document_id: str,
+        base_version: str | int | None = None,
+        target_version: str | int | None = None,
+    ) -> dict:
+        """Compare two protocol specification documents within the authenticated Session's document scope.
+
+        Returns structural differences, line numbers, localized excerpts, and unconfirmed aspects.
+        Does not prove live cluster deployment state. All documents must be authorized under the session's active project.
+        """
+        from opspilot.domain.scoped_protocol_comparison import compare_scoped_protocols
+        from opspilot.domain.protocol_comparison import ProtocolComparisonError
+        from opspilot.domain.assistant_knowledge import KnowledgeScopeDenied
+        from opspilot.domain.task_control import TaskControlError
+
+        current, actor = read_run(path, run_id)
+        b_ver = str(base_version) if base_version is not None else None
+        t_ver = str(target_version) if target_version is not None else None
+        try:
+            comparison = compare_scoped_protocols(
+                path,
+                actor,
+                current['session_id'],
+                base_document_id=base_document_id,
+                target_document_id=target_document_id,
+                base_version=b_ver,
+                target_version=t_ver,
+            )
+            data = comparison.to_dict()
+            data["success"] = True
+            return data
+        except (ProtocolComparisonError, KnowledgeScopeDenied, TaskControlError) as err:
+            return {
+                "success": False,
+                "error": str(err),
+                "reason_code": getattr(err, "reason_code", type(err).__name__),
+                "authority": "TOOL_REFUSAL_NOT_FACT",
+                "deployment_version_verified": False,
+            }
     try: await server.run_stdio_async()
     finally:
         if api:

@@ -99,6 +99,12 @@ def sources_current(connection, run_id):
             elif isinstance(value,dict) and 'documents' in value:
                 ok,reason=knowledge_current(connection,identity,run['session_id'],value)
                 if not ok:return False,reason
+            elif isinstance(value,dict) and ('differences' in value or 'comparison_digest' in value):
+                if value.get('authority') == 'TOOL_REFUSAL_NOT_FACT' or value.get('success') is False:
+                    continue
+                from opspilot.domain.scoped_protocol_comparison import scoped_comparison_is_current
+                ok,reason=scoped_comparison_is_current(connection,identity,run['session_id'],value)
+                if not ok:return False,reason
         return True,None
     except Exception:
         return False,'ASSISTANT_SOURCE_SCOPE_INVALID'
