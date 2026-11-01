@@ -92,6 +92,29 @@ def _scope(connection: sqlite3.Connection, identity: TrustedIdentity, session_id
     return projects, selected
 
 
+def get_session_project(
+    db: sqlite3.Connection | str | Path,
+    identity: TrustedIdentity,
+    session_id: str,
+) -> dict[str, Any]:
+    """Return the currently selected project after rechecking Session and grant."""
+    if isinstance(db, sqlite3.Connection):
+        projects, selected = _scope(db, identity, session_id)
+        if selected is None:
+            raise KnowledgeScopeDenied(
+                "KNOWLEDGE_SCOPE_SELECTION_REQUIRED" if projects else "KNOWLEDGE_SCOPE_DENIED"
+            )
+        return next(project for project in projects if project["project_id"] == selected)
+
+    with connect(db) as connection:
+        projects, selected = _scope(connection, identity, session_id)
+        if selected is None:
+            raise KnowledgeScopeDenied(
+                "KNOWLEDGE_SCOPE_SELECTION_REQUIRED" if projects else "KNOWLEDGE_SCOPE_DENIED"
+            )
+        return next(project for project in projects if project["project_id"] == selected)
+
+
 def _projection(projects: list[dict[str, Any]], selected: str | None) -> dict[str, Any]:
     return {
         "items": [{"project_id": p["project_id"], "title": p["title"],

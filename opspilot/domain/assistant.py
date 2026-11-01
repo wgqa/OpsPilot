@@ -60,6 +60,83 @@ def history_excerpt(value: object, limit: int = MAX_HISTORY_EXCERPT_CHARS) -> st
 
 def _historical_result_summary(tool_name: str, result: dict[str, object]) -> dict[str, object]:
     """Keep small, typed historical leads after their persisted sources were revalidated."""
+    if isinstance(result.get("protocol_documents"), list):
+        documents = result.get("protocol_documents")
+        protocols = result.get("protocols")
+        documents = documents if isinstance(documents, list) else []
+        protocols = protocols if isinstance(protocols, list) else []
+        projected = []
+        for document in documents[:3]:
+            if not isinstance(document, dict):
+                continue
+            projected.append({
+                key: document.get(key) for key in (
+                    "document_id", "title", "version", "contract_versions", "digest",
+                    "source", "valid_from", "expires_at",
+                )
+            })
+        families = []
+        for protocol in protocols[:3]:
+            if isinstance(protocol, dict):
+                families.append({
+                    "family": history_excerpt(protocol.get("family"), 120),
+                    "document_ids": [str(value) for value in protocol.get("document_ids", [])[:4]],
+                    "versions": [str(value) for value in protocol.get("versions", [])[:4]],
+                })
+        return {
+            "authority": "HISTORICAL_PROTOCOL_METHOD_ONLY_NOT_CURRENT_BUSINESS_EVIDENCE",
+            "session_id": result.get("session_id"),
+            "project_id": result.get("project_id"),
+            "grant_version": result.get("grant_version"),
+            "scope_digest": result.get("scope_digest"),
+            "topic": history_excerpt(result.get("topic"), 100),
+            "document_count": result.get("document_count"),
+            "protocol_documents": projected,
+            "protocols": families,
+            "source_refs": projected,
+        }
+
+    if isinstance(result.get("comparison_digest"), str):
+        def _protocol_ref(value):
+            if not isinstance(value, dict):
+                return None
+            return {key: value.get(key) for key in (
+                "document_id", "version", "digest", "source", "valid_from", "expires_at",
+            )}
+
+        differences = result.get("differences")
+        differences = differences if isinstance(differences, list) else []
+        projected_differences = []
+        for item in differences[:3]:
+            if not isinstance(item, dict):
+                continue
+            projected_differences.append({
+                "difference_id": item.get("difference_id"),
+                "category": item.get("category"),
+                "title": history_excerpt(item.get("title"), 120),
+                "description": history_excerpt(item.get("description"), 220),
+                "base_location": history_excerpt(item.get("base_location"), 100),
+                "target_location": history_excerpt(item.get("target_location"), 100),
+                "evidence_id": item.get("evidence_id"),
+            })
+        unconfirmed = result.get("unconfirmed_aspects")
+        unconfirmed = unconfirmed if isinstance(unconfirmed, list) else []
+        return {
+            "authority": "HISTORICAL_PROTOCOL_METHOD_ONLY_NOT_CURRENT_BUSINESS_EVIDENCE",
+            "session_id": result.get("session_id"),
+            "project_id": result.get("project_id"),
+            "grant_version": result.get("grant_version"),
+            "scope_digest": result.get("scope_digest"),
+            "base_ref": _protocol_ref(result.get("base_ref")),
+            "target_ref": _protocol_ref(result.get("target_ref")),
+            "summary": history_excerpt(result.get("summary")),
+            "diff_count": result.get("diff_count"),
+            "differences": projected_differences,
+            "unconfirmed_aspects": [history_excerpt(item, 180) for item in unconfirmed[:3]],
+            "comparison_digest": result.get("comparison_digest"),
+            "deployment_version_verified": False,
+        }
+
     if isinstance(result.get("documents"), list):
         documents = result.get("documents")
         refs = result.get("source_refs")
@@ -193,6 +270,10 @@ def finish(path,call_id,status,result=None,usage=None,observation=None):
 def sources_current(connection, run_id):
     """Revalidate actual persisted sources; never trust a saved Prompt/answer."""
     from opspilot.domain.assistant_knowledge import sources_current as knowledge_current
+    from opspilot.domain.scoped_protocol_comparison import (
+        scoped_comparison_is_current,
+        scoped_discovery_is_current,
+    )
     from opspilot.domain.s3 import current_s3_evidence, get_s3_binding
     try:
         run,identity=state(connection,run_id,active=False)
@@ -212,6 +293,22 @@ def sources_current(connection, run_id):
             if row['evidence_id']:
                 facts,excluded=current_s3_evidence(connection,run['task_id'],[row['evidence_id']],run_id=run_id,observation_ids={row['evidence_id']:row['observation_id']})
                 if excluded or not facts: return False,'BUSINESS_SOURCE_INVALIDATED'
+            elif 'protocol_documents' in value:
+                if value.get('success') is not True:
+                    return False, 'PROTOCOL_DISCOVERY_RESULT_INVALID'
+                ok, reason = scoped_discovery_is_current(
+                    connection, identity, run['session_id'], value,
+                )
+                if not ok:
+                    return False, reason or 'PROTOCOL_DISCOVERY_SOURCE_INVALID'
+            elif 'comparison_digest' in value:
+                if value.get('success') is not True:
+                    return False, 'PROTOCOL_COMPARISON_RESULT_INVALID'
+                ok, reason = scoped_comparison_is_current(
+                    connection, identity, run['session_id'], value,
+                )
+                if not ok:
+                    return False, reason or 'PROTOCOL_COMPARISON_SOURCE_INVALID'
             elif isinstance(value,dict) and 'documents' in value:
                 ok,reason=knowledge_current(connection,identity,run['session_id'],value)
                 if not ok:return False,reason

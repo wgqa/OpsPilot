@@ -1,0 +1,184 @@
+....FF                                                                   [100%]
+================================== FAILURES ===================================
+_ test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation[QUEUED] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-real-journey-02/.pytest-temp/ar02-ar03-green-e2e-03/test_formal_worker_protocol_im0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-real-journey-02/.pytest-temp/ar02-ar03-green-e2e-03/test_formal_worker_protocol_im0')
+receiver_state = 'QUEUED'
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation(
+        demo_db, tmp_path, receiver_state,
+    ):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        fixture = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2,
+        )
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar02-order'"
+                )
+    
+        bind_model = IntegrationFixtureModel(mode="binding")
+        journey_model = IntegrationFixtureModel(mode="bound", receiver_state=receiver_state)
+        models = deque([bind_model, journey_model])
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / f"integration-bound-{receiver_state}.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.popleft(),
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            binding = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": f"ar02-ar03-bind-{receiver_state}"},
+                json={"order_id": "ar02-order", "initial_message": "ͨ��������Դѡ��ȷ�϶����󶨡�"},
+            )
+            assert binding.status_code == 202, binding.text
+            bound = binding.json()
+            assert _wait_run(client, bound["run_id"])["status"] == "SUCCEEDED"
+    
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": f"ar02-ar03-investigate-{receiver_state}"},
+                json={
+                    "body": "�Ƚ���Ȩ�ص�Э��汾������ϱ�������ǰ Event ��������Ӱ�죬����δ�ύ��֧��˵����",
+                    "task_id": bound["task_id"],
+                },
+            )
+            assert accepted.status_code == 202, accepted.text
+            item = accepted.json()
+            assert _wait_run(client, item["run_id"])["status"] == "SUCCEEDED"
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            answer = next(row["body"] for row in messages if row.get("answer_source_message_id") == item["message_id"])
+            assert "HTTP 202" in answer and "����Ӱ��˵���ݸ�" in answer and "δ�ύ" in answer
+            assert "���ϲ���汾" in answer and "δ֪" in answer
+            if receiver_state == "QUEUED":
+                assert "��δ֤���������" in answer and "PROCESSED" not in answer
+            else:
+                assert "�Ѵ������" in answer and "PROCESSED" in answer
+                assert "��δ֤���������" not in answer
+    
+            with connect(demo_db) as connection:
+                calls = connection.execute(
+                    "SELECT request_json,result_json,evidence_id,observation_id FROM assistant_calls "
+                    "WHERE run_id=? AND kind='MCP' ORDER BY created_at", (item["run_id"],),
+                ).fetchall()
+                results_by_name = {
+                    json.loads(row["request_json"])["name"]: (json.loads(row["result_json"]), row)
+                    for row in calls
+                }
+                assert {"list_scoped_protocol_documents", "compare_scoped_protocols",
+                        "get_receiver_processing", "get_callback_delivery", "get_order_status"} <= set(results_by_name)
+                receiver, receiver_row = results_by_name["get_receiver_processing"]
+                delivery, delivery_row = results_by_name["get_callback_delivery"]
+                assert receiver["facts"]["status"] == receiver_state
+                assert receiver["facts"]["event_id"] == delivery["facts"]["event_id"] == fixture["transport_trace"][0]["request"]["event_id"]
+>               assert receiver_row[1]["evidence_id"] and receiver_row[1]["observation_id"]
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               TypeError: string indices must be integers, not 'str'
+
+tests\test_ar02_ar03_integration_01.py:390: TypeError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:55152/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+
+_ test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation[PROCESSED] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-real-journey-02/.pytest-temp/ar02-ar03-green-e2e-03/test_formal_worker_protocol_im1/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-real-journey-02/.pytest-temp/ar02-ar03-green-e2e-03/test_formal_worker_protocol_im1')
+receiver_state = 'PROCESSED'
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation(
+        demo_db, tmp_path, receiver_state,
+    ):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        fixture = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2,
+        )
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar02-order'"
+                )
+    
+        bind_model = IntegrationFixtureModel(mode="binding")
+        journey_model = IntegrationFixtureModel(mode="bound", receiver_state=receiver_state)
+        models = deque([bind_model, journey_model])
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / f"integration-bound-{receiver_state}.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.popleft(),
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            binding = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": f"ar02-ar03-bind-{receiver_state}"},
+                json={"order_id": "ar02-order", "initial_message": "ͨ��������Դѡ��ȷ�϶����󶨡�"},
+            )
+            assert binding.status_code == 202, binding.text
+            bound = binding.json()
+            assert _wait_run(client, bound["run_id"])["status"] == "SUCCEEDED"
+    
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": f"ar02-ar03-investigate-{receiver_state}"},
+                json={
+                    "body": "�Ƚ���Ȩ�ص�Э��汾������ϱ�������ǰ Event ��������Ӱ�죬����δ�ύ��֧��˵����",
+                    "task_id": bound["task_id"],
+                },
+            )
+            assert accepted.status_code == 202, accepted.text
+            item = accepted.json()
+            assert _wait_run(client, item["run_id"])["status"] == "SUCCEEDED"
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            answer = next(row["body"] for row in messages if row.get("answer_source_message_id") == item["message_id"])
+            assert "HTTP 202" in answer and "����Ӱ��˵���ݸ�" in answer and "δ�ύ" in answer
+            assert "���ϲ���汾" in answer and "δ֪" in answer
+            if receiver_state == "QUEUED":
+                assert "��δ֤���������" in answer and "PROCESSED" not in answer
+            else:
+                assert "�Ѵ������" in answer and "PROCESSED" in answer
+                assert "��δ֤���������" not in answer
+    
+            with connect(demo_db) as connection:
+                calls = connection.execute(
+                    "SELECT request_json,result_json,evidence_id,observation_id FROM assistant_calls "
+                    "WHERE run_id=? AND kind='MCP' ORDER BY created_at", (item["run_id"],),
+                ).fetchall()
+                results_by_name = {
+                    json.loads(row["request_json"])["name"]: (json.loads(row["result_json"]), row)
+                    for row in calls
+                }
+                assert {"list_scoped_protocol_documents", "compare_scoped_protocols",
+                        "get_receiver_processing", "get_callback_delivery", "get_order_status"} <= set(results_by_name)
+                receiver, receiver_row = results_by_name["get_receiver_processing"]
+                delivery, delivery_row = results_by_name["get_callback_delivery"]
+                assert receiver["facts"]["status"] == receiver_state
+                assert receiver["facts"]["event_id"] == delivery["facts"]["event_id"] == fixture["transport_trace"][0]["request"]["event_id"]
+>               assert receiver_row[1]["evidence_id"] and receiver_row[1]["observation_id"]
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E               TypeError: string indices must be integers, not 'str'
+
+tests\test_ar02_ar03_integration_01.py:390: TypeError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:55163/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_ar03_integration_01.py::test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation[QUEUED]
+FAILED tests/test_ar02_ar03_integration_01.py::test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation[PROCESSED]
+2 failed, 4 passed in 12.37s

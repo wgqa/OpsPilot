@@ -38,6 +38,74 @@ async def run(path,run_id):
         # The binding selects applicable documentation, not live deployment truth.
         result['deployment_version_verified']=False
         return result
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+    def list_scoped_protocol_documents(topic: str | None = None) -> dict:
+        """Discover versioned protocol documents allowed for this Session.
+
+        This returns scoped static documentation, not live deployment state or
+        action authorization. Callers need not know internal document IDs.
+        """
+        from opspilot.domain.scoped_protocol_comparison import list_scoped_protocols
+        from opspilot.domain.protocol_comparison import ProtocolComparisonError
+        from opspilot.domain.assistant_knowledge import KnowledgeScopeDenied
+        from opspilot.domain.task_control import TaskControlError
+
+        current, actor = read_run(path, run_id)
+        try:
+            result = list_scoped_protocols(
+                path, actor, current['session_id'], topic=topic,
+            )
+            result['success'] = True
+            return result
+        except (ProtocolComparisonError, KnowledgeScopeDenied, TaskControlError) as error:
+            return {
+                'success': False,
+                'error': str(error),
+                'reason_code': getattr(error, 'reason_code', type(error).__name__),
+                'authority': 'TOOL_REFUSAL_NOT_FACT',
+                'deployment_version_verified': False,
+            }
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+    def compare_scoped_protocols(
+        base_document_id: str,
+        target_document_id: str,
+        base_version: str | int | None = None,
+        target_version: str | int | None = None,
+    ) -> dict:
+        """Compare two authorized protocol versions and return sourced section diffs.
+
+        The comparison cannot establish which version is deployed or authorize
+        business actions. Both document IDs must be discovered/authorized in
+        this Session's active project scope.
+        """
+        from opspilot.domain.scoped_protocol_comparison import compare_scoped_protocols as compare
+        from opspilot.domain.protocol_comparison import ProtocolComparisonError
+        from opspilot.domain.assistant_knowledge import KnowledgeScopeDenied
+        from opspilot.domain.task_control import TaskControlError
+
+        current, actor = read_run(path, run_id)
+        try:
+            result = compare(
+                path,
+                actor,
+                current['session_id'],
+                base_document_id=base_document_id,
+                target_document_id=target_document_id,
+                base_version=str(base_version) if base_version is not None else None,
+                target_version=str(target_version) if target_version is not None else None,
+            ).to_dict()
+            result['success'] = True
+            return result
+        except (ProtocolComparisonError, KnowledgeScopeDenied, TaskControlError) as error:
+            return {
+                'success': False,
+                'error': str(error),
+                'reason_code': getattr(error, 'reason_code', type(error).__name__),
+                'authority': 'TOOL_REFUSAL_NOT_FACT',
+                'deployment_version_verified': False,
+            }
     try: await server.run_stdio_async()
     finally:
         if api:

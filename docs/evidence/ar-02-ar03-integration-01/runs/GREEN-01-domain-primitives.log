@@ -1,0 +1,59 @@
+.FF                                                                      [100%]
+================================== FAILURES ===================================
+_____ test_scoped_protocol_comparison_revalidates_all_visible_diff_fields _____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-real-journey-02/.pytest-temp/ar02-ar03-green-domain-01/test_scoped_protocol_compariso0/domain.sqlite3')
+
+    def test_scoped_protocol_comparison_revalidates_all_visible_diff_fields(demo_db):
+        from opspilot.domain.scoped_protocol_comparison import (
+            compare_scoped_protocols,
+            scoped_comparison_is_current,
+        )
+    
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = create_session(demo_db, identity)["session_id"]
+        discovered = _discovery(demo_db, identity, session_id)
+>       old, new = _retry_pair(discovered)
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar02_ar03_integration_01.py:62: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+discovery = {'session_id': 'session-9b67b8f5-8d5e-4d79-a6bd-c303cd6363ea', 'project_id': 'orders-callback', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+
+    def _retry_pair(discovery):
+        docs = discovery["protocol_documents"]
+>       old = next(doc for doc in docs if doc["document_id"].endswith("v1"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       StopIteration
+
+tests\test_ar02_ar03_integration_01.py:21: StopIteration
+_____ test_protocol_history_summary_is_bounded_and_never_current_evidence _____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-real-journey-02/.pytest-temp/ar02-ar03-green-domain-01/test_protocol_history_summary_0/domain.sqlite3')
+
+    def test_protocol_history_summary_is_bounded_and_never_current_evidence(demo_db):
+        from opspilot.domain.scoped_protocol_comparison import compare_scoped_protocols
+    
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = create_session(demo_db, identity)["session_id"]
+        discovered = _discovery(demo_db, identity, session_id)
+>       old, new = _retry_pair(discovered)
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar02_ar03_integration_01.py:97: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+discovery = {'session_id': 'session-98f59843-a688-4530-a900-f3acf203aebd', 'project_id': 'orders-callback', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+
+    def _retry_pair(discovery):
+        docs = discovery["protocol_documents"]
+>       old = next(doc for doc in docs if doc["document_id"].endswith("v1"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       StopIteration
+
+tests\test_ar02_ar03_integration_01.py:21: StopIteration
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_ar03_integration_01.py::test_scoped_protocol_comparison_revalidates_all_visible_diff_fields
+FAILED tests/test_ar02_ar03_integration_01.py::test_protocol_history_summary_is_bounded_and_never_current_evidence
+2 failed, 1 passed in 0.72s

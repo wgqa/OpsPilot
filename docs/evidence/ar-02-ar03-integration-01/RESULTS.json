@@ -1,0 +1,63 @@
+{
+  "status": "ACCEPTANCE_CANDIDATE",
+  "scope": "AR-02 x AR-03 offline isolated integration",
+  "base_sha": "a6935a0944b27d0f5598242eb5e1deaa756af1f4",
+  "plan_commit_sha": "f6690be72cb6d803a562c17f8222d86a2efe36a5",
+  "candidate_sha": null,
+  "branch": "codex/ar02-ar03-integration-01",
+  "remote_candidate_sha": null,
+  "remote_main_sha": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "source_ar03_sha": "255087bae4dc0e9990a650786f5b9aae26f9f1db",
+  "environment": {
+    "python": "repository .venv Python (the system Python lacked langchain_core)",
+    "langchain_core": "1.6.12",
+    "langgraph": "1.2.16",
+    "fastapi": "0.137.1",
+    "pytest": "9.1.1",
+    "mcp": "2.3.0",
+    "tiktoken": "0.14.0"
+  },
+  "checks": [
+    {"name": "AR-03 protocol comparison, scoped-source, and integration final", "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_ar03_protocol_comparison.py tests/test_ar03_02_scoped_protocol_comparison.py tests/test_ar02_ar03_integration_01.py -q --basetemp=.pytest-temp/ar02-ar03-final-confirm", "log": "runs/GREEN-13-final-protocol-integration-command.log", "passed": 50, "failed": 0, "exit_code": 0},
+    {"name": "AR-02 relevant regression", "command": null, "command_note": "The preserved original log contains pytest output and exit status but no command header; exact invocation is therefore not independently recoverable from that log.", "log": "runs/GREEN-09-ar02-regression.log", "passed": 84, "failed": 0, "exit_code": 0},
+    {"name": "Integration positive/negative cases", "command": null, "command_note": "Earlier preserved run log has no command header; final command above reruns the integration file as part of the 50-test set.", "log": "runs/GREEN-10-integration-positive-negative.log", "passed": 7, "failed": 0, "exit_code": 0},
+    {"name": "Unauthorized protocol MCP call trace", "command": null, "command_note": "Earlier preserved run log has no command header; final command above reruns this case as part of the integration file.", "log": "runs/GREEN-11-unauthorized-mcp-trace.log", "passed": 1, "failed": 0, "exit_code": 0},
+    {"name": "Python compileall for changed source and test modules", "log": "runs/STATIC-compileall.log", "exit_code": 0},
+    {"name": "Python source compile, trace/RESULTS JSON parsing, sensitive marker scan", "log": "runs/STATIC-final-source-and-trace.log", "source_files_compiled": 8, "trace_rows_parsed": 74, "sensitive_marker_matches": 0, "exit_code": 0},
+    {"name": "Sensitive marker scan of raw logs", "log": "runs/STATIC-log-scan.log", "raw_log_files": 20, "raw_log_bytes": 30972, "sensitive_marker_matches": 0, "exit_code": 0},
+    {"name": "git diff --cached --check after explicit staging, excluding verbatim raw pytest logs", "command": "git diff --cached --check -- . :(exclude)docs/evidence/ar-02-ar03-integration-01/runs/*.log", "log": "runs/STATIC-diff-check-final.log", "exit_code": 0}
+  ],
+  "trace": {
+    "path": "TRACE.jsonl",
+    "rows": 74,
+    "persisted_runs": 7,
+    "persisted_model_dispatches": 20,
+    "persisted_mcp_calls": 13,
+    "persisted_s3_observations": 6,
+    "persisted_answer_links": 7,
+    "context_estimated_input_tokens_min": 932,
+    "context_estimated_input_tokens_max": 4776,
+    "input_budget_tokens": 12000,
+    "model": "AR02_AR03_INTEGRATION_DETERMINISTIC_FIXTURE",
+    "evidence_level": "deterministic model control-flow; real local API/Worker/SQLite/MCP/HTTP integration"
+  },
+  "side_effects": {
+    "real_provider_requests": 0,
+    "browser_automation": 0,
+    "repair_or_external_business_writes": 0,
+    "approval_action_ledger_or_handoff_writes": 0,
+    "main_modified": false,
+    "historical_budget_or_unknown_records_modified": false
+  },
+  "not_run": [
+    "complete repository pytest suite",
+    "real DeepSeek behavior or usage",
+    "browser journey",
+    "production deployment version verification"
+  ],
+  "known_limitations": [
+    "S02-4's historical real-model non-refresh behavior remains PARTIAL and was not masked by a fixed tool order.",
+    "The deterministic FixtureModel proves product-path wiring and observation-dependent handling, not autonomous model quality.",
+    "The 12,000-token guard is exercised through existing budget accounting; trace token counts are local estimates, not Provider Usage."
+  ]
+}
