@@ -133,6 +133,32 @@ def select_scope(path: str | Path, identity: TrustedIdentity, session_id: str, p
         return _projection(projects, project_id)
 
 
+def get_session_project(
+    db: sqlite3.Connection | str | Path,
+    identity: TrustedIdentity,
+    session_id: str,
+) -> dict[str, Any]:
+    """Retrieve the currently selected and authorized project for an active session.
+
+    Enforces session validity, identity matching, and project grant verification.
+    """
+    if isinstance(db, sqlite3.Connection):
+        projects, selected = _scope(db, identity, session_id)
+        if selected is None:
+            raise KnowledgeScopeDenied(
+                "KNOWLEDGE_SCOPE_SELECTION_REQUIRED" if projects else "KNOWLEDGE_SCOPE_DENIED"
+            )
+        return next(p for p in projects if p["project_id"] == selected)
+
+    with connect(db) as connection:
+        projects, selected = _scope(connection, identity, session_id)
+        if selected is None:
+            raise KnowledgeScopeDenied(
+                "KNOWLEDGE_SCOPE_SELECTION_REQUIRED" if projects else "KNOWLEDGE_SCOPE_DENIED"
+            )
+        return next(p for p in projects if p["project_id"] == selected)
+
+
 def _documents(project: dict[str, Any], contract_version: int | None = None) -> list[dict[str, Any]]:
     allowed = set(project["document_ids"])
     return [d for d in load_knowledge(contract_version=contract_version) if d["document_id"] in allowed]

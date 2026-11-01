@@ -1,0 +1,66 @@
+{
+  "session_id": "session-9ed68059-35b4-4e5f-97cc-c52405178e0b",
+  "project_id": "orders-callback",
+  "tenant_id": "tenant-a",
+  "actor_id": "support-a",
+  "grant_version": 1,
+  "scope_digest": "7456567bdb3806795fb8f0859667b832da54b950ddbf66c2023faeef08578dc6",
+  "authority": "SESSION_AUTHORIZED_INVESTIGATION_EVIDENCE_NOT_ACTION_AUTHORIZATION",
+  "deployment_version_verified": false,
+  "base_ref": {
+    "document_id": "order-lifecycle-contract",
+    "version": "1.0.0",
+    "digest": "8aba3d0fe075d8d8c7f3326c82b6e4ac765aaa57419bd47a039abf86260bf314",
+    "source": "local:orders-async-demo/contract-v1",
+    "valid_from": "2026-10-01T00:00:00+00:00",
+    "expires_at": "2030-01-01T00:00:00+00:00",
+    "title": "Order lifecycle and callback trigger v1"
+  },
+  "target_ref": {
+    "document_id": "order-lifecycle-contract-v2",
+    "version": "2.0.0",
+    "digest": "a8c1f4a0f7db5820d4884ba9de55df93c5ec0307ab668c88b00947500a9b2994",
+    "source": "local:orders-async-demo/contract-v2",
+    "valid_from": "2026-10-01T00:00:00+00:00",
+    "expires_at": "2030-01-01T00:00:00+00:00",
+    "title": "Order lifecycle and asynchronous event publication v2"
+  },
+  "identical": false,
+  "summary": "Compared order-lifecycle-contract (v1.0.0) with order-lifecycle-contract-v2 (v2.0.0): 1 structural differences detected. Candidate lexical cues detected in target text (behavioral cues: ASYNC_PUBLICATION). Notice: Lexical keywords serve as investigation cues only; protocol semantics and runtime adoption must be verified via context and live telemetry.",
+  "diff_count": 1,
+  "differences": [
+    {
+      "difference_id": "DIFF-001",
+      "category": "TEXT_DIFFERENCE",
+      "title": "Section modified: Root",
+      "description": "Section 'Root' content modified. Changes include candidate candidate behavioral cues: ASYNC_PUBLICATION (advisory lexical hint; does not prove runtime rule adoption).",
+      "base_location": "Lines 1-1",
+      "target_location": "Lines 1-1",
+      "evidence_id": "EVID-001"
+    }
+  ],
+  "diff_evidence": [
+    {
+      "evidence_id": "EVID-001",
+      "diff_type": "SECTION_MODIFIED",
+      "base_doc_id": "order-lifecycle-contract",
+      "base_version": "1.0.0",
+      "base_location": "Lines 1-1",
+      "base_excerpt": "Protocol v1. HTTP 200 on an order read means the request succeeded, not that the order completed. Callback is emitted only after COMPLETED. A PROCESSING order does not prove a callback failure. Query current order state before drawing a root cause. Use the same bound order version when correlating its callback event.",
+      "base_excerpt_digest": "f75ffef7a25f3ac7ab7c0835afee8b67e597f0fbc4e405bed5e5edd41659422d",
+      "target_doc_id": "order-lifecycle-contract-v2",
+      "target_version": "2.0.0",
+      "target_location": "Lines 1-1",
+      "target_excerpt": "Protocol v2. HTTP 200 confirms only that the bound order read succeeded. Callback creation follows the terminal COMPLETED transition, but event publication can be asynchronous. Correlate the event's order version to the current bound order and inspect a delivery attempt before attributing a missing callback to transport failure. Do not treat PROCESSING as a callback incident.",
+      "target_excerpt_digest": "ae85cd595b383c9712269f38c3351f4df478ffe9268cd3a934aac750ec15221c",
+      "traceability": "Content difference verified in section 'Root' between v1.0.0 and v2.0.0"
+    }
+  ],
+  "unconfirmed_aspects": [
+    "LIVE_DEPLOYMENT_VERSION_UNVERIFIED: Static protocol documents describe specifications only. They cannot prove which version is actually running in production/cluster environments without live probing.",
+    "RUNTIME_CONSUMER_READINESS_UNVERIFIED: Cannot determine whether live callers, queues, or consumers have adopted this target contract version without runtime observation.",
+    "HISTORICAL_SPECIFICATION_BOUNDARY: Comparison reflects documented specifications as authored; runtime bug fixes or unannounced gateway routing behaviors are not verified by document text."
+  ],
+  "comparison_digest": "72d5586b8d8f54e94f3d37a72364754dc600167db72fb6d39c8366f749b75355",
+  "compared_at": "2026-11-01T08:19:44.232+00:00"
+}
