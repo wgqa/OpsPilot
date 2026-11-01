@@ -1,12 +1,49 @@
 {
-  "status": "PREPARATION_IN_PROGRESS",
+  "status": "FREE_PREPARATION_COMPLETE_WAITING_FOR_PAID_AUTHORIZATION",
   "base_sha": "d576bb9dbad8ee96500de14bd215fcf26e1fb527",
+  "freeze_commit": "ec3faeb",
+  "implementation_commit": "d77efb9796408935560ca12fa504cd28d06f47ef",
   "branch": "codex/ar02-live-01",
+  "remote_main": "UNVERIFIED: git ls-remote failed to connect to GitHub HTTPS port 443",
   "paid_provider_authorized": false,
   "provider_requests": 0,
   "real_s01": "NOT_RUN",
   "real_s02": "NOT_RUN",
   "browser": "NOT_RUN",
+  "full_pytest": "NOT_RUN",
+  "runtime": {
+    "python": "3.14.0",
+    "langchain": "1.4.1",
+    "langchain_core": "1.6.12",
+    "langchain_openai": "1.7.2",
+    "httpx2": "2.13.1",
+    "mcp": "2.3.0",
+    "pytest": "9.1.1",
+    "environment_source": "existing D:\\学习\\agent新项目\\.venv; no install performed"
+  },
+  "focused_regressions": {
+    "status": "PASS",
+    "passed": 47,
+    "failed": 0,
+    "suite": [
+      "test_ar02_real_journey_budget_scope.py",
+      "test_ar02_live_budget.py",
+      "test_ar02_smoke_provider_factory.py",
+      "test_ar02_journey_p0.py",
+      "test_ar02_journey_p0_hf01.py",
+      "test_ar02_journey_p0_hf02.py",
+      "test_ar02_live_hf02.py"
+    ],
+    "log_archive": "runs/regression-02.zip"
+  },
+  "local_formal_worker_trace": {
+    "status": "PASS",
+    "source": "deterministic FixtureModel via FastAPI TestClient and single formal Worker",
+    "trace": "TRACE.jsonl",
+    "raw_log_archive": "runs/formal-worker-trace-03.zip",
+    "provider_network_requests": 0,
+    "business_writes": 0
+  },
   "budget": {
     "experiment_id": "AR-02-REAL-JOURNEY-01",
     "provider_limit": 16,
@@ -24,6 +61,55 @@
       "exit_code": 1,
       "summary": "4 failed; new experiment scope rejected by ledger, provider factory, app, and legacy-schema expectation",
       "log_archive": "runs/frozen-red.zip"
+    },
+    {
+      "command": "python -m pytest -q tests/test_ar02_real_journey_budget_scope.py --basetemp=.pytest-tmp/ar02-real-journey-green-01",
+      "phase": "first_GREEN_attempt_wrong_global_interpreter",
+      "exit_code": 1,
+      "summary": "3 passed, 1 failed on import because global D:\\python lacked locked langchain dependency; rerun with repository venv",
+      "log_archive": "runs/green-scope-01.zip"
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_real_journey_budget_scope.py --basetemp=.runtime/pytest-ar02-real-journey-green-02",
+      "phase": "focused_GREEN",
+      "exit_code": 0,
+      "summary": "4 passed",
+      "log_archive": "runs/green-scope-02.zip"
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_real_journey_budget_scope.py --basetemp=.runtime/pytest-ar02-real-journey-green-03",
+      "phase": "focused_GREEN_with_formal_worker_path",
+      "exit_code": 0,
+      "summary": "5 passed",
+      "log_archive": "runs/green-scope-03.zip"
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_real_journey_budget_scope.py::test_formal_worker_uses_new_budget_identity_with_deterministic_model --basetemp=.runtime/pytest-ar02-real-journey-trace-02",
+      "phase": "formal_API_Worker_trace_capture",
+      "exit_code": 0,
+      "summary": "1 passed; persisted API/Worker/Session correlation emitted in TRACE.jsonl",
+      "log_archive": "runs/formal-worker-trace-02.zip"
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_real_journey_budget_scope.py tests/test_ar02_live_budget.py tests/test_ar02_smoke_provider_factory.py tests/test_ar02_journey_p0.py tests/test_ar02_journey_p0_hf01.py tests/test_ar02_journey_p0_hf02.py tests/test_ar02_live_hf02.py --basetemp=.runtime/pytest-ar02-real-journey-regression-01",
+      "phase": "focused_AR02_regression",
+      "exit_code": 0,
+      "summary": "47 passed in 46.61s",
+      "log_archive": "runs/regression-01.zip"
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q -s tests/test_ar02_real_journey_budget_scope.py::test_formal_worker_uses_new_budget_identity_with_deterministic_model --basetemp=.runtime/pytest-ar02-real-journey-trace-03",
+      "phase": "final_formal_API_Worker_trace_capture",
+      "exit_code": 0,
+      "summary": "1 passed; HTTP 202, FixtureModel answer, Session/source Message/Run linkage and zero Provider/network/business-write observed",
+      "log_archive": "runs/formal-worker-trace-03.zip"
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_real_journey_budget_scope.py tests/test_ar02_live_budget.py tests/test_ar02_smoke_provider_factory.py tests/test_ar02_journey_p0.py tests/test_ar02_journey_p0_hf01.py tests/test_ar02_journey_p0_hf02.py tests/test_ar02_live_hf02.py --basetemp=.runtime/pytest-ar02-real-journey-regression-02",
+      "phase": "final_focused_AR02_regression",
+      "exit_code": 0,
+      "summary": "47 passed in 45.89s",
+      "log_archive": "runs/regression-02.zip"
     }
   ],
   "known_blockers": ["Need separate explicit user authorization before any real Provider request"]
