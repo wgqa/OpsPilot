@@ -23,13 +23,15 @@ Sources:
 
 ## Local environment and wire checks
 
-- Existing local `.env` presence and expected key names were checked without displaying values. The API key is loaded in memory from that existing file only for the live process; no key is written into evidence.
+- Existing local `.env` presence and expected key names were checked without displaying values. The API key is loaded in memory from that existing file only for the live process; no key is written into evidence. The no-network formal preflight confirmed the key is present; it did not print or hash it.
 - Real provider remains opt-in by `OPSPILOT_ASSISTANT_PROVIDER_ENABLED=1` and the exact new experiment ID.
 - An explicit HTTPX MockTransport test exercises the actual ChatOpenAI serialization. It is required to assert the URL, model, `thinking`, `max_tokens`, tool schema, `tool_choice`, `parallel_tool_calls`, stream mode, no SDK retry, and absence of `max_completion_tokens` before live execution.
 - The existing local Base URL is `https://api.deepseek.com/v1`; only scheme/host/path and API-key presence were inspected, never secret values. The formal factory accepts `/v1`; the official integration example confirms the resulting `/v1/chat/completions` endpoint. The final MockTransport test asserts this exact configured endpoint.
 - Existing context-continuity tests keep the 12,000-token input limit and prove the frozen S02-4/S02-5 deterministic journey fits. A live over-budget context is fail-closed; this task will not raise the limit.
 - The formal runner uses a new ignored runtime directory and new Domain/Checkpoint SQLite files. It refuses to reuse either file.
 - No paid request is made by the preparation tests. No standalone provider connectivity probe is authorized or planned.
+
+The no-network formal runner preflight passed on implementation commit `635e000bb2957643e1b642403218d7aa1f807a03`. It verified the exact branch/head and frozen blobs, model `deepseek-flash`, `/v1/chat/completions` endpoint, provider opt-in and new experiment ID, 30-second timeout, zero retries, request limits, configured budget, key presence, and that both fresh runtime DB paths were absent. The real model client was constructed and closed without I/O. See `PREFLIGHT_LOCAL.json` and the raw red/green logs in `runs/`.
 
 ## Offline execution results
 
