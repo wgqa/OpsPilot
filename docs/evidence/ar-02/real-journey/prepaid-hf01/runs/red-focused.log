@@ -1,0 +1,285 @@
+.FFFFFF                                                                  [100%]
+================================== FAILURES ===================================
+____ test_unknown_usage_closes_campaign_and_preserves_reservation[missing] ____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_unknown_usage_closes_camp0/domain.sqlite3')
+usage = None
+
+    @pytest.mark.parametrize(
+        "usage",
+        [
+            None,
+            {"input_tokens": 2, "output_tokens": "bad", "total_tokens": 2},
+            {"input_tokens": True, "output_tokens": 2, "total_tokens": 3},
+        ],
+        ids=["missing", "malformed-output", "boolean-input"],
+    )
+    def test_unknown_usage_closes_campaign_and_preserves_reservation(demo_db, usage):
+        from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            complete_dispatch,
+            initialize_experiment,
+            read_budget,
+            reserve_dispatch,
+        )
+    
+        initialize_experiment(demo_db, EXPERIMENT_ID)
+        first = _new_run(demo_db, f"unknown-usage-{str(usage)}")
+        other_run = _new_run(demo_db, f"after-unknown-usage-{str(usage)}")
+        reserve_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", request={"prompt": "usage will be invalid"},
+        )
+        result = complete_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", usage=usage,
+        )
+    
+        assert result["usage_state"] == "UNKNOWN"
+        snapshot = read_budget(demo_db, EXPERIMENT_ID)
+>       assert snapshot["status"] == "BUDGET_BREACH"
+E       AssertionError: assert 'OPEN' == 'BUDGET_BREACH'
+E         
+E         - BUDGET_BREACH
+E         + OPEN
+
+tests\test_ar02_prepaid_hf01.py:148: AssertionError
+_ test_unknown_usage_closes_campaign_and_preserves_reservation[malformed-output] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_unknown_usage_closes_camp1/domain.sqlite3')
+usage = {'input_tokens': 2, 'output_tokens': 'bad', 'total_tokens': 2}
+
+    @pytest.mark.parametrize(
+        "usage",
+        [
+            None,
+            {"input_tokens": 2, "output_tokens": "bad", "total_tokens": 2},
+            {"input_tokens": True, "output_tokens": 2, "total_tokens": 3},
+        ],
+        ids=["missing", "malformed-output", "boolean-input"],
+    )
+    def test_unknown_usage_closes_campaign_and_preserves_reservation(demo_db, usage):
+        from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            complete_dispatch,
+            initialize_experiment,
+            read_budget,
+            reserve_dispatch,
+        )
+    
+        initialize_experiment(demo_db, EXPERIMENT_ID)
+        first = _new_run(demo_db, f"unknown-usage-{str(usage)}")
+        other_run = _new_run(demo_db, f"after-unknown-usage-{str(usage)}")
+        reserve_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", request={"prompt": "usage will be invalid"},
+        )
+        result = complete_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", usage=usage,
+        )
+    
+        assert result["usage_state"] == "UNKNOWN"
+        snapshot = read_budget(demo_db, EXPERIMENT_ID)
+>       assert snapshot["status"] == "BUDGET_BREACH"
+E       AssertionError: assert 'OPEN' == 'BUDGET_BREACH'
+E         
+E         - BUDGET_BREACH
+E         + OPEN
+
+tests\test_ar02_prepaid_hf01.py:148: AssertionError
+_ test_unknown_usage_closes_campaign_and_preserves_reservation[boolean-input] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_unknown_usage_closes_camp2/domain.sqlite3')
+usage = {'input_tokens': True, 'output_tokens': 2, 'total_tokens': 3}
+
+    @pytest.mark.parametrize(
+        "usage",
+        [
+            None,
+            {"input_tokens": 2, "output_tokens": "bad", "total_tokens": 2},
+            {"input_tokens": True, "output_tokens": 2, "total_tokens": 3},
+        ],
+        ids=["missing", "malformed-output", "boolean-input"],
+    )
+    def test_unknown_usage_closes_campaign_and_preserves_reservation(demo_db, usage):
+        from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            complete_dispatch,
+            initialize_experiment,
+            read_budget,
+            reserve_dispatch,
+        )
+    
+        initialize_experiment(demo_db, EXPERIMENT_ID)
+        first = _new_run(demo_db, f"unknown-usage-{str(usage)}")
+        other_run = _new_run(demo_db, f"after-unknown-usage-{str(usage)}")
+        reserve_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", request={"prompt": "usage will be invalid"},
+        )
+        result = complete_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", usage=usage,
+        )
+    
+        assert result["usage_state"] == "UNKNOWN"
+        snapshot = read_budget(demo_db, EXPERIMENT_ID)
+>       assert snapshot["status"] == "BUDGET_BREACH"
+E       AssertionError: assert 'OPEN' == 'BUDGET_BREACH'
+E         
+E         - BUDGET_BREACH
+E         + OPEN
+
+tests\test_ar02_prepaid_hf01.py:148: AssertionError
+________ test_provider_unknown_is_a_durable_campaign_stop_after_reopen ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_provider_unknown_is_a_dur0/domain.sqlite3')
+
+    def test_provider_unknown_is_a_durable_campaign_stop_after_reopen(demo_db):
+        from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            initialize_experiment,
+            mark_unknown,
+            read_budget,
+            reserve_dispatch,
+        )
+    
+        initialize_experiment(demo_db, EXPERIMENT_ID)
+        first = _new_run(demo_db, "response-lost")
+        other_run = _new_run(demo_db, "response-lost-new-run")
+        reserve_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", request={"prompt": "single authorized request"},
+        )
+        mark_unknown(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", error_code="SimulatedTimeout",
+        )
+    
+        # Each domain call opens a fresh SQLite connection, modeling worker restart.
+        with pytest.raises(ExperimentBudgetError, match="AR02_LIVE_CALL_OUTCOME_UNKNOWN"):
+            reserve_dispatch(
+                demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+                logical_key="model:0", request={"prompt": "single authorized request"},
+            )
+>       with pytest.raises(ExperimentBudgetError, match="AR02_LIVE_SPEND_BOUND_BREACHED"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ExperimentBudgetError
+
+tests\test_ar02_prepaid_hf01.py:190: Failed
+_ test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known[unknown-usage] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_assistant_stops_before_to0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_assistant_stops_before_to0')
+usage = None
+
+    @pytest.mark.parametrize(
+        "usage",
+        [None, {"input_tokens": 1, "output_tokens": 2049, "total_tokens": 2050}],
+        ids=["unknown-usage", "usage-violation"],
+    )
+    def test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known(
+        demo_db, tmp_path, usage
+    ):
+        from opspilot.assistant import run_assistant
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.domain.task_control import claim_task_run, register_worker_owner, trusted_identity
+    
+        created = _new_run(demo_db, f"assistant-abnormal-{usage}", task_binding=True)
+        worker_id = f"hf01-worker-{created['run_id']}"
+        register_worker_owner(demo_db, worker_id, __import__("os").getpid())
+        claim_task_run(demo_db, trusted_identity(demo_db, "support-a"), created["run_id"])
+        model = ToolCallModel(usage=usage)
+        events = []
+        result = asyncio.run(
+            run_assistant(
+                demo_db,
+                tmp_path / f"{created['run_id']}-checkpoint.sqlite3",
+                worker_id,
+                created["run_id"],
+                model=model,
+                trace=lambda event, **values: events.append({"event": event, **values}),
+                experiment_id=EXPERIMENT_ID,
+            )
+        )
+    
+>       assert model.calls == 1
+E       AssertionError: assert 7 == 1
+E        +  where 7 = ToolCallModel(metadata={'lc_versions': {'langchain-core': '1.6.12', 'langchain': '1.4.1'}}, calls=7).calls
+
+tests\test_ar02_prepaid_hf01.py:233: AssertionError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:63310/api/async-orders/async-order?order_id=hf01-assistant-abnormal-None "HTTP/1.0 200 OK"
+
+HTTP Request: GET http://127.0.0.1:63310/api/async-orders/async-order?order_id=hf01-assistant-abnormal-None "HTTP/1.0 200 OK"
+
+HTTP Request: GET http://127.0.0.1:63310/api/async-orders/async-order?order_id=hf01-assistant-abnormal-None "HTTP/1.0 200 OK"
+
+HTTP Request: GET http://127.0.0.1:63310/api/async-orders/async-order?order_id=hf01-assistant-abnormal-None "HTTP/1.0 200 OK"
+
+HTTP Request: GET http://127.0.0.1:63310/api/async-orders/async-order?order_id=hf01-assistant-abnormal-None "HTTP/1.0 200 OK"
+
+HTTP Request: GET http://127.0.0.1:63310/api/async-orders/async-order?order_id=hf01-assistant-abnormal-None "HTTP/1.0 200 OK"
+
+_ test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known[usage-violation] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_assistant_stops_before_to1/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_assistant_stops_before_to1')
+usage = {'input_tokens': 1, 'output_tokens': 2049, 'total_tokens': 2050}
+
+    @pytest.mark.parametrize(
+        "usage",
+        [None, {"input_tokens": 1, "output_tokens": 2049, "total_tokens": 2050}],
+        ids=["unknown-usage", "usage-violation"],
+    )
+    def test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known(
+        demo_db, tmp_path, usage
+    ):
+        from opspilot.assistant import run_assistant
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.domain.task_control import claim_task_run, register_worker_owner, trusted_identity
+    
+>       created = _new_run(demo_db, f"assistant-abnormal-{usage}", task_binding=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar02_prepaid_hf01.py:215: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar02_prepaid_hf01.py:28: in _new_run
+    prepare_s3_fixture(db_path, "PROCESSING", order_id=f"hf01-{key}", contract_version=2)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101/test_assistant_stops_before_to1/domain.sqlite3')
+state = 'PROCESSING', tenant_id = 'tenant-a'
+order_id = "hf01-assistant-abnormal-{'input_tokens': 1, 'output_tokens': 2049, 'total_tokens': 2050}"
+contract_version = 2, failure_code = 'TEMPORARY_UNAVAILABLE'
+attempt_count = None, max_attempts = 3, retry_state = None
+retry_after_seconds = 60, queue_age_seconds = 60, processing_sla_seconds = 300
+
+    def prepare_s3_fixture(
+        path: str | Path, state: str, *, tenant_id: str = "tenant-a", order_id: str = ORDER,
+        contract_version: int = 1, failure_code: str = "TEMPORARY_UNAVAILABLE",
+        attempt_count: int | None = None, max_attempts: int = 3, retry_state: str | None = None,
+        retry_after_seconds: int = 60, queue_age_seconds: int = 60,
+        processing_sla_seconds: int = 300,
+    ) -> dict[str, object]:
+        """Explicit test setup, NOT a registered tool/API. Performs a real receiver POST."""
+        if state not in {"PROCESSING", "DELIVERY_FAILED", "DELIVERED_PENDING"}:
+            raise ValueError("Unknown S3 test state")
+        if not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", order_id):
+>           raise ValueError("S3 fixture order id is invalid")
+E           ValueError: S3 fixture order id is invalid
+
+opspilot\domain\s3.py:316: ValueError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_prepaid_hf01.py::test_unknown_usage_closes_campaign_and_preserves_reservation[missing]
+FAILED tests/test_ar02_prepaid_hf01.py::test_unknown_usage_closes_campaign_and_preserves_reservation[malformed-output]
+FAILED tests/test_ar02_prepaid_hf01.py::test_unknown_usage_closes_campaign_and_preserves_reservation[boolean-input]
+FAILED tests/test_ar02_prepaid_hf01.py::test_provider_unknown_is_a_durable_campaign_stop_after_reopen
+FAILED tests/test_ar02_prepaid_hf01.py::test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known[unknown-usage]
+FAILED tests/test_ar02_prepaid_hf01.py::test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known[usage-violation]
+6 failed, 1 passed in 5.71s
+
+EXIT_CODE=1

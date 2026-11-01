@@ -1,0 +1,84 @@
+{
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/ar02-live-01",
+  "base_sha": "8c665912f3f544e208cdeb863c058707f7a99236",
+  "acceptance_plan_commit": "a8a218cce1fd29ab8f271c8b7c72cbca520b87bc",
+  "frozen_test_commit": "0562c6c6769fe04c66be1c8380570b7fdd7ded0a",
+  "test_fixture_correction_commit": "196acd7b82a8a0347800c49be171f79ee9b642c2",
+  "source_test_commit": "c77d54e7fcc3479086fa0d2339716c4e39d2ee6a",
+  "environment": {
+    "os": "Windows",
+    "workspace_drive": "D:",
+    "python": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe",
+    "python_version": "3.14.0",
+    "pytest_version": "9.1.1",
+    "langchain": "1.4.1",
+    "langchain_core": "1.6.12",
+    "langgraph": "1.2.16",
+    "httpx": "0.28.1",
+    "isolated_sqlite": true,
+    "deterministic_model": true,
+    "mock_or_local_http_only": true
+  },
+  "external_activity": {
+    "real_provider_requests": 0,
+    "browser_automation": 0,
+    "external_business_writes": 0,
+    "main_modified": false,
+    "antigravity_modified": false
+  },
+  "runs": [
+    {
+      "id": "initial_red_with_fixture_issue",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_prepaid_hf01.py --basetemp docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-basetemp-20261101 --disable-warnings",
+      "passed": 1,
+      "failed": 6,
+      "exit_code": 1,
+      "log": "runs/red-focused.log",
+      "classification": "NOT_VALID_BUSINESS_RED; one parametrized S3 fixture ID was invalid"
+    },
+    {
+      "id": "valid_red",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_prepaid_hf01.py --basetemp docs/evidence/ar-02/real-journey/prepaid-hf01/runs/red-corrected-basetemp-20261101 --disable-warnings",
+      "passed": 1,
+      "failed": 6,
+      "exit_code": 1,
+      "log": "runs/red-corrected-fixture.log",
+      "classification": "RED_REPRODUCED"
+    },
+    {
+      "id": "implementation_intermediate",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_prepaid_hf01.py --basetemp docs/evidence/ar-02/real-journey/prepaid-hf01/runs/green-basetemp-20261101 --disable-warnings",
+      "passed": 5,
+      "failed": 2,
+      "exit_code": 1,
+      "log": "runs/green-focused.log",
+      "classification": "INTERMEDIATE; assertion compatibility and expected-cost calculation corrected"
+    },
+    {
+      "id": "final_hf01",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_prepaid_hf01.py --basetemp docs/evidence/ar-02/real-journey/prepaid-hf01/runs/green-final-basetemp-20261101 --disable-warnings",
+      "passed": 8,
+      "failed": 0,
+      "exit_code": 0,
+      "duration": "7.26s",
+      "log": "runs/green-focused-final.log"
+    },
+    {
+      "id": "related_ar02_regression",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar02_live_budget.py tests/test_ar02_live_hf02.py tests/test_ar02_real_journey_budget_scope.py tests/test_ar02_runtime.py tests/test_ar02_journey_p0.py tests/test_ar02_journey_p0_hf01.py tests/test_ar02_journey_p0_hf02.py --basetemp docs/evidence/ar-02/real-journey/prepaid-hf01/runs/ar02-regression-basetemp-20261101 --disable-warnings",
+      "passed": 54,
+      "failed": 0,
+      "exit_code": 0,
+      "duration": "77.84s",
+      "log": "runs/ar02-regression.log"
+    }
+  ],
+  "not_run": [
+    "full pytest suite",
+    "real Provider calls",
+    "browser automation",
+    "paid S01/S02 journey"
+  ]
+}

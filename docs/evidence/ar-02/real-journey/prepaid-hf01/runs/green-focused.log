@@ -1,0 +1,110 @@
+....F.F                                                                  [100%]
+================================== FAILURES ===================================
+________ test_provider_unknown_is_a_durable_campaign_stop_after_reopen ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/green-basetemp-20261101/test_provider_unknown_is_a_dur0/domain.sqlite3')
+
+    def test_provider_unknown_is_a_durable_campaign_stop_after_reopen(demo_db):
+        from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            initialize_experiment,
+            mark_unknown,
+            read_budget,
+            reserve_dispatch,
+        )
+    
+        initialize_experiment(demo_db, EXPERIMENT_ID)
+        first = _new_run(demo_db, "response-lost")
+        other_run = _new_run(demo_db, "response-lost-new-run")
+        reserve_dispatch(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", request={"prompt": "single authorized request"},
+        )
+        mark_unknown(
+            demo_db, experiment_id=EXPERIMENT_ID, run_id=first["run_id"], kind="MODEL",
+            logical_key="model:0", error_code="SimulatedTimeout",
+        )
+    
+        # Each domain call opens a fresh SQLite connection, modeling worker restart.
+>       with pytest.raises(ExperimentBudgetError, match="AR02_LIVE_CALL_OUTCOME_UNKNOWN"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'AR02_LIVE_CALL_OUTCOME_UNKNOWN'
+E         Actual message: 'AR02_LIVE_SPEND_BOUND_BREACHED'
+
+tests\test_ar02_prepaid_hf01.py:188: AssertionError
+_ test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known[usage-violation] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/green-basetemp-20261101/test_assistant_stops_before_to1/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/docs/evidence/ar-02/real-journey/prepaid-hf01/runs/green-basetemp-20261101/test_assistant_stops_before_to1')
+usage = {'input_tokens': 1, 'output_tokens': 2049, 'total_tokens': 2050}
+
+    @pytest.mark.parametrize(
+        "usage",
+        [None, {"input_tokens": 1, "output_tokens": 2049, "total_tokens": 2050}],
+        ids=["unknown-usage", "usage-violation"],
+    )
+    def test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known(
+        demo_db, tmp_path, usage
+    ):
+        from opspilot.assistant import run_assistant
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.domain.task_control import claim_task_run, register_worker_owner, trusted_identity
+    
+        created = _new_run(demo_db, f"assistant-abnormal-{usage}", task_binding=True)
+        worker_id = f"hf01-worker-{created['run_id']}"
+        register_worker_owner(demo_db, worker_id, __import__("os").getpid())
+        claim_task_run(demo_db, trusted_identity(demo_db, "support-a"), created["run_id"])
+        model = ToolCallModel(usage=usage)
+        events = []
+        result = asyncio.run(
+            run_assistant(
+                demo_db,
+                tmp_path / f"{created['run_id']}-checkpoint.sqlite3",
+                worker_id,
+                created["run_id"],
+                model=model,
+                trace=lambda event, **values: events.append({"event": event, **values}),
+                experiment_id=EXPERIMENT_ID,
+            )
+        )
+    
+        assert model.calls == 1
+        assert result["status"] == "NOT_COMPLETED"
+        assert not any(event["event"] == "tool_observation" for event in events)
+        with connect(demo_db) as connection:
+            calls = connection.execute(
+                "SELECT kind, status FROM assistant_calls WHERE run_id=? ORDER BY kind",
+                (created["run_id"],),
+            ).fetchall()
+            dispatch = connection.execute(
+                "SELECT status, usage_state, reserved_usd_micro, settled_usd_micro "
+                "FROM ar02_live_dispatches WHERE experiment_id=? AND run_id=?",
+                (EXPERIMENT_ID, created["run_id"]),
+            ).fetchall()
+            answers = connection.execute(
+                "SELECT COUNT(*) FROM chat_run_answers WHERE run_id=?", (created["run_id"],)
+            ).fetchone()[0]
+            observations = connection.execute(
+                "SELECT COUNT(*) FROM d2_tool_observations WHERE task_id=?", (created["task_id"],)
+            ).fetchone()[0]
+            run_status = connection.execute(
+                "SELECT status FROM task_runs WHERE run_id=?", (created["run_id"],)
+            ).fetchone()[0]
+    
+        assert [(row["kind"], row["status"]) for row in calls] == [("MODEL", "FAILED")]
+        assert len(dispatch) == 1
+        assert dispatch[0]["status"] == "OK"
+        assert dispatch[0]["usage_state"] == ("UNKNOWN" if usage is None else "VIOLATION")
+        assert dispatch[0]["reserved_usd_micro"] == (645_600 if usage is None else 0)
+>       assert dispatch[0]["settled_usd_micro"] == (0 if usage is None else 20)
+E       assert 2460 == 20
+
+tests\test_ar02_prepaid_hf01.py:264: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_prepaid_hf01.py::test_provider_unknown_is_a_durable_campaign_stop_after_reopen
+FAILED tests/test_ar02_prepaid_hf01.py::test_assistant_stops_before_tool_or_normal_answer_when_usage_not_known[usage-violation]
+2 failed, 5 passed in 5.83s
+
+EXIT_CODE=1
