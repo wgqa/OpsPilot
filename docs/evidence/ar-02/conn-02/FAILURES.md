@@ -25,3 +25,10 @@
 - git push origin codex/ar02-live-01 返回 Recv failure: Connection was reset。
 - 随后的只读 git ls-remote origin refs/heads/codex/ar02-live-01 也返回同样连接重置；不能断言远端分支是否已更新。
 - 本报告完成后会再按用户要求尝试推送最终候选；若仍失败，保留准确阻断状态，不改写本地提交或主线。
+
+
+## 5. 最终打包推送连接失败
+
+- 本地候选 SHA `09f033f1835da8cca89ed7191aa11f63b95ae003` 的 `git push origin codex/ar02-live-01` 在 GitHub HTTPS 连接阶段失败，原始错误为 `Failed to connect to github.com port 443 after 21082 ms: Could not connect to server`，退出码 128。
+- 本地分支提交仍保留；远端分支未能核验。该失败不涉及 Provider 请求，也没有重发模型调用。
+- 提交本状态记录后仅再尝试一次更新后的隔离候选推送；不做无限重试。
