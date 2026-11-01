@@ -1,0 +1,82 @@
+F........F                                                               [100%]
+================================== FAILURES ===================================
+_________ test_offline_mock_is_explicitly_injected_into_openai_client _________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000201C1D01220>
+
+    def test_offline_mock_is_explicitly_injected_into_openai_client(monkeypatch):
+        import httpx2
+    
+        clear_proxy_environment(monkeypatch)
+        probe = load_probe()
+        real_async_openai = probe.AsyncOpenAI
+        captured = []
+    
+        def require_injected_client(*args, **kwargs):
+            client = kwargs.get("http_client")
+            assert isinstance(client, httpx2.AsyncClient), (
+                "offline preflight tried to construct the SDK default HTTP client"
+            )
+            captured.append(client)
+            return real_async_openai(*args, **kwargs)
+    
+        monkeypatch.setattr(probe, "AsyncOpenAI", require_injected_client)
+        result = asyncio.run(probe.local_mock_success("https://api.deepseek.com/v1"))
+    
+        assert len(captured) == 1
+        assert result["actual_network"] is False
+        assert result["provider_requests"] == 0
+        assert result["request"]["url"] == "https://api.deepseek.com/v1/chat/completions"
+        assert result["request"]["method"] == "POST"
+        assert result["request"]["body"]["model"] == "deepseek-flash"
+        assert result["request"]["body"]["thinking"] == {"type": "disabled"}
+        assert result["request"]["body"]["max_tokens"] == 64
+        assert "tools" not in result["request"]["body"]
+        assert "tool_choice" not in result["request"]["body"]
+        assert result["request"]["authorization_present"] is True
+>       assert result["request"]["headers_redacted"]["Authorization"] == "[REDACTED]"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'Authorization'
+
+tests\test_ar02_conn01_hf01.py:76: KeyError
+___________ test_two_processes_cannot_reserve_same_simulated_permit ___________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar02-live-01/.runtime/ar02-conn01-hf01/green-02/test_two_processes_cannot_rese0')
+
+    def test_two_processes_cannot_reserve_same_simulated_permit(tmp_path):
+        probe_path = PROBE_PATH
+        ledger = tmp_path / "shared.sqlite3"
+        barrier = tmp_path / "barrier"
+        barrier.mkdir()
+        first = _spawn_reservation_process(
+            probe_path, ledger, "AUTH-RACE", "digest-same", barrier / "first"
+        )
+        second = _spawn_reservation_process(
+            probe_path, ledger, "AUTH-RACE", "digest-same", barrier / "second"
+        )
+        try:
+            ready_deadline = time.time() + 20
+            while time.time() < ready_deadline:
+                if (barrier / "first.ready").exists() and (barrier / "second.ready").exists():
+                    break
+                time.sleep(0.02)
+            if not (barrier / "first.ready").exists() or not (barrier / "second.ready").exists():
+                out1, err1 = first.communicate(timeout=5)
+                out2, err2 = second.communicate(timeout=5)
+                pytest.fail(f"reservation children did not reach the barrier: {out1} {err1} / {out2} {err2}")
+            (barrier / "first.go").touch()
+            (barrier / "second.go").touch()
+            out1, err1 = first.communicate(timeout=20)
+            out2, err2 = second.communicate(timeout=20)
+            assert first.returncode == 0, err1
+            assert second.returncode == 0, err2
+            assert sorted([out1.strip(), out2.strip()]) == ["REPLAY_BLOCKED", "RESERVED"]
+>           rows = probe.ledger_snapshot(ledger)
+                   ^^^^^
+E           NameError: name 'probe' is not defined
+
+tests\test_ar02_conn01_hf01.py:292: NameError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_conn01_hf01.py::test_offline_mock_is_explicitly_injected_into_openai_client
+FAILED tests/test_ar02_conn01_hf01.py::test_two_processes_cannot_reserve_same_simulated_permit
+2 failed, 8 passed in 1.80s
