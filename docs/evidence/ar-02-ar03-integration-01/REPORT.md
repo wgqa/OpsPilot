@@ -10,6 +10,8 @@
 
 **AR-03 source:** `255087bae4dc0e9990a650786f5b9aae26f9f1db`
 
+**Implementation commit:** `fb8d31b17c3fc3b733d9b587f8d39830a378ddfe`
+
 This slice adds authorized protocol discovery and comparison to the existing `ASSISTANT_V1` API/Worker/MCP path. It does not replace the Assistant or create a second graph, worker, agent, or frontend entry.
 
 ## What a user can now do in the offline formal path
@@ -49,6 +51,8 @@ Files changed: `opspilot/assistant_mcp.py`, `opspilot/domain/assistant.py`, `ops
 The final fresh command `D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest tests/test_ar03_protocol_comparison.py tests/test_ar03_02_scoped_protocol_comparison.py tests/test_ar02_ar03_integration_01.py -q --basetemp=.pytest-temp/ar02-ar03-final-confirm` passed 50 tests. The preserved AR-02 regression run passed 84; its raw pytest output did not include the command line, so the exact invocation cannot be recovered and is not claimed. The earlier seven-case integration set passed 7, and the explicit unauthorized MCP test passed 1. Changed modules compiled, the trace and results JSON parsed, the sensitive-marker scan found no matches, and `git diff --check` passed. All attempts, including setup/test errors and the safe runtime budget refusal encountered during test setup, are in `FAILURES.md` and `runs/`.
 
 The complete repository pytest suite was **not run**. Real DeepSeek, browser, production, and deployment-version verification were **not run**. No paid Provider request, browser action, repair, approval, delivery, external write, `main` change, or historical ledger mutation occurred.
+
+The isolated commit is present locally. GitHub did not accept a push: a read-only ref check failed with a connection reset, and the one allowed push retry could not connect to `github.com:443`. Therefore the remote candidate SHA is **unverified and not reported as pushed**. `runs/PUSH-01.log` preserves the observed failure. No `main` ref was written.
 
 ## Known issue and limits
 
