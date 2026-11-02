@@ -1,9 +1,9 @@
 # OpsPilot AR-03-REAL-LLM-02 — Frozen Live Execution Plan
 
-**State before any new Provider request:** `PREPARING`  
-**Experiment:** `AR-03-REAL-LLM-02`  
-**Branch:** `codex/ar03-real-llm-02`  
-**Authorized base:** `codex/ar03-live-hf-01@69ffa0d73e6e869c590bc46f36bceda4db62e273`  
+**State before any new Provider request:** `PREPARING`
+**Experiment:** `AR-03-REAL-LLM-02`
+**Branch:** `codex/ar03-real-llm-02`
+**Authorized base:** `codex/ar03-live-hf-01@69ffa0d73e6e869c590bc46f36bceda4db62e273`
 **Remote main observed at start:** `ec8c3582f6d145eec9979c43607302731411ead8`
 
 This is one newly authorized paired execution. It is not a retry of AR-03-REAL-LLM-01 and must not reuse its databases, Checkpoints, one-shot claim, budget ledger, or Provider authorization rows.

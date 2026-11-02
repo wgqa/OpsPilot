@@ -19,12 +19,14 @@ REAL_JOURNEY_EXPERIMENT_ID = "AR-02-REAL-JOURNEY-01"
 REAL_JOURNEY_02_EXPERIMENT_ID = "AR-02-REAL-JOURNEY-02"
 REAL_JOURNEY_03_EXPERIMENT_ID = "AR-02-REAL-JOURNEY-03"
 AR03_REAL_LLM_01_EXPERIMENT_ID = "AR-03-REAL-LLM-01"
+AR03_REAL_LLM_02_EXPERIMENT_ID = "AR-03-REAL-LLM-02"
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPERIMENT_ID,
     REAL_JOURNEY_EXPERIMENT_ID,
     REAL_JOURNEY_02_EXPERIMENT_ID,
     REAL_JOURNEY_03_EXPERIMENT_ID,
     AR03_REAL_LLM_01_EXPERIMENT_ID,
+    AR03_REAL_LLM_02_EXPERIMENT_ID,
 })
 EXPERIMENT_ENV = "OPSPILOT_ASSISTANT_EXPERIMENT_ID"
 PROVIDER_LIMIT = 16
@@ -47,7 +49,7 @@ MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ar02_live_experiment_budgets (
     experiment_id TEXT PRIMARY KEY CHECK (
-        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01')
+        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02')
     ),
     provider_limit INTEGER NOT NULL,
     mcp_limit INTEGER NOT NULL,
@@ -94,7 +96,10 @@ def _validate_experiment_id(experiment_id: str) -> None:
 
 def _limits_for_experiment(experiment_id: str) -> tuple[int, int]:
     """Return the fixed per-database count envelope for this experiment."""
-    if experiment_id == AR03_REAL_LLM_01_EXPERIMENT_ID:
+    if experiment_id in {
+        AR03_REAL_LLM_01_EXPERIMENT_ID,
+        AR03_REAL_LLM_02_EXPERIMENT_ID,
+    }:
         # This paired experiment uses independent scenario databases. Persist
         # half of the aggregate allowance in each so local ledgers compose to
         # no more than the signed 16 Provider / 12 MCP campaign ceiling.
