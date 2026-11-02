@@ -65,6 +65,44 @@ def test_scoped_protocol_discovery_is_current_and_fails_closed(demo_db):
     assert not scoped_discovery_is_current(demo_db, identity, session_id, digest_forgery)[0]
 
 
+@pytest.mark.parametrize(
+    "topic",
+    ["retry", "callback", "callback retry", "回调", "重试", "回调重试", "回调 重试"],
+)
+def test_scoped_protocol_discovery_matches_callback_retry_topics(demo_db, topic):
+    from opspilot.domain.scoped_protocol_comparison import list_scoped_protocols
+
+    identity = trusted_identity(demo_db, "support-a")
+    session_id = create_session(demo_db, identity)["session_id"]
+    result = list_scoped_protocols(demo_db, identity, session_id, topic=topic)
+    document_ids = {document["document_id"] for document in result["protocol_documents"]}
+
+    assert {"callback-retry-contract", "callback-retry-contract-v2"} <= document_ids
+    assert result["tenant_id"] == identity.tenant_id
+    assert result["actor_id"] == identity.actor_id
+    assert result["scope_digest"]
+
+
+def test_callback_retry_topic_match_does_not_expand_session_document_scope(demo_db):
+    from opspilot.domain.scoped_protocol_comparison import list_scoped_protocols
+
+    identity = trusted_identity(demo_db, "support-a")
+    session_id = create_session(demo_db, identity)["session_id"]
+    legal = list_scoped_protocols(demo_db, identity, session_id, topic="retry")
+    legal_ids = {document["document_id"] for document in legal["protocol_documents"]}
+    assert {"callback-retry-contract", "callback-retry-contract-v2"} <= legal_ids
+
+    # The catalog contains API-scope documents, but this Session's selected
+    # project does not authorize them. A broad/forged topic cannot widen it.
+    outside = list_scoped_protocols(demo_db, identity, session_id, topic="api scope")
+    outside_ids = {document["document_id"] for document in outside["protocol_documents"]}
+    assert "api-scope-current" not in outside_ids
+
+    other_actor = trusted_identity(demo_db, "support-b")
+    with pytest.raises(KnowledgeScopeDenied):
+        list_scoped_protocols(demo_db, other_actor, session_id, topic="retry")
+
+
 def test_scoped_protocol_comparison_revalidates_all_visible_diff_fields(demo_db):
     from opspilot.domain.scoped_protocol_comparison import (
         compare_scoped_protocols,
@@ -603,3 +641,122 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8", newline="\n") as stream:
                 stream.write(json.dumps(trace_row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+@pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+def test_full_frozen_goal_in_trusted_order_initial_message_uses_one_assistant_run(
+    demo_db, tmp_path, receiver_state, monkeypatch,
+):
+    """The trusted binding request itself can be the user's full investigation request."""
+    from fastapi.testclient import TestClient
+    from opspilot.domain.database import connect
+    from opspilot.domain.s3 import prepare_s3_fixture
+    from opspilot.web.app import create_app
+    from test_ar02_assistant import ORIGIN, PASSWORDS
+
+    paired_ids = iter((
+        uuid.UUID("00000000-0000-4000-8000-000000000001"),
+        uuid.UUID("00000000-0000-4000-8000-000000000002"),
+    ))
+    with monkeypatch.context() as patcher:
+        patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+        fixture = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
+        )
+    assert fixture["transport_trace"][0]["request"]["event_id"] == (
+        "event-00000000-0000-4000-8000-000000000001"
+    )
+    if receiver_state == "PROCESSED":
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+            )
+
+    frozen_cases_path = (
+        Path(__file__).resolve().parents[1]
+        / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+    )
+    initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+    model = IntegrationFixtureModel(mode="bound", receiver_state=receiver_state)
+    app = create_app(
+        db_path=demo_db,
+        checkpoint_db_path=tmp_path / f"hf01-full-initial-{receiver_state}.sqlite3",
+        start_worker=True,
+        credentials=PASSWORDS,
+        expected_origin=ORIGIN,
+        assistant_model_factory=lambda: model,
+    )
+    with TestClient(app) as client:
+        headers = _login(client)
+        session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+        accepted = client.post(
+            f"/api/sessions/{session_id}/assistant/order",
+            headers={**headers, "Idempotency-Key": f"ar03-hf01-full-goal-{receiver_state}"},
+            json={"order_id": "ar03-order", "initial_message": initial_message},
+        )
+        assert accepted.status_code == 202, accepted.text
+        binding = accepted.json()
+        run = _wait_run(client, binding["run_id"])
+        assert run["status"] == "SUCCEEDED", run
+
+        messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+        user_messages = [row for row in messages if row["role"] == "USER"]
+        answers = [row for row in messages if row.get("answer_source_message_id") == binding["message_id"]]
+        assert len(user_messages) == 1
+        assert user_messages[0]["message_id"] == binding["message_id"]
+        assert user_messages[0]["body"] == initial_message
+        assert len(answers) == 1
+        answer = answers[0]["body"]
+        assert "callback-retry-contract" in answer
+        assert "升级影响说明草稿" in answer and "未提交" in answer
+        assert "线上部署版本" in answer and "未知" in answer
+        if receiver_state == "QUEUED":
+            assert "尚未证明处理完成" in answer and "PROCESSED" not in answer
+        else:
+            assert "同一 Event" in answer and "已处理完成" in answer
+            assert "尚未证明处理完成" not in answer
+        assert initial_message in str(model.seen)
+
+        with connect(demo_db) as connection:
+            task_runs = connection.execute(
+                "SELECT run_id,kind,status,source_message_id FROM task_runs WHERE session_id=?",
+                (session_id,),
+            ).fetchall()
+            assert len(task_runs) == 1
+            assert task_runs[0]["run_id"] == binding["run_id"]
+            assert task_runs[0]["kind"] == "CHAT_READONLY"
+            assert task_runs[0]["status"] == "SUCCEEDED"
+            assert task_runs[0]["source_message_id"] == binding["message_id"]
+            assert connection.execute(
+                "SELECT COUNT(*) FROM assistant_runs WHERE run_id=? AND core='ASSISTANT_V1'",
+                (binding["run_id"],),
+            ).fetchone()[0] == 1
+            mcp_calls = connection.execute(
+                "SELECT request_json,result_json,evidence_id,observation_id,status "
+                "FROM assistant_calls WHERE run_id=? AND kind='MCP' ORDER BY created_at",
+                (binding["run_id"],),
+            ).fetchall()
+            assert len(mcp_calls) <= 6
+            by_name = {
+                json.loads(row["request_json"])["name"]: row for row in mcp_calls
+            }
+            assert {
+                "list_scoped_protocol_documents", "compare_scoped_protocols",
+                "get_order_status", "get_callback_delivery", "get_receiver_processing",
+            } <= set(by_name)
+            assert all(row["status"] == "OK" for row in by_name.values())
+            for tool_name in ("get_callback_delivery", "get_receiver_processing"):
+                assert by_name[tool_name]["evidence_id"] and by_name[tool_name]["observation_id"]
+                tool_result = json.loads(by_name[tool_name]["result_json"])
+                assert tool_result["facts"]["event_id"] == fixture["transport_trace"][0]["request"]["event_id"]
+                assert tool_result["facts"]["order_id"] == "ar03-order"
+            assert connection.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id=? AND role='USER'", (session_id,)
+            ).fetchone()[0] == 1
+            for table in (
+                "s3_diagnoses", "d3_plans", "d3_plan_authorizations", "d3_approvals",
+                "d3_action_permissions", "d3_action_intents", "d3_action_ledgers",
+                "d3_verification_receipts", "d3_report_artifacts", "d3_delivery_records",
+                "s3_handoff_queue_entries", "s3_handoff_receipts",
+            ):
+                assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
