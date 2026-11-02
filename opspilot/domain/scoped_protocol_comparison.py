@@ -441,6 +441,33 @@ def _infer_family(document_id: str) -> str:
     return stem or document_id
 
 
+_TOPIC_ALIASES = (
+    ("回调", "callback"),
+    ("重试", "retry"),
+    ("失败", "failure"),
+    ("策略", "policy"),
+)
+
+
+def _topic_terms(topic: str) -> tuple[str, ...]:
+    """Normalize short English/Chinese topic expressions into metadata terms.
+
+    English words are matched independently across the authorized entry's
+    metadata, so a phrase such as "callback retry" need not appear verbatim in
+    one field. The small bilingual aliases cover the callback terminology
+    already used by the catalog; this is not document-content search.
+    """
+    normalized = topic.casefold().strip()
+    terms = set(re.findall(r"[a-z0-9]+", normalized))
+    for source, target in _TOPIC_ALIASES:
+        if source in normalized:
+            terms.add(target)
+    if terms:
+        return tuple(sorted(terms))
+    compact = re.sub(r"\s+", "", normalized)
+    return (compact,) if compact else ()
+
+
 def list_scoped_protocols(
     db: sqlite3.Connection | str | Path,
     identity: TrustedIdentity,
@@ -455,7 +482,7 @@ def list_scoped_protocols(
     1. Caller identity and session ownership in SQLite.
     2. Active project selection and authorization under assistant-access registry.
     3. Strict isolation: only documents in project['document_ids'] can be discovered.
-    4. Optional topic filtering by substring in document_id, title, file, or keywords.
+    4. Optional topic filtering over document_id, title, file, and keywords.
     5. Grouping into protocol families with versions for easy Agent discovery.
     6. Epistemic boundary: discovery results do not prove cluster deployment state.
     """
@@ -463,7 +490,8 @@ def list_scoped_protocols(
     allowed_doc_ids = set(project.get("document_ids", []))
 
     resolved_catalogs = _ensure_catalog_dirs(catalog_dirs)
-    topic_str = topic.strip().lower() if (isinstance(topic, str) and topic.strip()) else None
+    topic_str = topic.strip() if (isinstance(topic, str) and topic.strip()) else None
+    topic_terms = _topic_terms(topic_str) if topic_str else ()
 
     discovered_docs: dict[str, dict[str, Any]] = {}
 
@@ -485,17 +513,15 @@ def list_scoped_protocols(
             if not doc_id or doc_id not in allowed_doc_ids:
                 continue
 
-            if topic_str:
-                keywords = [str(kw).lower() for kw in entry.get("keywords", [])]
-                title = str(entry.get("title", "")).lower()
-                doc_id_lower = str(doc_id).lower()
-                file_str = str(entry.get("file", "")).lower()
-                if (
-                    topic_str not in doc_id_lower
-                    and topic_str not in title
-                    and topic_str not in file_str
-                    and not any(topic_str in kw for kw in keywords)
-                ):
+            if topic_terms:
+                keywords = [str(kw) for kw in entry.get("keywords", [])]
+                searchable = " ".join((
+                    str(doc_id),
+                    str(entry.get("title", "")),
+                    str(entry.get("file", "")),
+                    *keywords,
+                )).casefold()
+                if not all(term in searchable for term in topic_terms):
                     continue
 
             if doc_id not in discovered_docs:

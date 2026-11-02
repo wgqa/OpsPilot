@@ -225,7 +225,7 @@ class IntegrationFixtureModel(BaseChatModel):
         else:
             if "list_scoped_protocol_documents" not in payloads:
                 selected = "list_scoped_protocol_documents"
-                args = {"topic": "retry"}
+                args = {"topic": "callback retry"}
             elif "compare_scoped_protocols" not in payloads:
                 discovered = payloads["list_scoped_protocol_documents"]
                 docs = discovered.get("protocol_documents", [])
@@ -718,6 +718,12 @@ def test_full_frozen_goal_in_trusted_order_initial_message_uses_one_assistant_ru
         assert initial_message in str(model.seen)
 
         with connect(demo_db) as connection:
+            from opspilot.domain.s3 import get_s3_binding
+
+            trusted_binding = get_s3_binding(connection, binding["task_id"])
+            assert trusted_binding["order_id"] == "ar03-order"
+            assert trusted_binding["tenant_id"] == "tenant-a"
+            assert trusted_binding["actor_id"] == "support-a"
             task_runs = connection.execute(
                 "SELECT run_id,kind,status,source_message_id FROM task_runs WHERE session_id=?",
                 (session_id,),
@@ -744,7 +750,25 @@ def test_full_frozen_goal_in_trusted_order_initial_message_uses_one_assistant_ru
                 "list_scoped_protocol_documents", "compare_scoped_protocols",
                 "get_order_status", "get_callback_delivery", "get_receiver_processing",
             } <= set(by_name)
+            discovery_request = json.loads(by_name["list_scoped_protocol_documents"]["request_json"])
+            assert discovery_request["args"]["topic"] == "callback retry"
             assert all(row["status"] == "OK" for row in by_name.values())
+            attempts = connection.execute(
+                "SELECT kind,status FROM d2_attempts WHERE run_id=? ORDER BY reserved_at,attempt_id",
+                (binding["run_id"],),
+            ).fetchall()
+            mcp_attempts = [row for row in attempts if row["kind"] == "MCP"]
+            assert len(mcp_attempts) == len(mcp_calls) <= 6
+            assert all(row["status"] == "OK" for row in mcp_attempts)
+            model_requests = connection.execute(
+                "SELECT request_json FROM assistant_calls WHERE run_id=? AND kind='MODEL'",
+                (binding["run_id"],),
+            ).fetchall()
+            assert model_requests
+            assert all(
+                json.loads(row["request_json"])["context_budget"]["estimated_input_tokens"] <= 12_000
+                for row in model_requests
+            )
             for tool_name in ("get_callback_delivery", "get_receiver_processing"):
                 assert by_name[tool_name]["evidence_id"] and by_name[tool_name]["observation_id"]
                 tool_result = json.loads(by_name[tool_name]["result_json"])
@@ -760,3 +784,8 @@ def test_full_frozen_goal_in_trusted_order_initial_message_uses_one_assistant_ru
                 "s3_handoff_queue_entries", "s3_handoff_receipts",
             ):
                 assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+        trace_target = os.environ.get("AR03_LIVE_HF01_TRACE_PATH")
+        if trace_target:
+            monkeypatch.setenv("AR02_AR03_TRACE_PATH", trace_target)
+            _append_formal_trace(demo_db, session_id, [binding["run_id"]], [model])
