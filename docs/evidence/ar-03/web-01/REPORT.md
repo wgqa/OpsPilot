@@ -22,7 +22,7 @@
 - 原始候选选定回归：21 项通过；全量 pytest 未运行。
 - 安全发布分支新鲜检查：Node/Python 语法检查通过；`npm run build` 通过。
 - 本轮新增真实 Provider 请求：0；业务写入：0。
-- 在线远端：`UNVERIFIED`，GitHub:443 在执行环境不可达。
+- 在线远端：`UNVERIFIED`。只执行了一次普通 `git push`，因无法连接 `github.com:443` 失败；没有提权或改用其他推送路径，也没有重试。
 
 ## 限制
 
