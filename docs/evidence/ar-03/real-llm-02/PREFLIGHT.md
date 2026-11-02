@@ -60,13 +60,13 @@ The live runner creates fresh per-scenario Domain and Checkpoint SQLite files, u
 
    `D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest tests/test_ar03_real_llm_02_live.py tests/test_ar03_real_llm_01_live_preflight.py tests/test_ar03_live_budget_allocation.py tests/test_ar03_live_provider_trace_transport.py tests/test_ar02_ar03_integration_01.py::test_full_frozen_goal_in_trusted_order_initial_message_uses_one_assistant_run -q --basetemp D:\学习\agent新项目\.tmp\ar03-real-llm-02-regression-20261102a`
 
-   Result: 8 passed on the first related pass. After adding the pre-send input-token guard and unknown-outcome stop classification, the same command was freshly rerun and 10 tests passed. The final raw console output is `runs/offline_regression_after_unknown_guard.log`; earlier output is retained separately.
+   Result: the related suite passed 10/10 after the final code commit. Raw console output: `runs/offline_regression_after_commit.log`; earlier runs are retained separately.
 
-4. Runner preflight-only (no network transport construction and no Provider dispatch):
+4. Runner preflight-only on implementation commit `3bf3d5318e53f71d083c70e766e95713b1e97939` (no network transport construction and no Provider dispatch):
 
    `D:\学习\agent新项目\.venv\Scripts\python.exe docs/evidence/ar-03/real-llm-02/run_live.py --preflight-only`
 
-   Result before implementation commit: `PREFLIGHT_READY`; 0 Provider requests; correct branch, frozen blobs, 16/12/8/6 caps, USD 10.329600 aggregate reservation and no existing execution claim/runtime. Original output is `runs/preflight_before_commit.log`. It will be repeated after the implementation commit and before any live request.
+   Result: `PREFLIGHT_READY`; 0 Provider requests; correct branch, frozen blobs, 16/12/8/6 caps, USD 10.329600 aggregate reservation, 12,000 input budget, and no existing execution claim/runtime. Original output is `runs/preflight_after_code_commit.log`; earlier pre-commit output is `runs/preflight_before_commit.log`.
 
 ## Limits
 
