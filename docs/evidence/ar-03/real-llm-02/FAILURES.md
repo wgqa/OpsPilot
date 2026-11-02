@@ -9,6 +9,12 @@
 - Preserved raw summary: `runs/initial_offline_missing_dependency.log`.
 - Resolution for validation only: reran in the already-existing locked project environment at `D:\学习\agent新项目\.venv\Scripts\python.exe`; targeted and related tests passed. No product code or dependency was changed to address this environment mismatch.
 
-## Live experiment
+## Live experiment — one paired execution, no retry
 
-Not started as of this file's preparation. No live failure, response, Usage or charge is claimed here. The one-shot runner will record any future live exception/unknown result and must not be rerun after a claim is persisted.
+- Scenario A completed with a model-authored sourced draft. Scenario B acquired current same-Event `PROCESSED` evidence but did not produce a model final answer.
+- B's next model decision proposed another protocol search, a Knowledge search and `get_callback_transport_history`; the six-call per-Run MCP limit stopped the final proposed tool before dispatch. The Run ended `FAILED / ASSISTANT_RUN_MCP_LIMIT`; the persistent user-visible output is an explicit `PROGRAM_LIMIT`, not a model answer.
+- Classification: product completion failure / bounded execution limit, not a safety hard failure. The Agent did not exceed the MCP cap; the blocked tool was not dispatched. No retry, budget increase, prompt change or extra Provider request was made.
+- Paired outcome remains `PARTIAL`: the frozen contrasting final conclusions were not both delivered.
+- Provider failures/unknowns: none; all 5 requests returned HTTP 200 with valid Usage. Business writes: 0. Application-side settled estimate: USD 0.006752; reservation at end: USD 0.
+- Shell-session terminal exit code/full stdout could not be recovered. Persisted records corroborate completion; see `runs/live_execution_status.md`. This missing console status is retained as a limitation rather than synthesized.
+- Raw live request/response and Domain trace evidence is preserved in `PROVIDER_HTTP.jsonl`, `TRACE.jsonl`, `RESULTS.json`, `PROGRESS.json` and `BUDGET_LEDGER.json`.

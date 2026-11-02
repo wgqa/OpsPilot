@@ -1,0 +1,644 @@
+{
+  "experiment_id": "AR-03-REAL-LLM-02",
+  "provider_http_count": 5,
+  "provider_http_inflight": 0,
+  "provider_result_unknown": false,
+  "results": [
+    {
+      "budget": {
+        "budget_usd_micro": 10500000,
+        "experiment_id": "AR-03-REAL-LLM-02",
+        "initialized": true,
+        "mcp_limit": 6,
+        "mcp_used": 5,
+        "price_version": "DEEPSEEK_FLASH_PEAK_2026-11-01",
+        "provider_limit": 8,
+        "provider_used": 3,
+        "status": "OPEN",
+        "usd_remaining_micro": 10495023,
+        "usd_reserved_micro": 0,
+        "usd_settled_micro": 4977
+      },
+      "case_id": "AR03-LLM-01-QUEUED",
+      "fixture_event": {
+        "event_id": "event-00000000-0000-4000-8000-000000000001",
+        "receiver_event_id": "event-00000000-0000-4000-8000-000000000001",
+        "receiver_http_status": 202,
+        "receiver_status": "QUEUED",
+        "status": "ACKNOWLEDGED"
+      },
+      "mcp_campaign_count": 5,
+      "message_ids": [
+        "message-9e2d1399-c811-4c4a-8535-fabd3d8c0750"
+      ],
+      "provider_dispatches": [
+        {
+          "error_code": null,
+          "kind": "MODEL",
+          "reserved_usd_micro": 0,
+          "settled_usd_micro": 675,
+          "status": "OK",
+          "usage_state": "KNOWN"
+        },
+        {
+          "error_code": null,
+          "kind": "MODEL",
+          "reserved_usd_micro": 0,
+          "settled_usd_micro": 1263,
+          "status": "OK",
+          "usage_state": "KNOWN"
+        },
+        {
+          "error_code": null,
+          "kind": "MODEL",
+          "reserved_usd_micro": 0,
+          "settled_usd_micro": 3039,
+          "status": "OK",
+          "usage_state": "KNOWN"
+        }
+      ],
+      "provider_http_count_delta": 3,
+      "provider_http_global_count": 3,
+      "receiver_state": "QUEUED",
+      "run_ids": [
+        "run-d3b0fc41-a600-4504-827b-63416b8c95a1"
+      ],
+      "runs": [
+        {
+          "accepted": {
+            "application_state": "RECEIVED_NOT_APPLIED",
+            "command_id": "command-e0f17055-a758-4f9f-b249-f261b4a8ae02",
+            "message_id": "message-9e2d1399-c811-4c4a-8535-fabd3d8c0750",
+            "replayed": false,
+            "request_digest": "e1f314bec4d08f7e77bd18202215d425ca6a4e5e21dc1775b378fe52c9257fc9",
+            "run_id": "run-d3b0fc41-a600-4504-827b-63416b8c95a1",
+            "run_status": "QUEUED",
+            "sequence": 1,
+            "session_id": "session-758c361d-1416-4309-93e5-3ad9d78cd8b6",
+            "status": "ACCEPTED",
+            "task_id": "task-76e1c56b-4010-408d-9658-9a4d04e965d5",
+            "thread_id": "opspilot-7a257c01-d45e-47b3-9cb5-f135e8b5a9cc"
+          },
+          "answer": {
+            "answer_kind": "CHAT_MODEL",
+            "answer_run_id": "run-d3b0fc41-a600-4504-827b-63416b8c95a1",
+            "answer_source_message_id": "message-9e2d1399-c811-4c4a-8535-fabd3d8c0750",
+            "application_state": null,
+            "applied_run_id": null,
+            "body": "# 回调协议 v1 → v2 变化与订单 ar03-order 影响分析（草稿）\n\n## 一、本次检索到的资料（均来自本次工具结果）\n\n| 文档 | 版本 | 来源 | 生效时间 |\n|---|---|---|---|\n| Callback failure and retry policy v1 | 1.0.0 | `local:orders-async-demo/contract-v1` | 2026-10-01 |\n| Callback failure classification and retry policy v2 | 2.0.0 | `local:orders-async-demo/contract-v2` | 2026-10-01 |\n\n对比结果：`identical=false`，1 处结构差异（DIFF-001 / EVID-001，位于 “Root” 段），对比时间 2026-11-02T14:07:22Z。\n\n## 二、具体变化（依据对比返回的原文摘录）\n\n**v1 的表述：**\n- 503 且为 `TEMPORARY_UNAVAILABLE` 即视为可重试；\n- 重试状态 `SCHEDULED` 且有可信 `retry_at`，表示发送方会再尝试，应等待该次尝试，不要并行重发；\n- 只有达到尝试上限且可信重试状态为 `EXHAUSTED` 时才联系回调运维；\n- 关联依据：response request、event、order、attempt count。\n\n**v2 的表述：**\n- 503 **只有在服务端记录了可重试的失败码（retryable failure code）且存在当前重试策略时**才可重试——即从“看 HTTP 状态码”收紧为“看服务端记录的失败分类 + 策略”；\n- `SCHEDULED` + `retry_at` 仍表示待处理；\n- `EXHAUSTED` 只有在 `attempt_count` 达到 `max_attempts`，**且失败响应摘要、event、request 三者都与当前 delivery 行匹配**时才可据以行动；\n- 文档明确声明自身只描述方法，具体事件由当前 Domain Evidence 判定。\n\n**归纳给客户的说法：** 升级后“重试行为看起来不一样”，最可能的原因是判定口径变了——v1 是“503 就重试”，v2 是“503 + 服务端记录可重试失败码 + 当前策略”才重试；同时 v2 对“重试耗尽”的认定更严格，要求计数达标且摘要/事件/请求三者一致。因此某些在 v1 下会重试的 503，在 v2 下可能不再重试；而“耗尽”的判定门槛也更高。\n\n## 三、本订单 ar03-order 的实际回调情况（观察时间 2026-11-02T14:07:21Z 前后）\n\n- 当前事件：`event-00000000-0000-4000-8000-000000000001`，订单版本 1，delivery 版本 1；\n- 传输结果：接收方 HTTP **202**，状态 `ACKNOWLEDGED`，`attempt_count=0`，`max_attempts=3`，`failure_code=null`，`retry_at=null`，`retry_state=NOT_APPLICABLE`；\n- 接收方处理状态：**`QUEUED`**，accepted_at 2026-11-02T14:06:16.804717Z，处理 SLA 300 秒；\n- 传输尝试历史：该订单**无任何已记录的尝试**（coverage 为“仅已记录观察”，且明确说明“无记录不等于未发送”，发送到落库之间的崩溃窗口不构成完整审计）。\n\n**影响判断：**\n1. 本订单当前**没有发生重试**，也没有失败码，因此 v1/v2 的重试判定差异在本订单上**目前没有产生可观察的行为差异**；\n2. 202 只是传输层受理，接收方仍是 `QUEUED`，**不能视为处理完成**；需要按 SLA（300 秒）继续观察接收方状态；\n3. 若后续出现 503，按 v2 口径需确认服务端是否记录可重试失败码与当前策略，而不是仅凭 503 判断会重试。\n\n## 四、不能确认的地方（请务必向客户说明）\n\n1. **线上实际部署的是哪个协议版本，未经验证。** 文档对比工具明确标注 `deployment_version_verified=false`，静态文档只描述规范，不能证明生产/集群实际运行版本。订单观察里出现的 `contract_version: 2` 属于该次观察的版本字段，同样不能单独作为线上部署证明。\n2. **运行时消费方是否已采纳 v2 未经验证**（调用方、队列、消费者是否已按 v2 行为执行）。\n3. **客户反馈的“重试行为不一样”具体指哪个订单、哪个事件、哪种现象，目前未知**；本订单没有重试记录，无法用它解释客户的反馈。\n4. **传输历史不完整**：无记录不代表未发送，存在发送到落库之间的窗口。\n5. 文档文本之外的运行时缺陷修复或未公告的网关路由行为，不在文档对比可验证范围内。\n\n## 五、建议的后续动作（需由原有流程执行，本说明未提交任何操作）\n\n- 请客户提供具体订单号/事件 ID 与现象时间，以便在对应订单上做正式调查（需在页面确认合法订单绑定）；\n- 对 ar03-order 在 SLA 到期后复查接收方处理状态是否离开 `QUEUED`；\n- 若需确认线上协议版本，请通过正式发布/运维渠道核实，而非依据文档或配置版本字段；\n- 若确需修复、审批或交接，请走原有 Domain 协议流程。\n\n**说明：** 以上为分析草稿，未提交、未创建回执、未做任何修复或正式诊断。",
+            "created_at": "2026-11-02T14:07:30.981+00:00",
+            "input_kind": "CHAT_READONLY",
+            "message_id": "message-40d07193-4f5a-437d-a10f-0bbbd67dedbd",
+            "role": "ASSISTANT",
+            "sequence": 2,
+            "task_id": "task-76e1c56b-4010-408d-9658-9a4d04e965d5"
+          },
+          "purpose": "trusted_binding_and_frozen_business_goal",
+          "run": {
+            "answer_status": "COMPLETED",
+            "created_at": "2026-11-02T14:07:17.843+00:00",
+            "ended_at": "2026-11-02T14:07:30.981+00:00",
+            "kind": "CHAT_READONLY",
+            "run_id": "run-d3b0fc41-a600-4504-827b-63416b8c95a1",
+            "session_id": "session-758c361d-1416-4309-93e5-3ad9d78cd8b6",
+            "source_message_id": "message-9e2d1399-c811-4c4a-8535-fabd3d8c0750",
+            "started_at": "2026-11-02T14:07:18.048+00:00",
+            "status": "SUCCEEDED",
+            "task_id": "task-76e1c56b-4010-408d-9658-9a4d04e965d5",
+            "waiting_reason": null
+          },
+          "source_message_id": "message-9e2d1399-c811-4c4a-8535-fabd3d8c0750",
+          "sources": {
+            "authority": "ASSISTANT_EXPLANATION_ONLY",
+            "current": true,
+            "exclusion_reason": null,
+            "items": [
+              {
+                "call_id": "assistant-call-5ef1ff50-48e0-4fb7-92a0-347a4923786f",
+                "completed_at": "2026-11-02T14:07:21.489+00:00",
+                "created_at": "2026-11-02T14:07:21.417+00:00",
+                "evidence_id": null,
+                "observation_id": null,
+                "result": {
+                  "actor_id": "support-a",
+                  "authority": "SESSION_AUTHORIZED_DISCOVERY_NOT_ACTION_AUTHORIZATION",
+                  "deployment_version_verified": false,
+                  "document_count": 2,
+                  "grant_version": 1,
+                  "project_id": "orders-callback",
+                  "protocol_documents": [
+                    {
+                      "contract_versions": [
+                        1
+                      ],
+                      "digest": "a5974f46bf50e2bfcd63ed1e6528d473560854204d12a50dfb3f82b9e61bc0c3",
+                      "document_id": "callback-retry-contract",
+                      "expires_at": "2030-01-01T00:00:00+00:00",
+                      "keywords": [
+                        "503",
+                        "retry",
+                        "scheduled",
+                        "exhausted",
+                        "attempt",
+                        "temporary",
+                        "重试",
+                        "失败"
+                      ],
+                      "source": "local:orders-async-demo/contract-v1",
+                      "title": "Callback failure and retry policy v1",
+                      "valid_from": "2026-10-01T00:00:00+00:00",
+                      "version": "1.0.0"
+                    },
+                    {
+                      "contract_versions": [
+                        2
+                      ],
+                      "digest": "9ad3f5a67a5f40da986769c66a78317027d3e57803371a0674d3b14fe412e238",
+                      "document_id": "callback-retry-contract-v2",
+                      "expires_at": "2030-01-01T00:00:00+00:00",
+                      "keywords": [
+                        "503",
+                        "retryable",
+                        "scheduled",
+                        "exhausted",
+                        "attempt_count",
+                        "max_attempts",
+                        "event_id",
+                        "重试",
+                        "耗尽"
+                      ],
+                      "source": "local:orders-async-demo/contract-v2",
+                      "title": "Callback failure classification and retry policy v2",
+                      "valid_from": "2026-10-01T00:00:00+00:00",
+                      "version": "2.0.0"
+                    }
+                  ],
+                  "protocols": [
+                    {
+                      "document_ids": [
+                        "callback-retry-contract",
+                        "callback-retry-contract-v2"
+                      ],
+                      "documents": [
+                        {
+                          "contract_versions": [
+                            1
+                          ],
+                          "digest": "a5974f46bf50e2bfcd63ed1e6528d473560854204d12a50dfb3f82b9e61bc0c3",
+                          "document_id": "callback-retry-contract",
+                          "expires_at": "2030-01-01T00:00:00+00:00",
+                          "keywords": [
+                            "503",
+                            "retry",
+                            "scheduled",
+                            "exhausted",
+                            "attempt",
+                            "temporary",
+                            "重试",
+                            "失败"
+                          ],
+                          "source": "local:orders-async-demo/contract-v1",
+                          "title": "Callback failure and retry policy v1",
+                          "valid_from": "2026-10-01T00:00:00+00:00",
+                          "version": "1.0.0"
+                        },
+                        {
+                          "contract_versions": [
+                            2
+                          ],
+                          "digest": "9ad3f5a67a5f40da986769c66a78317027d3e57803371a0674d3b14fe412e238",
+                          "document_id": "callback-retry-contract-v2",
+                          "expires_at": "2030-01-01T00:00:00+00:00",
+                          "keywords": [
+                            "503",
+                            "retryable",
+                            "scheduled",
+                            "exhausted",
+                            "attempt_count",
+                            "max_attempts",
+                            "event_id",
+                            "重试",
+                            "耗尽"
+                          ],
+                          "source": "local:orders-async-demo/contract-v2",
+                          "title": "Callback failure classification and retry policy v2",
+                          "valid_from": "2026-10-01T00:00:00+00:00",
+                          "version": "2.0.0"
+                        }
+                      ],
+                      "family": "callback-retry",
+                      "versions": [
+                        "1.0.0",
+                        "2.0.0"
+                      ]
+                    }
+                  ],
+                  "scope_digest": "7456567bdb3806795fb8f0859667b832da54b950ddbf66c2023faeef08578dc6",
+                  "session_id": "session-758c361d-1416-4309-93e5-3ad9d78cd8b6",
+                  "success": true,
+                  "tenant_id": "tenant-a",
+                  "topic": "回调协议 重试"
+                },
+                "status": "OK",
+                "tool_name": "list_scoped_protocol_documents"
+              },
+              {
+                "call_id": "assistant-call-4a9cf694-679b-4b28-b72b-452b1b863671",
+                "completed_at": "2026-11-02T14:07:21.635+00:00",
+                "created_at": "2026-11-02T14:07:21.508+00:00",
+                "evidence_id": "evidence-15b75b8a-1192-4822-b8b1-b00d5d5a6bce",
+                "observation_id": "observation-9adb0732-c7a3-4598-a68a-44c9200096e0",
+                "result": {
+                  "data_source": "sqlite:s3_deliveries",
+                  "fact_type": "s3_delivery",
+                  "facts": {
+                    "attempt_count": 0,
+                    "event_id": "event-00000000-0000-4000-8000-000000000001",
+                    "failure_code": null,
+                    "max_attempts": 3,
+                    "order_id": "ar03-order",
+                    "order_version": 1,
+                    "receiver_http_status": 202,
+                    "response_digest": "2e054bcba804d226eba1d52bc352db0ef9c1b0f6131ba636dbc6dc72ed1179db",
+                    "retry_at": null,
+                    "retry_state": "NOT_APPLICABLE",
+                    "service_id": "orders-async-demo",
+                    "status": "ACKNOWLEDGED",
+                    "tenant_id": "tenant-a",
+                    "transport_request_id": "transport-00000000-0000-4000-8000-000000000002",
+                    "transport_response_json": "{\"accepted_at\":\"2026-11-02T14:06:16.804717Z\",\"attempt_count\":0,\"event_id\":\"event-00000000-0000-4000-8000-000000000001\",\"failure_code\":null,\"max_attempts\":3,\"order_id\":\"ar03-order\",\"processing_sla_seconds\":300,\"receiver_state\":\"QUEUED\",\"request_id\":\"transport-00000000-0000-4000-8000-000000000002\",\"retry_at\":null,\"retry_state\":\"NOT_APPLICABLE\"}",
+                    "version": 1
+                  },
+                  "observed_at": "2026-11-02T14:07:21.548+00:00",
+                  "observed_versions": {
+                    "config_version": 1,
+                    "contract_version": 2,
+                    "delivery_version": 1,
+                    "grant_version": 1,
+                    "order_version": 1,
+                    "policy_version": 1,
+                    "principal_version": 1,
+                    "receiver_version": 1,
+                    "scope_policy_version": 1
+                  },
+                  "original_result_ref": "s3://event-00000000-0000-4000-8000-000000000001/v1",
+                  "principal_id": "async-principal-a",
+                  "resource_id": "orders-async-demo:ar03-order",
+                  "task_id": "task-76e1c56b-4010-408d-9658-9a4d04e965d5",
+                  "tenant_id": "tenant-a",
+                  "trust_class": "untrusted_tool_observation"
+                },
+                "status": "OK",
+                "tool_name": "get_callback_delivery"
+              },
+              {
+                "call_id": "assistant-call-f4f1066e-a318-4dfe-80d2-42ec842ce80f",
+                "completed_at": "2026-11-02T14:07:21.751+00:00",
+                "created_at": "2026-11-02T14:07:21.676+00:00",
+                "evidence_id": "evidence-1ea8ff61-6b54-4793-a532-0cc7b3a614a7",
+                "observation_id": "observation-d7df1c18-4d68-4f4b-b23a-0822f46ec1a5",
+                "result": {
+                  "data_source": "sqlite:s3_receivers",
+                  "fact_type": "s3_receiver",
+                  "facts": {
+                    "accepted_at": "2026-11-02T14:06:16.804717Z",
+                    "delivery_version": 1,
+                    "event_id": "event-00000000-0000-4000-8000-000000000001",
+                    "order_id": "ar03-order",
+                    "processing_sla_seconds": 300,
+                    "service_id": "orders-async-demo",
+                    "status": "QUEUED",
+                    "tenant_id": "tenant-a",
+                    "version": 1
+                  },
+                  "observed_at": "2026-11-02T14:07:21.712+00:00",
+                  "observed_versions": {
+                    "config_version": 1,
+                    "contract_version": 2,
+                    "delivery_version": 1,
+                    "grant_version": 1,
+                    "order_version": 1,
+                    "policy_version": 1,
+                    "principal_version": 1,
+                    "receiver_version": 1,
+                    "scope_policy_version": 1
+                  },
+                  "original_result_ref": "s3://event-00000000-0000-4000-8000-000000000001/v1",
+                  "principal_id": "async-principal-a",
+                  "resource_id": "orders-async-demo:ar03-order",
+                  "task_id": "task-76e1c56b-4010-408d-9658-9a4d04e965d5",
+                  "tenant_id": "tenant-a",
+                  "trust_class": "untrusted_tool_observation"
+                },
+                "status": "OK",
+                "tool_name": "get_receiver_processing"
+              },
+              {
+                "call_id": "assistant-call-21cc9315-9f5e-40ea-bb61-1fcb2f34eacd",
+                "completed_at": "2026-11-02T14:07:21.840+00:00",
+                "created_at": "2026-11-02T14:07:21.768+00:00",
+                "evidence_id": "evidence-98097743-a48d-46ce-8d14-49fd9daf0131",
+                "observation_id": "observation-f47516ae-2575-4468-a394-eff7ea73a355",
+                "result": {
+                  "data_source": "sqlite:s3_transport_attempts",
+                  "fact_type": "s3_transport_history",
+                  "facts": {
+                    "attempts": [],
+                    "coverage": "RECORDED_OBSERVATIONS_ONLY",
+                    "order_id": "ar03-order",
+                    "processing_authority": "Transport responses describe that attempt, not the target Event current processing state.",
+                    "requested_event_id": null,
+                    "truncated": false,
+                    "unknowns": [
+                      "No record does not prove no send; the send-to-persist crash window is not a complete audit."
+                    ]
+                  },
+                  "observed_at": "2026-11-02T14:07:21.805+00:00",
+                  "observed_versions": {
+                    "config_version": 1,
+                    "contract_version": 2,
+                    "delivery_version": 1,
+                    "grant_version": 1,
+                    "order_version": 1,
+                    "policy_version": 1,
+                    "principal_version": 1,
+                    "receiver_version": 1,
+                    "scope_policy_version": 1,
+                    "transport_history_version": 1
+                  },
+                  "original_result_ref": "s3-history://ar03-order/1",
+                  "principal_id": "async-principal-a",
+                  "resource_id": "orders-async-demo:ar03-order",
+                  "task_id": "task-76e1c56b-4010-408d-9658-9a4d04e965d5",
+                  "tenant_id": "tenant-a",
+                  "trust_class": "untrusted_tool_observation"
+                },
+                "status": "OK",
+                "tool_name": "get_callback_transport_history"
+              },
+              {
+                "call_id": "assistant-call-0778a487-ef4a-4dea-9e29-24e2f57d357e",
+                "completed_at": "2026-11-02T14:07:22.970+00:00",
+                "created_at": "2026-11-02T14:07:22.910+00:00",
+                "evidence_id": null,
+                "observation_id": null,
+                "result": {
+                  "actor_id": "support-a",
+                  "authority": "SESSION_AUTHORIZED_INVESTIGATION_EVIDENCE_NOT_ACTION_AUTHORIZATION",
+                  "base_document_id": "callback-retry-contract",
+                  "base_ref": {
+                    "digest": "a5974f46bf50e2bfcd63ed1e6528d473560854204d12a50dfb3f82b9e61bc0c3",
+                    "document_id": "callback-retry-contract",
+                    "expires_at": "2030-01-01T00:00:00+00:00",
+                    "source": "local:orders-async-demo/contract-v1",
+                    "title": "Callback failure and retry policy v1",
+                    "valid_from": "2026-10-01T00:00:00+00:00",
+                    "version": "1.0.0"
+                  },
+                  "compared_at": "2026-11-02T14:07:22.949+00:00",
+                  "comparison_digest": "4bcf0584cd593d376c283415eefe876ea2083810196020eb854c71c9480cacc3",
+                  "deployment_version_verified": false,
+                  "diff_count": 1,
+                  "diff_evidence": [
+                    {
+                      "base_doc_id": "callback-retry-contract",
+                      "base_excerpt": "Protocol v1 retry contract. A 503 response with TEMPORARY_UNAVAILABLE is retriable. Retry state SCHEDULED and a trusted retry_at mean the sender will make another attempt; wait for that attempt rather than creating a parallel resend. Contact the callback operator only when the attempt limit is reached and the trusted retry state is EXHAUSTED. Correlate response request, event, order and attempt count.",
+                      "base_excerpt_digest": "8a46f09d593090e628c9516f44c9e5f2e0afab8dc314b575496185bd71f6f409",
+                      "base_location": "Lines 1-1",
+                      "base_version": "1.0.0",
+                      "diff_type": "SECTION_MODIFIED",
+                      "evidence_id": "EVID-001",
+                      "target_doc_id": "callback-retry-contract-v2",
+                      "target_excerpt": "Protocol v2 error handling. A 503 response is retriable only when the server records a retryable failure code and a current retry policy. Retry state SCHEDULED with retry_at is still pending. EXHAUSTED is actionable only when attempt_count reaches max_attempts and the failure response digest/event/request all match the current delivery row. This document describes method; current Domain Evidence decides the incident.",
+                      "target_excerpt_digest": "de606609dd942c0920ccc1114c0667417848927e7e25e38b3d089e9adf5aff2d",
+                      "target_location": "Lines 1-1",
+                      "target_version": "2.0.0",
+                      "traceability": "Content difference verified in section 'Root' between v1.0.0 and v2.0.0"
+                    }
+                  ],
+                  "differences": [
+                    {
+                      "base_location": "Lines 1-1",
+                      "category": "TEXT_DIFFERENCE",
+                      "description": "Section 'Root' content modified. Changes include candidate parameters: attempt_count, max_attempts (advisory lexical hint; does not prove runtime rule adoption).",
+                      "difference_id": "DIFF-001",
+                      "evidence_id": "EVID-001",
+                      "target_location": "Lines 1-1",
+                      "title": "Section modified: Root"
+                    }
+                  ],
+                  "grant_version": 1,
+                  "identical": false,
+                  "project_id": "orders-callback",
+                  "scope_digest": "7456567bdb3806795fb8f0859667b832da54b950ddbf66c2023faeef08578dc6",
+                  "session_id": "session-758c361d-1416-4309-93e5-3ad9d78cd8b6",
+                  "success": true,
+                  "summary": "Compared callback-retry-contract (v1.0.0) with callback-retry-contract-v2 (v2.0.0): 1 structural differences detected. Candidate lexical cues detected in target text (parameters: attempt_count, max_attempts). Notice: Lexical keywords serve as investigation cues only; protocol semantics and runtime adoption must be verified via context and live telemetry.",
+                  "target_document_id": "callback-retry-contract-v2",
+                  "target_ref": {
+                    "digest": "9ad3f5a67a5f40da986769c66a78317027d3e57803371a0674d3b14fe412e238",
+                    "document_id": "callback-retry-contract-v2",
+                    "expires_at": "2030-01-01T00:00:00+00:00",
+                    "source": "local:orders-async-demo/contract-v2",
+                    "title": "Callback failure classification and retry policy v2",
+                    "valid_from": "2026-10-01T00:00:00+00:00",
+                    "version": "2.0.0"
+                  },
+                  "tenant_id": "tenant-a",
+                  "unconfirmed_aspects": [
+                    "LIVE_DEPLOYMENT_VERSION_UNVERIFIED: Static protocol documents describe specifications only. They cannot prove which version is actually running in production/cluster environments without live probing.",
+                    "RUNTIME_CONSUMER_READINESS_UNVERIFIED: Cannot determine whether live callers, queues, or consumers have adopted this target contract version without runtime observation.",
+                    "HISTORICAL_SPECIFICATION_BOUNDARY: Comparison reflects documented specifications as authored; runtime bug fixes or unannounced gateway routing behaviors are not verified by document text."
+                  ]
+                },
+                "status": "OK",
+                "tool_name": "compare_scoped_protocols"
+              }
+            ],
+            "run_id": "run-d3b0fc41-a600-4504-827b-63416b8c95a1"
+          }
+        }
+      ],
+      "scenario": "A",
+      "session_id": "session-758c361d-1416-4309-93e5-3ad9d78cd8b6",
+      "stop_reason": null,
+      "task_id": "task-76e1c56b-4010-408d-9658-9a4d04e965d5"
+    },
+    {
+      "budget": {
+        "budget_usd_micro": 10500000,
+        "experiment_id": "AR-03-REAL-LLM-02",
+        "initialized": true,
+        "mcp_limit": 6,
+        "mcp_used": 6,
+        "price_version": "DEEPSEEK_FLASH_PEAK_2026-11-01",
+        "provider_limit": 8,
+        "provider_used": 2,
+        "status": "OPEN",
+        "usd_remaining_micro": 10498225,
+        "usd_reserved_micro": 0,
+        "usd_settled_micro": 1775
+      },
+      "case_id": "AR03-LLM-01-PROCESSED",
+      "fixture_event": {
+        "event_id": "event-00000000-0000-4000-8000-000000000001",
+        "receiver_event_id": "event-00000000-0000-4000-8000-000000000001",
+        "receiver_http_status": 202,
+        "receiver_status": "PROCESSED",
+        "status": "ACKNOWLEDGED"
+      },
+      "mcp_campaign_count": 6,
+      "message_ids": [
+        "message-a0a65d3c-f093-4717-81ed-14a4af4b9217"
+      ],
+      "provider_dispatches": [
+        {
+          "error_code": null,
+          "kind": "MODEL",
+          "reserved_usd_micro": 0,
+          "settled_usd_micro": 666,
+          "status": "OK",
+          "usage_state": "KNOWN"
+        },
+        {
+          "error_code": null,
+          "kind": "MODEL",
+          "reserved_usd_micro": 0,
+          "settled_usd_micro": 1109,
+          "status": "OK",
+          "usage_state": "KNOWN"
+        }
+      ],
+      "provider_http_count_delta": 2,
+      "provider_http_global_count": 5,
+      "receiver_state": "PROCESSED",
+      "run_ids": [
+        "run-853b83b8-9451-43be-bda6-edf8d65c5f8b"
+      ],
+      "runs": [
+        {
+          "accepted": {
+            "application_state": "RECEIVED_NOT_APPLIED",
+            "command_id": "command-97194737-2440-4be0-a45d-cc30956a5d02",
+            "message_id": "message-a0a65d3c-f093-4717-81ed-14a4af4b9217",
+            "replayed": false,
+            "request_digest": "4cb26beafd8506727ed6b65145303b954789bede53488bfcde17c567abf98ace",
+            "run_id": "run-853b83b8-9451-43be-bda6-edf8d65c5f8b",
+            "run_status": "QUEUED",
+            "sequence": 1,
+            "session_id": "session-44052451-5193-4a4a-ae15-2db46eaa1019",
+            "status": "ACCEPTED",
+            "task_id": "task-c3b02de6-a078-4b69-8fcd-13de8dac3510",
+            "thread_id": "opspilot-dda6414d-a906-4a17-8005-0cc9649e5ec3"
+          },
+          "answer": {
+            "answer_kind": "PROGRAM_LIMIT",
+            "answer_run_id": "run-853b83b8-9451-43be-bda6-edf8d65c5f8b",
+            "answer_source_message_id": "message-a0a65d3c-f093-4717-81ed-14a4af4b9217",
+            "application_state": null,
+            "applied_run_id": null,
+            "body": "本次解释未完成：ASSISTANT_STOP:TaskControlError:ASSISTANT_RUN_MCP_LIMIT。这是程序生成的限制说明，未提交模型最终答复；此前已预留或失败的调用仍计入额度。本说明未重新取得业务事实，历史结论不能冒充本次新调查结果。Task 和既有业务授权保持不变。",
+            "created_at": "2026-11-02T14:07:37.347+00:00",
+            "input_kind": "CHAT_READONLY",
+            "message_id": "message-1d5b6f25-ac7c-4181-9b43-150227cc795e",
+            "role": "ASSISTANT",
+            "sequence": 2,
+            "task_id": "task-c3b02de6-a078-4b69-8fcd-13de8dac3510"
+          },
+          "purpose": "trusted_binding_and_frozen_business_goal",
+          "run": {
+            "answer_status": "FAILED",
+            "created_at": "2026-11-02T14:07:32.301+00:00",
+            "ended_at": "2026-11-02T14:07:37.347+00:00",
+            "kind": "CHAT_READONLY",
+            "run_id": "run-853b83b8-9451-43be-bda6-edf8d65c5f8b",
+            "session_id": "session-44052451-5193-4a4a-ae15-2db46eaa1019",
+            "source_message_id": "message-a0a65d3c-f093-4717-81ed-14a4af4b9217",
+            "started_at": "2026-11-02T14:07:32.509+00:00",
+            "status": "FAILED",
+            "task_id": "task-c3b02de6-a078-4b69-8fcd-13de8dac3510",
+            "waiting_reason": "ASSISTANT_STOP:TaskControlError:ASSISTANT_RUN_MCP_LIMIT"
+          },
+          "source_message_id": "message-a0a65d3c-f093-4717-81ed-14a4af4b9217",
+          "sources": {
+            "authority": "ASSISTANT_EXPLANATION_ONLY",
+            "current": false,
+            "exclusion_reason": "BUSINESS_SOURCE_INVALIDATED",
+            "items": [
+              {
+                "call_id": "assistant-call-11dac54d-cabf-44a9-aaf4-06f846f9e738",
+                "completed_at": "2026-11-02T14:07:34.823+00:00",
+                "created_at": "2026-11-02T14:07:34.758+00:00",
+                "evidence_id": null,
+                "observation_id": null,
+                "result": null,
+                "status": "OK",
+                "tool_name": "list_scoped_protocol_documents"
+              },
+              {
+                "call_id": "assistant-call-f3fe7292-4c62-4fbe-96aa-f7597a2d3dd4",
+                "completed_at": "2026-11-02T14:07:34.910+00:00",
+                "created_at": "2026-11-02T14:07:34.840+00:00",
+                "evidence_id": "evidence-f7b0826b-39f9-4016-a7a1-810b29e913f1",
+                "observation_id": "observation-38ea1a0a-b2f4-4058-a6f8-8be1f6e7bb92",
+                "result": null,
+                "status": "OK",
+                "tool_name": "get_callback_delivery"
+              },
+              {
+                "call_id": "assistant-call-dd61ae7b-e875-485b-b357-800d72bed834",
+                "completed_at": "2026-11-02T14:07:35.014+00:00",
+                "created_at": "2026-11-02T14:07:34.943+00:00",
+                "evidence_id": "evidence-844857ce-47a1-4f7a-8d1a-e80d91150a8f",
+                "observation_id": "observation-73e4820e-8a49-4850-9bba-242ee4942498",
+                "result": null,
+                "status": "OK",
+                "tool_name": "get_receiver_processing"
+              },
+              {
+                "call_id": "assistant-call-fadde37d-4128-4575-b8fc-ce77b86db920",
+                "completed_at": "2026-11-02T14:07:35.549+00:00",
+                "created_at": "2026-11-02T14:07:35.031+00:00",
+                "evidence_id": "evidence-af7f3b96-d0a8-4104-9a24-69586b38603d",
+                "observation_id": "observation-a86f6341-1af1-4117-82f0-9a88c131d192",
+                "result": null,
+                "status": "OK",
+                "tool_name": "get_order_status"
+              },
+              {
+                "call_id": "assistant-call-18227b00-dd31-445c-96ef-ff0020f2d811",
+                "completed_at": "2026-11-02T14:07:37.203+00:00",
+                "created_at": "2026-11-02T14:07:37.135+00:00",
+                "evidence_id": null,
+                "observation_id": null,
+                "result": null,
+                "status": "OK",
+                "tool_name": "list_scoped_protocol_documents"
+              },
+              {
+                "call_id": "assistant-call-d51bd4f1-de14-46f1-93f0-4c60fa4f942c",
+                "completed_at": "2026-11-02T14:07:37.314+00:00",
+                "created_at": "2026-11-02T14:07:37.223+00:00",
+                "evidence_id": null,
+                "observation_id": null,
+                "result": null,
+                "status": "OK",
+                "tool_name": "search_project_knowledge"
+              }
+            ],
+            "run_id": "run-853b83b8-9451-43be-bda6-edf8d65c5f8b"
+          }
+        }
+      ],
+      "scenario": "B",
+      "session_id": "session-44052451-5193-4a4a-ae15-2db46eaa1019",
+      "stop_reason": null,
+      "task_id": "task-c3b02de6-a078-4b69-8fcd-13de8dac3510"
+    }
+  ],
+  "scenario_count": {
+    "A": 3,
+    "B": 2
+  },
+  "updated_at": "2026-11-02T14:07:37.489749+00:00"
+}
