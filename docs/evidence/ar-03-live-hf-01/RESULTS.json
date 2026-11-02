@@ -1,0 +1,128 @@
+{
+  "task": "AR-03-LIVE-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "outcome": "OFFLINE_FIX_VERIFIED",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/ar03-live-hf-01",
+  "base_sha": "03d6248bf00439d3e189ac437fd805c1366b93c5",
+  "freeze_commit": "d11af42a463cfd8b7ad013b831bf3bdb5c40c058",
+  "red_commit": "36415aedaa9e58737106c5b096d3dffe208f392a",
+  "implementation_commit": "7f7a49c208cd660bddd2b5c4a6c6d47c8c0964ce",
+  "remote_main_at_start": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "runtime": {
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "langchain_core": "1.6.12",
+    "venv": "D:/学习/agent新项目/.venv"
+  },
+  "verification": {
+    "red_run": {
+      "command": "python -m pytest tests/test_ar02_ar03_integration_01.py -k \"scoped_protocol_discovery_matches_callback_retry_topics or full_frozen_goal_in_trusted_order\" -q --basetemp D:/学习/agent新项目/.tmp/ar03-live-hf01-red-20261102-01",
+      "result": "6 failed, 3 passed, 8 deselected",
+      "valid_product_failures": 4,
+      "test_setup_failures": 2,
+      "log": "runs/red-focused-01.log"
+    },
+    "pre_fix_entrypoint_recheck": {
+      "command": "python -m pytest tests/test_ar02_ar03_integration_01.py -k \"full_frozen_goal_in_trusted_order_initial_message or callback_retry_topic_match_does_not_expand\" -q --basetemp D:/学习/agent新项目/.tmp/ar03-live-hf01-red-20261102-02",
+      "result": "3 passed, 14 deselected",
+      "meaning": "existing trusted API path already accepts the full frozen initial_message and runs one offline Assistant investigation; no backend API source change required",
+      "log": "runs/red-initial-message-check-01.log"
+    },
+    "focused_green": {
+      "command": "python -m pytest tests/test_ar02_ar03_integration_01.py -k \"scoped_protocol_discovery_matches_callback_retry_topics or callback_retry_topic_match_does_not_expand or full_frozen_goal_in_trusted_order_initial_message\" -q --basetemp D:/学习/agent新项目/.tmp/ar03-live-hf01-green-20261102-02",
+      "result": "10 passed, 7 deselected",
+      "log": "runs/green-focused-02.log"
+    },
+    "related_regression": {
+      "command": "python -m pytest tests/test_ar02_ar03_integration_01.py tests/test_ar03_real_llm_01_prep.py tests/test_ar03_real_llm_01_live_preflight.py tests/test_ar02_assistant.py -q --basetemp D:/学习/agent新项目/.tmp/ar03-live-hf01-regression-20261102-03",
+      "result": "25 passed, 0 failed",
+      "log": "runs/green-regression-03.log"
+    },
+    "full_pytest": "NOT_RUN",
+    "browser": "NOT_RUN_BY_TASK_SCOPE",
+    "real_provider_requests": 0,
+    "business_writes": 0
+  },
+  "initial_message_entrypoint": {
+    "route": "POST /api/sessions/{session_id}/assistant/order",
+    "order_id": "ar03-order",
+    "prompt_source": "docs/evidence/ar-03-real-llm-01-prep/CASES.json",
+    "exact_frozen_prompt": true,
+    "one_user_message_per_request": true,
+    "one_task_and_one_assistant_v1_run_per_request": true,
+    "separate_investigation_message_sent": false,
+    "receiver_states": ["QUEUED", "PROCESSED"]
+  },
+  "recorded_deterministic_journeys": [
+    {
+      "receiver": "QUEUED",
+      "representative_run_id": "run-a973fe1c-3c2f-49f4-85ee-592fa200ff47",
+      "representative_task_id": "task-02a64c76-e121-4bf5-8118-79109fce1b22",
+      "run_status": "SUCCEEDED",
+      "assistant_model_calls": 6,
+      "mcp_calls_and_attempts": 5,
+      "mcp_limit": 6,
+      "successful_tools": [
+        "list_scoped_protocol_documents",
+        "compare_scoped_protocols",
+        "get_receiver_processing",
+        "get_callback_delivery",
+        "get_order_status"
+      ],
+      "conclusion": "HTTP 202/ACKNOWLEDGED is transport acceptance; same Event Receiver QUEUED, processing not confirmed",
+      "draft_submitted": false
+    },
+    {
+      "receiver": "PROCESSED",
+      "representative_run_id": "run-17e3230f-d912-4f6a-a113-51af635d05d8",
+      "representative_task_id": "task-2e5a6e42-3ede-411e-9ab9-2259598dce69",
+      "run_status": "SUCCEEDED",
+      "assistant_model_calls": 6,
+      "mcp_calls_and_attempts": 5,
+      "mcp_limit": 6,
+      "successful_tools": [
+        "list_scoped_protocol_documents",
+        "compare_scoped_protocols",
+        "get_receiver_processing",
+        "get_callback_delivery",
+        "get_order_status"
+      ],
+      "conclusion": "same Event Receiver PROCESSED; conclusion limited to that Event",
+      "draft_submitted": false
+    }
+  ],
+  "offline_trace_repetitions": 3,
+  "topic_queries_verified": [
+    "retry",
+    "callback",
+    "callback retry",
+    "回调",
+    "重试",
+    "回调重试",
+    "回调 重试"
+  ],
+  "scope_negative_checks": {
+    "out_of_scope_document_api_scope_current_returned": false,
+    "different_actor_can_read_owner_session": false,
+    "existing_source_digest_revalidation_regression": "PASSED_IN_RELATED_REGRESSION"
+  },
+  "preservation": {
+    "frozen_cases_or_gold_modified": false,
+    "historical_ar03_live_trace_or_report_modified": false,
+    "historical_experiment_budget_modified": false,
+    "main_modified": false,
+    "dependency_or_lockfile_changed": false
+  },
+  "trace_validation": {
+    "jsonl_records": 114,
+    "invalid_json_lines": 0,
+    "credential_scan": "No Bearer, api_key, or authorization values found; naive sk- pattern matches were all substrings of task- identifiers."
+  },
+  "evidence_files": {
+    "report": "REPORT.md",
+    "trace": "TRACE.jsonl",
+    "failures": "FAILURES.md",
+    "logs_directory": "runs/"
+  }
+}

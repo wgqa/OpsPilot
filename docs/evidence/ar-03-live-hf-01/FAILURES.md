@@ -11,3 +11,12 @@ Result: **6 failed, 3 passed, 8 deselected**. Four failures reproduced the produ
 The fixture was corrected to provide both preselected UUIDs. Re-running the trusted full-`initial_message` API path for both Receiver states plus the existing in-scope/out-of-scope authorization pair returned **3 passed, 14 deselected**. This confirms the existing `/assistant/order` endpoint can take the exact frozen user goal and its single ASSISTANT_V1 run can complete the deterministic offline investigation; the prior live run's extra investigation came from submitting a second user request after binding, not from a missing server entrypoint.
 
 These logs are immutable; later GREEN results are recorded separately.
+
+## GREEN and related regression
+
+- `runs/green-focused-02.log`: the frozen topic cases and trusted `initial_message` route passed, **10 passed / 7 deselected**.
+- `runs/green-regression-03.log`: related AR-02/AR-03 integration, prep, wire-preflight, and Assistant regression passed, **25 passed / 0 failed**.
+- Earlier repeat executions are retained as `green-focused-01.log`, `green-regression-01.log`, and `green-regression-02.log`; these are repeated deterministic offline runs, not additional independent model samples.
+- Full repository pytest: **NOT_RUN**. Real Provider, browser, and business writes: **0** by scope.
+
+The two setup failures in the original RED were resolved only in the test fixture by supplying both deterministic UUIDs; no product expectation was relaxed. All original RED output remains preserved.
