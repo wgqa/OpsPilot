@@ -509,40 +509,51 @@ async function bindAssistantOrder(): Promise<void> {
 
 async function refreshSession(): Promise<void> {
   if (!sessionId.value) return;
+  const requestedSessionId = sessionId.value;
+  const messageTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
+  const isCurrentSession = (): boolean => sessionId.value === requestedSessionId;
   loading.value = true;
-  let linkedTask: string | null = null;
-  let taskInspectorLoaded = false;
   try {
-    const response = await api.messages(sessionId.value);
+    const response = await api.messages(requestedSessionId);
+    if (!s3ReadResponseFence.isCurrentSessionMessages(messageTicket, sessionId.value)) return;
     messages.value = response.items;
-    linkedTask = [...response.items].reverse().find((item) => item.task_id)?.task_id ?? null;
-    const runs = await api.sessionRuns(sessionId.value);
+    // The messages endpoint revalidates and sanitizes persisted answers. Their
+    // explicit source IDs make the conversation safe to project before the
+    // parallel Task Inspector refresh finishes.
+    sessionHistoryReady.value = true;
+    let linkedTask = [...response.items].reverse().find((item) => item.task_id)?.task_id ?? null;
+    const runs = await api.sessionRuns(requestedSessionId);
+    if (!isCurrentSession()) return;
     const chatRuns = [...runs.items].filter((run) => run.kind === 'CHAT_READONLY');
     const latestChat = chatRuns.at(-1) ?? null;
     const recoverable = [...chatRuns].reverse().find((run) => ['QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE'].includes(run.status));
     activeChatRun.value = recoverable ?? latestChat;
     if (recoverable) {
       chunks.value = await api.chunks(recoverable.run_id, 0).then((result) => result.items);
+      if (!isCurrentSession()) return;
       lastChunkSeq.value = chunks.value.reduce((max, item) => Math.max(max, item.chunk_seq), 0);
       void watchRun(recoverable.run_id);
     } else if (latestChat && ['FAILED', 'BLOCKED'].includes(latestChat.status)) {
       errorMessage.value = `上次只读回答结束：${readableStatus(latestChat.status)}${latestChat.waiting_reason ? `（${latestChat.waiting_reason}）` : ''}`;
     }
     if (!linkedTask) {
-      const linkedTasks = await api.session(sessionId.value);
+      const linkedTasks = await api.session(requestedSessionId);
+      if (!isCurrentSession()) return;
       linkedTask = [...linkedTasks.tasks].reverse().find((item) => item.task_id)?.task_id ?? null;
     }
     if (linkedTask) {
       taskId.value = linkedTask;
-      taskInspectorLoaded = await refreshInspector();
+      await refreshInspector();
+      if (!isCurrentSession()) return;
     }
+    if (!isCurrentSession()) return;
     await refreshEventHistory();
+    if (!isCurrentSession()) return;
     connectEvents();
   } catch (error) {
-    errorMessage.value = explainError(error);
+    if (isCurrentSession()) errorMessage.value = explainError(error);
   } finally {
-    sessionHistoryReady.value = !linkedTask || taskInspectorLoaded;
-    loading.value = false;
+    if (isCurrentSession()) loading.value = false;
   }
 }
 
@@ -1142,6 +1153,7 @@ async function refreshSessionMessagesOnly(): Promise<void> {
   const response = await api.messages(requestedSessionId);
   if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
     messages.value = filterDeniedS3AssistantMessages(response.items, (taskId) => s3ReadResponseFence.isTaskDenied(taskId));
+    sessionHistoryReady.value = true;
   }
 }
 
