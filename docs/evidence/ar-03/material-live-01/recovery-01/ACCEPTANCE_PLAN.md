@@ -1,7 +1,7 @@
 # AR-03-MATERIAL-LIVE-01 Recovery 01 — 冻结验收计划
 
-**基线：** `codex/ar03-material-01-public@69a1a1171b97849a6b5a77a7b8f8d03f263c95aa`  
-**范围：** 新隔离数据库初始化顺序修复与一次免费预演。  
+**基线：** `codex/ar03-material-01-public@69a1a1171b97849a6b5a77a7b8f8d03f263c95aa`
+**范围：** 新隔离数据库初始化顺序修复与一次免费预演。
 **状态：** 在实现前冻结；不授权真实 Provider 请求。
 
 ## 固定合同

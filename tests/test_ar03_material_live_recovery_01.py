@@ -21,8 +21,9 @@ assert RUNNER_SPEC is not None and RUNNER_SPEC.loader is not None
 RUNNER_SPEC.loader.exec_module(RUNNER)
 
 EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01"
-ORIGIN = "http://ar03-material-recovery-preview"
-PASSWORD = "material-recovery-preview-local"
+ORIGIN = "http://testserver"
+# Disposable credential for the in-process demo app; never use outside tests.
+PASSWORD = "offline-test-only"
 
 
 class RecoveryPreviewModel(BaseChatModel):
@@ -310,7 +311,8 @@ def test_fresh_bootstrap_and_formal_worker_read_only_preview(
         "historical_artifact_hashes_unchanged": historical_after,
         "assistant_calls": raw_calls,
     }
-    print("RECOVERY_PREVIEW_TRACE=" + json.dumps(trace, ensure_ascii=False, sort_keys=True))
+    # Detailed trace output stays in the private preview artifact. The public
+    # test run should expose only assertions and aggregate pytest results.
     assert trace["provider_http_requests"] == 0
 
 
