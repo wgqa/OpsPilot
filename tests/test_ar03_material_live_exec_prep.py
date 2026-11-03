@@ -185,13 +185,15 @@ def test_new_identity_zero_cost_formal_worker_preview_uses_independent_ledger(
     recovery = _load_recovery_test()
     runner = _load_resume_runner()
     base_runner = runner._bound_base_runner()
+    historical_evidence = ROOT / "docs/evidence/ar-03/material-live-01"
+    historical_runtime = ROOT / ".runtime/ar03-material-live-01"
     historical_paths = [
-        base_runner.EVIDENCE / "EXECUTION_CLAIM.json",
-        base_runner.EVIDENCE / "TRACE.jsonl",
-        base_runner.EVIDENCE / "RESULTS.json",
-        base_runner.EVIDENCE / "BUDGET_LEDGER.json",
-        base_runner.DOMAIN_DB,
-        base_runner.CHECKPOINT_DB,
+        historical_evidence / "EXECUTION_CLAIM.json",
+        historical_evidence / "TRACE.jsonl",
+        historical_evidence / "RESULTS.json",
+        historical_evidence / "BUDGET_LEDGER.json",
+        historical_runtime / "domain.sqlite3",
+        historical_runtime / "checkpoints.sqlite3",
     ]
     historical_before = {str(path): _file_digest(path) for path in historical_paths}
     monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
