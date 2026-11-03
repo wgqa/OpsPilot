@@ -1,0 +1,80 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+________ test_remainder_campaign_counts_mcp_without_a_low_call_ceiling ________
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+
+    def test_remainder_campaign_counts_mcp_without_a_low_call_ceiling(demo_db):
+        from opspilot.domain.assistant_experiment import initialize_experiment, read_budget
+
+>       initialize_experiment(demo_db, EXPERIMENT_ID)
+
+tests\test_ar03_material_remainder_01.py:12:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\assistant_experiment.py:178: in initialize_experiment
+    _validate_experiment_id(experiment_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+experiment_id = 'AR-03-MATERIAL-REMAINDER-01'
+
+    def _validate_experiment_id(experiment_id: str) -> None:
+        if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
+>           raise ExperimentBudgetError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+E           opspilot.domain.assistant_experiment.ExperimentBudgetError: AR02_LIVE_EXPERIMENT_SCOPE_INVALID
+
+opspilot\domain\assistant_experiment.py:105: ExperimentBudgetError
+____ test_remainder_limits_are_experiment_scoped_and_legacy_defaults_stay _____
+
+    def test_remainder_limits_are_experiment_scoped_and_legacy_defaults_stay():
+        from opspilot.domain.assistant import run_limits_for_experiment
+
+>       assert run_limits_for_experiment(EXPERIMENT_ID) == (16, None)
+E       assert (8, 6) == (16, None)
+E
+E         At index 0 diff: 8 != 16
+E         Use -v to get more diff
+
+tests\test_ar03_material_remainder_01.py:23: AssertionError
+____ test_remainder_policy_allows_multiple_runs_but_keeps_task_time_budget ____
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+
+    def test_remainder_policy_allows_multiple_runs_but_keeps_task_time_budget(demo_db):
+>       from opspilot.domain.d2 import configure_material_remainder_budget, task_attempt_limits
+E       ImportError: cannot import name 'configure_material_remainder_budget' from 'opspilot.domain.d2' (<LOCAL_PATH>)
+
+tests\test_ar03_material_remainder_01.py:29: ImportError
+______________ test_remainder_paid_provider_is_still_fail_closed ______________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000024D3AFCCC30>
+
+    def test_remainder_paid_provider_is_still_fail_closed(monkeypatch):
+>       from opspilot.assistant import create_assistant_model
+
+tests\test_ar03_material_remainder_01.py:71:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Single professional create_agent loop; trusted execution uses existing Domain.
+
+    No business Outcome writer. Provider construction requires explicit opt-in; the
+    material resume campaign additionally requires its exact one-shot authorization.
+    """
+    from __future__ import annotations
+    import asyncio
+    import hashlib
+    import hmac
+    import json
+    import os
+    import sys
+    from urllib.parse import urlparse
+    from pathlib import Path
+>   from langchain.agents import create_agent
+E   ModuleNotFoundError: No module named 'langchain'
+
+opspilot\assistant.py:15: ModuleNotFoundError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_campaign_counts_mcp_without_a_low_call_ceiling
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_limits_are_experiment_scoped_and_legacy_defaults_stay
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_policy_allows_multiple_runs_but_keeps_task_time_budget
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_paid_provider_is_still_fail_closed
+4 failed in 0.53s

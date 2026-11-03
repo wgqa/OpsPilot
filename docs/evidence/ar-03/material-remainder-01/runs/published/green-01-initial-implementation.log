@@ -1,0 +1,343 @@
+..F.FFFFFF..                                                             [100%]
+================================== FAILURES ===================================
+____ test_remainder_policy_allows_multiple_runs_but_keeps_task_time_budget ____
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+
+    def test_remainder_policy_allows_multiple_runs_but_keeps_task_time_budget(demo_db):
+        from opspilot.domain.d2 import configure_material_remainder_budget, task_attempt_limits
+        from opspilot.domain.execution_budget import execution_budget_snapshot
+        from opspilot.domain.s3 import prepare_s3_fixture
+
+        fixture = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", tenant_id="tenant-a", order_id="ar03-order",
+            contract_version=2, queue_age_seconds=60,
+        )
+        assert fixture
+        from fastapi.testclient import TestClient
+        from opspilot.web.app import create_app
+
+        origin = "http://ar03-material-remainder-offline"
+        passwords = {"support-a": "material-remainder-offline"}
+
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=Path(str(demo_db) + ".checkpoints.sqlite3"),
+            start_worker=False, credentials=passwords, expected_origin=origin,
+            assistant_experiment_id=EXPERIMENT_ID,
+        )
+        with TestClient(app) as client:
+            login = client.post(
+                "/api/auth/login", headers={"Origin": origin},
+                json={"actor_id": "support-a", "password": passwords["support-a"]},
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Origin": origin, "X-CSRF-Token": login.json()["csrf_token"]}
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": "remainder-policy-red"},
+                json={"order_id": "ar03-order", "initial_message": "MAT-05 offline policy probe"},
+            )
+            assert accepted.status_code == 202, accepted.text
+            task_id = accepted.json()["task_id"]
+
+>       limits = configure_material_remainder_budget(demo_db, task_id, EXPERIMENT_ID)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar03_material_remainder_01.py:229:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('<LOCAL_PATH>)
+task_id = 'task-7d97cada-c2c3-463d-b83c-ddc154bf9c31'
+experiment_id = 'AR-03-MATERIAL-REMAINDER-01'
+
+    def configure_material_remainder_budget(path, task_id, experiment_id):
+        """Apply the isolated remainder policy before attempts, on a bound demo Task only."""
+        from opspilot.domain.assistant_experiment import AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID
+        if experiment_id != AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
+            raise ValueError("MATERIAL_REMAINDER_EXPERIMENT_SCOPE_INVALID")
+        from opspilot.domain.s3 import get_s3_binding
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            binding = get_s3_binding(connection, task_id)
+            if binding.get("service_id") != "orders-async-demo":
+                raise ScopeDenied("MATERIAL_REMAINDER_TASK_SCOPE_INVALID")
+            row = connection.execute(
+                "SELECT * FROM task_execution_budgets WHERE task_id=?", (task_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("MATERIAL_REMAINDER_TASK_BUDGET_MISSING")
+            current = _task_attempt_limits(connection, task_id)
+            expected = {"MODEL":16,"MCP":None}
+            if current == expected and row["policy_version"] == "AR03_MATERIAL_REMAINDER_01_V1":
+                return expected
+            if current != {"MODEL":8,"MCP":6} or row["policy_version"] != "LEGACY_V1":
+>               raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED")
+E               ValueError: TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED
+
+opspilot\domain\d2.py:785: ValueError
+___ test_remainder_bound_policy_is_idempotent_and_deadline_still_stops_mcp ____
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+tmp_path = WindowsPath('<LOCAL_PATH>)
+
+    def test_remainder_bound_policy_is_idempotent_and_deadline_still_stops_mcp(demo_db, tmp_path):
+        from opspilot.domain.database import connect
+        from opspilot.domain.d2 import configure_material_remainder_budget, task_attempt_limits
+        from opspilot.domain.execution_budget import execution_budget_snapshot
+
+>       accepted = _prepare_bound_run(
+            demo_db, tmp_path / "deadline-checkpoint.sqlite3", "MAT-04-BOUND-QUEUED",
+        )
+
+tests\test_ar03_material_remainder_01.py:253:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar03_material_remainder_01.py:80: in _prepare_bound_run
+    limits = configure_material_remainder_budget(db_path, task_id, EXPERIMENT_ID)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('<LOCAL_PATH>)
+task_id = 'task-ef3a9af7-dfe6-46fb-8be7-2c9ab795bbfa'
+experiment_id = 'AR-03-MATERIAL-REMAINDER-01'
+
+    def configure_material_remainder_budget(path, task_id, experiment_id):
+        """Apply the isolated remainder policy before attempts, on a bound demo Task only."""
+        from opspilot.domain.assistant_experiment import AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID
+        if experiment_id != AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
+            raise ValueError("MATERIAL_REMAINDER_EXPERIMENT_SCOPE_INVALID")
+        from opspilot.domain.s3 import get_s3_binding
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            binding = get_s3_binding(connection, task_id)
+            if binding.get("service_id") != "orders-async-demo":
+                raise ScopeDenied("MATERIAL_REMAINDER_TASK_SCOPE_INVALID")
+            row = connection.execute(
+                "SELECT * FROM task_execution_budgets WHERE task_id=?", (task_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("MATERIAL_REMAINDER_TASK_BUDGET_MISSING")
+            current = _task_attempt_limits(connection, task_id)
+            expected = {"MODEL":16,"MCP":None}
+            if current == expected and row["policy_version"] == "AR03_MATERIAL_REMAINDER_01_V1":
+                return expected
+            if current != {"MODEL":8,"MCP":6} or row["policy_version"] != "LEGACY_V1":
+>               raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED")
+E               ValueError: TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED
+
+opspilot\domain\d2.py:785: ValueError
+_ test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_worker _
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+tmp_path = WindowsPath('<LOCAL_PATH>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000029835F91810>
+
+    def test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_worker(
+        demo_db, tmp_path, monkeypatch,
+    ):
+        from fastapi.testclient import TestClient
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+
+>       accepted = _prepare_bound_run(
+            demo_db, tmp_path / "capacity-checkpoint.sqlite3", "MAT-04-BOUND-QUEUED",
+        )
+
+tests\test_ar03_material_remainder_01.py:283:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar03_material_remainder_01.py:80: in _prepare_bound_run
+    limits = configure_material_remainder_budget(db_path, task_id, EXPERIMENT_ID)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('<LOCAL_PATH>)
+task_id = 'task-4797dad6-7de9-4a20-8b51-1330ea21f97f'
+experiment_id = 'AR-03-MATERIAL-REMAINDER-01'
+
+    def configure_material_remainder_budget(path, task_id, experiment_id):
+        """Apply the isolated remainder policy before attempts, on a bound demo Task only."""
+        from opspilot.domain.assistant_experiment import AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID
+        if experiment_id != AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
+            raise ValueError("MATERIAL_REMAINDER_EXPERIMENT_SCOPE_INVALID")
+        from opspilot.domain.s3 import get_s3_binding
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            binding = get_s3_binding(connection, task_id)
+            if binding.get("service_id") != "orders-async-demo":
+                raise ScopeDenied("MATERIAL_REMAINDER_TASK_SCOPE_INVALID")
+            row = connection.execute(
+                "SELECT * FROM task_execution_budgets WHERE task_id=?", (task_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("MATERIAL_REMAINDER_TASK_BUDGET_MISSING")
+            current = _task_attempt_limits(connection, task_id)
+            expected = {"MODEL":16,"MCP":None}
+            if current == expected and row["policy_version"] == "AR03_MATERIAL_REMAINDER_01_V1":
+                return expected
+            if current != {"MODEL":8,"MCP":6} or row["policy_version"] != "LEGACY_V1":
+>               raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED")
+E               ValueError: TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED
+
+opspilot\domain\d2.py:785: ValueError
+_ test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[QUEUED-OFF] _
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+tmp_path = WindowsPath('<LOCAL_PATH>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000029835F8F1D0>
+receiver_status = 'QUEUED', skill_mode = 'OFF'
+
+    @pytest.mark.parametrize(
+        ("receiver_status", "skill_mode"),
+        [("QUEUED", "OFF"), ("QUEUED", "ON"), ("PROCESSED", "OFF"), ("PROCESSED", "ON")],
+    )
+    def test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract(
+        demo_db, tmp_path, monkeypatch, receiver_status, skill_mode,
+    ):
+        import httpx
+        from fastapi.testclient import TestClient
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+
+        case_id = "MAT-05-BOUND-PROCESSED" if receiver_status == "PROCESSED" else "MAT-04-BOUND-QUEUED"
+>       assert _case_input("MAT-04-BOUND-QUEUED") == _case_input("MAT-05-BOUND-PROCESSED")
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar03_material_remainder_01.py:340:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar03_material_remainder_01.py:23: in _case_input
+    return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x000002982CBF0E50>
+
+>   return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+                ^^^^^^^^^^^^
+E   KeyError: 'input'
+
+tests\test_ar03_material_remainder_01.py:23: KeyError
+_ test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[QUEUED-ON] _
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+tmp_path = WindowsPath('<LOCAL_PATH>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000029836142E00>
+receiver_status = 'QUEUED', skill_mode = 'ON'
+
+    @pytest.mark.parametrize(
+        ("receiver_status", "skill_mode"),
+        [("QUEUED", "OFF"), ("QUEUED", "ON"), ("PROCESSED", "OFF"), ("PROCESSED", "ON")],
+    )
+    def test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract(
+        demo_db, tmp_path, monkeypatch, receiver_status, skill_mode,
+    ):
+        import httpx
+        from fastapi.testclient import TestClient
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+
+        case_id = "MAT-05-BOUND-PROCESSED" if receiver_status == "PROCESSED" else "MAT-04-BOUND-QUEUED"
+>       assert _case_input("MAT-04-BOUND-QUEUED") == _case_input("MAT-05-BOUND-PROCESSED")
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar03_material_remainder_01.py:340:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar03_material_remainder_01.py:23: in _case_input
+    return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x000002982CC0D360>
+
+>   return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+                ^^^^^^^^^^^^
+E   KeyError: 'input'
+
+tests\test_ar03_material_remainder_01.py:23: KeyError
+_ test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[PROCESSED-OFF] _
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+tmp_path = WindowsPath('<LOCAL_PATH>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000029836143130>
+receiver_status = 'PROCESSED', skill_mode = 'OFF'
+
+    @pytest.mark.parametrize(
+        ("receiver_status", "skill_mode"),
+        [("QUEUED", "OFF"), ("QUEUED", "ON"), ("PROCESSED", "OFF"), ("PROCESSED", "ON")],
+    )
+    def test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract(
+        demo_db, tmp_path, monkeypatch, receiver_status, skill_mode,
+    ):
+        import httpx
+        from fastapi.testclient import TestClient
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+
+        case_id = "MAT-05-BOUND-PROCESSED" if receiver_status == "PROCESSED" else "MAT-04-BOUND-QUEUED"
+>       assert _case_input("MAT-04-BOUND-QUEUED") == _case_input("MAT-05-BOUND-PROCESSED")
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar03_material_remainder_01.py:340:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar03_material_remainder_01.py:23: in _case_input
+    return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x000002982CC0DE10>
+
+>   return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+                ^^^^^^^^^^^^
+E   KeyError: 'input'
+
+tests\test_ar03_material_remainder_01.py:23: KeyError
+_ test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[PROCESSED-ON] _
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+tmp_path = WindowsPath('<LOCAL_PATH>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000298361CD550>
+receiver_status = 'PROCESSED', skill_mode = 'ON'
+
+    @pytest.mark.parametrize(
+        ("receiver_status", "skill_mode"),
+        [("QUEUED", "OFF"), ("QUEUED", "ON"), ("PROCESSED", "OFF"), ("PROCESSED", "ON")],
+    )
+    def test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract(
+        demo_db, tmp_path, monkeypatch, receiver_status, skill_mode,
+    ):
+        import httpx
+        from fastapi.testclient import TestClient
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+
+        case_id = "MAT-05-BOUND-PROCESSED" if receiver_status == "PROCESSED" else "MAT-04-BOUND-QUEUED"
+>       assert _case_input("MAT-04-BOUND-QUEUED") == _case_input("MAT-05-BOUND-PROCESSED")
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar03_material_remainder_01.py:340:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar03_material_remainder_01.py:23: in _case_input
+    return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x000002982CC2F820>
+
+>   return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+                ^^^^^^^^^^^^
+E   KeyError: 'input'
+
+tests\test_ar03_material_remainder_01.py:23: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_policy_allows_multiple_runs_but_keeps_task_time_budget
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_bound_policy_is_idempotent_and_deadline_still_stops_mcp
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_worker
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[QUEUED-OFF]
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[QUEUED-ON]
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[PROCESSED-OFF]
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[PROCESSED-ON]
+7 failed, 5 passed in 5.62s

@@ -1,0 +1,7 @@
+Offline trace export failed before writing TRACE.jsonl:
+Traceback (most recent call last):
+  File "<stdin>", line 42, in <module>
+  File "<stdin>", line 15, in rows
+sqlite3.OperationalError: no such column: e.result_json
+
+Root cause: exporter query used a nonexistent d2_evidence.result_json column. The checked schema stores the evidence payload in d2_evidence.facts_json. The read-only exporter was corrected and rerun; this was not an application test failure and changed no database.

@@ -20,6 +20,8 @@ All four conditions used the same frozen user input (SHA-256 `012e88fc9fe2352155
 
 ## Evidence and results
 
+Published pytest logs and redaction hashes are listed in PUBLISHED_LOGS.md; exact local raw logs remain unchanged.
+
 - Base `305a59c25e4161a5712a1e0127012761e63cf90f`; branch `codex/ar03-material-remainder-01`.
 - New focused tests: 15/15 passed in the final focused rerun.
 - Combined targeted MAT/AR-03/S3/D2/S2 regression: 125/125 passed.

@@ -1,0 +1,64 @@
+...........F..                                                           [100%]
+================================== FAILURES ===================================
+__ test_remainder_campaign_provider_count_is_shared_and_fee_reserve_is_hard ___
+
+demo_db = WindowsPath('<LOCAL_PATH>)
+tmp_path = WindowsPath('<LOCAL_PATH>)
+
+    def test_remainder_campaign_provider_count_is_shared_and_fee_reserve_is_hard(demo_db, tmp_path):
+        from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError, read_budget, reserve_dispatch,
+        )
+        from opspilot.domain.database import connect
+
+        run_ids = _prepare_unbound_runs(
+            demo_db, tmp_path / "shared-campaign-checkpoints.sqlite3", count=2,
+        )
+        for index in range(16):
+            result = reserve_dispatch(
+                demo_db, experiment_id=EXPERIMENT_ID, run_id=run_ids[index % 2],
+                kind="MODEL", logical_key=f"shared-reserve-{index}",
+                request={"offline-reservation-test": index},
+            )
+            assert result["dispatch"] is True
+        budget = read_budget(demo_db, EXPERIMENT_ID)
+        assert budget["provider_used"] == 16
+        assert budget["mcp_limit"] is None
+        assert budget["usd_reserved_micro"] == 16 * 645_600 == 10_329_600
+        assert budget["usd_reserved_micro"] < budget["budget_usd_micro"] == 10_500_000
+        with pytest.raises(ExperimentBudgetError, match="AR02_LIVE_PROVIDER_LIMIT"):
+            reserve_dispatch(
+                demo_db, experiment_id=EXPERIMENT_ID, run_id=run_ids[0], kind="MODEL",
+                logical_key="seventeenth-shared-reserve", request={"offline": True},
+            )
+
+        # A persisted settled balance near the ceiling proves the cost check itself
+        # remains before dispatch, independent of the request-count check above.
+        budget_db = tmp_path / "fee-ceiling.sqlite3"
+>       budget_runs = _prepare_unbound_runs(
+            budget_db, tmp_path / "fee-checkpoints.sqlite3", count=1,
+        )
+
+tests\test_ar03_material_remainder_01.py:573:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar03_material_remainder_01.py:106: in _prepare_unbound_runs
+    headers = _login(client)
+              ^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+client = <starlette.testclient.TestClient object at 0x000001C226C027A0>
+
+    def _login(client):
+        response = client.post(
+            "/api/auth/login", headers={"Origin": ORIGIN},
+            json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+        )
+>       assert response.status_code == 200, response.text
+E       AssertionError: {"code":"TRUSTED_IDENTITY_REQUIRED"}
+E       assert 400 == 200
+E        +  where 400 = <Response [400 Bad Request]>.status_code
+
+tests\test_ar03_material_remainder_01.py:124: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_remainder_01.py::test_remainder_campaign_provider_count_is_shared_and_fee_reserve_is_hard
+1 failed, 13 passed in 19.38s
