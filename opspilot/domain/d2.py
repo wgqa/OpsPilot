@@ -27,9 +27,10 @@ class ScopeDenied(D2Error):
 
 
 class BudgetExhausted(D2Error):
-    def __init__(self, kind: str, used: int, limit: int, *, reason_code: str | None = None):
+    def __init__(self, kind: str, used: int, limit: int | None, *, reason_code: str | None = None):
         self.reason_code = reason_code or f"TASK_{kind}_LIMIT"
-        super().__init__(f"{self.reason_code}: {kind} attempt budget exhausted ({used}/{limit}).")
+        detail = f"({used}/{limit})" if limit is not None else f"(execution deadline; {used} reserved)"
+        super().__init__(f"{self.reason_code}: {kind} attempt budget exhausted {detail}.")
         self.kind = kind
         self.used = used
         self.limit = limit
@@ -583,7 +584,7 @@ def reserve_attempt(
     path: str | Path,
     task_id: str,
     kind: AttemptKind,
-    limit: int,
+    limit: int | None,
     *,
     call_id: str,
     tool_call_id: str | None = None,
@@ -593,7 +594,9 @@ def reserve_attempt(
     task_run_control: dict[str, object] | None = None,
     run_id: str | None = None,
 ) -> tuple[str, int]:
-    if kind not in {"MODEL", "MCP"} or type(limit) is not int or limit < 1:
+    if (kind not in {"MODEL", "MCP"}
+            or (limit is None and kind != "MCP")
+            or (limit is not None and (type(limit) is not int or limit < 1))):
         raise ValueError("Invalid D2 attempt kind or limit.")
     attempt_id = f"attempt-{uuid.uuid4()}"
     with connect(path) as connection:
@@ -624,6 +627,8 @@ def reserve_attempt(
         from opspilot.domain.execution_budget import investigation_budget_in_transaction
 
         budget = investigation_budget_in_transaction(connection, task_id, run_id)
+        if limit is None and budget["policy_version"] != "AR03_MATERIAL_REMAINDER_01_V1":
+            raise ScopeDenied("UNBOUNDED_MCP_ATTEMPT_POLICY_NOT_AUTHORIZED")
         if budget["policy_version"] == "CONTUX_S3_V1":
             from opspilot.domain.task_control import assert_task_control_in_transaction
 
@@ -633,11 +638,11 @@ def reserve_attempt(
             assert_task_control_in_transaction(connection,str(owner["tenant_id"]),task_id,run_id=run_id)
         used = budget["task_used"][kind]
         reason = budget["limit_reasons"][kind]
-        if reason and budget["policy_version"] == "CONTUX_S3_V1":
+        if reason and budget["policy_version"] in {"CONTUX_S3_V1", "AR03_MATERIAL_REMAINDER_01_V1"}:
             run_limit = budget["run_limits"][kind] if budget["run_limits"] else budget["task_limits"][kind]
             raise BudgetExhausted(kind, budget["run_used"][kind] if reason.startswith("RUN_") else used,
                                   run_limit if reason.startswith("RUN_") else budget["task_limits"][kind], reason_code=reason)
-        if used >= limit:
+        if limit is not None and used >= limit:
             raise BudgetExhausted(kind, used, limit)
         connection.execute(
             """INSERT INTO d2_attempts
@@ -754,6 +759,67 @@ def configure_s3_experiment_budget(path, task_id, model_limit, mcp_limit):
         if changed.rowcount != 1:
             raise ValueError("A persistent controlled Task is required")
     return {"MODEL": model_limit, "MCP": mcp_limit}
+
+
+def configure_material_remainder_budget(path, task_id, experiment_id):
+    """Apply the isolated remainder policy before attempts, on a bound demo Task only."""
+    from opspilot.domain.assistant_experiment import (
+        AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
+        BUDGET_USD_MICRO,
+        PRICE_VERSION,
+    )
+    if experiment_id != AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
+        raise ValueError("MATERIAL_REMAINDER_EXPERIMENT_SCOPE_INVALID")
+    from opspilot.domain.s3 import get_s3_binding
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        campaign = connection.execute(
+            "SELECT provider_limit,mcp_limit,budget_usd_micro,price_version,status "
+            "FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+            (experiment_id,),
+        ).fetchone()
+        if (
+            campaign is None
+            or int(campaign["provider_limit"]) != 16
+            or campaign["mcp_limit"] is not None
+            or int(campaign["budget_usd_micro"]) != BUDGET_USD_MICRO
+            or str(campaign["price_version"]) != PRICE_VERSION
+            or campaign["status"] != "OPEN"
+        ):
+            raise ScopeDenied("MATERIAL_REMAINDER_CAMPAIGN_SCOPE_INVALID")
+        binding = get_s3_binding(connection, task_id)
+        if binding.get("service_id") != "orders-async-demo":
+            raise ScopeDenied("MATERIAL_REMAINDER_TASK_SCOPE_INVALID")
+        row = connection.execute(
+            "SELECT * FROM task_execution_budgets WHERE task_id=?", (task_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("MATERIAL_REMAINDER_TASK_BUDGET_MISSING")
+        if row["active_started_at"] is not None or int(row["active_elapsed_ms"]) != 0:
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+        current = _task_attempt_limits(connection, task_id)
+        expected = {"MODEL":16,"MCP":None}
+        if current == expected and row["policy_version"] == "AR03_MATERIAL_REMAINDER_01_V1":
+            return expected
+        allowed_initial_policy = (
+            current == {"MODEL":8,"MCP":6} and row["policy_version"] == "LEGACY_V1"
+        ) or (
+            current == {"MODEL":24,"MCP":18} and row["policy_version"] == "CONTUX_S3_V1"
+        )
+        if not allowed_initial_policy:
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED")
+        if connection.execute("SELECT 1 FROM d2_attempts WHERE task_id=? LIMIT 1", (task_id,)).fetchone():
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+        from opspilot.domain.execution_budget import auxiliary_attempt_counts_in_transaction
+        if sum(auxiliary_attempt_counts_in_transaction(connection, task_id).values()):
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+        changed = connection.execute(
+            "UPDATE task_execution_budgets SET model_limit=16,mcp_limit=0,policy_version='AR03_MATERIAL_REMAINDER_01_V1',aux_provider_limit=NULL WHERE task_id=?",
+            (task_id,),
+        )
+        if changed.rowcount != 1:
+            raise ValueError("MATERIAL_REMAINDER_TASK_BUDGET_UPDATE_FAILED")
+    return expected
 
 
 def save_model_trace(

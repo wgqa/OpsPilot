@@ -235,16 +235,18 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     from opspilot.domain.assistant_experiment import (
         EXPERIMENT_ENV,
         EXPERIMENTS_AWAITING_PAID_AUTHORIZATION,
+        AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
         SUPPORTED_EXPERIMENT_IDS,
     )
 
     experiment_id = os.environ.get(EXPERIMENT_ENV, "").strip()
     if experiment_id in EXPERIMENTS_AWAITING_PAID_AUTHORIZATION:
-        authorized = (
-            _material_resume_02_one_shot_authorized(experiment_id)
-            if experiment_id == MATERIAL_RESUME_02_EXPERIMENT_ID
-            else _material_resume_one_shot_authorized(experiment_id)
-        )
+        if experiment_id == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
+            authorized = False  # No paid authorization/claim exists in this free-only slice.
+        elif experiment_id == MATERIAL_RESUME_02_EXPERIMENT_ID:
+            authorized = _material_resume_02_one_shot_authorized(experiment_id)
+        else:
+            authorized = _material_resume_one_shot_authorized(experiment_id)
         if not authorized:
             raise RuntimeError("AR03_MATERIAL_LIVE_PAID_AUTHORIZATION_REQUIRED")
     if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
@@ -330,6 +332,7 @@ def assistant_tool_hidden_for_experiment(tool_name, experiment_id):
         AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
         AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
         AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
+        AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
     )
     if (
         tool_name != "load_protocol_upgrade_skill"
@@ -337,6 +340,7 @@ def assistant_tool_hidden_for_experiment(tool_name, experiment_id):
             AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
             AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
             AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
+            AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
         }
     ):
         return False

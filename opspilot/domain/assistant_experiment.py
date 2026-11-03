@@ -23,9 +23,11 @@ AR03_REAL_LLM_02_EXPERIMENT_ID = "AR-03-REAL-LLM-02"
 AR03_MATERIAL_LIVE_01_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01"
 AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01-RESUME-01"
 AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01-RESUME-02"
+AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID = "AR-03-MATERIAL-REMAINDER-01"
 EXPERIMENTS_AWAITING_PAID_AUTHORIZATION = frozenset({
     AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
     AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
+    AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
 })
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPERIMENT_ID,
@@ -37,11 +39,13 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
     AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
     AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
+    AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
 })
 EXPERIMENT_ENV = "OPSPILOT_ASSISTANT_EXPERIMENT_ID"
 PROVIDER_LIMIT = 16
 MCP_LIMIT = 12
 AR03_MATERIAL_LIVE_MCP_LIMIT = 10
+AR03_MATERIAL_REMAINDER_MCP_LIMIT = None
 BUDGET_USD_MICRO = 10_500_000
 AR03_SCENARIO_PROVIDER_LIMIT = 8
 AR03_SCENARIO_MCP_LIMIT = 6
@@ -60,10 +64,10 @@ MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ar02_live_experiment_budgets (
     experiment_id TEXT PRIMARY KEY CHECK (
-        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02', 'AR-03-MATERIAL-LIVE-01', 'AR-03-MATERIAL-LIVE-01-RESUME-01', 'AR-03-MATERIAL-LIVE-01-RESUME-02')
+        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02', 'AR-03-MATERIAL-LIVE-01', 'AR-03-MATERIAL-LIVE-01-RESUME-01', 'AR-03-MATERIAL-LIVE-01-RESUME-02', 'AR-03-MATERIAL-REMAINDER-01')
     ),
     provider_limit INTEGER NOT NULL,
-    mcp_limit INTEGER NOT NULL,
+    mcp_limit INTEGER,
     budget_usd_micro INTEGER NOT NULL,
     price_version TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('OPEN', 'BUDGET_BREACH')),
@@ -105,8 +109,8 @@ def _validate_experiment_id(experiment_id: str) -> None:
         raise ExperimentBudgetError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
 
 
-def _limits_for_experiment(experiment_id: str) -> tuple[int, int]:
-    """Return the fixed per-database count envelope for this experiment."""
+def _limits_for_experiment(experiment_id: str) -> tuple[int, int | None]:
+    """Return count limits; None means counted but bounded by other hard stops."""
     if experiment_id in {
         AR03_REAL_LLM_01_EXPERIMENT_ID,
         AR03_REAL_LLM_02_EXPERIMENT_ID,
@@ -121,6 +125,11 @@ def _limits_for_experiment(experiment_id: str) -> tuple[int, int]:
         AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     }:
         return PROVIDER_LIMIT, AR03_MATERIAL_LIVE_MCP_LIMIT
+    if experiment_id == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
+        # This campaign keeps durable MCP telemetry but has no low count gate.
+        # Provider spend, Task/Run timeouts and LangGraph recursion remain hard
+        # stops; this policy is scoped to the new isolated experiment only.
+        return PROVIDER_LIMIT, AR03_MATERIAL_REMAINDER_MCP_LIMIT
     return PROVIDER_LIMIT, MCP_LIMIT
 
 
@@ -164,9 +173,10 @@ def _ensure_row(connection, experiment_id: str) -> None:
             ),
         )
         return
+    stored_mcp_limit = None if row["mcp_limit"] is None else int(row["mcp_limit"])
     if (
         int(row["provider_limit"]) != provider_limit
-        or int(row["mcp_limit"]) != mcp_limit
+        or stored_mcp_limit != mcp_limit
         or int(row["budget_usd_micro"]) != BUDGET_USD_MICRO
         or str(row["price_version"]) != PRICE_VERSION
     ):
@@ -265,8 +275,9 @@ def reserve_dispatch(
         count = _used_count(connection, experiment_id, kind)
         # Enforce the persisted, per-database allocation, not a process
         # parameter that could differ between the two isolated scenarios.
-        count_limit = int(budget["provider_limit"] if kind == "MODEL" else budget["mcp_limit"])
-        if count >= count_limit:
+        raw_count_limit = budget["provider_limit"] if kind == "MODEL" else budget["mcp_limit"]
+        count_limit = None if raw_count_limit is None else int(raw_count_limit)
+        if count_limit is not None and count >= count_limit:
             label = "PROVIDER" if kind == "MODEL" else "MCP"
             raise ExperimentBudgetError(f"AR02_LIVE_{label}_LIMIT")
 
@@ -527,7 +538,7 @@ def read_budget(path: str | Path, experiment_id: str = EXPERIMENT_ID) -> dict[st
             "status": str(budget["status"]),
             "provider_limit": int(budget["provider_limit"]),
             "provider_used": _used_count(connection, experiment_id, "MODEL"),
-            "mcp_limit": int(budget["mcp_limit"]),
+            "mcp_limit": None if budget["mcp_limit"] is None else int(budget["mcp_limit"]),
             "mcp_used": _used_count(connection, experiment_id, "MCP"),
             "budget_usd_micro": int(budget["budget_usd_micro"]),
             "usd_reserved_micro": reserved,

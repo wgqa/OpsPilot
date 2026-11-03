@@ -21,6 +21,18 @@ def attempt_policy_in_transaction(connection, task_id):
         return {"version":"LEGACY_V1", "MODEL":8, "MCP":6, "AUX":None}
     version = row["policy_version"]
     pair = (row["model_limit"], row["mcp_limit"])
+    if version == "AR03_MATERIAL_REMAINDER_01_V1":
+        binding = connection.execute(
+            "SELECT service_id,tenant_id FROM task_bindings WHERE task_id=?", (task_id,),
+        ).fetchone()
+        if (binding is None or binding["service_id"] != "orders-async-demo"
+                # Existing Task DBs keep mcp_limit NOT NULL. Persist 0 only as
+                # this exact policy's sentinel for no count ceiling; expose
+                # the semantic value as None to callers.
+                or binding["tenant_id"] != row["tenant_id"] or pair != (16, 0)
+                or row["aux_provider_limit"] is not None):
+            raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
+        return {"version":version, "MODEL":16, "MCP":None, "AUX":None}
     if any(type(n) is not int for n in pair):
         raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
     if version == "CONTUX_S3_V1":
@@ -96,15 +108,19 @@ def investigation_budget_in_transaction(connection, task_id, run_id=None):
     task_limits = {kind:policy[kind] for kind in ("MODEL","MCP")}
     remaining, reasons = {}, {}
     for kind in task_limits:
-        remaining[kind] = max(0,task_limits[kind]-task_used[kind])
-        reasons[kind] = f"TASK_{kind}_LIMIT" if not remaining[kind] else None
+        if task_limits[kind] is None:
+            remaining[kind] = None
+            reasons[kind] = None
+        else:
+            remaining[kind] = max(0,task_limits[kind]-task_used[kind])
+            reasons[kind] = f"TASK_{kind}_LIMIT" if not remaining[kind] else None
         if run_limits:
             run_remaining = max(0,run_limits[kind]-run_used[kind])
             remaining[kind] = min(remaining[kind],run_remaining)
             if not run_remaining and reasons[kind] is None:
                 reasons[kind] = f"RUN_{kind}_LIMIT"
     clock = connection.execute("SELECT active_elapsed_ms,deadline_ms FROM task_execution_budgets WHERE task_id=?",(task_id,)).fetchone()
-    if policy["version"] == "CONTUX_S3_V1" and clock and clock["active_elapsed_ms"] >= clock["deadline_ms"]:
+    if policy["version"] in {"CONTUX_S3_V1", "AR03_MATERIAL_REMAINDER_01_V1"} and clock and clock["active_elapsed_ms"] >= clock["deadline_ms"]:
         remaining = {"MODEL":0,"MCP":0}
         reasons = {"MODEL":"ACTIVE_TIME_LIMIT","MCP":"ACTIVE_TIME_LIMIT"}
     return {"policy_version":policy["version"], "task_limits":task_limits,"run_limits":run_limits,

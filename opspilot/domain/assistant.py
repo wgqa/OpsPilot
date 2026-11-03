@@ -278,11 +278,12 @@ def read_run(path,run_id,*,active=True,worker_id=None):
     with connect(path) as c: return state(c,run_id,active=active,worker_id=worker_id)
 
 def run_limits_for_experiment(experiment_id):
-    """Keep ordinary Runs at 8/6; only the frozen material live ID uses 16/10."""
+    """Keep ordinary Runs at 8/6; only explicitly scoped experiments vary."""
     from opspilot.domain.assistant_experiment import (
         AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
         AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
         AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
+        AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
     )
     if experiment_id in {
         AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
@@ -290,6 +291,8 @@ def run_limits_for_experiment(experiment_id):
         AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     }:
         return 16, 10
+    if experiment_id == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
+        return 16, None
     return 8, 6
 
 
@@ -313,7 +316,8 @@ def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None)
             return dict(old),False
         used=c.execute('SELECT COUNT(*) FROM assistant_calls WHERE run_id=? AND kind=?',(run_id,kind)).fetchone()[0]
         model_limit,mcp_limit=run_limits_for_experiment(experiment_id)
-        if used >= (model_limit if kind=='MODEL' else mcp_limit): raise TaskControlError('ASSISTANT_RUN_'+kind+'_LIMIT')
+        limit = model_limit if kind=='MODEL' else mcp_limit
+        if limit is not None and used >= limit: raise TaskControlError('ASSISTANT_RUN_'+kind+'_LIMIT')
         if kind=='MODEL' and run['task_id']:
             budget=auxiliary_budget_in_transaction(c,run['task_id'])
             if budget['reason_code']: raise TaskControlError(budget['reason_code'])
