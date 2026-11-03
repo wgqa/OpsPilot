@@ -67,7 +67,11 @@ def test_scoped_protocol_discovery_is_current_and_fails_closed(demo_db):
 
 @pytest.mark.parametrize(
     "topic",
-    ["retry", "callback", "callback retry", "回调", "重试", "回调重试", "回调 重试"],
+    [
+        "retry", "callback", "callback retry", "callback retry protocol",
+        "callback retry behavior", "回调", "重试", "回调重试", "回调 重试",
+        "回调重试协议",
+    ],
 )
 def test_scoped_protocol_discovery_matches_callback_retry_topics(demo_db, topic):
     from opspilot.domain.scoped_protocol_comparison import list_scoped_protocols
@@ -81,6 +85,19 @@ def test_scoped_protocol_discovery_matches_callback_retry_topics(demo_db, topic)
     assert result["tenant_id"] == identity.tenant_id
     assert result["actor_id"] == identity.actor_id
     assert result["scope_digest"]
+
+
+def test_callback_retry_topic_rank_prefers_retry_family_and_empty_query_stays_empty(demo_db):
+    from opspilot.domain.scoped_protocol_comparison import list_scoped_protocols
+
+    identity = trusted_identity(demo_db, "support-a")
+    session_id = create_session(demo_db, identity)["session_id"]
+    ranked = list_scoped_protocols(demo_db, identity, session_id, topic="callback retry")
+    ids = [document["document_id"] for document in ranked["protocol_documents"]]
+    assert ids[:2] == ["callback-retry-contract", "callback-retry-contract-v2"]
+
+    unrelated = list_scoped_protocols(demo_db, identity, session_id, topic="invoice color")
+    assert unrelated["protocol_documents"] == []
 
 
 def test_callback_retry_topic_match_does_not_expand_session_document_scope(demo_db):
@@ -205,7 +222,44 @@ class IntegrationFixtureModel(BaseChatModel):
         }
         selected = None
         args = {}
-        if self.mode == "history-answer":
+        if self.mode == "cap-resume":
+            denial = payloads.get("search_project_knowledge")
+            if denial is not None:
+                assert denial.get("executed") is False
+                assert denial.get("authority") == "TOOL_REFUSAL_NOT_FACT"
+                delivery = payloads.get("get_callback_delivery", {}).get("facts", {})
+                receiver = payloads.get("get_receiver_processing", {}).get("facts", {})
+                status = receiver.get("status") if delivery.get("event_id") == receiver.get("event_id") else "UNKNOWN"
+                answer = (
+                    f"当前 Event {delivery.get('event_id')} 的投递为 HTTP {delivery.get('receiver_http_status')} / "
+                    f"{delivery.get('status')}；同一 Event Receiver 为 {status}。"
+                    "未执行的 Knowledge 提议没有返回资料，因此不作为依据；回答仅基于当前已取得的观察。"
+                )
+            else:
+                plan = [
+                    "list_scoped_protocol_documents", "compare_scoped_protocols",
+                    "get_order_status", "get_callback_delivery", "get_receiver_processing",
+                    "get_callback_transport_history",
+                ]
+                selected = next((name for name in plan if name not in payloads), None)
+                if selected == "list_scoped_protocol_documents":
+                    args = {"topic": "callback retry"}
+                elif selected == "compare_scoped_protocols":
+                    docs = payloads["list_scoped_protocol_documents"].get("protocol_documents", [])
+                    old = next(row for row in docs if str(row.get("version", "")).startswith("1."))
+                    new = next(row for row in docs if str(row.get("version", "")).startswith("2."))
+                    args = {
+                        "base_document_id": old["document_id"],
+                        "target_document_id": new["document_id"],
+                        "base_version": old["version"],
+                        "target_version": new["version"],
+                    }
+                elif selected:
+                    args = {"reason": "核验受信订单的当前回调状态"}
+                else:
+                    selected = "search_project_knowledge"
+                    args = {"query": "回调重试协议"}
+        elif self.mode == "history-answer":
             answer = "我依据上一轮仍有效但仅属历史线索的协议版本比较回答；它不是线上部署证明或新的业务观察。"
         elif self.mode == "binding":
             answer = "可信订单选择操作已确认资源绑定；聊天文本本身不授予查询权限。"
@@ -277,7 +331,7 @@ class IntegrationFixtureModel(BaseChatModel):
                     )
 
         if selected:
-            self.decisions.append({"action": "CALL", "tool": selected, "args": args})
+            self.decisions.append({"action": "CALL", "tool": selected, "args": args, "tool_call_id": f"integration-{self.mode}-{len(self.decisions) + 1}"})
             message = AIMessage(content="", tool_calls=[{
                 "name": selected, "args": args, "id": f"integration-{self.mode}-{len(self.decisions)}",
             }])
@@ -641,6 +695,107 @@ def test_formal_worker_protocol_impact_draft_tracks_current_receiver_observation
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8", newline="\n") as stream:
                 stream.write(json.dumps(trace_row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+@pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+def test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refusal(
+    demo_db, tmp_path, receiver_state, monkeypatch,
+):
+    """A denied seventh tool is not executed, and the Agent may still answer from six current calls."""
+    from fastapi.testclient import TestClient
+    from opspilot.domain.database import connect
+    from opspilot.domain.s3 import prepare_s3_fixture
+    from opspilot.web.app import create_app
+    from test_ar02_assistant import ORIGIN, PASSWORDS
+
+    paired_ids = iter((
+        uuid.UUID("00000000-0000-4000-8000-000000000001"),
+        uuid.UUID("00000000-0000-4000-8000-000000000002"),
+    ))
+    with monkeypatch.context() as patcher:
+        patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+        fixture = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
+        )
+    if receiver_state == "PROCESSED":
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+            )
+
+    frozen_cases_path = (
+        Path(__file__).resolve().parents[1]
+        / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+    )
+    initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+    model = IntegrationFixtureModel(mode="cap-resume", receiver_state=receiver_state)
+    app = create_app(
+        db_path=demo_db,
+        checkpoint_db_path=tmp_path / f"cap-resume-{receiver_state}.sqlite3",
+        start_worker=True,
+        credentials=PASSWORDS,
+        expected_origin=ORIGIN,
+        assistant_model_factory=lambda: model,
+    )
+    with TestClient(app) as client:
+        headers = _login(client)
+        session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+        accepted = client.post(
+            f"/api/sessions/{session_id}/assistant/order",
+            headers={**headers, "Idempotency-Key": f"ar03-cap-resume-{receiver_state}"},
+            json={"order_id": "ar03-order", "initial_message": initial_message},
+        )
+        assert accepted.status_code == 202, accepted.text
+        binding = accepted.json()
+        run = _wait_run(client, binding["run_id"])
+        assert run["status"] == "SUCCEEDED", run
+
+        messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+        answer = next(row["body"] for row in messages if row.get("answer_source_message_id") == binding["message_id"])
+        assert "未执行的 Knowledge 提议" in answer
+        assert fixture["transport_trace"][0]["request"]["event_id"] in answer
+        if receiver_state == "QUEUED":
+            assert "Receiver 为 QUEUED" in answer
+            assert "已处理完成" not in answer
+        else:
+            assert "Receiver 为 PROCESSED" in answer
+
+        with connect(demo_db) as connection:
+            calls = connection.execute(
+                "SELECT request_json,result_json,status FROM assistant_calls WHERE run_id=? AND kind='MCP' ORDER BY created_at",
+                (binding["run_id"],),
+            ).fetchall()
+            assert len(calls) == 6
+            assert all(row["status"] == "OK" for row in calls)
+            names = [json.loads(row["request_json"])["name"] for row in calls]
+            assert names == [
+                "list_scoped_protocol_documents", "compare_scoped_protocols",
+                "get_order_status", "get_callback_delivery", "get_receiver_processing",
+                "get_callback_transport_history",
+            ]
+            attempts = connection.execute(
+                "SELECT status FROM d2_attempts WHERE run_id=? AND kind='MCP'",
+                (binding["run_id"],),
+            ).fetchall()
+            assert len(attempts) == 6 and all(row["status"] == "OK" for row in attempts)
+            current, reason = assistant_domain.sources_current(connection, binding["run_id"])
+            assert current, reason
+            for table in (
+                "s3_diagnoses", "d3_approvals", "d3_action_intents", "d3_action_ledgers",
+                "s3_handoff_queue_entries", "s3_handoff_receipts",
+            ):
+                assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+        attempted = [decision for decision in model.decisions if decision.get("tool") == "search_project_knowledge"]
+        assert len(attempted) == 1
+        denied = [
+            message for turn in model.seen for message in turn
+            if isinstance(message, ToolMessage) and message.tool_call_id == attempted[0]["tool_call_id"]
+        ]
+        assert len(denied) == 1
+        refusal = json.loads(denied[0].content)
+        assert refusal["executed"] is False
+        assert refusal["authority"] == "TOOL_REFUSAL_NOT_FACT"
 
 
 @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])

@@ -1,0 +1,206 @@
+...FF......FF                                                            [100%]
+================================== FAILURES ===================================
+_ test_scoped_protocol_discovery_matches_callback_retry_topics[callback retry protocol] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-red-01/test_scoped_protocol_discovery3/domain.sqlite3')
+topic = 'callback retry protocol'
+
+    @pytest.mark.parametrize(
+        "topic",
+        [
+            "retry", "callback", "callback retry", "callback retry protocol",
+            "callback retry behavior", "�ص�", "����", "�ص�����", "�ص� ����",
+            "�ص�����Э��",
+        ],
+    )
+    def test_scoped_protocol_discovery_matches_callback_retry_topics(demo_db, topic):
+        from opspilot.domain.scoped_protocol_comparison import list_scoped_protocols
+    
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = create_session(demo_db, identity)["session_id"]
+        result = list_scoped_protocols(demo_db, identity, session_id, topic=topic)
+        document_ids = {document["document_id"] for document in result["protocol_documents"]}
+    
+>       assert {"callback-retry-contract", "callback-retry-contract-v2"} <= document_ids
+E       AssertionError: assert {'callback-re...-contract-v2'} <= set()
+E         
+E         Extra items in the left set:
+E         'callback-retry-contract-v2'
+E         'callback-retry-contract'
+
+tests\test_ar02_ar03_integration_01.py:84: AssertionError
+_ test_scoped_protocol_discovery_matches_callback_retry_topics[callback retry behavior] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-red-01/test_scoped_protocol_discovery4/domain.sqlite3')
+topic = 'callback retry behavior'
+
+    @pytest.mark.parametrize(
+        "topic",
+        [
+            "retry", "callback", "callback retry", "callback retry protocol",
+            "callback retry behavior", "�ص�", "����", "�ص�����", "�ص� ����",
+            "�ص�����Э��",
+        ],
+    )
+    def test_scoped_protocol_discovery_matches_callback_retry_topics(demo_db, topic):
+        from opspilot.domain.scoped_protocol_comparison import list_scoped_protocols
+    
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = create_session(demo_db, identity)["session_id"]
+        result = list_scoped_protocols(demo_db, identity, session_id, topic=topic)
+        document_ids = {document["document_id"] for document in result["protocol_documents"]}
+    
+>       assert {"callback-retry-contract", "callback-retry-contract-v2"} <= document_ids
+E       AssertionError: assert {'callback-re...-contract-v2'} <= set()
+E         
+E         Extra items in the left set:
+E         'callback-retry-contract-v2'
+E         'callback-retry-contract'
+
+tests\test_ar02_ar03_integration_01.py:84: AssertionError
+_ test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refusal[QUEUED] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-red-01/test_formal_worker_can_deliver0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-red-01/test_formal_worker_can_deliver0')
+receiver_state = 'QUEUED'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000025DD6109480>
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refusal(
+        demo_db, tmp_path, receiver_state, monkeypatch,
+    ):
+        """A denied seventh tool is not executed, and the Agent may still answer from six current calls."""
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        paired_ids = iter((
+            uuid.UUID("00000000-0000-4000-8000-000000000001"),
+            uuid.UUID("00000000-0000-4000-8000-000000000002"),
+        ))
+        with monkeypatch.context() as patcher:
+            patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+            fixture = prepare_s3_fixture(
+                demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
+            )
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+                )
+    
+        frozen_cases_path = (
+            Path(__file__).resolve().parents[1]
+            / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+        )
+        initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+        model = IntegrationFixtureModel(mode="cap-resume", receiver_state=receiver_state)
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / f"cap-resume-{receiver_state}.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: model,
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": f"ar03-cap-resume-{receiver_state}"},
+                json={"order_id": "ar03-order", "initial_message": initial_message},
+            )
+            assert accepted.status_code == 202, accepted.text
+            binding = accepted.json()
+            run = _wait_run(client, binding["run_id"])
+>           assert run["status"] == "SUCCEEDED", run
+E           AssertionError: {'run_id': 'run-6dca6b9f-9214-4dc3-a828-af4df442cf94', 'task_id': 'task-aefbb02b-b776-4028-9c78-0cface401dd8', 'sessio...ession-f2951f9a-0e35-4ee8-b2ee-580defe81ff2', 'source_message_id': 'message-f5da34d4-ceea-46b9-99c1-39e99853db79', ...}
+E           assert 'FAILED' == 'SUCCEEDED'
+E             
+E             - SUCCEEDED
+E             + FAILED
+
+tests\test_ar02_ar03_integration_01.py:751: AssertionError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:62263/api/async-orders/async-order?order_id=ar03-order "HTTP/1.0 200 OK"
+
+_ test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refusal[PROCESSED] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-red-01/test_formal_worker_can_deliver1/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-red-01/test_formal_worker_can_deliver1')
+receiver_state = 'PROCESSED'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000025DD9165C70>
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refusal(
+        demo_db, tmp_path, receiver_state, monkeypatch,
+    ):
+        """A denied seventh tool is not executed, and the Agent may still answer from six current calls."""
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        paired_ids = iter((
+            uuid.UUID("00000000-0000-4000-8000-000000000001"),
+            uuid.UUID("00000000-0000-4000-8000-000000000002"),
+        ))
+        with monkeypatch.context() as patcher:
+            patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+            fixture = prepare_s3_fixture(
+                demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
+            )
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+                )
+    
+        frozen_cases_path = (
+            Path(__file__).resolve().parents[1]
+            / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+        )
+        initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+        model = IntegrationFixtureModel(mode="cap-resume", receiver_state=receiver_state)
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / f"cap-resume-{receiver_state}.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: model,
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": f"ar03-cap-resume-{receiver_state}"},
+                json={"order_id": "ar03-order", "initial_message": initial_message},
+            )
+            assert accepted.status_code == 202, accepted.text
+            binding = accepted.json()
+            run = _wait_run(client, binding["run_id"])
+>           assert run["status"] == "SUCCEEDED", run
+E           AssertionError: {'run_id': 'run-2351439b-8206-4bb2-b091-e6a6986aa1e3', 'task_id': 'task-6f3bf526-9c7b-4dd9-b13f-80eaedbf9289', 'sessio...ession-64b84438-620a-462d-a255-155b4faa0da4', 'source_message_id': 'message-423351e6-8b2c-44ca-86c8-316f2c30ae4f', ...}
+E           assert 'FAILED' == 'SUCCEEDED'
+E             
+E             - SUCCEEDED
+E             + FAILED
+
+tests\test_ar02_ar03_integration_01.py:751: AssertionError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:62273/api/async-orders/async-order?order_id=ar03-order "HTTP/1.0 200 OK"
+
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_ar03_integration_01.py::test_scoped_protocol_discovery_matches_callback_retry_topics[callback retry protocol]
+FAILED tests/test_ar02_ar03_integration_01.py::test_scoped_protocol_discovery_matches_callback_retry_topics[callback retry behavior]
+FAILED tests/test_ar02_ar03_integration_01.py::test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refusal[QUEUED]
+FAILED tests/test_ar02_ar03_integration_01.py::test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refusal[PROCESSED]
+4 failed, 9 passed in 11.24s
+
+EXIT_CODE=1
