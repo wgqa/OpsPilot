@@ -60,6 +60,47 @@ def history_excerpt(value: object, limit: int = MAX_HISTORY_EXCERPT_CHARS) -> st
 
 def _historical_result_summary(tool_name: str, result: dict[str, object]) -> dict[str, object]:
     """Keep small, typed historical leads after their persisted sources were revalidated."""
+    if tool_name == "read_scoped_protocol_excerpt" and isinstance(result.get("document_ref"), dict):
+        document = result["document_ref"]
+        excerpts = result.get("excerpts")
+        excerpts = excerpts if isinstance(excerpts, list) else []
+        source_refs = result.get("source_refs")
+        source_refs = source_refs if isinstance(source_refs, list) else []
+        return {
+            "authority": "HISTORICAL_PROTOCOL_SOURCE_TEXT_ONLY",
+            "currentness": "NOT_CURRENT_BUSINESS_EVIDENCE",
+            "session_id": result.get("session_id"),
+            "project_id": result.get("project_id"),
+            "grant_version": result.get("grant_version"),
+            "scope_digest": result.get("scope_digest"),
+            "document_ref": {
+                key: document.get(key) for key in (
+                    "document_id", "version", "source", "digest", "valid_from", "expires_at",
+                )
+            },
+            "query": history_excerpt(result.get("query"), 100),
+            "start_line": result.get("start_line"),
+            "start_column": result.get("start_column"),
+            "next_cursor": result.get("next_cursor"),
+            "excerpts": [{
+                "section": history_excerpt(row.get("section"), 80),
+                "line_start": row.get("line_start"),
+                "line_end": row.get("line_end"),
+                "column_start": row.get("column_start"),
+                "column_end": row.get("column_end"),
+                "text": history_excerpt(row.get("text"), 300),
+                "excerpt_digest": row.get("excerpt_digest"),
+                "truncated": bool(row.get("truncated")),
+            } for row in excerpts[:2] if isinstance(row, dict)],
+            "source_refs": [{
+                key: ref.get(key) for key in (
+                    "document_id", "version", "source", "digest", "line_start", "line_end",
+                    "column_start", "column_end", "excerpt_digest",
+                )
+            } for ref in source_refs[:2] if isinstance(ref, dict)],
+            "deployment_version_verified": False,
+        }
+
     if isinstance(result.get("protocol_documents"), list):
         documents = result.get("protocol_documents")
         protocols = result.get("protocols")
@@ -273,6 +314,7 @@ def sources_current(connection, run_id):
     from opspilot.domain.scoped_protocol_comparison import (
         scoped_comparison_is_current,
         scoped_discovery_is_current,
+        scoped_protocol_excerpt_is_current,
     )
     from opspilot.domain.s3 import current_s3_evidence, get_s3_binding
     try:
@@ -290,6 +332,11 @@ def sources_current(connection, run_id):
                 return False,'ASSISTANT_SOURCE_RESULT_INVALID'
             if not isinstance(value, dict):
                 return False,'ASSISTANT_SOURCE_RESULT_INVALID'
+            try:
+                request = json.loads(row['request_json']) if row['request_json'] is not None else None
+            except (TypeError, json.JSONDecodeError):
+                return False, 'ASSISTANT_SOURCE_REQUEST_INVALID'
+            tool_name = request.get('name') if isinstance(request, dict) else None
             if row['evidence_id']:
                 facts,excluded=current_s3_evidence(connection,run['task_id'],[row['evidence_id']],run_id=run_id,observation_ids={row['evidence_id']:row['observation_id']})
                 if excluded or not facts: return False,'BUSINESS_SOURCE_INVALIDATED'
@@ -309,6 +356,26 @@ def sources_current(connection, run_id):
                 )
                 if not ok:
                     return False, reason or 'PROTOCOL_COMPARISON_SOURCE_INVALID'
+            elif tool_name == 'read_scoped_protocol_excerpt':
+                if value.get('success') is not True:
+                    return False, 'PROTOCOL_EXCERPT_RESULT_INVALID'
+                ok, reason = scoped_protocol_excerpt_is_current(
+                    connection, identity, run['session_id'], value,
+                )
+                if not ok:
+                    return False, reason or 'PROTOCOL_EXCERPT_SOURCE_INVALID'
+            elif tool_name == 'load_protocol_upgrade_skill':
+                from opspilot.skill_assets import (
+                    PROTOCOL_UPGRADE_PROBLEM_TYPE, skill_asset_is_current,
+                )
+                skill = value.get('skill')
+                if (
+                    value.get('success') is not True
+                    or value.get('problem_type') != PROTOCOL_UPGRADE_PROBLEM_TYPE
+                    or not isinstance(skill, dict)
+                    or not skill_asset_is_current(PROTOCOL_UPGRADE_PROBLEM_TYPE, skill)
+                ):
+                    return False, 'PROTOCOL_UPGRADE_SKILL_SOURCE_INVALID'
             elif isinstance(value,dict) and 'documents' in value:
                 ok,reason=knowledge_current(connection,identity,run['session_id'],value)
                 if not ok:return False,reason

@@ -13,6 +13,9 @@ SKILL_NAME = "auth-incident-triage"
 SCOPE_SKILL_DIRECTORY = ROOT / "skills" / "auth-scope-triage"
 SCOPE_SKILL_NAME = "auth-scope-triage"
 SCOPE_PROBLEM_TYPE = "auth_403_scope"
+PROTOCOL_UPGRADE_SKILL_DIRECTORY = ROOT / "skills" / "protocol-upgrade-impact-analysis"
+PROTOCOL_UPGRADE_SKILL_NAME = "protocol-upgrade-impact-analysis"
+PROTOCOL_UPGRADE_PROBLEM_TYPE = "protocol_upgrade_impact"
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 
@@ -24,11 +27,15 @@ def load_applicable_skill(problem_type: str | None) -> dict[str, str] | None:
     """Read the small manifest first; open the Skill body only for a matching issue."""
     if problem_type is None:
         return None
-    directory, expected_name, title = (
-        (SCOPE_SKILL_DIRECTORY, SCOPE_SKILL_NAME, "auth scope triage")
-        if problem_type == SCOPE_PROBLEM_TYPE
-        else (SKILL_DIRECTORY, SKILL_NAME, "auth incident")
-    )
+    if problem_type == SCOPE_PROBLEM_TYPE:
+        directory, expected_name, title = SCOPE_SKILL_DIRECTORY, SCOPE_SKILL_NAME, "auth scope triage"
+    elif problem_type == PROTOCOL_UPGRADE_PROBLEM_TYPE:
+        directory, expected_name, title = (
+            PROTOCOL_UPGRADE_SKILL_DIRECTORY, PROTOCOL_UPGRADE_SKILL_NAME,
+            "protocol upgrade impact analysis",
+        )
+    else:
+        directory, expected_name, title = SKILL_DIRECTORY, SKILL_NAME, "auth incident"
     manifest_path = directory / "manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -67,3 +74,17 @@ def load_applicable_skill(problem_type: str | None) -> dict[str, str] | None:
         "description": str(manifest.get("description", ""))[:240],
         "content": content[:4000],
     }
+
+
+def skill_asset_is_current(problem_type: str, supplied: dict[str, str]) -> bool:
+    """Recheck that persisted method guidance still matches its bundled asset."""
+    if not isinstance(supplied, dict):
+        return False
+    try:
+        current = load_applicable_skill(problem_type)
+    except SkillIntegrityError:
+        return False
+    return current is not None and all(
+        supplied.get(key) == current.get(key)
+        for key in ("name", "version", "digest", "description", "content")
+    )

@@ -1,0 +1,104 @@
+..F.......                                                               [100%]
+================================== FAILURES ===================================
+____ test_authorized_protocol_excerpt_continues_from_exact_bounded_cursor _____
+
+scoped_material_env = (WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01/docs/evidence/ar-03/material-01/runs/green-11-tmp/test_author.../ar03-material-01/docs/evidence/ar-03/material-01/runs/green-11-tmp/test_authorized_protocol_excer1/callback-catalog'))
+
+    def test_authorized_protocol_excerpt_continues_from_exact_bounded_cursor(scoped_material_env):
+        import hashlib
+    
+        from opspilot.domain.scoped_protocol_comparison import (
+            read_scoped_protocol_excerpt,
+            scoped_protocol_excerpt_is_current,
+        )
+    
+        db, identity, session_id, _, catalog = scoped_material_env
+        content = "retry " + ("x" * 1800) + "\nfollowing callback clause.\n"
+        document_path = catalog / "callback-retry-contract.md"
+        document_path.write_text(content, encoding="utf-8")
+        manifest_path = catalog / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        ref = next(row for row in manifest["documents"] if row["document_id"] == "callback-retry-contract")
+        ref["digest"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    
+>       first = read_scoped_protocol_excerpt(
+            db, identity, session_id, document_id="callback-retry-contract", version="1.0.0",
+            query="retry", catalog_dirs=[catalog],
+        )
+
+tests\test_ar03_material_01.py:145: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\scoped_protocol_comparison.py:734: in read_scoped_protocol_excerpt
+    resolved = resolve_document(ref, catalog_dirs=catalogs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+ref = DocumentRef(document_id='callback-retry-contract', version='1.0.0', digest='eab2eab55ea57599bcec5a34f2355e06878c900400...from='2026-10-01T00:00:00+00:00', expires_at='2030-01-01T00:00:00+00:00', title='Callback failure and retry policy v1')
+catalog_dirs = [WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01/docs/evidence/ar-03/material-01/runs/green-11-tmp/test_authorized_protocol_excer1/callback-catalog')]
+as_of = None, check_validity = True, allow_inapplicable = True
+
+    def resolve_document(
+        ref: dict[str, Any] | DocumentRef,
+        *,
+        catalog_dirs: Sequence[Path | str] | None = None,
+        as_of: datetime | str | None = None,
+        check_validity: bool = True,
+        allow_inapplicable: bool = True,
+    ) -> ResolvedDocument:
+        """Resolve and verify a document reference against trusted catalog files.
+    
+        Performs:
+        1. Reference structure validation
+        2. Manifest lookup
+        3. Source matching
+        4. Path traversal safety
+        5. Disk content SHA-256 vs manifest digest verification
+        6. Disk content SHA-256 vs reference digest verification
+        7. Validity period and active flag check
+        8. UTF-8 decoding
+        """
+        if isinstance(ref, DocumentRef):
+            doc_ref = ref
+        else:
+            doc_ref = DocumentRef.from_dict(ref)
+    
+        resolved_catalogs = _ensure_catalog_dirs(catalog_dirs)
+        entry, catalog_dir, _ = _find_catalog_entry(doc_ref.document_id, doc_ref.version, resolved_catalogs)
+    
+        # 3. Source verification
+        expected_source = entry.get("source")
+        if doc_ref.source != expected_source:
+            raise DocumentSourceMismatchError(
+                f"DOCUMENT_SOURCE_MISMATCH: Reference specifies source '{doc_ref.source}', "
+                f"but trusted catalog manifest specifies '{expected_source}' for '{doc_ref.document_id}'"
+            )
+    
+        # 4. Path traversal safety
+        filename = entry.get("file")
+        if not isinstance(filename, str) or Path(filename).name != filename:
+            raise DocumentIntegrityError(f"MALFORMED_CATALOG_FILE_ENTRY: Invalid filename '{filename}'")
+        file_path = (catalog_dir / filename).resolve()
+        if not file_path.is_file() or file_path.parent != catalog_dir:
+            raise DocumentIntegrityError(f"PATH_TRAVERSAL_OR_MISSING_FILE: Document file '{filename}' invalid or missing")
+    
+        # 5. Read raw bytes and compute actual SHA-256
+        try:
+            raw_bytes = file_path.read_bytes()
+        except OSError as err:
+            raise DocumentIntegrityError(f"DOCUMENT_FILE_UNREADABLE: Could not read '{file_path}': {err}") from err
+    
+        actual_digest = hashlib.sha256(raw_bytes).hexdigest()
+        manifest_digest = entry.get("digest")
+    
+        if actual_digest != manifest_digest:
+>           raise DocumentIntegrityError(
+                f"DOCUMENT_DIGEST_MISMATCH: Actual file digest ({actual_digest}) does not match "
+                f"manifest digest ({manifest_digest}) for '{doc_ref.document_id}'"
+            )
+E           opspilot.domain.protocol_comparison.DocumentIntegrityError: DOCUMENT_DIGEST_MISMATCH: Actual file digest (0d80dd7ddde97f4214b9f3aeed3e56a0e55f76c40b361a4c0a002e6dd8945335) does not match manifest digest (eab2eab55ea57599bcec5a34f2355e06878c9004006fe92bcfcff4934853a808) for 'callback-retry-contract'
+
+opspilot\domain\protocol_comparison.py:349: DocumentIntegrityError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_01.py::test_authorized_protocol_excerpt_continues_from_exact_bounded_cursor
+1 failed, 9 passed in 13.99s

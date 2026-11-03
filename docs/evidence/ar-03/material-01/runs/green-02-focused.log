@@ -1,0 +1,53 @@
+..FF                                                                     [100%]
+================================== FAILURES ===================================
+_ test_protocol_upgrade_skill_is_integrity_checked_and_only_loaded_on_demand __
+
+    def test_protocol_upgrade_skill_is_integrity_checked_and_only_loaded_on_demand():
+        from opspilot.skill_assets import (
+            PROTOCOL_UPGRADE_PROBLEM_TYPE,
+            load_applicable_skill,
+            skill_asset_is_current,
+        )
+    
+        assert load_applicable_skill(None) is None
+        skill = load_applicable_skill(PROTOCOL_UPGRADE_PROBLEM_TYPE)
+        assert skill is not None
+        assert skill["name"] == "protocol-upgrade-impact-analysis"
+>       assert skill["version"] and skill["digest"] and "untrusted" in skill["content"].lower()
+E       assert ('1.0.0' and '609eef0290603af81c5978d55d921f4b74c374121223a5add61c104604b295d8' and 'untrusted' in "# protocol-upgrade-impact-analysis\n\nuse this method when a user asks how a protocol change may affect a real integr... agent may use, adapt, or ignore the method when the user's goal or observations call for another legitimate action.\n")
+E        +  where "# protocol-upgrade-impact-analysis\n\nuse this method when a user asks how a protocol change may affect a real integr... agent may use, adapt, or ignore the method when the user's goal or observations call for another legitimate action.\n" = <built-in method lower of str object at 0x000001BCC21CC440>()
+E        +    where <built-in method lower of str object at 0x000001BCC21CC440> = "# protocol-upgrade-impact-analysis\n\nUse this method when a user asks how a protocol change may affect a real integr... Agent may use, adapt, or ignore the method when the user's goal or observations call for another legitimate action.\n".lower
+
+tests\test_ar03_material_01.py:137: AssertionError
+_ test_protocol_excerpt_history_projection_keeps_source_bounded_and_non_authoritative _
+
+    def test_protocol_excerpt_history_projection_keeps_source_bounded_and_non_authoritative():
+        from opspilot.domain.assistant import _historical_result_summary
+    
+        prior = {
+            "authority": "SESSION_AUTHORIZED_ORIGINAL_TEXT_NOT_RUNTIME_EVIDENCE",
+            "session_id": "session-a", "project_id": "orders-callback",
+            "tenant_id": "tenant-a", "actor_id": "support-a",
+            "grant_version": 3, "scope_digest": "scope-digest",
+            "document_ref": {
+                "document_id": "callback-retry-contract", "version": "1.0.0",
+                "source": "local:orders-async-demo/contract-v1", "digest": "doc-digest",
+            },
+            "query": "retry state",
+            "excerpts": [{"section": "Root", "line_start": 1, "line_end": 1,
+                          "text": "Protocol v1 retry contract. Retry state SCHEDULED means wait.",
+                          "excerpt_digest": "excerpt-digest"}],
+            "deployment_version_verified": False,
+        }
+        summary = _historical_result_summary("read_scoped_protocol_excerpt", prior)
+>       assert summary["authority"] == "HISTORICAL_PROTOCOL_SOURCE_TEXT_ONLY"
+E       AssertionError: assert 'HISTORICAL_P...NESS_EVIDENCE' == 'HISTORICAL_P...RCE_TEXT_ONLY'
+E         
+E         - HISTORICAL_PROTOCOL_SOURCE_TEXT_ONLY
+E         + HISTORICAL_PROTOCOL_SOURCE_TEXT_ONLY_NOT_CURRENT_BUSINESS_EVIDENCE
+
+tests\test_ar03_material_01.py:163: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_01.py::test_protocol_upgrade_skill_is_integrity_checked_and_only_loaded_on_demand
+FAILED tests/test_ar03_material_01.py::test_protocol_excerpt_history_projection_keeps_source_bounded_and_non_authoritative
+2 failed, 2 passed, 3 deselected in 0.80s

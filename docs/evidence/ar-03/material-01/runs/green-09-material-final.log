@@ -1,0 +1,50 @@
+........F                                                                [100%]
+================================== FAILURES ===================================
+_ test_trusted_order_material_investigation_uses_current_same_event_and_keeps_draft_unsubmitted[PROCESSED] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01/docs/evidence/ar-03/material-01/runs/green-09-tmp/test_trusted_order_material_in1/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01/docs/evidence/ar-03/material-01/runs/green-09-tmp/test_trusted_order_material_in1')
+receiver_state = 'PROCESSED'
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_trusted_order_material_investigation_uses_current_same_event_and_keeps_draft_unsubmitted(
+        demo_db, tmp_path, receiver_state,
+    ):
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+    
+        fixture = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
+        )
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+                )
+        model = MaterialFixtureModel(route="bound", load_skill=True)
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / f"material-bound-{receiver_state}.sqlite3",
+            start_worker=True, credentials={"support-a": "[LOCAL_TEST_PASSWORD_REDACTED]", "support-b": "free-local-b", "approver-a": "free-approver"},
+            expected_origin="http://testserver", assistant_model_factory=lambda: model,
+        )
+        case_id = "MAT-04-BOUND-QUEUED" if receiver_state == "QUEUED" else "MAT-05-BOUND-PROCESSED"
+>       user_text = _frozen_input(case_id)
+                    ^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar03_material_01.py:508: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar03_material_01.py:327: in _frozen_input
+    return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+.0 = <list_iterator object at 0x00000272AE24F850>
+
+>   return next(row["input"] for row in casebook["cases"] if row["id"] == case_id)
+                ^^^^^^^^^^^^
+E   KeyError: 'input'
+
+tests\test_ar03_material_01.py:327: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_01.py::test_trusted_order_material_investigation_uses_current_same_event_and_keeps_draft_unsubmitted[PROCESSED]
+1 failed, 8 passed in 11.94s

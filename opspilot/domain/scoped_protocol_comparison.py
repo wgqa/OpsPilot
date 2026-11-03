@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -53,6 +54,10 @@ class DocumentNotAuthorizedError(ScopedComparisonError):
 
     def __init__(self, message: str):
         super().__init__(message, reason_code="DOCUMENT_NOT_AUTHORIZED")
+
+
+MAX_PROTOCOL_EXCERPTS = 3
+MAX_PROTOCOL_EXCERPT_CHARS = 1600
 
 
 @dataclass(frozen=True)
@@ -615,6 +620,194 @@ def list_scoped_protocols(
         "deployment_version_verified": False,
         "authority": "SESSION_AUTHORIZED_DISCOVERY_NOT_ACTION_AUTHORIZATION",
     }
+
+
+def _protocol_excerpt_rows(
+    content: str, query: str, *, start_line: int, start_column: int,
+) -> tuple[list[dict[str, Any]], dict[str, int] | None]:
+    """Select a few exact, bounded source lines and return a continuation cursor."""
+    lines = content.splitlines() or [content]
+    if type(start_line) is not int or type(start_column) is not int:
+        raise InvalidReferenceError("INVALID_PROTOCOL_EXCERPT_CURSOR")
+    if start_line < 1 or start_line > len(lines) or start_column < 1:
+        raise InvalidReferenceError("INVALID_PROTOCOL_EXCERPT_CURSOR")
+    if start_column > len(lines[start_line - 1]) + 1:
+        raise InvalidReferenceError("INVALID_PROTOCOL_EXCERPT_CURSOR")
+    terms = _topic_terms(query)
+    headings: dict[int, str] = {}
+    current_heading = "Root"
+    for number, line in enumerate(lines, start=1):
+        if line.lstrip().startswith("#"):
+            current_heading = line.lstrip(" #\t")[:160] or "Untitled section"
+        headings[number] = current_heading
+
+    ranked: list[tuple[int, int]] = []
+    for index, line in enumerate(lines[start_line - 1:], start=start_line - 1):
+        line_terms = set(_topic_terms(line))
+        score = len(line_terms.intersection(terms)) if terms else 0
+        if score:
+            ranked.append((score, index))
+    if ranked:
+        selected = [index for _, index in sorted(ranked, key=lambda pair: (-pair[0], pair[1]))[:MAX_PROTOCOL_EXCERPTS]]
+    else:
+        selected = list(range(start_line - 1, min(start_line - 1 + MAX_PROTOCOL_EXCERPTS, len(lines))))
+
+    rows: list[dict[str, Any]] = []
+    remaining = MAX_PROTOCOL_EXCERPT_CHARS
+    next_cursor: dict[str, int] | None = None
+    last_complete_line = start_line - 1
+    for index in sorted(set(selected)):
+        if remaining <= 0:
+            break
+        source_line = lines[index]
+        column_offset = start_column - 1 if index == start_line - 1 else 0
+        text = source_line[column_offset:]
+        truncated = False
+        if len(text) > remaining:
+            offsets = [text.casefold().find(term.casefold()) for term in terms]
+            offsets = [offset for offset in offsets if offset >= 0]
+            if offsets:
+                local_start = max(0, min(offsets) - min(160, remaining // 4))
+                column_offset += local_start
+                text = source_line[column_offset:column_offset + remaining]
+            else:
+                text = text[:remaining]
+            truncated = True
+        if not text:
+            last_complete_line = max(last_complete_line, index + 1)
+            continue
+        column_start = column_offset + 1
+        rows.append({
+            "section": headings[index + 1],
+            "line_start": index + 1,
+            "line_end": index + 1,
+            "column_start": column_start,
+            "column_end": column_start + len(text) - 1,
+            "text": text,
+            "excerpt_digest": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "truncated": truncated,
+        })
+        remaining -= len(text)
+        if truncated:
+            next_cursor = {"line": index + 1, "column": column_start + len(text)}
+            break
+        last_complete_line = index + 1
+    if next_cursor is None and last_complete_line < len(lines):
+        next_cursor = {"line": last_complete_line + 1, "column": 1}
+    return rows, next_cursor
+
+
+def read_scoped_protocol_excerpt(
+    db: sqlite3.Connection | str | Path,
+    identity: TrustedIdentity,
+    session_id: str,
+    *,
+    document_id: str,
+    version: str,
+    query: str,
+    start_line: int = 1,
+    start_column: int = 1,
+    catalog_dirs: Sequence[Path | str] | None = None,
+) -> dict[str, Any]:
+    """Read bounded original text from a document currently authorized for this Session.
+
+    The caller supplies only a discovered document identity and a bounded topic.
+    File paths and digests are resolved from the trusted catalog after the
+    current Session grant is checked. The result is static method evidence,
+    never a runtime deployment or business fact.
+    """
+    if not isinstance(document_id, str) or not document_id.strip() or len(document_id) > 120:
+        raise InvalidReferenceError("INVALID_DOCUMENT_ID")
+    if not isinstance(version, str) or not version.strip() or len(version) > 40:
+        raise InvalidReferenceError("INVALID_DOCUMENT_VERSION")
+    if not isinstance(query, str) or not query.strip() or len(query) > 200:
+        raise InvalidReferenceError("INVALID_PROTOCOL_EXCERPT_QUERY")
+
+    project = get_session_project(db, identity, session_id)
+    if document_id not in set(project.get("document_ids", [])):
+        raise DocumentNotAuthorizedError("DOCUMENT_NOT_AUTHORIZED")
+
+    catalogs = _ensure_catalog_dirs(catalog_dirs)
+    ref = _resolve_catalog_ref(document_id, version, catalogs)
+    if ref.version != version:
+        raise DocumentNotFoundError("DOCUMENT_VERSION_NOT_FOUND")
+    resolved = resolve_document(ref, catalog_dirs=catalogs)
+    excerpts, next_cursor = _protocol_excerpt_rows(
+        resolved.content, query.strip(), start_line=start_line, start_column=start_column,
+    )
+    return {
+        "session_id": session_id,
+        "project_id": project["project_id"],
+        "tenant_id": identity.tenant_id,
+        "actor_id": identity.actor_id,
+        "grant_version": project["grant_version"],
+        "scope_digest": digest_json(project),
+        "document_ref": {
+            "document_id": resolved.document_id,
+            "title": resolved.title,
+            "version": resolved.version,
+            "source": resolved.source,
+            "digest": resolved.digest,
+            "valid_from": resolved.valid_from,
+            "expires_at": resolved.expires_at,
+        },
+        "query": query.strip(),
+        "start_line": start_line,
+        "start_column": start_column,
+        "excerpts": excerpts,
+        "next_cursor": next_cursor,
+        "source_refs": [{
+            "document_id": resolved.document_id,
+            "version": resolved.version,
+            "source": resolved.source,
+            "digest": resolved.digest,
+            "line_start": excerpt["line_start"],
+            "line_end": excerpt["line_end"],
+            "column_start": excerpt["column_start"],
+            "column_end": excerpt["column_end"],
+            "excerpt_digest": excerpt["excerpt_digest"],
+        } for excerpt in excerpts],
+        "authority": "SESSION_AUTHORIZED_ORIGINAL_TEXT_NOT_RUNTIME_EVIDENCE",
+        "deployment_version_verified": False,
+    }
+
+
+def scoped_protocol_excerpt_is_current(
+    db: sqlite3.Connection | str | Path,
+    identity: TrustedIdentity,
+    session_id: str,
+    excerpt_result: dict[str, Any],
+    *,
+    catalog_dirs: Sequence[Path | str] | None = None,
+) -> tuple[bool, str | None]:
+    """Recheck current grant, catalog digest, excerpt text and source locations."""
+    try:
+        if not isinstance(excerpt_result, dict):
+            return False, "PROTOCOL_EXCERPT_RESULT_MALFORMED"
+        if excerpt_result.get("session_id") != session_id:
+            return False, "CROSS_SESSION_PROTOCOL_EXCERPT_REJECTED"
+        if excerpt_result.get("tenant_id") != identity.tenant_id:
+            return False, "CROSS_TENANT_PROTOCOL_EXCERPT_REJECTED"
+        if excerpt_result.get("actor_id") != identity.actor_id:
+            return False, "PROTOCOL_EXCERPT_ACTOR_MISMATCH"
+        ref = excerpt_result.get("document_ref")
+        if not isinstance(ref, dict):
+            return False, "PROTOCOL_EXCERPT_RESULT_MALFORMED"
+        current = read_scoped_protocol_excerpt(
+            db, identity, session_id,
+            document_id=ref.get("document_id"),
+            version=ref.get("version"),
+            query=excerpt_result.get("query"),
+            start_line=excerpt_result.get("start_line"),
+            start_column=excerpt_result.get("start_column"),
+            catalog_dirs=catalog_dirs,
+        )
+        supplied = {key: value for key, value in excerpt_result.items() if key != "success"}
+        if canonical_json(supplied) != canonical_json(current):
+            return False, "PROTOCOL_EXCERPT_RESULT_CHANGED_OR_TAMPERED"
+        return True, None
+    except (KnowledgeScopeDenied, TaskControlError, ProtocolComparisonError, ValueError, TypeError, KeyError, AttributeError):
+        return False, "PROTOCOL_EXCERPT_SCOPE_OR_SOURCE_INVALID"
 
 
 def scoped_discovery_is_current(

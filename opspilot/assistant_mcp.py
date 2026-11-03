@@ -106,6 +106,88 @@ async def run(path,run_id):
                 'authority': 'TOOL_REFUSAL_NOT_FACT',
                 'deployment_version_verified': False,
             }
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+    def read_scoped_protocol_excerpt(
+        document_id: str, version: str, query: str,
+        start_line: int = 1, start_column: int = 1,
+    ) -> dict:
+        """Read up to three short original-text excerpts from a currently authorized protocol.
+
+        Document identity and version must come from scoped discovery. The
+        result cites exact lines/columns, source digest, excerpt digest, and an
+        optional bounded continuation cursor. It is static protocol text, never
+        live deployment or business-state evidence.
+        """
+        from opspilot.domain.scoped_protocol_comparison import (
+            read_scoped_protocol_excerpt as read_excerpt,
+        )
+        from opspilot.domain.protocol_comparison import ProtocolComparisonError
+        from opspilot.domain.assistant_knowledge import KnowledgeScopeDenied
+        from opspilot.domain.task_control import TaskControlError
+
+        current, actor = read_run(path, run_id)
+        try:
+            result = read_excerpt(
+                path, actor, current['session_id'], document_id=document_id,
+                version=version, query=query, start_line=start_line,
+                start_column=start_column,
+            )
+            result['success'] = True
+            return result
+        except (ProtocolComparisonError, KnowledgeScopeDenied, TaskControlError) as error:
+            return {
+                'success': False,
+                'error': str(error),
+                'reason_code': getattr(error, 'reason_code', type(error).__name__),
+                'authority': 'TOOL_REFUSAL_NOT_FACT',
+                'deployment_version_verified': False,
+            }
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+    def load_protocol_upgrade_skill(reason: str) -> dict:
+        """Load optional protocol-upgrade method guidance when useful.
+
+        This bundled Skill is a bounded method hint only. It cannot grant
+        permissions, establish current facts, or require a particular workflow.
+        """
+        from opspilot.skill_assets import (
+            PROTOCOL_UPGRADE_PROBLEM_TYPE,
+            load_applicable_skill,
+        )
+        from opspilot.skill_assets import SkillIntegrityError
+
+        read_run(path, run_id)
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 240:
+            return {
+                'success': False,
+                'error': 'INVALID_SKILL_SELECTION_REASON',
+                'reason_code': 'INVALID_SKILL_SELECTION_REASON',
+                'authority': 'TOOL_REFUSAL_NOT_FACT',
+            }
+        try:
+            skill = load_applicable_skill(PROTOCOL_UPGRADE_PROBLEM_TYPE)
+        except SkillIntegrityError as error:
+            return {
+                'success': False,
+                'error': str(error),
+                'reason_code': 'SKILL_ASSET_INVALID',
+                'authority': 'TOOL_REFUSAL_NOT_FACT',
+            }
+        if skill is None:
+            return {
+                'success': False,
+                'error': 'PROTOCOL_UPGRADE_SKILL_NOT_APPLICABLE',
+                'reason_code': 'PROTOCOL_UPGRADE_SKILL_NOT_APPLICABLE',
+                'authority': 'TOOL_REFUSAL_NOT_FACT',
+            }
+        return {
+            'success': True,
+            'problem_type': PROTOCOL_UPGRADE_PROBLEM_TYPE,
+            'skill': skill,
+            'selection_reason': reason.strip(),
+            'authority': 'METHOD_HINT_ONLY_NOT_AUTHORIZATION_OR_CURRENT_FACT',
+        }
     try: await server.run_stdio_async()
     finally:
         if api:

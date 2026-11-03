@@ -1,0 +1,129 @@
+{
+  "release": "AR-03-MATERIAL-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "01eb6f9c38d062f7de040e202713a352215014f2",
+  "implementation_freeze_head": "9e6cb589a1338378b462c5bae532dcd7d4df728d",
+  "branch": "codex/ar03-material-01-public",
+  "frozen_inputs": {
+    "cases_sha": "c29b5cf7630fa838a365634d0df5f9f0f2bfa834",
+    "gold_sha": "88d5e6f40f027ce2622b957d8ab32b8d2b827381",
+    "project_north_star_blob": "1f737712c7a36ceb34433ac09c3fbba3c3305542",
+    "agents_blob": "32c45506cceeaa8c76a5c56bf8360ff476b58856",
+    "project_skill_blob": "d405c8d413d633824b279202cc1503dab4cf0b03"
+  },
+  "checks": [
+    {
+      "name": "frozen_case_alignment_attempt",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_ar03_material_01.py -q --basetemp docs/evidence/ar-03/material-01/runs/green-09-tmp",
+      "exit_code": 1,
+      "result": "8 passed, 1 failed; fixture incorrectly expected a separate MAT-05 input, while frozen CASES defines it as the MAT-04 question with a different trusted Receiver state",
+      "raw_log": "runs/green-09-material-final.log"
+    },
+    {
+      "name": "final_material_acceptance",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_ar03_material_01.py -q --basetemp docs/evidence/ar-03/material-01/runs/green-12-tmp",
+      "exit_code": 0,
+      "result": "10 passed in 13.88s",
+      "raw_log": "runs/green-12-material-final.log"
+    },
+    {
+      "name": "protocol_and_assistant_regression",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar03_protocol_comparison.py tests/test_ar03_02_scoped_protocol_comparison.py tests/test_ar02_assistant.py tests/test_ar02_ar03_integration_01.py --basetemp docs/evidence/ar-03/material-01/runs/regression-01-tmp",
+      "exit_code": 0,
+      "result": "71 passed in 37.34s",
+      "raw_log": "runs/regression-01-protocol-assistant.log"
+    },
+    {
+      "name": "full_pytest",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q --basetemp=docs/evidence/ar-03/material-01/runs/regression-02-tmp",
+      "exit_code": 1,
+      "result": "602 passed, 4 failed in 605.02s",
+      "raw_log": "runs/regression-02-full-pytest.log",
+      "failures": [
+        "tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death",
+        "tests/test_m1_web_server.py::test_server_uses_configured_vue_origin_for_exact_origin_guard",
+        "tests/test_m1_web_server.py::test_server_defaults_origin_to_same_loopback_api_origin",
+        "tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix"
+      ]
+    },
+    {
+      "name": "full_pytest_source_timing",
+      "result": "Full suite ran before the bounded continuation-cursor code/test delta. The later code delta was covered by the final 10-test slice and fresh 71-test protocol/Assistant regression; full suite was not rerun after that delta."
+    },
+    {
+      "name": "bounded_excerpt_final_regression",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -q tests/test_ar03_protocol_comparison.py tests/test_ar03_02_scoped_protocol_comparison.py tests/test_ar02_assistant.py tests/test_ar02_ar03_integration_01.py --basetemp docs/evidence/ar-03/material-01/runs/regression-03-tmp",
+      "exit_code": 0,
+      "result": "71 passed in 37.87s",
+      "raw_log": "runs/regression-03-protocol-assistant-final.log"
+    },
+    {
+      "name": "bounded_excerpt_test_attempts",
+      "failed_attempt": {
+        "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_ar03_material_01.py -q --basetemp docs/evidence/ar-03/material-01/runs/green-11-tmp",
+        "exit_code": 1,
+        "result": "9 passed, 1 failed; test fixture computed SHA-256 over LF text but Windows text mode wrote CRLF, correctly triggering existing document integrity rejection",
+        "raw_log": "runs/green-11-material-final.log"
+      }
+    },
+    {
+      "name": "python_compile",
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m py_compile opspilot/assistant.py opspilot/assistant_mcp.py opspilot/domain/assistant.py opspilot/domain/scoped_protocol_comparison.py opspilot/skill_assets.py tests/test_ar03_material_01.py",
+      "exit_code": 0,
+      "result": "passed"
+    },
+    {
+      "name": "git_diff_check",
+      "command": "git diff --check",
+      "exit_code": 0,
+      "result": "passed; Git emitted only line-ending normalization warnings"
+    }
+  ],
+  "trace_summary": {
+    "file": "TRACE.jsonl",
+    "records": 59,
+    "assistant_runs": 7,
+    "persisted_answers": 7,
+    "fixture_model_calls": 26,
+    "mcp_calls": 19,
+    "mcp_tools": {
+      "list_scoped_protocol_documents": 5,
+      "read_scoped_protocol_excerpt": 5,
+      "load_protocol_upgrade_skill": 3,
+      "compare_scoped_protocols": 2,
+      "get_callback_delivery": 2,
+      "get_receiver_processing": 2
+    },
+    "provider_requests": 0,
+    "source": "actual persisted assistant_calls, Task bindings and answers from green-12 fixture-test SQLite databases; not a real Provider trace"
+  },
+  "side_effects": {
+    "real_provider_requests": 0,
+    "browser_automation": "NOT_RUN / NOT_AUTHORIZED",
+    "business_writes": 0,
+    "trusted_binding_order_id": "ar03-order",
+    "business_event_observations": "Delivery and Receiver observations were persisted for the same event within each bound fixture run",
+    "task_diagnoses_created": 0,
+    "action_ledgers_created": 0,
+    "handoff_receipts_created": 0
+  },
+  "limitations": [
+    "MaterialFixtureModel is deterministic; model autonomy and real-provider answer quality are NOT_VERIFIED.",
+    "No browser acceptance or live DeepSeek request was authorized or run.",
+    "The full suite is not green; four failures are retained and listed above.",
+    "The final continuation-cursor delta was covered by the fresh material slice and 71-test related regression, not by a second full-suite run.",
+    "The full suite's historical C1 RED test appended one row to each of two committed C1 trace files. Those files were restored byte-for-byte from this worktree HEAD; their final diff is empty. No C1 trace change is included in this candidate."
+  ],
+  "public_artifact_review": {
+    "raw_candidate_base": "01eb6f9c38d062f7de040e202713a352215014f2",
+    "raw_candidate_head": "505597bd0592c66639e10084456a3836edb72516",
+    "raw_candidate_commits_reviewed": 4,
+    "raw_candidate_files_reviewed": 55,
+    "scan_result": "No external API key, bearer credential, AWS/GitHub token, JWT, email address, private IPv4, cookie/header, user-profile path, binary, screenshot, database, checkpoint, or environment file found.",
+    "finding": "Five original local pytest/debug log files echoed a synthetic in-process TestClient fixture password 11 times. The test source also contains only local fixture credentials; none authenticates to an external service.",
+    "publication_action": "The original branch history and byte-exact logs remain local and were not copied into this publication history. Every published .log is a text-only derivative with only the synthetic fixture password echo replaced by [LOCAL_TEST_PASSWORD_REDACTED]; exit codes, test outcomes, tracebacks, and other output are preserved.",
+    "published_log_count": 20,
+    "hash_inventory": "PUBLIC_ARTIFACTS.md",
+    "temporary_sqlite_directories": "Not included; remain in the original local worktree."
+  }
+}
