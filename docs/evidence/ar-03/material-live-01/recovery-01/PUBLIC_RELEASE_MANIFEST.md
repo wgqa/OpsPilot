@@ -1,6 +1,6 @@
 # Public release manifest — Recovery 01
 
-This release is based on the already public recovery candidate base `69a1a1171b97849a6b5a77a7b8f8d03f263c95aa`. Only the following new or modified paths are included in this branch diff.
+This release is based on the already public recovery candidate base `69a1a1171b97849a6b5a77a7b8f8d03f263c95aa`. This manifest reviews the new branch delta only; files already present on that public base are unchanged.
 
 | Path | Purpose | Publication review |
 |---|---|---|
@@ -12,6 +12,6 @@ This release is based on the already public recovery candidate base `69a1a1171b9
 
 ## Excluded private artifacts
 
-The release does not include raw pytest stdout, JSONL traces, SQLite databases or sidecars, one-shot claim files, budget ledgers, credentials, cookies, environment configuration, screenshots, or private execution paths. Those artifacts remain in the original local recovery candidate for audit and are indexed separately outside the published change.
+The new recovery delta does not add raw pytest stdout, recovery JSONL traces, SQLite databases or sidecars, one-shot claim files, budget ledgers, credentials, cookies, environment configuration, screenshots, or private execution paths. These newly generated raw recovery artifacts remain in the original local recovery candidate and are indexed there outside the published change. Earlier material-live-01 artifacts already present on the public base are unchanged by this release.
 
-No claim is made that synthetic fixture identifiers are production customer data. No raw browser state or personal information is included. No `main` commit is part of this release history.
+No claim is made that synthetic fixture identifiers are production customer data. No new raw browser state or personal information is added. No commit is pushed to `main`.

@@ -151,6 +151,12 @@ def test_fresh_bootstrap_and_formal_worker_read_only_preview(
         assert connection.execute(
             "SELECT COUNT(*) FROM principals WHERE tenant_id='tenant-a' AND principal_id='principal-a' AND status='ENABLED'"
         ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM credentials WHERE tenant_id='tenant-a' AND credential_ref='cred-v2' AND credential_version=2"
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM trusted_operators WHERE actor_id='support-a' AND tenant_id='tenant-a' AND role='SUPPORT'"
+        ).fetchone()[0] == 1
 
     # The campaign ledger is created only after the trusted demo bootstrap.
     initialize_experiment(db_path, EXPERIMENT_ID)
@@ -163,6 +169,9 @@ def test_fresh_bootstrap_and_formal_worker_read_only_preview(
         contract_version=2, queue_age_seconds=60,
     )
     with connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM s3_orders WHERE tenant_id='tenant-a' AND order_id='ar03-order' AND status='COMPLETED'"
+        ).fetchone()[0] == 1
         delivery = dict(connection.execute(
             "SELECT * FROM s3_deliveries WHERE tenant_id='tenant-a' AND order_id='ar03-order'"
         ).fetchone())
