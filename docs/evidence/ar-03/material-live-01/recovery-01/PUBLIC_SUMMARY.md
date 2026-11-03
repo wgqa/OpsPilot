@@ -2,9 +2,20 @@
 
 **Release status:** `ACCEPTANCE_CANDIDATE` — free offline recovery evidence only
 **Release base:** `codex/ar03-material-01-public@69a1a1171b97849a6b5a77a7b8f8d03f263c95aa`
-**Frozen recovery plan:** commit `5a16647e62abaafe8e4eb05bcbaca67f9b5f889b`
-**Implementation:** commit `243f7d9f1eb6e97d6484e456c51c45b54a6dc53f`
-**Sidecar refusal coverage:** commit `0369ecfd78bcd054744fa4da59e351c84ce8b85b`
+**Frozen recovery plan:** commit `7f5fc65b27e03cba8bd95c8b8f38096c333db12f`
+**Implementation:** commit `84c8656a8de67ec85ef74be6353d64cc5f4bc9ee`
+**Sidecar refusal coverage:** commit `e9a87384a0eec01e000043fa75e2ab877acf6119`
+
+## Start-of-work verification
+
+- Remote recovery base: `69a1a1171b97849a6b5a77a7b8f8d03f263c95aa`; remote `main`: `ec8c3582f6d145eec9979c43607302731411ead8`.
+- Local recovery candidate observed at start: `36ac4fee8643a036097c4b79b4110b3c68a6b231`; it was not remotely verified or pushed.
+- `PROJECT_NORTH_STAR.md` blob: `1f737712c7a36ceb34433ac09c3fbba3c3305542`.
+- `AGENTS.md` blob: `32c45506cceeaa8c76a5c56bf8360ff476b58856`.
+- Project review Skill blob: `d405c8d413d633824b279202cc1503dab4cf0b03`.
+- Frozen `CASES.json` blob: `faf16fbb857278e98f8afbe179fe327855132967`. Gold is embedded in `CASES.json` and the acceptance plan; there is no separate `GOLD.md` for this slice.
+
+The original local candidate was left intact. The public branch was rebuilt from the verified remote base and contains only selected safe changes plus the redacted summary/manifest.
 
 ## Result
 
@@ -27,6 +38,8 @@ This is a fixture-driven wiring and safety result. It is **not** evidence of rea
 ## Provider and budget preflight
 
 No completion request was sent. The current [DeepSeek Chat Completions contract](https://api-docs.deepseek.com/api/create-chat-completion/) documents `deepseek-flash`, non-thinking mode, `max_tokens`, tool calling, and `tool_choice=auto`. The current [Models & Pricing page](https://api-docs.deepseek.com/quick_start/pricing/) lists DeepSeek-V4.1-Flash-1017 behind `deepseek-flash`, with peak cache-miss input at $0.30 / 1M tokens and output at $1.20 / 1M tokens (checked 2026-11-03).
+
+The frozen configuration remains `max_tokens=2048`, `thinking=disabled`, `tool_choice=auto` when tools are supplied, `parallel_tool_calls=false`, `stream=false`, 30-second timeout, and zero retries. The campaign cap is 16 Provider requests / 10 MCP calls, with a $10.50 application ceiling, $0.645600 per-request reservation, and 12,000 input-token limit. The offline test confirms that the isolated campaign and Task budgets initialize to 16/10; it does not send or validate a real Provider payload.
 
 At the frozen 12,000-input / 2,048-output caps, that listed peak rate gives an arithmetic request estimate of about **$0.006058** before any other billing adjustments. The frozen application reserve remains **$0.645600 per request**; 16 such reservations total **$10.329600**, below the unchanged $10.50 campaign ceiling. This is a preflight calculation, not a vendor invoice or a live request-body validation. Recheck prices and actual serialized payload before any separately authorized live campaign.
 
