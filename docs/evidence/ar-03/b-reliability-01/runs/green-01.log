@@ -1,0 +1,152 @@
+.............FF                                                          [100%]
+================================== FAILURES ===================================
+_ test_terminal_model_cap_delivers_source_checked_program_partial_and_hides_stale_copy[QUEUED] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-green-01/test_terminal_model_cap_delive0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-green-01/test_terminal_model_cap_delive0')
+receiver_state = 'QUEUED'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021ED6F33130>
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_terminal_model_cap_delivers_source_checked_program_partial_and_hides_stale_copy(
+        demo_db, tmp_path, receiver_state, monkeypatch,
+    ):
+        """A terminal budget stop can summarize current facts but must revalidate on read."""
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        paired_ids = iter((
+            uuid.UUID("00000000-0000-4000-8000-000000000001"),
+            uuid.UUID("00000000-0000-4000-8000-000000000002"),
+        ))
+        with monkeypatch.context() as patcher:
+            patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+            fixture = prepare_s3_fixture(
+                demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
+            )
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+                )
+    
+        frozen_cases_path = (
+            Path(__file__).resolve().parents[1]
+            / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+        )
+        initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+        model = IntegrationFixtureModel(mode="cap-terminal-partial", receiver_state=receiver_state)
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / f"cap-partial-{receiver_state}.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: model,
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": f"ar03-cap-partial-{receiver_state}"},
+                json={"order_id": "ar03-order", "initial_message": initial_message},
+            )
+            assert accepted.status_code == 202, accepted.text
+            binding = accepted.json()
+            run = _wait_run(client, binding["run_id"])
+            assert run["status"] == "FAILED", run
+    
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            partial = next(row for row in messages if row.get("answer_source_message_id") == binding["message_id"])
+            assert partial["answer_kind"] == "PROGRAM_LIMIT"
+>           assert partial["body"].startswith("���������ɵĲ��ֽ�� �� PARTIAL��")
+E           AssertionError: assert False
+E            +  where False = <built-in method startswith of str object at 0x0000021EDA3A16B0>('���������ɵĲ��ֽ�� �� PARTIAL��')
+E            +    where <built-in method startswith of str object at 0x0000021EDA3A16B0> = '�����������ɵĲ��ֽ����Դ��ʧЧ�����ܼ�����Ϊ��ǰ��ʵ�������²�ѯ��'.startswith
+
+tests\test_ar02_ar03_integration_01.py:888: AssertionError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:55070/api/async-orders/async-order?order_id=ar03-order "HTTP/1.0 200 OK"
+
+_ test_terminal_model_cap_delivers_source_checked_program_partial_and_hides_stale_copy[PROCESSED] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-green-01/test_terminal_model_cap_delive1/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-green-01/test_terminal_model_cap_delive1')
+receiver_state = 'PROCESSED'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021ED77B9150>
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_terminal_model_cap_delivers_source_checked_program_partial_and_hides_stale_copy(
+        demo_db, tmp_path, receiver_state, monkeypatch,
+    ):
+        """A terminal budget stop can summarize current facts but must revalidate on read."""
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        paired_ids = iter((
+            uuid.UUID("00000000-0000-4000-8000-000000000001"),
+            uuid.UUID("00000000-0000-4000-8000-000000000002"),
+        ))
+        with monkeypatch.context() as patcher:
+            patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+            fixture = prepare_s3_fixture(
+                demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
+            )
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+                )
+    
+        frozen_cases_path = (
+            Path(__file__).resolve().parents[1]
+            / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+        )
+        initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+        model = IntegrationFixtureModel(mode="cap-terminal-partial", receiver_state=receiver_state)
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / f"cap-partial-{receiver_state}.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: model,
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": f"ar03-cap-partial-{receiver_state}"},
+                json={"order_id": "ar03-order", "initial_message": initial_message},
+            )
+            assert accepted.status_code == 202, accepted.text
+            binding = accepted.json()
+            run = _wait_run(client, binding["run_id"])
+            assert run["status"] == "FAILED", run
+    
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            partial = next(row for row in messages if row.get("answer_source_message_id") == binding["message_id"])
+            assert partial["answer_kind"] == "PROGRAM_LIMIT"
+>           assert partial["body"].startswith("���������ɵĲ��ֽ�� �� PARTIAL��")
+E           AssertionError: assert False
+E            +  where False = <built-in method startswith of str object at 0x0000021EDCD99730>('���������ɵĲ��ֽ�� �� PARTIAL��')
+E            +    where <built-in method startswith of str object at 0x0000021EDCD99730> = '�����������ɵĲ��ֽ����Դ��ʧЧ�����ܼ�����Ϊ��ǰ��ʵ�������²�ѯ��'.startswith
+
+tests\test_ar02_ar03_integration_01.py:888: AssertionError
+---------------------------- Captured stderr call -----------------------------
+HTTP Request: GET http://127.0.0.1:55078/api/async-orders/async-order?order_id=ar03-order "HTTP/1.0 200 OK"
+
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_ar03_integration_01.py::test_terminal_model_cap_delivers_source_checked_program_partial_and_hides_stale_copy[QUEUED]
+FAILED tests/test_ar02_ar03_integration_01.py::test_terminal_model_cap_delivers_source_checked_program_partial_and_hides_stale_copy[PROCESSED]
+2 failed, 13 passed in 15.73s
+
+EXIT_CODE=1

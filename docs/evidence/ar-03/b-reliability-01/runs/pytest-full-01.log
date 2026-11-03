@@ -1,0 +1,300 @@
+........................................................................ [ 12%]
+........................................................................ [ 24%]
+........................................................................ [ 36%]
+..........................................................F............. [ 48%]
+......................................FF................................ [ 60%]
+........................................................................ [ 72%]
+........................................................................ [ 84%]
+....F................................................................... [ 96%]
+.......................                                                  [100%]
+================================== FAILURES ===================================
+____ test_n2_01_committed_repair_event_replays_after_commit_process_death _____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-full-01/test_n2_01_committed_repair_ev0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-full-01/test_n2_01_committed_repair_ev0')
+
+    def test_n2_01_committed_repair_event_replays_after_commit_process_death(
+        demo_db: Path, tmp_path: Path
+    ) -> None:
+        commit_script = Path(__file__).with_name("m1_repair_commit_process.py")
+        committed = subprocess.run(
+            [sys.executable, "-X", "utf8", str(commit_script), str(demo_db)],
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+        assert committed.returncode == 0, committed.stderr
+        commit_event = json.loads(committed.stdout.strip().splitlines()[-1])
+        assert commit_event["status"] == "COMMITTED"
+        assert commit_event["before_version"] == 7 and commit_event["after_version"] == 8
+        assert commit_event["config_version"] == 8
+        assert commit_event["durable_repair_event_count_before_process_exit"] == 1
+    
+        port = _free_port()
+        origin = f"http://127.0.0.1:{port}"
+        credentials = {
+            "OPSPILOT_DB_PATH": str(demo_db),
+            "OPSPILOT_CHECKPOINT_DB_PATH": str(tmp_path / "restart-checkpoint.sqlite3"),
+            "OPSPILOT_WEB_ORIGIN": origin,
+            "OPSPILOT_WEB_SUPPORT_PASSWORD": secrets.token_urlsafe(24),
+            "OPSPILOT_WEB_APPROVER_PASSWORD": secrets.token_urlsafe(24),
+            "OPSPILOT_WEB_SUPPORT_B_PASSWORD": secrets.token_urlsafe(24),
+            "OPSPILOT_WEB_APPROVER_B_PASSWORD": secrets.token_urlsafe(24),
+            "PYTHONUTF8": "1",
+        }
+        environment = os.environ.copy()
+        environment.update(credentials)
+        server_log = (tmp_path / "event-replay-server.log").open("w", encoding="utf-8")
+        server = subprocess.Popen(
+            [sys.executable, "-X", "utf8", "-u", "-m", "opspilot.web.server",
+             "--host", "127.0.0.1", "--port", str(port)],
+            cwd=ROOT, env=environment, stdout=server_log, stderr=subprocess.STDOUT,
+        )
+        try:
+            end = time.monotonic() + 15
+            while time.monotonic() < end:
+                if server.poll() is not None:
+                    raise AssertionError(f"replay server exited with code {server.returncode}")
+                try:
+                    ready = httpx.get(f"{origin}/api/health", timeout=0.5)
+                    if ready.status_code == 200:
+                        break
+                except httpx.HTTPError:
+                    time.sleep(0.05)
+            else:
+                raise AssertionError("replay server readiness timeout")
+    
+            with httpx.Client(base_url=origin, timeout=5.0) as client:
+                login = client.post(
+                    "/api/auth/login", headers={"Origin": origin},
+                    json={"actor_id": "support-a", "password": credentials["OPSPILOT_WEB_SUPPORT_PASSWORD"]},
+                )
+                assert login.status_code == 200
+                history = client.get(
+                    f"/api/sessions/{commit_event['session_id']}/events/history?after=0",
+                    headers={"Last-Event-ID": "0"},
+                )
+                assert history.status_code == 200
+                repair_events = [
+                    item for item in history.json()["items"]
+                    if item["event_kind"] == "REPAIR_COMMITTED"
+                    and item["source_id"] == commit_event["action_id"]
+                ]
+                assert len(repair_events) == 1
+                assert repair_events[0]["payload"]["action_id"] == commit_event["action_id"]
+                assert "fixture-a-current-secret" not in history.text
+                with connect(demo_db) as connection:
+                    action_counts = {
+                        "intent": connection.execute(
+                            "SELECT COUNT(*) FROM d3_action_intents WHERE action_id = ?",
+                            (commit_event["action_id"],),
+                        ).fetchone()[0],
+                        "ledger": connection.execute(
+                            "SELECT COUNT(*) FROM d3_action_ledgers WHERE action_id = ? AND status='COMMITTED'",
+                            (commit_event["action_id"],),
+                        ).fetchone()[0],
+                        "repair_event": connection.execute(
+                            "SELECT COUNT(*) FROM session_events WHERE source_kind='ACTION_LEDGER' AND source_id=? AND event_kind='REPAIR_COMMITTED'",
+                            (commit_event["action_id"],),
+                        ).fetchone()[0],
+                        "config_version": connection.execute(
+                            "SELECT config_version FROM integrations WHERE tenant_id='tenant-a' AND integration_id='integration-a'"
+                        ).fetchone()[0],
+                    }
+                assert action_counts == {"intent": 1, "ledger": 1, "repair_event": 1, "config_version": 8}
+                print("M1_EVIDENCE " + json.dumps({
+                    "case": "N2-01", "commit_process_pid": commit_event["pid"],
+                    "new_api_process_pid": server.pid, "repair_action_id": commit_event["action_id"],
+                    "http_status": history.status_code, "replayed_event_count": len(repair_events),
+                    "action_counts_after_restart": action_counts,
+                    "repair_event_payload": repair_events[0]["payload"],
+                }, sort_keys=True))
+        finally:
+>           _kill_tree(server)
+
+tests\test_m1_event_process_recovery.py:134: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m1_event_process_recovery.py:36: in _kill_tree
+    process.wait(timeout=15)
+D:\python\Lib\subprocess.py:1278: in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <Popen: returncode: None args: ['D:\\ѧϰ\\agent����Ŀ\\.venv\\Scripts\\python.ex...>
+timeout = 15
+
+    def _wait(self, timeout):
+        """Internal implementation of wait() on Windows."""
+        if timeout is None:
+            timeout_millis = _winapi.INFINITE
+        elif timeout <= 0:
+            timeout_millis = 0
+        else:
+            timeout_millis = int(timeout * 1000)
+        if self.returncode is None:
+            # API note: Returns immediately if timeout_millis == 0.
+            result = _winapi.WaitForSingleObject(self._handle,
+                                                 timeout_millis)
+            if result == _winapi.WAIT_TIMEOUT:
+>               raise TimeoutExpired(self.args, timeout)
+E               subprocess.TimeoutExpired: Command '['D:\\ѧϰ\\agent����Ŀ\\.venv\\Scripts\\python.exe', '-X', 'utf8', '-u', '-m', 'opspilot.web.server', '--host', '127.0.0.1', '--port', '58935']' timed out after 15 seconds
+
+D:\python\Lib\subprocess.py:1607: TimeoutExpired
+---------------------------- Captured stdout call -----------------------------
+M1_EVIDENCE {"action_counts_after_restart": {"config_version": 8, "intent": 1, "ledger": 1, "repair_event": 1}, "case": "N2-01", "commit_process_pid": 32716, "http_status": 200, "new_api_process_pid": 4800, "repair_action_id": "action-a01b6ecb-4b54-4432-8ee0-1736e5a59a42", "repair_event_payload": {"action_id": "action-a01b6ecb-4b54-4432-8ee0-1736e5a59a42", "action_kind": "REPAIR", "plan_hash": "1f88dbe480531081c55d5c7250d17a71598d77e5bc33f7323a0fc9d6fa966077", "status": "COMMITTED", "task_id": "task-035e0024-2a60-4330-a088-1d5ccf0f536f"}, "replayed_event_count": 1}
+________ test_server_uses_configured_vue_origin_for_exact_origin_guard ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002652E0BB380>
+
+    def test_server_uses_configured_vue_origin_for_exact_origin_guard(monkeypatch) -> None:
+        captured = _run_server_main(monkeypatch, configured_origin="http://127.0.0.1:5173")
+    
+>       assert captured["app"] == {"expected_origin": "http://127.0.0.1:5173"}
+E       AssertionError: assert {'expected_or...02652786F7F0>} == {'expected_or...7.0.0.1:5173'}
+E         
+E         Omitting 1 identical items, use -vv to show
+E         Left contains 1 more item:
+E         {'assistant_model_factory': <function create_assistant_model at 0x000002652786F7F0>}
+E         Use -v to get more diff
+
+tests\test_m1_web_server.py:24: AssertionError
+___________ test_server_defaults_origin_to_same_loopback_api_origin ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000265307A6740>
+
+    def test_server_defaults_origin_to_same_loopback_api_origin(monkeypatch) -> None:
+        captured = _run_server_main(monkeypatch, configured_origin=None)
+    
+>       assert captured["app"] == {"expected_origin": "http://127.0.0.1:8123"}
+E       AssertionError: assert {'expected_or...02652786F7F0>} == {'expected_or...7.0.0.1:8123'}
+E         
+E         Omitting 1 identical items, use -vv to show
+E         Left contains 1 more item:
+E         {'assistant_model_factory': <function create_assistant_model at 0x000002652786F7F0>}
+E         Use -v to get more diff
+
+tests\test_m1_web_server.py:33: AssertionError
+_ test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-b-reliability-01/docs/evidence/ar-03/b-reliability-01/runs/pytest-full-01/test_explicit_protocol_followu0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000026530D2C830>
+
+    def test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix(
+        tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Expected RED: baseline only classifies FOLLOW_UP, with no investigator Run path."""
+        db = tmp_path / "m4-autonomy-c1.sqlite3"
+        reset_fixture(db, "S1_POS")
+        session_id, task_id, diagnosis_run_id, diagnosis_id = _diagnosed_task(db)
+        app = create_app(
+            db_path=db,
+            start_worker=False,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            heartbeat_seconds=0.05,
+        )
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "c1-red-test-model")
+        monkeypatch.setattr(
+            "opspilot.domain.investigation_updates.classify_input",
+            lambda **_kwargs: {"intent": "READONLY_FOLLOWUP", "change_summary": ""},
+        )
+    
+        with TestClient(app, raise_server_exceptions=False) as client:
+            login = client.post(
+                "/api/auth/login",
+                headers={"Origin": ORIGIN},
+                json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            message = client.post(
+                f"/api/sessions/{session_id}/messages",
+                headers={**headers, "Idempotency-Key": "m4-c1-red-followup-message"},
+                json={
+                    "task_id": task_id,
+                    "input_kind": "CHAT_READONLY",
+                    "body": "�밴�������ǰ�󶨵�Э��汾���� HTTP 202 �ĺ��壬�����ɺ˶Ե��ĵ����ݡ�",
+                },
+            )
+            assert message.status_code == 202, message.text
+            source_message_id = str(message.json()["message_id"])
+            assessment = client.post(
+                f"/api/tasks/{task_id}/investigation-updates/proposals",
+                headers={**headers, "Idempotency-Key": source_message_id},
+                json={"source_message_id": source_message_id},
+            )
+    
+        with connect(db) as connection:
+            chat_run = connection.execute(
+                "SELECT run_id, kind, status, source_message_id FROM task_runs WHERE run_id = ?",
+                (str(message.json()["run_id"]),),
+            ).fetchone()
+            followup = connection.execute(
+                """SELECT run_id, kind, status, source_message_id FROM task_runs
+                   WHERE task_id = ? AND source_message_id = ? AND kind = 'READONLY_FOLLOWUP'""",
+                (task_id, source_message_id),
+            ).fetchone()
+            control_revision = int(connection.execute(
+                "SELECT control_revision FROM task_controls WHERE task_id = ?", (task_id,)
+            ).fetchone()[0])
+            correction_count = int(connection.execute(
+                "SELECT COUNT(*) FROM messages WHERE task_id = ? AND input_kind = 'CORRECT_TASK_INPUT'",
+                (task_id,),
+            ).fetchone()[0])
+            diagnosis = connection.execute(
+                "SELECT receipt_id, body_json, digest FROM s3_diagnoses WHERE receipt_id = ?",
+                (diagnosis_id,),
+            ).fetchone()
+            task_status = str(connection.execute(
+                "SELECT status FROM task_bindings WHERE task_id = ?", (task_id,)
+            ).fetchone()[0])
+            http_observations = int(connection.execute(
+                "SELECT COUNT(*) FROM s3_http_observations"
+            ).fetchone()[0])
+            side_effect_counts = {
+                table: int(connection.execute(f"SELECT COUNT(*) FROM {table} WHERE task_id = ?", (task_id,)).fetchone()[0])
+                for table in ("d3_action_intents", "d3_action_ledgers", "s3_handoff_queue_entries", "s3_handoff_receipts")
+            }
+        trace = {
+            "schema": "opspilot-m4-autonomy-c1-red-v1",
+            "case_id": "C1-01",
+            "baseline_sha": "add47ec83f31fa76b9b6a5782e013311732bc496",
+            "task_id": task_id,
+            "diagnosis_id": diagnosis_id,
+            "diagnosis_run_id": diagnosis_run_id,
+            "diagnosis_digest": str(diagnosis["digest"]) if diagnosis is not None else None,
+            "diagnosis_gate": json.loads(str(diagnosis["body_json"])).get("gate") if diagnosis is not None else None,
+            "diagnosis_currentness": get_s3_outcome(db, task_id).get("currentness"),
+            "task_status": task_status,
+            "source_message_id": source_message_id,
+            "chat_run": dict(chat_run) if chat_run is not None else None,
+            "assessment_http_status": assessment.status_code,
+            "assessment_error_code": assessment.json().get("code") if assessment.headers.get("content-type", "").startswith("application/json") else None,
+            "followup_run_found": followup is not None,
+            "control_revision": control_revision,
+            "correction_count": correction_count,
+            "side_effect_counts": side_effect_counts,
+            "setup_http_observation_count": http_observations,
+            "followup_provider_calls": 0,
+            "followup_mcp_calls": 0,
+            "classification_source": "deterministic test double; not a real Provider trace",
+            "expected": "accepted same-Task READONLY_FOLLOWUP Run linked to source_message_id; no TaskControl or business-write change",
+            "observed": "baseline classifier rejects READONLY_FOLLOWUP before dispatch",
+        }
+        trace_path = Path(__file__).resolve().parents[1] / "docs/evidence/vnext/m4-autonomy-c1/TRACE.jsonl"
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with trace_path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(trace, ensure_ascii=False, sort_keys=True) + "\n")
+    
+>       assert assessment.status_code == 200, assessment.text
+E       AssertionError: {"code":"INVALID_MODEL_CLASSIFICATION"}
+E       assert 502 == 200
+E        +  where 502 = <Response [502 Bad Gateway]>.status_code
+
+tests\test_m4_autonomy_c1_red.py:198: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death
+FAILED tests/test_m1_web_server.py::test_server_uses_configured_vue_origin_for_exact_origin_guard
+FAILED tests/test_m1_web_server.py::test_server_defaults_origin_to_same_loopback_api_origin
+FAILED tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix
+4 failed, 595 passed in 597.72s (0:09:57)
+EXIT_CODE=1

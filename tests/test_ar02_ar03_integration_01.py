@@ -259,6 +259,37 @@ class IntegrationFixtureModel(BaseChatModel):
                 else:
                     selected = "search_project_knowledge"
                     args = {"query": "回调重试协议"}
+        elif self.mode == "cap-terminal-failed":
+            denial = payloads.get("search_project_knowledge")
+            if denial is not None:
+                assert denial.get("executed") is False
+                assert denial.get("authority") == "TOOL_REFUSAL_NOT_FACT"
+                selected = "search_project_knowledge"
+                args = {"query": "回调重试协议"}
+            else:
+                plan = [
+                    "list_scoped_protocol_documents", "compare_scoped_protocols",
+                    "get_order_status", "get_callback_delivery", "get_receiver_processing",
+                    "get_callback_transport_history",
+                ]
+                selected = next((name for name in plan if name not in payloads), None)
+                if selected == "list_scoped_protocol_documents":
+                    args = {"topic": "callback retry"}
+                elif selected == "compare_scoped_protocols":
+                    docs = payloads["list_scoped_protocol_documents"].get("protocol_documents", [])
+                    old = next(row for row in docs if str(row.get("version", "")).startswith("1."))
+                    new = next(row for row in docs if str(row.get("version", "")).startswith("2."))
+                    args = {
+                        "base_document_id": old["document_id"],
+                        "target_document_id": new["document_id"],
+                        "base_version": old["version"],
+                        "target_version": new["version"],
+                    }
+                elif selected:
+                    args = {"reason": "核验受信订单的当前回调状态"}
+                else:
+                    selected = "search_project_knowledge"
+                    args = {"query": "回调重试协议"}
         elif self.mode == "history-answer":
             answer = "我依据上一轮仍有效但仅属历史线索的协议版本比较回答；它不是线上部署证明或新的业务观察。"
         elif self.mode == "binding":
@@ -796,6 +827,85 @@ def test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refus
         refusal = json.loads(denied[0].content)
         assert refusal["executed"] is False
         assert refusal["authority"] == "TOOL_REFUSAL_NOT_FACT"
+
+
+@pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+def test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current(
+    demo_db, tmp_path, receiver_state, monkeypatch,
+):
+    """A failed Run's observations are not revived as current facts in a program notice."""
+    from fastapi.testclient import TestClient
+    from opspilot.domain.database import connect
+    from opspilot.domain.s3 import prepare_s3_fixture
+    from opspilot.web.app import create_app
+    from test_ar02_assistant import ORIGIN, PASSWORDS
+
+    paired_ids = iter((
+        uuid.UUID("00000000-0000-4000-8000-000000000001"),
+        uuid.UUID("00000000-0000-4000-8000-000000000002"),
+    ))
+    with monkeypatch.context() as patcher:
+        patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2)
+    if receiver_state == "PROCESSED":
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+            )
+
+    frozen_cases_path = (
+        Path(__file__).resolve().parents[1]
+        / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+    )
+    initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+    model = IntegrationFixtureModel(mode="cap-terminal-failed", receiver_state=receiver_state)
+    app = create_app(
+        db_path=demo_db,
+        checkpoint_db_path=tmp_path / f"cap-terminal-{receiver_state}.sqlite3",
+        start_worker=True,
+        credentials=PASSWORDS,
+        expected_origin=ORIGIN,
+        assistant_model_factory=lambda: model,
+    )
+    with TestClient(app) as client:
+        headers = _login(client)
+        session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+        accepted = client.post(
+            f"/api/sessions/{session_id}/assistant/order",
+            headers={**headers, "Idempotency-Key": f"ar03-cap-terminal-{receiver_state}"},
+            json={"order_id": "ar03-order", "initial_message": initial_message},
+        )
+        assert accepted.status_code == 202, accepted.text
+        binding = accepted.json()
+        run = _wait_run(client, binding["run_id"])
+        assert run["status"] == "FAILED", run
+
+        messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+        notice = next(row for row in messages if row.get("answer_source_message_id") == binding["message_id"])
+        assert notice["answer_kind"] == "PROGRAM_LIMIT"
+        assert "ASSISTANT_RUN_MODEL_LIMIT" in notice["body"]
+        assert "未提交模型最终答复" in notice["body"]
+        assert "未重新取得业务事实" in notice["body"]
+        assert "PROCESSED" not in notice["body"] and "QUEUED" not in notice["body"]
+        assert "event-00000000-0000-4000-8000-000000000001" not in notice["body"]
+
+        with connect(demo_db) as connection:
+            calls = connection.execute(
+                "SELECT kind,status FROM assistant_calls WHERE run_id=? ORDER BY created_at",
+                (binding["run_id"],),
+            ).fetchall()
+            mcp = [row for row in calls if row["kind"] == "MCP"]
+            model_calls = [row for row in calls if row["kind"] == "MODEL"]
+            assert len(mcp) == 6 and all(row["status"] == "OK" for row in mcp)
+            assert len(model_calls) == 8 and all(row["status"] == "OK" for row in model_calls)
+            assert connection.execute(
+                "SELECT COUNT(*) FROM d2_attempts WHERE run_id=? AND kind='MCP'",
+                (binding["run_id"],),
+            ).fetchone()[0] == 6
+            assert connection.execute(
+                "SELECT COUNT(*) FROM chat_run_answers WHERE run_id=?", (binding["run_id"],)
+            ).fetchone()[0] == 0
+            assert assistant_domain.sources_current(connection, binding["run_id"])[0] is False
 
 
 @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])

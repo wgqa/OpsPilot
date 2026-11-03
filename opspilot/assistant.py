@@ -358,7 +358,26 @@ class Loop(AgentMiddleware):
     async def awrap_tool_call(self,request,handler):
         call=request.tool_call; name=call['name']; args=call['args']
         domain.read_run(self.path,self.run_id,worker_id=self.worker_id)
-        row,fresh=domain.reserve(self.path,self.run_id,'MCP',call['id'],{'name':name,'args':args},self.worker_id)
+        try:
+            row,fresh=domain.reserve(self.path,self.run_id,'MCP',call['id'],{'name':name,'args':args},self.worker_id)
+        except TaskControlError as error:
+            reason = getattr(error, 'code', None) or getattr(error, 'reason_code', None) or str(error).rsplit(':', 1)[-1]
+            if reason != 'ASSISTANT_RUN_MCP_LIMIT':
+                raise
+            self.trace(
+                'tool_not_dispatched', tool_call_id=call['id'], name=name, arguments=args,
+                reason=reason, dispatch_started=False,
+            )
+            return ToolMessage(
+                content=canonical_json({
+                    'error': reason,
+                    'reason_code': reason,
+                    'executed': False,
+                    'authority': 'TOOL_REFUSAL_NOT_FACT',
+                    'message': 'No MCP request was executed. You may answer from current-run observations already returned, or state what remains unknown. Do not infer this tool result.',
+                }),
+                tool_call_id=call['id'],
+            )
         exposed_names = {
             item.get('function', {}).get('name')
             for item in self.specs

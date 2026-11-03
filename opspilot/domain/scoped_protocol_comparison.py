@@ -447,25 +447,67 @@ _TOPIC_ALIASES = (
     ("失败", "failure"),
     ("策略", "policy"),
 )
+_TOPIC_GENERIC_WORDS = {
+    "a", "an", "and", "about", "compare", "comparison", "document", "documents",
+    "docs", "find", "for", "in", "list", "of", "please", "protocol", "protocols",
+    "related", "search", "show", "the", "to", "version", "versions", "with",
+    "behavior", "behaviour",
+}
+_TOPIC_GENERIC_CJK = {"协议", "文档", "资料", "版本", "查询", "检索", "比较", "相关"}
+
+
+def _normalize_topic_word(value: str) -> str:
+    """Apply a small, deterministic normalization without a growing synonym table."""
+    word = value.casefold()
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 5 and word.endswith("ing"):
+        return word[:-3]
+    if len(word) > 4 and word.endswith("ed"):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
 
 
 def _topic_terms(topic: str) -> tuple[str, ...]:
-    """Normalize short English/Chinese topic expressions into metadata terms.
+    """Normalize English words and Chinese character bigrams for metadata retrieval.
 
-    English words are matched independently across the authorized entry's
-    metadata, so a phrase such as "callback retry" need not appear verbatim in
-    one field. The small bilingual aliases cover the callback terminology
-    already used by the catalog; this is not document-content search.
+    This is bounded catalog-metadata matching, not content search. Generic query
+    wording is discarded; the few existing bilingual domain terms stay stable
+    while ordinary descriptor words no longer have to exist in document text.
     """
     normalized = topic.casefold().strip()
-    terms = set(re.findall(r"[a-z0-9]+", normalized))
+    terms = {
+        _normalize_topic_word(word)
+        for word in re.findall(r"[a-z0-9]+", normalized)
+        if _normalize_topic_word(word) not in _TOPIC_GENERIC_WORDS
+    }
+    for run in re.findall(r"[\u3400-\u9fff]+", normalized):
+        if len(run) == 1:
+            if run not in _TOPIC_GENERIC_CJK:
+                terms.add(run)
+            continue
+        for index in range(len(run) - 1):
+            term = run[index:index + 2]
+            if term not in _TOPIC_GENERIC_CJK:
+                terms.add(term)
     for source, target in _TOPIC_ALIASES:
         if source in normalized:
             terms.add(target)
-    if terms:
-        return tuple(sorted(terms))
-    compact = re.sub(r"\s+", "", normalized)
-    return (compact,) if compact else ()
+    return tuple(sorted(term for term in terms if term))
+
+
+def _topic_relevance(topic_terms: tuple[str, ...], entry: dict[str, Any]) -> int:
+    if not topic_terms:
+        return 0
+    searchable = " ".join((
+        str(entry.get("document_id", "")),
+        str(entry.get("title", "")),
+        str(entry.get("file", "")),
+        *(str(keyword) for keyword in entry.get("keywords", []) if keyword is not None),
+    ))
+    return len(set(topic_terms).intersection(_topic_terms(searchable)))
 
 
 def list_scoped_protocols(
@@ -494,6 +536,7 @@ def list_scoped_protocols(
     topic_terms = _topic_terms(topic_str) if topic_str else ()
 
     discovered_docs: dict[str, dict[str, Any]] = {}
+    relevance_scores: dict[str, int] = {}
 
     for catalog_dir in resolved_catalogs:
         manifest_path = catalog_dir / "manifest.json"
@@ -513,16 +556,9 @@ def list_scoped_protocols(
             if not doc_id or doc_id not in allowed_doc_ids:
                 continue
 
-            if topic_terms:
-                keywords = [str(kw) for kw in entry.get("keywords", [])]
-                searchable = " ".join((
-                    str(doc_id),
-                    str(entry.get("title", "")),
-                    str(entry.get("file", "")),
-                    *keywords,
-                )).casefold()
-                if not all(term in searchable for term in topic_terms):
-                    continue
+            relevance = _topic_relevance(topic_terms, entry) if topic_terms else 0
+            if topic_terms and relevance == 0:
+                continue
 
             if doc_id not in discovered_docs:
                 ref = DocumentRef(
@@ -546,9 +582,10 @@ def list_scoped_protocols(
                     "expires_at": resolved.expires_at,
                     "keywords": entry.get("keywords", []),
                 }
+                relevance_scores[doc_id] = relevance
 
     doc_list = list(discovered_docs.values())
-    doc_list.sort(key=lambda d: d["document_id"])
+    doc_list.sort(key=lambda d: (-relevance_scores.get(d["document_id"], 0), d["document_id"]))
 
     families_map: dict[str, list[dict[str, Any]]] = {}
     for doc in doc_list:
