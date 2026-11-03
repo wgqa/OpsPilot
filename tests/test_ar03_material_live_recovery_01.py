@@ -96,15 +96,21 @@ def _wait_run(client: TestClient, run_id: str) -> dict:
     raise AssertionError("recovery preview Worker did not reach a terminal Run state")
 
 
-def test_bootstrap_refuses_existing_campaign_database_without_changing_it(tmp_path):
-    existing = tmp_path / "existing.sqlite3"
-    sentinel = b"pre-existing campaign database must never be reset"
-    existing.write_bytes(sentinel)
+@pytest.mark.parametrize("existing_artifact", ["database", "-wal", "-shm"])
+def test_bootstrap_refuses_existing_campaign_database_artifacts_without_changing_them(
+    tmp_path, existing_artifact,
+):
+    database = tmp_path / "existing.sqlite3"
+    artifact = database if existing_artifact == "database" else Path(f"{database}{existing_artifact}")
+    sentinel = b"pre-existing campaign database artifact must never be reset"
+    artifact.write_bytes(sentinel)
 
     with pytest.raises(RuntimeError, match="CAMPAIGN_DATABASE_NOT_FRESH"):
-        RUNNER._bootstrap_fresh_campaign_database(existing)
+        RUNNER._bootstrap_fresh_campaign_database(database)
 
-    assert existing.read_bytes() == sentinel
+    assert artifact.read_bytes() == sentinel
+    if existing_artifact != "database":
+        assert not database.exists()
 
 
 def test_fresh_bootstrap_and_formal_worker_read_only_preview(
