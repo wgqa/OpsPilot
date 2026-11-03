@@ -48,6 +48,8 @@ The same official pricing and Chat Completions references were rechecked on 2026
 
 The one-shot Runner repeats all preflight checks immediately before claiming the execution identity and creating the new isolated runtime. If it does not return/record `PREFLIGHT_READY`, no paid request will be sent.
 
+At the actual one-shot invocation on HEAD `9343730a1b2b196027a1f4f10ef6c5456032753c`, the runner's repeated preflight also returned `PREFLIGHT_READY`. That preflight successfully read remote refs: remote `main` was `ec8c3582f6d145eec9979c43607302731411ead8`, and the candidate branch still pointed to freeze/base `3ec06caa6a2d8ef370592d33164be3077a0a5f6f`. The execution claim and empty campaign ledger were then created. The run stopped during local fixture preparation before any Provider HTTP or MCP tool dispatch; details are in `REPORT.md` and `RESULTS.json`.
+
 After a successful preflight, the one-shot Runner creates an exclusive execution claim and fresh isolated SQLite/Checkpoint state. Before every HTTPX Provider dispatch it requires exactly one matching durable campaign reservation and Assistant reservation, validates the final serialized request, context estimate, allowed tools, aggregate caps, and single-flight condition. Unknown transport results, invalid Usage, writes, source/scope anomalies, or cap breaches stop all remaining cases; there are no retries.
 
 ## Evidence levels

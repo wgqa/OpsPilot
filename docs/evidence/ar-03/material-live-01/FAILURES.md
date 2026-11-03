@@ -26,3 +26,12 @@ The four `red-01` failures and both later test-preparation failures remain in th
 The raw pytest tracebacks contain whitespace-only lines. `git diff --check` reports those lines inside the preserved raw logs; the source, tests, Runner, and Markdown files are checked separately and are clean. The raw logs were not edited to silence that report.
 
 Live failures, if any, will be appended after the authorized one-shot run. Provider UNKNOWN, timeout, Usage anomaly, authorization/source anomaly, side effect, or budget inconsistency is an immediate campaign stop; no retries or reruns are allowed.
+
+## Authorized live attempt (2026-11-03)
+
+- One invocation of `run_live.py --execute-once` exited 1. The runner had already recorded `EXECUTION_CLAIM.json`; this experiment identity is consumed and must not be rerun.
+- The runner's repeated pre-send check was `PREFLIGHT_READY`. It then stopped with `IntegrityError:FOREIGN KEY constraint failed` during `_prepare_fixture`, before any formal Session/Task/Run or Provider/MCP dispatch. See `RESULTS.json`, `TRACE.jsonl`, `BUDGET_LEDGER.json`, and `REPORT.md`.
+- Post-stop read-only audit found zero tenant, credential, principal, integration, service, S3 business fact, Session, Task Run, Message, Assistant Run/Call, Evidence, Diagnosis, Handoff, or business action rows in this isolated DB; `PRAGMA foreign_key_check` returned zero violations. The campaign ledger is OPEN with Provider=0, MCP=0, reserved=$0, settled=$0.
+- Source path and DB state locate the missing prerequisite: the Runner calls schema-only `initialize()` and then `prepare_s3_fixture()` without first seeding the tenant/credential fixture. The first principal insert references absent `tenant-a`; the run captured the exception type/message but not a Python traceback, so the exact failing statement is inferred from the inspected call order and empty DB, not a captured stack frame.
+- The fixture helper's source issues a local loopback receiver POST before inserting the DB rows. The helper did not return, so no fixture Trace was emitted; this local setup call is not a Provider or MCP attempt and is not independently captured in the emitted trace. No external business write occurred.
+- All seven Gold cases are `NOT_RUN`; Skill OFF/ON effect is `NOT_RUN`. No answer, model decision, Usage, Provider charge, or business Observation was produced. No retry or fixture replay was attempted.
