@@ -1,0 +1,49 @@
+......F...                                                               [100%]
+================================== FAILURES ===================================
+_ test_material_live_can_create_distinct_isolated_tasks_for_same_registered_order _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01-public/docs/evidence/ar-03/material-live-01/runs/green-05-tmp/test_material_live_can_create_0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01-public/docs/evidence/ar-03/material-live-01/runs/green-05-tmp/test_material_live_can_create_0')
+
+    def test_material_live_can_create_distinct_isolated_tasks_for_same_registered_order(demo_db, tmp_path):
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+    
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2)
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "material-live-two-task-checkpoint.sqlite3",
+            start_worker=False,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_experiment_id=EXPERIMENT_ID,
+        )
+        with TestClient(app) as client:
+            login = client.post(
+                "/api/auth/login", headers={"Origin": ORIGIN},
+                json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            tasks = []
+            for index in range(2):
+                session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+                accepted = client.post(
+                    f"/api/sessions/{session_id}/assistant/order",
+                    headers={**headers, "Idempotency-Key": f"material-live-same-order-{index}"},
+                    json={"order_id": "ar03-order", "initial_message": "ֻ����ʵ��Ȩ������"},
+                )
+                assert accepted.status_code == 202, accepted.text
+                tasks.append(accepted.json()["task_id"])
+        assert tasks[0] != tasks[1]
+        with connect(demo_db) as connection:
+>           bindings = connection.execute(
+                "SELECT task_id,order_id FROM s3_task_bindings WHERE task_id IN (?,?)",
+                tuple(tasks),
+            ).fetchall()
+E           sqlite3.OperationalError: no such table: s3_task_bindings
+
+tests\test_ar03_material_live_01.py:259: OperationalError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_live_01.py::test_material_live_can_create_distinct_isolated_tasks_for_same_registered_order
+1 failed, 9 passed in 11.19s

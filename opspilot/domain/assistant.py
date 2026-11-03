@@ -277,7 +277,17 @@ def state(connection, run_id, *, active=True, worker_id=None):
 def read_run(path,run_id,*,active=True,worker_id=None):
     with connect(path) as c: return state(c,run_id,active=active,worker_id=worker_id)
 
-def reserve(path,run_id,kind,logical_key,request,worker_id):
+def run_limits_for_experiment(experiment_id):
+    """Keep ordinary Runs at 8/6; only the frozen material live ID uses 16/10."""
+    from opspilot.domain.assistant_experiment import (
+        AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
+    )
+    if experiment_id == AR03_MATERIAL_LIVE_01_EXPERIMENT_ID:
+        return 16, 10
+    return 8, 6
+
+
+def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None):
     """Count durable dispatches, including unknown results, before external I/O."""
     from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
     with connect(path) as c:
@@ -296,7 +306,8 @@ def reserve(path,run_id,kind,logical_key,request,worker_id):
                     raise TaskControlError('ASSISTANT_CACHED_RESULT_INVALID')
             return dict(old),False
         used=c.execute('SELECT COUNT(*) FROM assistant_calls WHERE run_id=? AND kind=?',(run_id,kind)).fetchone()[0]
-        if used >= (8 if kind=='MODEL' else 6): raise TaskControlError('ASSISTANT_RUN_'+kind+'_LIMIT')
+        model_limit,mcp_limit=run_limits_for_experiment(experiment_id)
+        if used >= (model_limit if kind=='MODEL' else mcp_limit): raise TaskControlError('ASSISTANT_RUN_'+kind+'_LIMIT')
         if kind=='MODEL' and run['task_id']:
             budget=auxiliary_budget_in_transaction(c,run['task_id'])
             if budget['reason_code']: raise TaskControlError(budget['reason_code'])

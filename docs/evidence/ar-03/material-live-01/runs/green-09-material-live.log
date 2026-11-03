@@ -1,0 +1,129 @@
+.F.........
+================================== FAILURES ===================================
+____________ test_material_live_mcp_ceiling_is_shared_across_runs _____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01-public/docs/evidence/ar-03/material-live-01/runs/green-09-tmp/test_material_live_mcp_ceiling0/domain.sqlite3')
+
+    def test_material_live_mcp_ceiling_is_shared_across_runs(demo_db):
+        from opspilot.domain.assistant_experiment import (
+            ExperimentBudgetError,
+            initialize_experiment,
+            read_budget,
+            reserve_dispatch,
+        )
+    
+        initialize_experiment(demo_db, EXPERIMENT_ID)
+        for index in range(10):
+>           reserved = reserve_dispatch(
+                demo_db,
+                experiment_id=EXPERIMENT_ID,
+                run_id=f"isolated-run-{index // 5}",
+                kind="MCP",
+                logical_key=f"tool-attempt-{index}",
+                request={"tool": "search_project_knowledge", "index": index},
+            )
+
+tests\test_ar03_material_live_01.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01-public/docs/evidence/ar-03/material-live-01/runs/green-09-tmp/test_material_live_mcp_ceiling0/domain.sqlite3')
+experiment_id = 'AR-03-MATERIAL-LIVE-01', run_id = 'isolated-run-0'
+kind = 'MCP', logical_key = 'tool-attempt-0'
+request = {'tool': 'search_project_knowledge', 'index': 0}
+
+    def reserve_dispatch(
+        path: str | Path,
+        *,
+        experiment_id: str,
+        run_id: str,
+        kind: str,
+        logical_key: str,
+        request: Any,
+    ) -> dict[str, Any]:
+        """Atomically reserve one campaign dispatch before Provider/MCP I/O."""
+        _validate_experiment_id(experiment_id)
+        if kind not in {"MODEL", "MCP"} or not logical_key:
+            raise ExperimentBudgetError("AR02_LIVE_DISPATCH_IDENTITY_INVALID")
+        request_digest = digest_json(request)
+    
+        # The app initializes this at worker startup. Lazy creation also makes direct
+        # offline callers safe, while remaining limited to this fixed experiment ID.
+        initialize_experiment(path, experiment_id)
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            budget = connection.execute(
+                "SELECT * FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+                (experiment_id,),
+            ).fetchone()
+            if budget is None:
+                raise ExperimentBudgetError("AR02_LIVE_BUDGET_NOT_INITIALIZED")
+    
+            old = connection.execute(
+                """SELECT * FROM ar02_live_dispatches
+                   WHERE experiment_id=? AND run_id=? AND kind=? AND logical_key=?""",
+                (experiment_id, run_id, kind, logical_key),
+            ).fetchone()
+            if old is not None:
+                if str(old["request_digest"]) != request_digest:
+                    raise ExperimentBudgetError("AR02_LIVE_IDEMPOTENCY_CONFLICT")
+                if old["status"] == "OK":
+                    if kind == "MODEL" and old["usage_state"] != "KNOWN":
+                        raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+                    return {"dispatch": False, "replay": True, "dispatch_id": old["dispatch_id"]}
+                if old["status"] == "NOT_DISPATCHED":
+                    raise ExperimentBudgetError("AR02_LIVE_ALREADY_NOT_DISPATCHED")
+                raise ExperimentBudgetError("AR02_LIVE_CALL_OUTCOME_UNKNOWN")
+    
+            if budget["status"] != "OPEN":
+                raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+    
+            # Older ledger rows may contain UNKNOWN/invalid Usage while their
+            # campaign row still says OPEN. Treat those durable dispatch facts as a
+            # stop marker without rewriting historical ledger or budget rows.
+            prior_unknown = connection.execute(
+                """SELECT 1 FROM ar02_live_dispatches
+                   WHERE experiment_id=? AND kind='MODEL'
+                     AND (status='UNKNOWN' OR (status='OK' AND usage_state!='KNOWN'))
+                   LIMIT 1""",
+                (experiment_id,),
+            ).fetchone()
+            if prior_unknown is not None:
+                raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+    
+            count = _used_count(connection, experiment_id, kind)
+            # Enforce the persisted, per-database allocation, not a process
+            # parameter that could differ between the two isolated scenarios.
+            count_limit = int(budget["provider_limit"] if kind == "MODEL" else budget["mcp_limit"])
+            if count >= count_limit:
+                label = "PROVIDER" if kind == "MODEL" else "MCP"
+                raise ExperimentBudgetError(f"AR02_LIVE_{label}_LIMIT")
+    
+            reservation = MAX_PROVIDER_RESERVATION_USD_MICRO if kind == "MODEL" else 0
+            if kind == "MODEL":
+                reserved, settled = _money_totals(connection, experiment_id)
+                if reserved + settled + reservation > BUDGET_USD_MICRO:
+                    raise ExperimentBudgetError("AR02_LIVE_USD_LIMIT")
+    
+            dispatch_id = "ar02-live-dispatch-" + str(uuid.uuid4())
+>           connection.execute(
+                """INSERT INTO ar02_live_dispatches
+                   (dispatch_id, experiment_id, run_id, kind, logical_key, request_digest,
+                    status, reserved_usd_micro, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', ?, ?)""",
+                (
+                    dispatch_id,
+                    experiment_id,
+                    run_id,
+                    kind,
+                    logical_key,
+                    request_digest,
+                    reservation,
+                    utc_now(),
+                ),
+            )
+E           sqlite3.IntegrityError: FOREIGN KEY constraint failed
+
+opspilot\domain\assistant_experiment.py:268: IntegrityError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_live_01.py::test_material_live_mcp_ceiling_is_shared_across_runs
+1 failed, 10 passed in 11.05s

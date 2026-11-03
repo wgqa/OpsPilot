@@ -164,6 +164,22 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
         sync_client.close()
         raise
 
+
+def assistant_tool_hidden_for_experiment(tool_name, experiment_id):
+    """Apply the isolated Skill OFF condition only to the material campaign."""
+    from opspilot.domain.assistant_experiment import (
+        AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
+    )
+    if (
+        tool_name != "load_protocol_upgrade_skill"
+        or experiment_id != AR03_MATERIAL_LIVE_01_EXPERIMENT_ID
+    ):
+        return False
+    mode = os.environ.get("OPSPILOT_AR03_MATERIAL_SKILL_MODE", "ON").strip().upper()
+    if mode not in {"ON", "OFF"}:
+        raise RuntimeError("AR03_MATERIAL_SKILL_MODE_INVALID")
+    return mode == "OFF"
+
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None):
         self.path,self.run_id,self.worker_id,self.client,self.specs,self.trace=path,run_id,worker_id,client,specs,trace
@@ -289,7 +305,7 @@ class Loop(AgentMiddleware):
         wire={'messages':messages_to_dict(sent),'tools':self.specs,'context_budget':provenance,
               'source_refs':payload,'selected_message_ids':prepared['selected_message_ids'],'model_id':self.model_id}
         step=get_config().get('metadata',{}).get('langgraph_step',0)
-        call,fresh=domain.reserve(self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',wire,self.worker_id)
+        call,fresh=domain.reserve(self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',wire,self.worker_id,experiment_id=self.experiment_id)
         self.trace('model_request',call_id=call['call_id'],replay=not fresh,**wire)
         if not fresh:
             self._settle_cached_campaign_dispatch(
@@ -359,7 +375,7 @@ class Loop(AgentMiddleware):
         call=request.tool_call; name=call['name']; args=call['args']
         domain.read_run(self.path,self.run_id,worker_id=self.worker_id)
         try:
-            row,fresh=domain.reserve(self.path,self.run_id,'MCP',call['id'],{'name':name,'args':args},self.worker_id)
+            row,fresh=domain.reserve(self.path,self.run_id,'MCP',call['id'],{'name':name,'args':args},self.worker_id,experiment_id=self.experiment_id)
         except TaskControlError as error:
             reason = getattr(error, 'code', None) or getattr(error, 'reason_code', None) or str(error).rsplit(':', 1)[-1]
             if reason != 'ASSISTANT_RUN_MCP_LIMIT':
@@ -506,6 +522,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         specs=[];tools=[]
         for t in listed.tools:
             if t.name in {'search_callback_knowledge','load_callback_skill'}:continue
+            if assistant_tool_hidden_for_experiment(t.name,experiment_id):continue
             schema=t.input_schema
             specs.append({'type':'function','function':{'name':t.name,'description':t.description or '', 'parameters':schema}})
             def adapter(name):

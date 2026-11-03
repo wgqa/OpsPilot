@@ -1,0 +1,61 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+__________ test_material_live_campaign_uses_frozen_aggregate_limits ___________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01-public/docs/evidence/ar-03/material-live-01/runs/red-01-tmp/test_material_live_campaign_us0/domain.sqlite3')
+
+    def test_material_live_campaign_uses_frozen_aggregate_limits(demo_db):
+        from opspilot.domain.assistant_experiment import (
+            initialize_experiment,
+            read_budget,
+        )
+    
+>       initialize_experiment(demo_db, EXPERIMENT_ID)
+
+tests\test_ar03_material_live_01.py:13: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\assistant_experiment.py:161: in initialize_experiment
+    _validate_experiment_id(experiment_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+experiment_id = 'AR-03-MATERIAL-LIVE-01'
+
+    def _validate_experiment_id(experiment_id: str) -> None:
+        if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
+>           raise ExperimentBudgetError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+E           opspilot.domain.assistant_experiment.ExperimentBudgetError: AR02_LIVE_EXPERIMENT_SCOPE_INVALID
+
+opspilot\domain\assistant_experiment.py:94: ExperimentBudgetError
+______ test_material_live_run_limits_are_scoped_and_legacy_defaults_stay ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01-public/docs/evidence/ar-03/material-live-01/runs/red-01-tmp/test_material_live_run_limits_0/domain.sqlite3')
+
+    def test_material_live_run_limits_are_scoped_and_legacy_defaults_stay(demo_db):
+>       from opspilot.domain.assistant import run_limits_for_experiment
+E       ImportError: cannot import name 'run_limits_for_experiment' from 'opspilot.domain.assistant' (D:\ѧϰ\agent����Ŀ\.worktrees\ar03-material-01-public\opspilot\domain\assistant.py)
+
+tests\test_ar03_material_live_01.py:23: ImportError
+_______ test_skill_off_hides_only_the_optional_loader_for_this_campaign _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001FBB4A2EC40>
+
+    def test_skill_off_hides_only_the_optional_loader_for_this_campaign(monkeypatch):
+>       from opspilot.assistant import assistant_tool_hidden_for_experiment
+E       ImportError: cannot import name 'assistant_tool_hidden_for_experiment' from 'opspilot.assistant' (D:\ѧϰ\agent����Ŀ\.worktrees\ar03-material-01-public\opspilot\assistant.py)
+
+tests\test_ar03_material_live_01.py:34: ImportError
+_______ test_skill_on_keeps_optional_loader_available_for_model_choice ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001FBB772E3F0>
+
+    def test_skill_on_keeps_optional_loader_available_for_model_choice(monkeypatch):
+>       from opspilot.assistant import assistant_tool_hidden_for_experiment
+E       ImportError: cannot import name 'assistant_tool_hidden_for_experiment' from 'opspilot.assistant' (D:\ѧϰ\agent����Ŀ\.worktrees\ar03-material-01-public\opspilot\assistant.py)
+
+tests\test_ar03_material_live_01.py:48: ImportError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_live_01.py::test_material_live_campaign_uses_frozen_aggregate_limits
+FAILED tests/test_ar03_material_live_01.py::test_material_live_run_limits_are_scoped_and_legacy_defaults_stay
+FAILED tests/test_ar03_material_live_01.py::test_skill_off_hides_only_the_optional_loader_for_this_campaign
+FAILED tests/test_ar03_material_live_01.py::test_skill_on_keeps_optional_loader_available_for_model_choice
+4 failed in 1.23s
