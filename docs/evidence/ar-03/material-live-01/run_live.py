@@ -155,7 +155,8 @@ def _validate_preflight() -> dict[str, Any]:
     if tracked_diff or staged_diff:
         raise RuntimeError("WORKTREE_OR_INDEX_NOT_CLEAN")
     untracked = _git("ls-files", "--others", "--exclude-standard").splitlines()
-    unexpected = [path for path in untracked if not path.startswith("docs/evidence/ar-03/material-live-01/runs/")]
+    evidence_runs_prefix = EVIDENCE.relative_to(ROOT).as_posix().rstrip("/") + "/runs/"
+    unexpected = [path for path in untracked if not path.startswith(evidence_runs_prefix)]
     if unexpected:
         raise RuntimeError("UNEXPECTED_UNTRACKED_FILES_PRESENT")
 

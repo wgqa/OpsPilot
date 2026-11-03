@@ -85,10 +85,14 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     from opspilot.config import MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME
     from opspilot.domain.assistant_experiment import (
         EXPERIMENT_ENV,
+        EXPERIMENTS_AWAITING_PAID_AUTHORIZATION,
         SUPPORTED_EXPERIMENT_IDS,
     )
 
-    if os.environ.get(EXPERIMENT_ENV, "").strip() not in SUPPORTED_EXPERIMENT_IDS:
+    experiment_id = os.environ.get(EXPERIMENT_ENV, "").strip()
+    if experiment_id in EXPERIMENTS_AWAITING_PAID_AUTHORIZATION:
+        raise RuntimeError("AR03_MATERIAL_LIVE_PAID_AUTHORIZATION_REQUIRED")
+    if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
         raise RuntimeError("AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED")
     model_id = os.environ.get(MODEL_NAME, '').strip()
     api_key = os.environ.get(MODEL_API_KEY, '').strip()
@@ -169,10 +173,14 @@ def assistant_tool_hidden_for_experiment(tool_name, experiment_id):
     """Apply the isolated Skill OFF condition only to the material campaign."""
     from opspilot.domain.assistant_experiment import (
         AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
+        AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
     )
     if (
         tool_name != "load_protocol_upgrade_skill"
-        or experiment_id != AR03_MATERIAL_LIVE_01_EXPERIMENT_ID
+        or experiment_id not in {
+            AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
+            AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
+        }
     ):
         return False
     mode = os.environ.get("OPSPILOT_AR03_MATERIAL_SKILL_MODE", "ON").strip().upper()
