@@ -1,0 +1,72 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+______ test_authorized_protocol_excerpt_is_bounded_exact_and_revalidated ______
+
+scoped_material_env = (WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01/docs/evidence/ar-03/material-01/runs/red-03-tmp/test_authoriz...es/ar03-material-01/docs/evidence/ar-03/material-01/runs/red-03-tmp/test_authorized_protocol_excer0/callback-catalog'))
+
+    def test_authorized_protocol_excerpt_is_bounded_exact_and_revalidated(scoped_material_env):
+>       from opspilot.domain.scoped_protocol_comparison import (
+            read_scoped_protocol_excerpt,
+            scoped_protocol_excerpt_is_current,
+            DocumentNotAuthorizedError,
+        )
+E       ImportError: cannot import name 'read_scoped_protocol_excerpt' from 'opspilot.domain.scoped_protocol_comparison' (D:\ѧϰ\agent����Ŀ\.worktrees\ar03-material-01\opspilot\domain\scoped_protocol_comparison.py)
+
+tests\test_ar03_material_01.py:39: ImportError
+___ test_protocol_excerpt_fails_closed_after_grant_or_source_digest_changes ___
+
+scoped_material_env = (WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-01/docs/evidence/ar-03/material-01/runs/red-03-tmp/test_protocol...es/ar03-material-01/docs/evidence/ar-03/material-01/runs/red-03-tmp/test_protocol_excerpt_fails_cl0/callback-catalog'))
+
+    def test_protocol_excerpt_fails_closed_after_grant_or_source_digest_changes(scoped_material_env):
+>       from opspilot.domain.scoped_protocol_comparison import (
+            read_scoped_protocol_excerpt,
+            scoped_protocol_excerpt_is_current,
+        )
+E       ImportError: cannot import name 'read_scoped_protocol_excerpt' from 'opspilot.domain.scoped_protocol_comparison' (D:\ѧϰ\agent����Ŀ\.worktrees\ar03-material-01\opspilot\domain\scoped_protocol_comparison.py)
+
+tests\test_ar03_material_01.py:83: ImportError
+_ test_protocol_upgrade_skill_is_integrity_checked_and_only_loaded_on_demand __
+
+    def test_protocol_upgrade_skill_is_integrity_checked_and_only_loaded_on_demand():
+>       from opspilot.skill_assets import (
+            PROTOCOL_UPGRADE_PROBLEM_TYPE,
+            load_applicable_skill,
+            skill_asset_is_current,
+        )
+E       ImportError: cannot import name 'PROTOCOL_UPGRADE_PROBLEM_TYPE' from 'opspilot.skill_assets' (D:\ѧϰ\agent����Ŀ\.worktrees\ar03-material-01\opspilot\skill_assets.py)
+
+tests\test_ar03_material_01.py:127: ImportError
+_ test_protocol_excerpt_history_projection_keeps_source_bounded_and_non_authoritative _
+
+    def test_protocol_excerpt_history_projection_keeps_source_bounded_and_non_authoritative():
+        from opspilot.domain.assistant import _historical_result_summary
+    
+        prior = {
+            "authority": "SESSION_AUTHORIZED_ORIGINAL_TEXT_NOT_RUNTIME_EVIDENCE",
+            "session_id": "session-a", "project_id": "orders-callback",
+            "tenant_id": "tenant-a", "actor_id": "support-a",
+            "grant_version": 3, "scope_digest": "scope-digest",
+            "document_ref": {
+                "document_id": "callback-retry-contract", "version": "1.0.0",
+                "source": "local:orders-async-demo/contract-v1", "digest": "doc-digest",
+            },
+            "query": "retry state",
+            "excerpts": [{"section": "Root", "line_start": 1, "line_end": 1,
+                          "text": "Protocol v1 retry contract. Retry state SCHEDULED means wait.",
+                          "excerpt_digest": "excerpt-digest"}],
+            "deployment_version_verified": False,
+        }
+        summary = _historical_result_summary("read_scoped_protocol_excerpt", prior)
+>       assert summary["authority"] == "HISTORICAL_PROTOCOL_SOURCE_TEXT_ONLY"
+E       AssertionError: assert 'HISTORICAL_T...EFERENCE_ONLY' == 'HISTORICAL_P...RCE_TEXT_ONLY'
+E         
+E         - HISTORICAL_PROTOCOL_SOURCE_TEXT_ONLY
+E         + HISTORICAL_TOOL_RESULT_REFERENCE_ONLY
+
+tests\test_ar03_material_01.py:163: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_01.py::test_authorized_protocol_excerpt_is_bounded_exact_and_revalidated
+FAILED tests/test_ar03_material_01.py::test_protocol_excerpt_fails_closed_after_grant_or_source_digest_changes
+FAILED tests/test_ar03_material_01.py::test_protocol_upgrade_skill_is_integrity_checked_and_only_loaded_on_demand
+FAILED tests/test_ar03_material_01.py::test_protocol_excerpt_history_projection_keeps_source_bounded_and_non_authoritative
+4 failed, 3 deselected in 0.77s
