@@ -45,7 +45,7 @@ No reasoning trace is inferred beyond those recorded actions. HTTP 202 was not t
 - Provider: `deepseek-flash` (officially listed as DeepSeek-V4.1-Flash-1017 when checked 2026-11-04).
 - Provider: **9 requests, 9 HTTP 200 responses, 9 unique Completion IDs, 9 valid Usage records, 0 UNKNOWN, 0 retries**.
 - MCP: **10/10** attempts; the cap was reached.
-- Usage: prompt 28,599 (cache hit 12,672; cache miss 15,927), completion 3,891, total 32,490 tokens.
+- Usage: prompt 28,599 (cache hit 12,672; cache miss 15,927), completion 3,891, total 32,490 tokens. The highest pre-send input estimate was 6,006 tokens and the highest Provider-reported prompt was 6,872, both below the frozen 12,000-token limit.
 - Application estimate: **$0.013253** settled; $0 reserved afterward; $10.486747 remaining against the $10.50 cap. This is calculated at peak input/output prices with cache discounts ignored, rounded up per dispatch; it is not a provider invoice.
 - Provider limit was 16, with $0.645600 reserve per request and maximum total reservation $10.329600. The one-shot claim is consumed; the remaining unused numerical budget does not authorize another campaign.
 - Isolated database inspection found zero approvals, plans, action intents/ledgers, delivery records, verification receipts, diagnoses, or S2/S3 handoffs. External business writes: **0**.
