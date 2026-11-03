@@ -1,25 +1,30 @@
-# RESUME-02 preflight
+# AR-03-MATERIAL-LIVE-01-RESUME-02 preflight and execution record
 
-## Contract checks
+**Final status:** one authorized campaign executed once; `PARTIAL_STOPPED` after a Runner audit exception. No further send is permitted under the consumed one-shot claim.
 
-- Project baseline and frozen case blob match the task card.
-- The new experiment ID has its own supported schema identity, awaiting-authorization set, and fixed 16/10 campaign limits.
-- Provider construction requires the exact RESUME-02 authorization record, private claim, experiment ID and matching one-shot token digest. An API key and allowlist entry alone are insufficient.
-- The one-shot token is removed from the MCP subprocess environment.
-- Runner audit distinguishes a persisted model answer from `PROGRAM_LIMIT`, unresolved Provider result, unverified non-model text, and no answer/no execution. A model answer requires a successful Run, exact Run/source-message association, completion ID, matching call/dispatch Usage, and the persisted model content.
-- MockTransport checks the actual SDK request before its handler returns a response. The formal Worker persists the campaign reservation before the handler observes the request.
-- Existing Recovery 02 failure path still retains the UNKNOWN dispatch and USD 0.645600 reservation.
+## Frozen checks before sending
 
-## Official Provider facts checked 2026-11-04
+- Branch: `codex/ar03-material-live-01-resume-02`; the committed implementation SHA was `8df557dabb6f7440b371828c39974239363ee6d9`.
+- Base: `d4addd403ba0722d4acb4c1a33d1cd655599c97c`.
+- Frozen MAT cases Blob: `faf16fbb857278e98f8afbe179fe327855132967`.
+- Current price page identified `deepseek-flash` as DeepSeek-V4.1-Flash-1017 and listed peak cache-miss input at $0.30/M, cache-hit at $0.006/M, and output at $1.20/M. The app-side cost estimate conservatively used the full peak cache-miss rate for every prompt token.
+- Offline HTTPX MockTransport verified the serialized request and persisted reservation path before the mock response. The request used `thinking.type=disabled`, `max_tokens=2048`, `tool_choice=auto` when tools were supplied, `parallel_tool_calls=false`, and `stream=false`.
+- The preflight verified a 12,000-token context cap, 30-second timeout, one in-flight Provider request, zero retry configuration, and 16 Provider / 10 MCP / $10.50 Campaign limits. The maximum 16-request reserve was $10.329600.
+- Each scenario used the new isolated RESUME-02 Domain DB and checkpoint path; the Runner did not target the old RESUME-01 paths. The new claim was created only after the committed clean-worktree preflight returned `PREFLIGHT_READY_AUTHORIZED_ONE_SHOT`.
 
-DeepSeek's current pricing page lists `deepseek-flash` as model version `DeepSeek-V4.1-Flash-1017`, with 1M context, maximum 384K output, peak cache-miss input at USD 0.30/M tokens, and peak output at USD 1.20/M tokens. The frozen reserve remains USD 0.645600 per request, based on the existing conservative 616K input + 384K output envelope. Sixteen reserves total USD 10.329600, below the USD 10.50 campaign cap. This is an application-side ceiling under the frozen reservation model, not a guarantee about provider billing if the provider violates the documented output limit.
+## Preflight history
 
-The Chat Completions API docs describe `/chat/completions`, the `max_tokens` parameter, and `tool_choice=auto`. The implementation continues to use the accepted OpenAI-compatible base URL and exact offline-verified serialized request.
+The first preflight was correctly blocked while the worktree was dirty: `WORKTREE_OR_INDEX_NOT_CLEAN`; it created no claim and made no Provider/MCP calls. The later clean-worktree preflight passed. Its report recorded only credential presence and model/host configuration; no key value was read or emitted.
 
-Sources: [DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/), [DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/).
+## After the one-time campaign
 
-## Actual local preflight outcome
+- The RESUME-02 claim is `CLAIMED_ONE_SHOT_NO_RETRY` and consumed. Nine Provider responses were received and settled; no result is UNKNOWN. Do not rerun.
+- The Provider ledger has $0 remaining reserve, $0.013253 estimated settled cost, and $10.486747 remaining under the app cap; the independent MCP allowance reached 10/10.
+- All seven Gold outcomes are in `RESULTS.json`. MAT-05 and MAT-06 OFF/ON were not run after the stop.
+- No Approval, Plan, ActionIntent, ActionLedger, Delivery, verification receipt, diagnosis, handoff, or external business write was recorded.
+- The paid campaign stopped because `_audit_case()` raised `KeyError('run_id')` after MAT-04 persisted; the exact cause and case treatment are in `REPORT.md` and `FAILURES.md`.
 
-The first `--preflight-only` attempt was made while the authorized code changes were still uncommitted. It correctly returned `BLOCKED_BEFORE_PROVIDER_SEND / WORKTREE_OR_INDEX_NOT_CLEAN`. It did not create a one-shot claim or send a request.
+## Official references
 
-The configured shared environment file at the worktree's parent workspace is present. Safe presence-only checks confirmed the API key is configured, the model is `deepseek-flash`, and the endpoint host is `api.deepseek.com`; credential contents were not read into output. Provider opt-in, experiment ID, and RESUME-02 token were not preset. A final clean-worktree preflight remains necessary after the implementation commit; only a READY result can authorize claim creation under the approved task card.
+- [DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing/)
+- [DeepSeek Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/)
