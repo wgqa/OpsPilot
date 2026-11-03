@@ -513,6 +513,23 @@ def _prepare_fixture(db_path: Path) -> dict[str, Any]:
     return event
 
 
+def _bootstrap_fresh_campaign_database(db_path: Path) -> None:
+    """Seed trusted demo principals only when this campaign DB is truly new.
+
+    ``reset_fixture`` is intentionally destructive and therefore must never be
+    used against an existing campaign database. The live runner creates its
+    runtime directory with ``exist_ok=False`` before reaching this function;
+    the explicit DB/SQLite-sidecar check also protects direct callers.
+    """
+    from opspilot.domain.database import reset_fixture
+
+    path = Path(db_path)
+    sidecars = (Path(str(path) + "-wal"), Path(str(path) + "-shm"))
+    if path.exists() or any(sidecar.exists() for sidecar in sidecars):
+        raise RuntimeError("CAMPAIGN_DATABASE_NOT_FRESH")
+    reset_fixture(path, "S1_POS")
+
+
 def _set_receiver_processed(db_path: Path, expected_event_id: str) -> dict[str, Any]:
     from opspilot.domain.database import connect
 
@@ -880,7 +897,6 @@ def _finalize(results: list[dict[str, Any]], state: _CampaignState, stop_reason:
 def _execute_once() -> int:
     from opspilot.config import load_local_environment
     from opspilot.domain.assistant_experiment import initialize_experiment, read_budget
-    from opspilot.domain.database import initialize
 
     preflight = _validate_preflight()
     claim = EVIDENCE / "EXECUTION_CLAIM.json"
@@ -903,7 +919,7 @@ def _execute_once() -> int:
     load_local_environment(ROOT.parent.parent / ".env")
     os.environ["OPSPILOT_ASSISTANT_PROVIDER_ENABLED"] = "1"
     os.environ["OPSPILOT_ASSISTANT_EXPERIMENT_ID"] = EXPERIMENT_ID
-    initialize(DOMAIN_DB)
+    _bootstrap_fresh_campaign_database(DOMAIN_DB)
     initialize_experiment(DOMAIN_DB, EXPERIMENT_ID)
     initial_budget = read_budget(DOMAIN_DB, EXPERIMENT_ID)
     if (
