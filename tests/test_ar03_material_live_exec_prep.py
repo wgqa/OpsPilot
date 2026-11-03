@@ -89,15 +89,144 @@ def test_prepared_experiment_cannot_construct_a_paid_provider_even_with_global_o
         )
 
 
-def test_resume_runner_has_a_separate_prep_identity_and_never_executes_paid_run():
+def test_resume_runner_consumes_one_shot_claim_before_delegating_and_cannot_repeat(tmp_path, monkeypatch, capsys):
     runner = _load_resume_runner()
     assert runner.EXPERIMENT_ID == EXPERIMENT_ID
     assert runner.BRANCH == "codex/ar03-material-live-01-exec-prep"
     assert runner.BASE_SHA == "ff956ea71b90448d40229c57b8f8619c997b5cbd"
+    authorization, auth_digest = runner._validate_paid_authorization()
+    assert authorization["authorization_id"] == runner.AUTHORIZATION_ID
+    assert runner._validate_prepared_claim()["one_shot_consumed"] is False
+
+    monkeypatch.setattr(runner, "AUTHORIZATION_CLAIM_DIR", tmp_path / "one-shot")
+    monkeypatch.setattr(runner, "AUTHORIZATION_CLAIM", tmp_path / "one-shot" / "claim.json")
+    monkeypatch.setattr(runner, "EVIDENCE", tmp_path / "evidence" / "runs" / EXPERIMENT_ID)
+    monkeypatch.setattr(runner, "_validate_preflight", lambda: {"authorization_record_sha256": auth_digest})
+    calls = []
+
+    class StubRunner:
+        def _execute_once(self):
+            token = __import__("os").environ[runner.TOKEN_ENV]
+            claim = json.loads(runner.AUTHORIZATION_CLAIM.read_text(encoding="utf-8"))
+            assert claim["experiment_id"] == EXPERIMENT_ID
+            assert claim["status"] == "CLAIMED_ONE_SHOT_NO_RETRY"
+            assert claim["token_sha256"] == hashlib.sha256(token.encode("utf-8")).hexdigest()
+            calls.append("called")
+            return 0
+
+    monkeypatch.setattr(runner, "_bound_base_runner", lambda: StubRunner())
+    assert runner.main(["--execute-once"]) == 0
+    assert runner.TOKEN_ENV not in __import__("os").environ
+    assert runner.AUTHORIZATION_CLAIM.exists()
+    assert calls == ["called"]
     assert runner.main(["--execute-once"]) == 2
-    assert runner.main(["--execute-once"]) == 2
-    assert not (runner.EVIDENCE / "EXECUTION_CLAIM.json").exists()
-    assert not runner.RUNTIME.exists()
+    assert "ONE_SHOT_AUTHORIZATION_ALREADY_CONSUMED" in capsys.readouterr().out
+    assert calls == ["called"]
+    assert runner.TOKEN_ENV not in __import__("os").environ
+
+
+def test_paid_authorization_is_exactly_scoped_to_frozen_resume_experiment():
+    runner = _load_resume_runner()
+    authorization, digest = runner._validate_paid_authorization()
+    assert authorization == runner._expected_paid_authorization()
+    assert authorization["status"] == "AUTHORIZED_ONE_SHOT"
+    assert authorization["experiment_id"] == EXPERIMENT_ID
+    assert authorization["provider_limit"] == 16
+    assert authorization["mcp_limit"] == 10
+    assert authorization["application_budget_usd_micro"] == 10_500_000
+    assert len(digest) == 64
+
+
+def test_runner_preflight_rejects_reused_claim_and_tampered_authorization(tmp_path, monkeypatch):
+    runner = _load_resume_runner()
+    claim_dir = tmp_path / "already-consumed"
+    claim_dir.mkdir()
+    monkeypatch.setattr(runner, "AUTHORIZATION_CLAIM_DIR", claim_dir)
+    monkeypatch.setattr(runner, "AUTHORIZATION_CLAIM", claim_dir / "claim.json")
+    with pytest.raises(RuntimeError, match="ONE_SHOT_AUTHORIZATION_ALREADY_CONSUMED"):
+        runner._validate_preflight()
+
+    auth = json.loads(runner.PAID_AUTHORIZATION.read_text(encoding="utf-8"))
+    auth["provider_limit"] = 17
+    auth_path = tmp_path / "tampered-authorization.json"
+    auth_path.write_text(json.dumps(auth), encoding="utf-8")
+    monkeypatch.setattr(runner, "AUTHORIZATION_CLAIM_DIR", tmp_path / "fresh-claim")
+    monkeypatch.setattr(runner, "AUTHORIZATION_CLAIM", tmp_path / "fresh-claim" / "claim.json")
+    monkeypatch.setattr(runner, "PAID_AUTHORIZATION", auth_path)
+    with pytest.raises(RuntimeError, match="PAID_AUTHORIZATION_SCOPE_MISMATCH"):
+        runner._validate_preflight()
+
+
+def test_assistant_one_shot_token_and_claim_only_authorize_resume_identity(tmp_path, monkeypatch):
+    import opspilot.assistant as assistant
+
+    token = "offline-test-only-one-shot-token"
+    auth_source = assistant.MATERIAL_RESUME_AUTH_RECORD
+    auth_path = tmp_path / "PAID_AUTHORIZATION.json"
+    auth_path.write_bytes(auth_source.read_bytes())
+    claim_path = tmp_path / "claim.json"
+    monkeypatch.setattr(assistant, "MATERIAL_RESUME_AUTH_RECORD", auth_path)
+    monkeypatch.setattr(assistant, "MATERIAL_RESUME_CLAIM", claim_path)
+    monkeypatch.setenv(assistant.MATERIAL_RESUME_TOKEN_ENV, token)
+
+    claim = {
+        "claim_id": f"{EXPERIMENT_ID}:one-shot:{assistant.MATERIAL_RESUME_AUTHORIZATION_ID}",
+        "authorization_id": assistant.MATERIAL_RESUME_AUTHORIZATION_ID,
+        "experiment_id": EXPERIMENT_ID,
+        "branch": "codex/ar03-material-live-01-exec-prep",
+        "execution_base_sha": "905e71e683d63299594211a07b86dcdf14e21602",
+        "accepted_base_sha": "ff956ea71b90448d40229c57b8f8619c997b5cbd",
+        "status": "CLAIMED_ONE_SHOT_NO_RETRY",
+        "claimed_at": "2026-11-03T00:00:00+00:00",
+        "provider_limit": 16,
+        "mcp_limit": 10,
+        "application_budget_usd_micro": 10_500_000,
+        "provider_reservation_usd_micro": 645_600,
+        "request_timeout_seconds": 30,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "authorization_record_sha256": hashlib.sha256(auth_path.read_bytes()).hexdigest(),
+        "token_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+    }
+    claim_path.write_text(json.dumps(claim), encoding="utf-8")
+    assert assistant._material_resume_one_shot_authorized(EXPERIMENT_ID) is True
+    assert assistant._material_resume_one_shot_authorized("AR-03-MATERIAL-LIVE-01") is False
+    claim["experiment_id"] = "AR-03-MATERIAL-LIVE-01"
+    claim_path.write_text(json.dumps(claim), encoding="utf-8")
+    assert assistant._material_resume_one_shot_authorized(EXPERIMENT_ID) is False
+    claim["experiment_id"] = EXPERIMENT_ID
+    claim_path.write_text(json.dumps(claim), encoding="utf-8")
+
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
+    monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
+    monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-placeholder-not-a-secret")
+    monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com/v1")
+    captured = {}
+
+    class OfflineClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def close(self):
+            pass
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(httpx, "AsyncClient", OfflineClient)
+    monkeypatch.setattr(httpx, "Client", OfflineClient)
+    fake_sdk = types.ModuleType("langchain_openai")
+    fake_sdk.ChatOpenAI = lambda **kwargs: captured.update(kwargs) or object()
+    monkeypatch.setitem(sys.modules, "langchain_openai", fake_sdk)
+    model = assistant.create_assistant_model(
+        transport_async=httpx.MockTransport(lambda request: httpx.Response(200, json={})),
+        transport_sync=httpx.MockTransport(lambda request: httpx.Response(200, json={})),
+    )
+    assert model is not None
+    assert captured["model"] == "deepseek-flash"
+    assert captured["max_retries"] == 0
+    assert captured["extra_body"] == {"max_tokens": 2048, "thinking": {"type": "disabled"}}
 
 
 def test_prepared_claim_cannot_be_promoted_without_a_separate_authorization(tmp_path, monkeypatch):
