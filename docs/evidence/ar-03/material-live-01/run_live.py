@@ -247,7 +247,8 @@ def _validate_preflight() -> dict[str, Any]:
         },
         "context_input_limit_tokens": CONTEXT_LIMIT,
         "budget": {
-            "provider_requests": PROVIDER_LIMIT, "mcp_tools_call": MCP_LIMIT,
+            "provider_requests": PROVIDER_LIMIT,
+            "mcp_tools_call": AR03_MATERIAL_LIVE_MCP_LIMIT,
             "application_budget_usd_micro": BUDGET_USD_MICRO,
             "reservation_usd_micro_per_provider": RESERVATION_USD_MICRO,
             "maximum_reservations_usd_micro": max_reserve,
