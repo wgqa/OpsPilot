@@ -282,10 +282,12 @@ def run_limits_for_experiment(experiment_id):
     from opspilot.domain.assistant_experiment import (
         AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
         AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
+        AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     )
     if experiment_id in {
         AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
         AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
+        AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     }:
         return 16, 10
     return 8, 6

@@ -648,6 +648,169 @@ def _decode_json(value: Any) -> Any:
         return value
 
 
+def _nonnegative_tokens(value: Any) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _call_usage_totals(call: dict[str, Any]) -> dict[str, int] | None:
+    usage = call.get("usage")
+    if not isinstance(usage, list) or not usage:
+        return None
+    totals = {"input_tokens": 0, "output_tokens": 0}
+    observed = False
+    for item in usage:
+        if item is None:
+            continue
+        if (
+            not isinstance(item, dict)
+            or not _nonnegative_tokens(item.get("input_tokens"))
+            or not _nonnegative_tokens(item.get("output_tokens"))
+        ):
+            return None
+        totals["input_tokens"] += item["input_tokens"]
+        totals["output_tokens"] += item["output_tokens"]
+        observed = True
+    return totals if observed else None
+
+
+def _call_completion_ids(call: dict[str, Any]) -> list[str]:
+    result = call.get("result")
+    if not isinstance(result, list):
+        return []
+    ids: list[str] = []
+    for message in result:
+        if not isinstance(message, dict):
+            continue
+        data = message.get("data")
+        metadata = data.get("response_metadata") if isinstance(data, dict) else None
+        completion_id = metadata.get("id") if isinstance(metadata, dict) else None
+        if isinstance(completion_id, str) and completion_id.strip():
+            ids.append(completion_id)
+    return ids
+
+
+def _call_answer_texts(call: dict[str, Any]) -> list[str]:
+    result = call.get("result")
+    if not isinstance(result, list):
+        return []
+    texts: list[str] = []
+    for message in result:
+        if not isinstance(message, dict):
+            continue
+        data = message.get("data")
+        content = data.get("content") if isinstance(data, dict) else None
+        if isinstance(content, str) and content.strip():
+            texts.append(content.strip())
+    return texts
+
+
+def _classify_case_outcome(
+    *, run: dict[str, Any], answer: dict[str, Any] | None,
+    calls: list[dict[str, Any]], dispatches: list[dict[str, Any]],
+    expected_run_id: str, expected_source_message_id: str,
+) -> dict[str, Any]:
+    """Separate persisted Provider evidence from a non-empty user delivery."""
+    model_calls = [call for call in calls if call.get("kind") == "MODEL"]
+    model_dispatches = [dispatch for dispatch in dispatches if dispatch.get("kind") == "MODEL"]
+    dispatch_by_key = {item.get("logical_key"): item for item in model_dispatches}
+    completion_ids: list[str] = []
+    valid_completion_keys: set[str] = set()
+    unknown = False
+    violation = False
+
+    for dispatch in model_dispatches:
+        if dispatch.get("status") in {"RESERVED", "UNKNOWN"} or dispatch.get("usage_state") == "UNKNOWN":
+            unknown = True
+        if dispatch.get("usage_state") == "VIOLATION":
+            violation = True
+
+    for call in model_calls:
+        if call.get("status") in {"RESERVED", "UNKNOWN"}:
+            unknown = True
+        dispatch = dispatch_by_key.get(call.get("logical_key"))
+        ids = _call_completion_ids(call)
+        call_usage = _call_usage_totals(call)
+        if (
+            call.get("status") == "OK" and ids and call_usage is not None
+            and isinstance(dispatch, dict) and dispatch.get("status") == "OK"
+            and dispatch.get("usage_state") == "KNOWN"
+            and isinstance(dispatch.get("usage"), dict)
+            and _nonnegative_tokens(dispatch["usage"].get("input_tokens"))
+            and _nonnegative_tokens(dispatch["usage"].get("output_tokens"))
+            and call_usage["input_tokens"] == dispatch["usage"].get("input_tokens")
+            and call_usage["output_tokens"] == dispatch["usage"].get("output_tokens")
+        ):
+            completion_ids.extend(ids)
+            valid_completion_keys.add(str(call.get("logical_key")))
+
+    if unknown:
+        provider_outcome = "UNKNOWN"
+    elif violation:
+        provider_outcome = "KNOWN_INVALID"
+    elif valid_completion_keys:
+        provider_outcome = "KNOWN_VALID"
+    elif model_calls or model_dispatches:
+        provider_outcome = "KNOWN_INVALID"
+    else:
+        provider_outcome = "NOT_SENT"
+
+    has_body = (
+        isinstance(answer, dict)
+        and isinstance(answer.get("body"), str)
+        and bool(answer["body"].strip())
+    )
+    if has_body and answer.get("answer_kind") == "PROGRAM_LIMIT":
+        delivery_kind = "PROGRAM_FAILURE_NOTIFICATION"
+    elif not has_body:
+        delivery_kind = "NONE"
+    elif (
+        answer.get("answer_kind") == "CHAT_MODEL"
+        and answer.get("answer_run_id") == expected_run_id
+        and answer.get("answer_source_message_id") == expected_source_message_id
+        and run.get("run_id") == expected_run_id
+        and provider_outcome == "KNOWN_VALID"
+        and any(
+            answer["body"].strip() in _call_answer_texts(call)
+            for call in model_calls
+            if str(call.get("logical_key")) in valid_completion_keys
+        )
+    ):
+        delivery_kind = "MODEL_ANSWER"
+    else:
+        delivery_kind = "UNVERIFIED_NONMODEL_ANSWER"
+
+    if provider_outcome == "UNKNOWN":
+        outcome_level = "PROVIDER_RESULT_UNKNOWN"
+        reason = "A model dispatch or Usage record is unresolved."
+    elif delivery_kind == "PROGRAM_FAILURE_NOTIFICATION":
+        outcome_level = "PROGRAM_FAILURE_NOTIFICATION"
+        reason = "The persisted user delivery is a typed program limit/failure notice."
+    elif delivery_kind == "MODEL_ANSWER":
+        if run.get("status") == "SUCCEEDED":
+            outcome_level = "REAL_PROVIDER_AND_FORMAL_WORKER"
+            reason = None
+        else:
+            outcome_level = "UNVERIFIED_NONMODEL_ANSWER"
+            reason = "The persisted model answer is not associated with a successful Run."
+    elif delivery_kind == "UNVERIFIED_NONMODEL_ANSWER":
+        outcome_level = "UNVERIFIED_NONMODEL_ANSWER"
+        reason = "A non-empty delivery lacks the typed model source and matching Provider evidence."
+    elif provider_outcome == "KNOWN_VALID":
+        outcome_level = "REAL_PROVIDER_COMPLETION_WITHOUT_PERSISTED_ANSWER"
+        reason = "A valid Provider completion exists, but no exact-source model answer was persisted."
+    else:
+        outcome_level = "NO_ANSWER_NO_EXECUTION"
+        reason = "No model completion and no persisted user answer were proven."
+
+    return {
+        "provider_outcome": provider_outcome,
+        "user_delivery_kind": delivery_kind,
+        "outcome_level": outcome_level,
+        "completion_ids": sorted(set(completion_ids)),
+        "reason": reason,
+    }
+
+
 def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> dict[str, Any]:
     from fastapi.testclient import TestClient
     from opspilot.domain.assistant_experiment import read_budget
@@ -702,6 +865,7 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
             business_writes[table] = int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
         mcp_calls = []
         model_calls = []
+        dispatches = []
         for row in calls:
             data = dict(row)
             has_error_code = "error_code" in data
@@ -723,6 +887,16 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
                 mcp_calls.append(record)
             else:
                 model_calls.append(record)
+        dispatch_rows = connection.execute(
+            "SELECT kind,logical_key,status,usage_state,usage_json,error_code "
+            "FROM ar02_live_dispatches WHERE experiment_id=? AND run_id=? "
+            "ORDER BY created_at,dispatch_id",
+            (EXPERIMENT_ID, run_id),
+        ).fetchall()
+        for dispatch_row in dispatch_rows:
+            dispatch = dict(dispatch_row)
+            dispatch["usage"] = _decode_json(dispatch.pop("usage_json"))
+            dispatches.append(dispatch)
     if len(user_rows) != 1 or len(answer_rows) > 1:
         raise RuntimeError("USER_MESSAGE_OR_ANSWER_ASSOCIATION_INVALID")
     if sources.get("current") is not True:
@@ -739,7 +913,12 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
     if bad_tools:
         raise RuntimeError("UNAUTHORIZED_OR_UNREGISTERED_MCP_TOOL:" + ",".join(str(item) for item in bad_tools))
     budget = read_budget(DOMAIN_DB, EXPERIMENT_ID)
-    answer = answer_rows[-1].get("body") if answer_rows else None
+    answer_message = answer_rows[-1] if answer_rows else None
+    answer = answer_message.get("body") if answer_message else None
+    outcome = _classify_case_outcome(
+        run=run, answer=answer_message, calls=model_calls, dispatches=dispatches,
+        expected_run_id=run_id, expected_source_message_id=str(case.get("message_id")),
+    )
     result = {
         **case,
         "run": run,
@@ -755,12 +934,13 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
         "mcp_call_count": len(mcp_calls),
         "model_calls": model_calls,
         "mcp_calls": mcp_calls,
+        "campaign_dispatches": dispatches,
         "d2_observations": observations,
         "campaign_budget": budget,
         "provider_count_delta": budget["provider_used"] - provider_before,
         "mcp_count_delta": budget["mcp_used"] - mcp_before,
         "business_write_counts": business_writes,
-        "outcome_level": "REAL_PROVIDER_AND_FORMAL_WORKER" if answer else "REAL_PROVIDER_RUN_WITHOUT_PERSISTED_ANSWER",
+        **outcome,
     }
     _append_jsonl(EVIDENCE / "TRACE.jsonl", {
         "record_type": "formal_case_result",

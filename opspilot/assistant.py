@@ -37,6 +37,95 @@ MATERIAL_RESUME_TOKEN_ENV = "OPSPILOT_AR03_MATERIAL_RESUME_ONE_SHOT_TOKEN"
 MATERIAL_RESUME_AUTH_RECORD = ROOT / "docs" / "evidence" / "ar-03" / "material-live-01" / "resume-01" / "PAID_AUTHORIZATION.json"
 MATERIAL_RESUME_CLAIM = ROOT.parent.parent / ".runtime" / "ar03-material-live-01-resume-01-authorization" / "claim.json"
 
+MATERIAL_RESUME_02_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01-RESUME-02"
+MATERIAL_RESUME_02_AUTHORIZATION_ID = "AR03-MATERIAL-LIVE-01-RESUME-02-USER-AUTH-2026-11-04"
+MATERIAL_RESUME_02_TOKEN_ENV = "OPSPILOT_AR03_MATERIAL_RESUME_02_ONE_SHOT_TOKEN"
+MATERIAL_RESUME_02_AUTH_RECORD = ROOT / "docs" / "evidence" / "ar-03" / "material-live-01" / "resume-02" / "PAID_AUTHORIZATION.json"
+MATERIAL_RESUME_02_CLAIM = ROOT.parent.parent / ".runtime" / "ar03-material-live-01-resume-02-authorization" / "claim.json"
+
+
+def _resume02_expected_authorization() -> dict[str, object]:
+    return {
+        "authorization_id": MATERIAL_RESUME_02_AUTHORIZATION_ID,
+        "experiment_id": MATERIAL_RESUME_02_EXPERIMENT_ID,
+        "status": "AUTHORIZED_ONE_SHOT",
+        "authorized_on": "2026-11-04",
+        "authorization_source": "Explicit user authorization in AR-03-MATERIAL-LIVE-01-RESUME-02 task card",
+        "branch": "codex/ar03-material-live-01-resume-02",
+        "execution_base_sha": "d4addd403ba0722d4acb4c1a33d1cd655599c97c",
+        "accepted_base_sha": "d4addd403ba0722d4acb4c1a33d1cd655599c97c",
+        "freeze_commit": "434a8b027f0072036b46bc624d1defab8703b775",
+        "frozen_cases_blob": "faf16fbb857278e98f8afbe179fe327855132967",
+        "provider": "DeepSeek",
+        "model": "deepseek-flash",
+        "thinking": {"type": "disabled"},
+        "max_tokens": 2048,
+        "tool_choice": "auto when tools are supplied",
+        "parallel_tool_calls": False,
+        "stream": False,
+        "context_input_limit_tokens": 12000,
+        "provider_limit": 16,
+        "mcp_limit": 10,
+        "application_budget_usd_micro": 10_500_000,
+        "provider_reservation_usd_micro": 645_600,
+        "request_timeout_seconds": 30,
+        "provider_concurrency": 1,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "campaign_wall_clock_seconds": 3600,
+        "business_writes_allowed": False,
+        "historical_claims_reusable": False,
+    }
+
+
+def _resume02_expected_claim(authorization_record_sha256: str) -> dict[str, object]:
+    return {
+        "claim_id": f"{MATERIAL_RESUME_02_EXPERIMENT_ID}:one-shot:{MATERIAL_RESUME_02_AUTHORIZATION_ID}",
+        "authorization_id": MATERIAL_RESUME_02_AUTHORIZATION_ID,
+        "experiment_id": MATERIAL_RESUME_02_EXPERIMENT_ID,
+        "branch": "codex/ar03-material-live-01-resume-02",
+        "execution_base_sha": "d4addd403ba0722d4acb4c1a33d1cd655599c97c",
+        "accepted_base_sha": "d4addd403ba0722d4acb4c1a33d1cd655599c97c",
+        "status": "CLAIMED_ONE_SHOT_NO_RETRY",
+        "provider_limit": 16,
+        "mcp_limit": 10,
+        "application_budget_usd_micro": 10_500_000,
+        "provider_reservation_usd_micro": 645_600,
+        "request_timeout_seconds": 30,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "authorization_record_sha256": authorization_record_sha256,
+    }
+
+
+def _material_resume_02_one_shot_authorized(experiment_id: str) -> bool:
+    if experiment_id != MATERIAL_RESUME_02_EXPERIMENT_ID:
+        return False
+    token = os.environ.get(MATERIAL_RESUME_02_TOKEN_ENV, "")
+    if not token:
+        return False
+    try:
+        authorization_bytes = MATERIAL_RESUME_02_AUTH_RECORD.read_bytes()
+        authorization = json.loads(authorization_bytes.decode("utf-8"))
+        claim = json.loads(MATERIAL_RESUME_02_CLAIM.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if type(authorization) is not dict or authorization != _resume02_expected_authorization():
+        return False
+    if type(claim) is not dict:
+        return False
+    expected = _resume02_expected_claim(hashlib.sha256(authorization_bytes).hexdigest())
+    if set(claim) != set(expected) | {"claimed_at", "token_sha256"}:
+        return False
+    if any(type(claim.get(key)) is not type(value) or claim.get(key) != value for key, value in expected.items()):
+        return False
+    if type(claim.get("claimed_at")) is not str or not claim["claimed_at"]:
+        return False
+    token_digest = claim.get("token_sha256")
+    if type(token_digest) is not str or len(token_digest) != 64:
+        return False
+    return hmac.compare_digest(token_digest, hashlib.sha256(token.encode("utf-8")).hexdigest())
+
 
 def _material_resume_one_shot_authorized(experiment_id: str) -> bool:
     """Accept only the live runner's one-shot claim for the exact authorized run."""
@@ -151,7 +240,12 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
 
     experiment_id = os.environ.get(EXPERIMENT_ENV, "").strip()
     if experiment_id in EXPERIMENTS_AWAITING_PAID_AUTHORIZATION:
-        if not _material_resume_one_shot_authorized(experiment_id):
+        authorized = (
+            _material_resume_02_one_shot_authorized(experiment_id)
+            if experiment_id == MATERIAL_RESUME_02_EXPERIMENT_ID
+            else _material_resume_one_shot_authorized(experiment_id)
+        )
+        if not authorized:
             raise RuntimeError("AR03_MATERIAL_LIVE_PAID_AUTHORIZATION_REQUIRED")
     if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
         raise RuntimeError("AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED")
@@ -235,12 +329,14 @@ def assistant_tool_hidden_for_experiment(tool_name, experiment_id):
     from opspilot.domain.assistant_experiment import (
         AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
         AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
+        AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     )
     if (
         tool_name != "load_protocol_upgrade_skill"
         or experiment_id not in {
             AR03_MATERIAL_LIVE_01_EXPERIMENT_ID,
             AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
+            AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
         }
     ):
         return False
@@ -585,7 +681,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         if prepared.get('error'): return prepared
         delivery=prepared['attempt_id']
         with connect(path) as c:c.execute('UPDATE assistant_runs SET delivery_attempt_id=? WHERE run_id=?',(delivery,run_id))
-    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV}})
+    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV}})
     async with Client(params) as client:
         listed=await client.list_tools()
         specs=[];tools=[]

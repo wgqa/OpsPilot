@@ -213,6 +213,10 @@ def test_formal_worker_mocktransport_accepts_reserved_request_and_persists_mat01
     assert result["run_status_observed_before_audit"] == "SUCCEEDED"
     assert result["answer"] and "202" in result["answer"]
     assert result["model_call_count"] == 1
+    assert result["provider_outcome"] == "KNOWN_VALID"
+    assert result["user_delivery_kind"] == "MODEL_ANSWER"
+    assert result["outcome_level"] == "REAL_PROVIDER_AND_FORMAL_WORKER"
+    assert result["completion_ids"] == ["chatcmpl-offline-ar03-recovery-02"]
     assert result["model_calls"][0]["error_code_state"] == "UNKNOWN_NOT_IN_ASSISTANT_CALLS_SCHEMA"
     assert result["model_calls"][0]["error_code"] is None
     assert set(result["business_write_counts"].values()) == {0}
@@ -232,6 +236,9 @@ def test_formal_worker_failed_mock_request_is_auditable_without_overwriting_run_
     assert result["run_status_observed_before_audit"] == "FAILED"
     assert "模型服务连接失败，本次解释未完成" in result["answer"]
     assert result["model_call_count"] == 1
+    assert result["provider_outcome"] == "UNKNOWN"
+    assert result["user_delivery_kind"] == "PROGRAM_FAILURE_NOTIFICATION"
+    assert result["outcome_level"] == "PROVIDER_RESULT_UNKNOWN"
     assert result["model_calls"][0]["status"] == "UNKNOWN"
     assert result["model_calls"][0]["error_code"] is None
     assert result["model_calls"][0]["error_code_state"] == "UNKNOWN_NOT_IN_ASSISTANT_CALLS_SCHEMA"
