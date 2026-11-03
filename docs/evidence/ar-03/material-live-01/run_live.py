@@ -194,7 +194,7 @@ def _validate_preflight() -> dict[str, Any]:
         raise RuntimeError("CAMPAIGN_BUDGET_ENVELOPE_UNSAFE")
     if (
         DOMAIN_PROVIDER_LIMIT != PROVIDER_LIMIT
-        or AR03_MATERIAL_LIVE_MCP_LIMIT != MCP_LIMIT
+        or AR03_MATERIAL_LIVE_MCP_LIMIT != 10
         or MCP_LIMIT != 12
         or BUDGET_USD_MICRO != 10_500_000
     ):

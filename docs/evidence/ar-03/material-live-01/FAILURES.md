@@ -17,6 +17,7 @@ No real Provider request has been sent at the time this file was prepared. Histo
 | `runs/green-10-material-live.log` | 11 passed | Final targeted offline green | Current 11-test suite, including shared MCP cap across two real persisted Runs. |
 | `runs/green-11-final-targeted.log` | 11 passed | Final targeted offline green | Fresh rerun after aligning the campaign wall clock with the first Provider dispatch and the Worker wait ceiling with the existing 300-second Task deadline. |
 | `runs/green-12-final-targeted.log` | 11 passed | Final targeted offline green | Fresh rerun after adding persisted campaign-cap and price-version checks to the pre-send Runner guard; Python compilation and `git diff --check` also passed. |
+| `runs/preflight-01-machine.jsonl` | Blocked before send | Runner preflight assertion defect | The guard compared the new experiment MCP ceiling (10) to the legacy default (12). Fixed to assert new ID = 10 and legacy constant = 12 separately. Provider requests and campaign DB initialization remained zero. |
 
 The four `red-01` failures and both later test-preparation failures remain in the evidence directory. They are not counted as current product failures or silently removed. A malformed PowerShell exit-code capture also created a root marker file named `1`; its exact content was verified as an accidental test-log path string and that generated marker alone was removed. No user file was changed.
 
