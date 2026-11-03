@@ -1,0 +1,102 @@
+{
+  "task": "AR-03-MATERIAL-LIVE-01 POST-LIVE CLOSEOUT",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "559aeeedf0ac87521dae467bdf0bacfd52a3df9c",
+  "branch": "codex/ar03-material-live-01-post-live-closeout",
+  "historical_experiment_id": "AR-03-MATERIAL-LIVE-01-RESUME-02",
+  "historical_experiment_status": "PARTIAL_STOPPED",
+  "tests": [
+    {
+      "name": "targeted RED before fix",
+      "command": "python -m pytest -q tests/test_ar03_material_post_live_closeout.py --basetemp .runtime/ar03-post-live-closeout-red-03",
+      "result": "FAIL_EXPECTED",
+      "failures": ["same-run audit KeyError('run_id')", "cross-run link not explicitly identified"]
+    },
+    {
+      "name": "closeout targeted GREEN",
+      "command": "python -m pytest -q tests/test_ar03_material_post_live_closeout.py --basetemp .runtime/ar03-post-live-closeout-green-01",
+      "result": "PASS",
+      "passed": 2,
+      "failed": 0
+    },
+    {
+      "name": "final closeout association GREEN",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q tests/test_ar03_material_post_live_closeout.py --basetemp .runtime/ar03-post-live-closeout-green-04-20261104-01",
+      "result": "PASS",
+      "passed": 3,
+      "failed": 0,
+      "coverage": ["same-run accepted", "cross-run rejected", "cross-task rejected"]
+    },
+    {
+      "name": "initial related regression using system Python",
+      "command": "python -m pytest -q tests/test_ar03_material_post_live_closeout.py tests/test_ar03_material_live_resume_02.py tests/test_ar03_material_runner_recovery_02.py --basetemp .runtime/ar03-post-live-closeout-regression-20261104-01",
+      "result": "ENVIRONMENT_FAILURE",
+      "passed": 12,
+      "failed": 8,
+      "reason": "System interpreter lacks langchain; no package was installed."
+    },
+    {
+      "name": "related regression using repository virtual environment",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q tests/test_ar03_material_post_live_closeout.py tests/test_ar03_material_live_resume_02.py tests/test_ar03_material_runner_recovery_02.py --basetemp .runtime/ar03-post-live-closeout-regression-venv-20261104-01",
+      "result": "PASS",
+      "passed": 20,
+      "failed": 0,
+      "environment": "langchain 1.4.1"
+    },
+    {
+      "name": "final related regression after Task-link query correction",
+      "command": ".venv\\Scripts\\python.exe -m pytest -q tests/test_ar03_material_post_live_closeout.py tests/test_ar03_material_live_resume_02.py tests/test_ar03_material_runner_recovery_02.py --basetemp .runtime/ar03-post-live-closeout-regression-final-20261104-01",
+      "result": "PASS",
+      "passed": 21,
+      "failed": 0,
+      "environment": "langchain 1.4.1"
+    }
+  ],
+  "closeout_execution": {
+    "real_provider_requests": 0,
+    "real_mcp_calls": 0,
+    "worker_starts": 0,
+    "business_writes": 0,
+    "claim_consumptions": 0,
+    "browser_runs": 0,
+    "full_pytest": "NOT_RUN"
+  },
+  "historical_live_evidence": {
+    "provider_requests": 9,
+    "provider_http_200": 9,
+    "mcp_calls": 10,
+    "prompt_tokens": 28599,
+    "completion_tokens": 3891,
+    "total_tokens": 32490,
+    "application_settlement_estimate_usd": 0.013253,
+    "application_reservation_remaining_usd": 0.0,
+    "provider_invoice_verified": false,
+    "business_write_counts_all_zero_in_read_only_db_audit": true,
+    "mat04_answer_persisted": true,
+    "mat04_run_status": "SUCCEEDED",
+    "mat04_original_audit_error": "KeyError:'run_id'",
+    "mat04_original_source_currentness": "UNVERIFIED_DIRECTLY; inferable from historical control-flow order only",
+    "mat04_current_source_revalidation": "BUSINESS_SOURCE_INVALIDATED (TTL expired)"
+  },
+  "historical_artifact_sha256": {
+    "domain_db": "7e9963649c4e3415ae4e36f703c42f9ed26f33f952d5e5d5611f73fa03f17400",
+    "checkpoint_db": "470f2c75e84944a79628ac43216ee20bbdf474bc54cc769a71d6e285eb9ad53a",
+    "provider_http": "c61569f30fff2937b73a6151353556292a29d683fb0f14527d1c2580625c5da0",
+    "trace": "3ff398fbf8d36ab66c7181c3d265dcf558982760e988308ffac04a3516d32996",
+    "original_results": "f585439f8ba26717b6eabac51bcbcc5b353db1a338e9e7ce210043dc32ba8960",
+    "budget_ledger": "335eee26bea4328dd4706cbb361b86af4c389751161b4eea57097e9e22ac6cbb",
+    "resume01_runtime_claim": "f8f4b2618fa263c10e8ea85def4140218d62ccd571ad3a9e06b2bd1ebcd11458",
+    "root_historical_claim": "db65416c9e361a064fe2bf29b0864793343e81d0d38edb637b89b4b8069d1e3a"
+  },
+  "historical_artifacts_unchanged_after_read_only_audit": true,
+  "frozen_gold_status_supplement": {
+    "MAT-01-PROTOCOL-EXCERPT": "PASS (previously recorded ACCEPTED)",
+    "MAT-02-USER-MATERIAL-UNBOUND": "PASS (previously recorded ACCEPTED)",
+    "MAT-03-USER-MATERIAL-MALFORMED": "PASS (previously recorded ACCEPTED)",
+    "MAT-04-BOUND-QUEUED": "PARTIAL",
+    "MAT-05-BOUND-PROCESSED": "NOT_RUN",
+    "MAT-06-SKILL-OFF": "NOT_RUN",
+    "MAT-06-SKILL-ON": "NOT_RUN"
+  },
+  "budget_design_discussion": "The historical 10 MCP allowance was fully consumed. Do not impose a low per-Run MCP hard cap by default. Discuss campaign-wide durable accounting and permissive exploration under money/time/auth controls; any future hard ceiling must be derived with contingency from the 6-call MAT-04 evidence and remaining Gold, and approved separately."
+}

@@ -853,10 +853,17 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
         observations = []
         if task_id:
             observations = [dict(row) for row in connection.execute(
-                "SELECT o.*,a.run_id AS attempt_run_id FROM d2_tool_observations o "
+                "SELECT DISTINCT o.*,a.run_id AS attempt_run_id,a.task_id AS attempt_task_id, "
+                "e.evidence_id AS linked_evidence_id,e.task_id AS evidence_task_id, "
+                "c.call_id AS linked_assistant_call_id,c.evidence_id AS assistant_call_evidence_id "
+                "FROM d2_tool_observations o "
                 "JOIN d2_attempts a ON a.attempt_id=o.attempt_id AND a.task_id=o.task_id "
-                "WHERE o.task_id=? AND a.run_id=? ORDER BY o.created_at,o.observation_id",
-                (task_id, run_id),
+                "LEFT JOIN d2_evidence e ON e.evidence_id=o.evidence_id "
+                "LEFT JOIN assistant_calls c ON c.run_id=? AND c.kind='MCP' "
+                "AND c.observation_id=o.observation_id "
+                "WHERE (o.task_id=? AND a.run_id=?) OR c.call_id IS NOT NULL "
+                "ORDER BY o.created_at,o.observation_id",
+                (run_id, task_id, run_id),
             ).fetchall()]
         user_rows = [row for row in messages if row.get("role") == "USER" and row.get("message_id") == case.get("message_id")]
         answer_rows = [row for row in messages if row.get("answer_source_message_id") == case.get("message_id")]
@@ -899,12 +906,11 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
             dispatches.append(dispatch)
     if len(user_rows) != 1 or len(answer_rows) > 1:
         raise RuntimeError("USER_MESSAGE_OR_ANSWER_ASSOCIATION_INVALID")
-    if sources.get("current") is not True:
-        raise RuntimeError("ASSISTANT_SOURCES_NOT_CURRENT:" + str(sources.get("exclusion_reason")))
     if assistant_row is None or assistant_row["core"] != "ASSISTANT_V1":
         raise RuntimeError("FORMAL_ASSISTANT_CORE_MISMATCH")
-    if any(item["run_id"] != run_id for item in observations):
-        raise RuntimeError("CROSS_RUN_OBSERVATION_ASSOCIATION")
+    _validate_audit_observation_links(observations, task_id=task_id, run_id=run_id)
+    if sources.get("current") is not True:
+        raise RuntimeError("ASSISTANT_SOURCES_NOT_CURRENT:" + str(sources.get("exclusion_reason")))
     bad_tools = []
     for call in mcp_calls:
         name = call.get("request", {}).get("name") if isinstance(call.get("request"), dict) else None
@@ -949,6 +955,26 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
         "result": result,
     })
     return result
+
+
+def _validate_audit_observation_links(
+    observations: list[dict[str, Any]], *, task_id: str | None, run_id: str,
+) -> None:
+    for item in observations:
+        if task_id is None or str(item.get("task_id")) != task_id or str(item.get("attempt_task_id")) != task_id:
+            raise RuntimeError("OBSERVATION_TASK_ASSOCIATION_INVALID")
+        if str(item.get("attempt_run_id")) != run_id:
+            raise RuntimeError("CROSS_RUN_OBSERVATION_ASSOCIATION")
+        evidence_id = item.get("evidence_id")
+        if evidence_id is not None and (
+            str(item.get("linked_evidence_id")) != str(evidence_id)
+            or str(item.get("evidence_task_id")) != task_id
+        ):
+            raise RuntimeError("OBSERVATION_EVIDENCE_ASSOCIATION_INVALID")
+        if item.get("linked_assistant_call_id") is not None and (
+            str(item.get("assistant_call_evidence_id")) != str(evidence_id)
+        ):
+            raise RuntimeError("ASSISTANT_CALL_EVIDENCE_ASSOCIATION_INVALID")
 
 
 def _run_case(case_id: str, body: str, bound: bool, mode: str, state: _CampaignState) -> dict[str, Any]:

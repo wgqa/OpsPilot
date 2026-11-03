@@ -1,0 +1,55 @@
+{
+  "evidence_level": "READ_ONLY_AUDIT_OF_PERSISTED_RESUME_02_DOMAIN_DB",
+  "experiment_id": "AR-03-MATERIAL-LIVE-01-RESUME-02",
+  "original_campaign_mcp_limit": 10,
+  "original_campaign_mcp_used": 10,
+  "total_calls": 10,
+  "all_status_ok": true,
+  "cases": [
+    {
+      "case_id": "MAT-01-PROTOCOL-EXCERPT",
+      "run_id": "run-f5f27c49-7223-4c87-8030-b549e0bfc066",
+      "mcp_calls": 2,
+      "tools": [
+        {"name": "list_scoped_protocol_documents", "count": 1, "result": "4 scoped protocol documents returned"},
+        {"name": "read_scoped_protocol_excerpt", "count": 1, "result": "callback-retry-contract v1.0.0 with source_ref"}
+      ],
+      "new_business_evidence_rows": 0
+    },
+    {
+      "case_id": "MAT-02-USER-MATERIAL-UNBOUND",
+      "run_id": "run-728ebaf9-2010-441d-a332-66f05f23705b",
+      "mcp_calls": 0,
+      "tools": [],
+      "new_business_evidence_rows": 0
+    },
+    {
+      "case_id": "MAT-03-USER-MATERIAL-MALFORMED",
+      "run_id": "run-9a01e0a1-44d3-4583-a755-f245edf27b26",
+      "mcp_calls": 2,
+      "tools": [
+        {"name": "list_scoped_protocol_documents", "count": 1, "result": "scoped document discovery"},
+        {"name": "search_project_knowledge", "count": 1, "result": "versioned Knowledge results with source_refs"}
+      ],
+      "new_business_evidence_rows": 0
+    },
+    {
+      "case_id": "MAT-04-BOUND-QUEUED",
+      "run_id": "run-3ecadd9f-c329-4fef-a261-b79ddfa224c1",
+      "task_id": "task-62990628-9d80-4cab-bb18-248ba574acde",
+      "mcp_calls": 6,
+      "tools": [
+        {"name": "get_callback_delivery", "count": 1, "result": "ACKNOWLEDGED / HTTP 202", "observation_id": "observation-cea00a94-2efc-4e41-904b-603997c5ab89", "evidence_id": "evidence-fb4a800d-ca90-42b4-964f-2d6f738d7501"},
+        {"name": "get_receiver_processing", "count": 1, "result": "QUEUED", "observation_id": "observation-62025a5c-41fa-4cd8-87ee-7e956a9ce494", "evidence_id": "evidence-3f257994-1c7e-49e6-b046-8a9d667de429"},
+        {"name": "list_scoped_protocol_documents", "count": 1, "result": "scoped discovery; did not create business Evidence"},
+        {"name": "read_scoped_protocol_excerpt", "count": 2, "result": "receiver-ack-contract-v2 v2.1.0 and callback-retry-contract-v2 v2.0.0, each with source_ref"},
+        {"name": "get_callback_transport_history", "count": 1, "result": "empty attempts under RECORDED_OBSERVATIONS_ONLY coverage", "observation_id": "observation-59875c28-80f0-4aac-aa16-d5159b9776d8", "evidence_id": "evidence-21bbc4ae-5036-4474-becb-12584c53290f"}
+      ],
+      "new_business_evidence_rows": 3,
+      "event_id": "event-d0f3a599-e85e-4b69-9cd5-5709375b390b",
+      "same_task_and_run": true,
+      "duplicate_same_tool_call": false
+    }
+  ],
+  "interpretation": "The six MAT-04 calls were distinct and yielded three same-Run business observations plus scoped protocol material. Those observations are historical and now expired. Do not introduce a blanket duplicate-tool rejection from this trace. The historical 10-call ceiling was reached, but the recorded campaign stop reason was the audit KeyError."
+}

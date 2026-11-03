@@ -1,0 +1,146 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_______ test_audit_case_accepts_same_run_observation_from_temp_database _______
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-live-01-exec-prep/.runtime/ar03-post-live-closeout-red-02/test_audit_case_accepts_same_r0')
+
+    def test_audit_case_accepts_same_run_observation_from_temp_database(tmp_path):
+        runner, accepted, _binding, add_observation = _runner(tmp_path)
+        observation = add_observation(str(accepted["run_id"]))
+
+>       result = runner._audit_case(
+            {
+                **accepted,
+                "case_id": CASE_ID,
+                "run_id": accepted["run_id"],
+                "session_id": accepted["session_id"],
+                "message_id": accepted["message_id"],
+            },
+            0,
+            0,
+        )
+
+tests\test_ar03_material_post_live_closeout.py:95:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+case = {'status': 'ACCEPTED', 'command_id': 'command-5431bc3d-2333-4d59-8d67-baf33d050c18', 'session_id': 'session-02cc0416-0202-4b21-b508-129fee779a3c', 'task_id': 'task-2e10f7d8-64cb-457e-a69a-175c10553d77', ...}
+provider_before = 0, mcp_before = 0
+
+    def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> dict[str, Any]:
+        from fastapi.testclient import TestClient
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+
+        case_id = str(case["case_id"])
+        run_id = str(case["run_id"])
+        session_id = str(case["session_id"])
+        app = create_app(
+            db_path=DOMAIN_DB, checkpoint_db_path=CHECKPOINT_DB, start_worker=False,
+            credentials={"support-a": SUPPORT_PASSWORD}, expected_origin=API_ORIGIN,
+            assistant_experiment_id=EXPERIMENT_ID,
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            run_response = client.get(f"/api/runs/{run_id}")
+            if run_response.status_code != 200:
+                raise RuntimeError("FINAL_RUN_READ_FAILED:" + str(run_response.status_code))
+            run = run_response.json()
+            message_response = client.get(f"/api/sessions/{session_id}/messages", headers=headers)
+            if message_response.status_code != 200:
+                raise RuntimeError("SESSION_MESSAGES_READ_FAILED:" + str(message_response.status_code))
+            messages = message_response.json().get("items", [])
+            sources_response = client.get(f"/api/runs/{run_id}/assistant-sources", headers=headers)
+            if sources_response.status_code != 200:
+                raise RuntimeError("ASSISTANT_SOURCE_READ_FAILED:" + str(sources_response.status_code))
+            sources = sources_response.json()
+        with connect(DOMAIN_DB) as connection:
+            calls = connection.execute(
+                "SELECT * FROM assistant_calls WHERE run_id=? ORDER BY created_at,rowid", (run_id,)
+            ).fetchall()
+            task_row = connection.execute(
+                "SELECT task_id FROM task_runs WHERE run_id=?", (run_id,),
+            ).fetchone()
+            task_id = str(task_row["task_id"]) if task_row and task_row["task_id"] else None
+            assistant_row = connection.execute(
+                "SELECT core,delivery_attempt_id FROM assistant_runs WHERE run_id=?", (run_id,),
+            ).fetchone()
+            observations = []
+            if task_id:
+                observations = [dict(row) for row in connection.execute(
+                    "SELECT o.*,a.run_id AS attempt_run_id FROM d2_tool_observations o "
+                    "JOIN d2_attempts a ON a.attempt_id=o.attempt_id AND a.task_id=o.task_id "
+                    "WHERE o.task_id=? AND a.run_id=? ORDER BY o.created_at,o.observation_id",
+                    (task_id, run_id),
+                ).fetchall()]
+            user_rows = [row for row in messages if row.get("role") == "USER" and row.get("message_id") == case.get("message_id")]
+            answer_rows = [row for row in messages if row.get("answer_source_message_id") == case.get("message_id")]
+            business_writes = {}
+            for table in BUSINESS_WRITE_TABLES:
+                business_writes[table] = int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            mcp_calls = []
+            model_calls = []
+            dispatches = []
+            for row in calls:
+                data = dict(row)
+                has_error_code = "error_code" in data
+                record = {
+                    "call_id": data["call_id"], "kind": data["kind"], "logical_key": data["logical_key"],
+                    "status": data["status"], "created_at": data["created_at"],
+                    "completed_at": data["completed_at"], "observation_id": data["observation_id"],
+                    "evidence_id": data["evidence_id"],
+                    "error_code": data.get("error_code"),
+                    "error_code_state": (
+                        "RECORDED" if has_error_code
+                        else "UNKNOWN_NOT_IN_ASSISTANT_CALLS_SCHEMA"
+                    ),
+                    "request": _decode_json(data["request_json"]),
+                    "result": _decode_json(data["result_json"]),
+                    "usage": _decode_json(data["usage_json"]),
+                }
+                if data["kind"] == "MCP":
+                    mcp_calls.append(record)
+                else:
+                    model_calls.append(record)
+            dispatch_rows = connection.execute(
+                "SELECT kind,logical_key,status,usage_state,usage_json,error_code "
+                "FROM ar02_live_dispatches WHERE experiment_id=? AND run_id=? "
+                "ORDER BY created_at,dispatch_id",
+                (EXPERIMENT_ID, run_id),
+            ).fetchall()
+            for dispatch_row in dispatch_rows:
+                dispatch = dict(dispatch_row)
+                dispatch["usage"] = _decode_json(dispatch.pop("usage_json"))
+                dispatches.append(dispatch)
+        if len(user_rows) != 1 or len(answer_rows) > 1:
+            raise RuntimeError("USER_MESSAGE_OR_ANSWER_ASSOCIATION_INVALID")
+        if sources.get("current") is not True:
+>           raise RuntimeError("ASSISTANT_SOURCES_NOT_CURRENT:" + str(sources.get("exclusion_reason")))
+E           RuntimeError: ASSISTANT_SOURCES_NOT_CURRENT:BUSINESS_SOURCE_INVALIDATED
+
+docs\evidence\ar-03\material-live-01\run_live.py:903: RuntimeError
+___ test_audit_case_rejects_current_call_linked_to_another_run_observation ____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-live-01-exec-prep/.runtime/ar03-post-live-closeout-red-02/test_audit_case_rejects_curren0')
+
+    def test_audit_case_rejects_current_call_linked_to_another_run_observation(tmp_path):
+        runner, accepted, _binding, add_observation = _runner(tmp_path)
+        add_observation("run-from-another-execution")
+
+>       with pytest.raises(RuntimeError, match="CROSS_RUN_OBSERVATION_ASSOCIATION"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'CROSS_RUN_OBSERVATION_ASSOCIATION'
+E         Actual message: 'ASSISTANT_SOURCES_NOT_CURRENT:BUSINESS_SOURCE_INVALIDATED'
+
+tests\test_ar03_material_post_live_closeout.py:116: AssertionError
+============================== warnings summary ===============================
+tests/test_ar03_material_post_live_closeout.py::test_audit_case_accepts_same_run_observation_from_temp_database
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_post_live_closeout.py::test_audit_case_accepts_same_run_observation_from_temp_database
+FAILED tests/test_ar03_material_post_live_closeout.py::test_audit_case_rejects_current_call_linked_to_another_run_observation
+2 failed, 1 warning in 2.92s
