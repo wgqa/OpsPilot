@@ -345,7 +345,7 @@ class _CampaignState:
         if context_tokens > min(CONTEXT_LIMIT, int(context_budget_for_model(MODEL)["input_budget_tokens"])):
             raise RuntimeError("LIVE_CONTEXT_INPUT_LIMIT_EXCEEDED")
 
-        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.assistant_experiment import PRICE_VERSION, read_budget
         from opspilot.domain.database import connect
         budget = read_budget(self.db_path, EXPERIMENT_ID)
         if (
@@ -704,11 +704,17 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
         model_calls = []
         for row in calls:
             data = dict(row)
+            has_error_code = "error_code" in data
             record = {
                 "call_id": data["call_id"], "kind": data["kind"], "logical_key": data["logical_key"],
                 "status": data["status"], "created_at": data["created_at"],
                 "completed_at": data["completed_at"], "observation_id": data["observation_id"],
-                "evidence_id": data["evidence_id"], "error_code": data["error_code"],
+                "evidence_id": data["evidence_id"],
+                "error_code": data.get("error_code"),
+                "error_code_state": (
+                    "RECORDED" if has_error_code
+                    else "UNKNOWN_NOT_IN_ASSISTANT_CALLS_SCHEMA"
+                ),
                 "request": _decode_json(data["request_json"]),
                 "result": _decode_json(data["result_json"]),
                 "usage": _decode_json(data["usage_json"]),
@@ -737,6 +743,9 @@ def _audit_case(case: dict[str, Any], provider_before: int, mcp_before: int) -> 
     result = {
         **case,
         "run": run,
+        "run_failure_reason": (
+            run.get("waiting_reason") if run.get("status") in {"FAILED", "BLOCKED"} else None
+        ),
         "assistant_core": assistant_row["core"],
         "user_message": user_rows[0],
         "answer_messages": answer_rows,

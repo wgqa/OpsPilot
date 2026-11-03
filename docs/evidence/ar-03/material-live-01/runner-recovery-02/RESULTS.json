@@ -1,0 +1,70 @@
+{
+  "task": "AR-03-MATERIAL-LIVE-01 Runner Recovery 02",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "scope": "offline runner repair and validation only",
+  "base_branch": "codex/ar03-material-live-01-exec-prep",
+  "base_sha": "f3614df65f436b86b19069b6248e3b8a401f2a8a",
+  "main_sha_at_verification": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "changed_files": [
+    "docs/evidence/ar-03/material-live-01/run_live.py",
+    "tests/test_ar03_material_live_exec_prep.py",
+    "tests/test_ar03_material_runner_recovery_02.py",
+    "docs/evidence/ar-03/material-live-01/runner-recovery-02/ACCEPTANCE_PLAN.md",
+    "docs/evidence/ar-03/material-live-01/runner-recovery-02/RESULTS.json",
+    "docs/evidence/ar-03/material-live-01/runner-recovery-02/FAILURES.md",
+    "docs/evidence/ar-03/material-live-01/runner-recovery-02/REPORT.md"
+  ],
+  "checks": {
+    "focused_red_valid_reproduction": "3 failed, 1 passed; reproduced NameError for PRICE_VERSION and two KeyErrors for absent assistant_calls.error_code",
+    "focused_green": "4 passed in 9.18s",
+    "relevant_regression": "28 passed in 24.68s",
+    "git_diff_check": "passed; Git emitted a non-failing LF/CRLF working-copy warning for the edited existing test file",
+    "full_pytest": "NOT_RUN"
+  },
+  "actual_invocations": [
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_ar03_material_runner_recovery_02.py -q --basetemp <unique-private-directory>",
+      "runs": ["red-2026-11-04-rerun01", "green-2026-11-04-rerun02"],
+      "exit_codes": [1, 0]
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest tests/test_ar03_material_runner_recovery_02.py tests/test_ar03_material_live_exec_prep.py tests/test_ar03_material_live_01.py tests/test_ar03_material_live_recovery_01.py -q --basetemp <unique-private-directory>",
+      "runs": ["regression-2026-11-04", "regression-2026-11-04-rerun01"],
+      "exit_codes": [1, 0]
+    }
+  ],
+  "mock_transport_observations": {
+    "formal_worker_success_requests": 1,
+    "formal_worker_synthetic_connection_failure_requests": 1,
+    "invalid_request_rejected_before_handler": true,
+    "provider_dispatch_reserved_before_transport": true,
+    "assistant_call_reserved_before_transport": true,
+    "mock_success_usage": {"prompt_tokens": 92, "completion_tokens": 25, "total_tokens": 117},
+    "synthetic_failure_run_reason": "OpenAIConnectionError preserved",
+    "synthetic_failure_usage_state": "UNKNOWN; temporary USD 0.645600 reservation retained",
+    "business_write_counts": 0,
+    "mcp_tools_call_count": 0
+  },
+  "external_effects": {
+    "real_provider_requests": 0,
+    "real_external_http_requests": 0,
+    "new_paid_claims_created_or_consumed": 0,
+    "business_writes": 0,
+    "browser_automation": false,
+    "main_modified": false
+  },
+  "historical_protection": {
+    "resume_01_manifest_sha256": "9DE01F4B04D0B80C5BB8FA1B6873AD78A320F6A71CBC2C763544FF64387C622A",
+    "manifest_embedded_old_history_marker": true,
+    "old_claim_ledger_database_checkpoint_trace_and_failure_records": "unchanged; prior artifact hash comparison recorded 15/15 matches using the stored path aliases"
+  },
+  "private_raw_logs": [
+    {"id": "red-2026-11-04", "result": "harness setup mismatch; not a valid product RED", "sha256": "A30A68E996398CA8B9065728AC1B76D0C8F0C04B9610C2A441C8EAC4278C5CEE"},
+    {"id": "red-2026-11-04-rerun01", "result": "3 failed, 1 passed", "sha256": "C468A98E394E9AAD20930036B2AB7AA4A12561635DA66E33DD1EF6DF1A459F77"},
+    {"id": "green-2026-11-04", "result": "2 failed, 2 passed; test expectation errors", "sha256": "58B2A2363BD7FF50FB0245A75C1A56DA7085CF166546787AB543EE71A36005B9"},
+    {"id": "green-2026-11-04-rerun01", "result": "1 failed, 3 passed; exception-name assertion mismatch", "sha256": "46BAA56FAA1D3E70490B95A7DF8ECE624B2E86716FBB5B9F989934AF2EB89524"},
+    {"id": "green-2026-11-04-rerun02", "result": "4 passed", "sha256": "A91744E0E78D1B674DE0CB54AF873ED1CBF1ACD41684C00DCFA8DE20D7070353"},
+    {"id": "regression-2026-11-04", "result": "27 passed, 1 failed; stale absence assertion for prior runtime DB", "sha256": "27758AF7CBA83BB97FA85326B3FCF5CC2678FA3D1BFAD09F210DE4B1146DAE60"},
+    {"id": "regression-2026-11-04-rerun01", "result": "28 passed", "sha256": "AD715BD63860A7B9940C8456CD1A8AC5B1E7096F34AD72013ADB8EDFC85ED1E7"}
+  ]
+}

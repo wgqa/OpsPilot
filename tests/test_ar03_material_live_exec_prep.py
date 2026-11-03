@@ -323,6 +323,12 @@ def test_new_identity_zero_cost_formal_worker_preview_uses_independent_ledger(
         historical_evidence / "BUDGET_LEDGER.json",
         historical_runtime / "domain.sqlite3",
         historical_runtime / "checkpoints.sqlite3",
+        runner.DOMAIN_DB,
+        runner.CHECKPOINT_DB,
+        Path(str(runner.DOMAIN_DB) + "-wal"),
+        Path(str(runner.DOMAIN_DB) + "-shm"),
+        Path(str(runner.CHECKPOINT_DB) + "-wal"),
+        Path(str(runner.CHECKPOINT_DB) + "-shm"),
     ]
     historical_before = {str(path): _file_digest(path) for path in historical_paths}
     monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
@@ -420,7 +426,6 @@ def test_new_identity_zero_cost_formal_worker_preview_uses_independent_ledger(
     assert after_budget["provider_used"] == 3  # Deterministic model dispatches, never HTTP Provider requests.
     assert after_budget["mcp_used"] == 2
     assert set(business_write_counts.values()) == {0}
-    assert not runner.DOMAIN_DB.exists() and not runner.CHECKPOINT_DB.exists()
     assert runner._validate_prepared_claim()["paid_dispatch_authorized"] is False
     historical_after = {str(path): _file_digest(path) for path in historical_paths}
     assert historical_after == historical_before
