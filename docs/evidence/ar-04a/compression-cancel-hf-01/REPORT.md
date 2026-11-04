@@ -111,7 +111,7 @@ state.update({
 
 ## 9. 候选 SHA 与建议
 
-- 代码 + 测试 + 证据提交：`PENDING`
+- 代码 + 测试 + 证据提交：`46412fb2aa5cfd2d4a55c4fe0035028dfbc732a4`（已推送 `origin/codex/ar04a-compression-cancel-hf-01`）
 - 分支 head 若再有一个仅更新本文件/RESULTS 记录字段的提交，代码树与该提交相同；以远端分支 head 为准
 - 只提交隔离候选，不合并 main
 
