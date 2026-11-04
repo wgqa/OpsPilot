@@ -88,7 +88,8 @@ AssertionError: ('RESERVED', 'RESERVED', 'RESERVED', 'OPEN')
 
 ## 8. 候选 SHA 与建议
 
-- 代码 + 测试 + 证据提交：见 `RESULTS.json`（提交后回填；分支 head 可能多一个仅记录字段的提交）
+- 代码 + 测试 + 证据提交：`8358a21e9dd99e7f2e66fcc7b881ee96b7e1b123`（已推送 `origin/codex/ar04a-compression-cancel-hf-01`）
+- 分支 head 若再有一个仅更新本文件/RESULTS 记录字段的提交，代码树与该提交相同；以远端分支 head 为准
 - 只提交隔离候选，不合并 main
 
 **建议：** `MERGE_READY`（就取消费用收口而言），由主 Agent 独立核验后决定。
