@@ -44,3 +44,9 @@ The offline wire test confirmed the actual serialized `deepseek-flash` request h
 ## Remaining gate
 
 After the source commit is pushed, run the Runner's complete `--preflight-only` command from a clean checkout. It must confirm the frozen rule and Gold blobs, branch, remote `main`, model identity, current budget/price constants, 12,000-token context budget, and absence of the final runtime/claim before `AR-03-MATERIAL-REMAINDER-01` may consume its single paid claim.
+
+## Execution update — 2026-11-04
+
+The clean-HEAD `--preflight-only` command was run from source HEAD `91cf810bb6106a1faad3c965ade121b363229ef9` and exited `0`. It validated the frozen blobs, branch, unchanged `main`, model/request policy, price version, isolated runtime, and unconsumed one-shot claim; its formal Worker path used HTTPX MockTransport and sent no external Provider request.
+
+After that check, the one authorized claim was consumed once and the paid three-condition campaign completed. Its result is in `campaign-01/`; the claim remains consumed, so the earlier “Remaining gate” is historical pre-execution text and no longer authorizes another run. See the campaign report for actual usage and limits.
