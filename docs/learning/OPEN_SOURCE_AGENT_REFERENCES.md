@@ -2,17 +2,17 @@
 
 > **定位：** 这是开发指导，不是阶段任务卡、不是验收合同，也不是“外部项目已经证明”的证据。它的用途只有一个：在设计 Agent Core、Context/Memory/Knowledge/Skill/MCP 装配、模型调用保障、取消/恢复或模块拆分之前，先看清两个可复查的外部实现到底怎么分层，再决定 OpsPilot 采纳、裁剪还是拒绝。
 >
-> **研究基线：** OpsPilot 代码以 `48234e5dabb6ed28ea816b8ebc438288409353b8`（`origin/main`）为准；外部仓库在 2026-11-04 通过浅克隆实际读取，commit 见下文。本文**没有运行** Ragent 或 Pi，也没有用它们做过性能、成本或效果对照。所有“机制”描述都来自源码静态阅读，不能写成“已被外部验证”或“本项目已实现”。
+> **研究基线：** OpsPilot 代码以 `9fc3b4e51ea5903b171e4d4df8be2b713fe07d73`（AR-04A 合并后的 `origin/main`）为准；外部仓库按固定 commit 检出后静态读取，commit 见下文。本文**没有运行** Ragent 或 Pi，也没有用它们做过性能、成本或效果对照。所有“机制”描述都来自源码静态阅读，不能写成“已被外部验证”或“本项目已实现”。
 >
 > **与其他文档的关系：** 方向与权力边界以 [PROJECT_NORTH_STAR.md](../../PROJECT_NORTH_STAR.md) 第 0、3、6、8 节为准；本文不新增治理合同，也不得覆盖冻结的安全、审批、事务和 Gold。
 
 ## 0. 一页结论
 
-1. **两个项目都没有手写“会思考的循环”。** Ragent 把循环交给 AgentScope 的 `ReActAgent`，自己写中间件；Pi 的 `agent` 包核心是循环、事件和队列，压缩、会话树、技能都在 `coding-agent` 应用层。真正值钱的是**分层与调用边界**，不是某个 ReAct 实现。
+1. **Ragent 复用运行时，Pi 自研轻量循环，两者不是同一种“没手写循环”。** Ragent 把循环交给 AgentScope 的 `ReActAgent`，自己写中间件；Pi 在 `packages/agent/src/agent-loop.ts` 自行实现模型—工具循环，并把压缩、Session、Skills 等应用层能力通过 hook 和组件扩展。OpsPilot 借鉴其职责划分，继续使用现有 LangChain/LangGraph Loop，不因此重写循环。
 2. **Context 策略可以放在应用层，但事实与授权不能。** Pi 的压缩在 `agent-session.ts` 里挂 `prepareNextTurn`；Ragent 的压缩是 `onReasoning` 中间件。两者都让核心循环不知道“摘要”这件事。OpsPilot 应保持同样方向：循环用框架，Context 装配和摘要账本在现有 Domain，不把摘要塞进 Agent Core。
 3. **外部项目的“记忆”比 OpsPilot 宽松。** Ragent 会从用户发言自动学习长期记忆，Pi 不做跨任务长期记忆。OpsPilot 的 Memory 必须经过来源、候选、独立确认、撤销和派生失效检查，不能照搬“自动记住”。
 4. **外部项目的“取消”只到进程内。** Ragent 有会话闸门、SSE 断开取消和收尾补存；Pi 有 `abort()`，文档说明中止会把排队消息交回编辑器。它们都没有 OpsPilot 这种“模型调用已外发但结果未知”的持久账本问题。取消后的 `UNKNOWN` 收口、禁止盲目重发必须留在 OpsPilot Domain。
-5. **不要因为参考项目有某个部件就扩建。** Pi 明确不做 sub-agent 和 plan mode；Ragent 的 middleware 链也不是通用插件平台。OpsPilot 只在出现**真实重复调用和职责冲突**时抽取，不能把“别人有”当成阶段授权。
+5. **不要因为参考项目有某个部件就扩建。** Pi 明确不做 sub-agent 和 plan mode；Ragent 的 middleware 链也不是通用插件平台。OpsPilot 只在出现**重复实现、职责冲突，或单模块职责膨胀已造成可验证维护/测试/变更风险**时提出有界解耦，不能把“别人有”当成阶段授权。
 
 ## 1. 事实卡：Ragent
 
@@ -71,7 +71,7 @@
 
 | 机制 | 源码入口 | 读到的行为 |
 |---|---|---|
-| 薄 Agent Core | [`packages/agent/src/agent-loop.ts` L172-L330](https://github.com/earendil-works/pi/blob/d8981c7ba00a722c897d7270b7f421418512a784/packages/agent/src/agent-loop.ts#L172-L330) | `runLoop` 只做：取 steering/follow-up、每轮准备请求、流式取 assistant、执行工具、写回 tool result、`finishTurn` 决定继续或结束。核心不实现摘要算法，只留 `transformContext`/`prepareRequest`/`prepareNextTurn` 等 hook；压缩就是挂在 hook 上的应用层逻辑。 |
+| 自研轻量循环 | [`packages/agent/src/agent-loop.ts` L172-L330](https://github.com/earendil-works/pi/blob/d8981c7ba00a722c897d7270b7f421418512a784/packages/agent/src/agent-loop.ts#L172-L330) | Pi 自己实现 `runLoop`：取 steering/follow-up、每轮准备请求、流式取 assistant、执行工具、写回 tool result、`finishTurn` 决定继续或结束。核心不实现摘要算法，只留 `transformContext`/`prepareRequest`/`prepareNextTurn` 等 hook；压缩就是挂在 hook 上的应用层逻辑。 |
 | 扩展点而非硬编码 | [`agent-loop.ts` L228-L248](https://github.com/earendil-works/pi/blob/d8981c7ba00a722c897d7270b7f421418512a784/packages/agent/src/agent-loop.ts#L228-L248)、[L295-L307](https://github.com/earendil-works/pi/blob/d8981c7ba00a722c897d7270b7f421418512a784/packages/agent/src/agent-loop.ts#L295-L307) | `prepareRequest` 在每次 Provider 请求前重建上下文；`finishTurn` 可返回 `end` / `continue`；`prepareNextTurn` 可在下一轮前替换上下文。压缩就是从这些口子挂进去的。 |
 | Agent 类只管状态与队列 | [`packages/agent/src/agent.ts` L194](https://github.com/earendil-works/pi/blob/d8981c7ba00a722c897d7270b7f421418512a784/packages/agent/src/agent.ts#L194) | `Agent` 持有 model、messages、tools、streaming 状态、steering/follow-up 队列；没有 session、compaction、memory、knowledge。 |
 | 核心包确实不含压缩/会话 | `packages/agent/src` 全文搜索 `compaction` 只命中 `agent-loop.ts` L210 的一句注释 | 这是分层证据：压缩属于应用层策略，不属于循环。 |
@@ -87,26 +87,27 @@
 ### 2.3 这份实现明确没有做的事
 
 - 没有在 Agent Core 里做记忆、知识检索或业务授权；Pi 是编码 Agent，不是企业任务 Agent。
+- Agent Loop 是 Pi 自己实现的，不是复用外部 ReAct runtime；这与 Ragent 复用 AgentScope 是两种不同路线，不能混写成“都没有手写循环”。
 - 没有把压缩条目当业务事实：它只是“以后请求从哪个条目开始”的上下文边界。
 - 没有靠删历史来压缩：原条目仍在树里，可导出、可回看。
 - 没有任何 Domain 级别的审批、幂等、回执或“未知结果”账本；这些不能从 Pi 借鉴。
 
 ## 3. 对照矩阵：外部机制 → OpsPilot 当前实现 → 决策
 
-> OpsPilot 列以 `48234e5` 为准。AR-04A 的压缩记账/取消收口候选尚未合入 `main`，因此**不算当前实现**；下文只在“统一调用保障”一节把它标为待合并候选。
+> OpsPilot 列以 `9fc3b4e`（AR-04A 合并后）为准。AR-04A 已合入 `main`，`ASSISTANT_V1` 的 Context 压缩调用已接入现有 MODEL Call 与实验费用账本；但 AR-04A 只获 `ACCEPT_WITH_LIMITS`，不能据此宣称真实 Provider 质量或生产级费用可靠性已经证明。
 
-| 外部源码入口 | 技术机制 | OpsPilot 当前实现（`48234e5`） | 采纳 / 裁剪 / 拒绝 | 对应验证 |
+| 外部源码入口 | 技术机制 | OpsPilot 当前实现（`9fc3b4e`） | 采纳 / 裁剪 / 拒绝 | 对应验证 |
 |---|---|---|---|---|
-| Ragent `ReActAgentProvider` L100-L124 | 复用 AgentScope 循环，自己只组装工具、预算和中间件 | [`opspilot/assistant.py` L840](../../opspilot/assistant.py#L840) 用 LangGraph `create_agent` 建循环；自定义逻辑在 `Loop` 中间件（L471、L585、L662） | **采纳**：循环继续用框架，不手写 ReAct；**拒绝**：再包一层“通用 Agent 平台” | `tests/test_ar02_assistant.py`、`tests/test_m1_chat.py` |
-| Pi `agent-loop.ts` L172-L330 | 核心只有模型-工具循环、事件、队列；策略通过 hook 注入 | 同上：`create_agent` + `AgentMiddleware`；`prepare`/工具钩子承担策略 | **采纳**：核心保持薄；**裁剪**：不复制 Pi 的事件类型体系 | `tests/test_ar02_assistant.py` |
-| Pi `agent-session.ts` L918-L933 | 压缩在应用层挂 `prepareNextTurn`，核心不知道摘要 | 经典 Chat Worker 在 [`opspilot/web/worker.py` L349-L391](../../opspilot/web/worker.py#L349-L391) 调压缩；摘要在 [`opspilot/domain/chat.py` L1703](../../opspilot/domain/chat.py#L1703) 准备、L1822 完成 | **采纳**：策略在应用/Domain 层；**保留差异**：OpsPilot 需要摘要依赖与失效，不只是上下文替换 | `tests/test_m302_context.py` |
+| Ragent `ReActAgentProvider` L100-L124 | 复用 AgentScope 循环，自己只组装工具、预算和中间件 | [`opspilot/assistant.py` L1207](../../opspilot/assistant.py#L1207) 用 LangGraph `create_agent` 建循环；自定义逻辑在 `Loop` 中间件（L477、L593、L683） | **采纳**：循环继续用框架，不手写 ReAct；**拒绝**：再包一层“通用 Agent 平台” | `tests/test_ar02_assistant.py`、`tests/test_m1_chat.py` |
+| Pi `agent-loop.ts` L172-L330 | Pi 自研的轻量模型—工具循环；核心只有循环、事件、队列，策略通过 hook 注入 | OpsPilot 继续用现有 `create_agent` + `AgentMiddleware`；`prepare`/工具钩子承担策略，不另外重写循环 | **采纳**：职责划分与 hook 思路；**裁剪**：不复制 Pi 的事件类型体系 | `tests/test_ar02_assistant.py` |
+| Pi `agent-session.ts` L918-L933 | 压缩在应用层挂 `prepareNextTurn`，核心不知道摘要 | 经典 Chat Worker 在 [`opspilot/web/worker.py` L349-L391](../../opspilot/web/worker.py#L349-L391) 调压缩；摘要在 [`opspilot/domain/chat.py` L1716](../../opspilot/domain/chat.py#L1716) 准备、L1843 完成 | **采纳**：策略在应用/Domain 层；**保留差异**：OpsPilot 需要摘要依赖与失效，不只是上下文替换 | `tests/test_m302_context.py` |
 | Pi `session-manager.ts` L91-L104 | 压缩=一条 `CompactionEntry` + `firstKeptEntryId`，原历史不删 | [`opspilot/domain/database.py` L910-L965](../../opspilot/domain/database.py#L910-L965) 的 `context_compression_attempts` / `context_summaries` / `context_summary_dependencies`；`_summary_is_current` 在 [`chat.py` L635](../../opspilot/domain/chat.py#L635) | **裁剪**：不引入会话树/分支 UI；**拒绝**：把摘要简化成单条不可追溯文本 | `tests/test_m302_context.py`、`tests/test_ar02_context_continuity_01.py` |
 | Ragent `AgentContextCompactor` L62-L147 | 摘要替换早期原文，切点只在用户轮；摘要以 `USER` 角色回填并声明“有损背景” | `context_summaries` 保存结构化摘要、版本、覆盖范围、来源依赖；`context_summary_dependencies` 记录 MESSAGE/MODEL_ATTEMPT/MEMORY/EVIDENCE/SKILL/SUMMARY | **采纳**：摘要必须声明派生与非权威；**拒绝**：单一审计表代替依赖失效 | `tests/test_m302_context.py` |
 | Ragent `AgentContextTrimmer` L68-L140 | 超水位后把旧工具结果换成短占位，保护最近循环 | 当前以 `RECENT_WINDOW`/`ROLLING_SUMMARY`/`HYBRID` 控制窗口与摘要；压缩输入会对助手历史做有界截断（[`chat.py` L995](../../opspilot/domain/chat.py#L995)），但没有独立的工具结果逐条驱逐器 | **暂缓**：先不新增第二套裁剪器；若真实长工具结果造成预算问题，再评估并入现有 Context 装配 | 现有 `tests/test_m302_context.py`；新能力尚无证据 |
 | Ragent `AgentUserMemoryMiddleware` L65-L106 + `AgentMemoryLearner` L89-L134 | 长期记忆按用户自动学习；模型调用在事务外，游标 CAS 提交，异常返回 `UNKNOWN` | Episodic/Semantic Memory 在 [`opspilot/domain/episodic_memory.py`](../../opspilot/domain/episodic_memory.py#L29)、[`semantic_memory.py`](../../opspilot/domain/semantic_memory.py#L199)；候选需独立确认，可撤销 | **采纳**：事务只包提交、未知不重试；**拒绝**：从用户发言自动生效的长期记忆 | `tests/test_m301_memory.py`、`tests/test_m303_semantic_memory.py`、`tests/test_d5_context.py` |
 | Ragent `SkillLoadTool` L39-L124 + `AgentSkillMaskingMiddleware` L74-L113 | 先给技能清单，模型按需加载正文；未加载时隐藏相关工具，压缩后重新隐藏 | Skill 由 [`opspilot/skill_assets.py` L26](../../opspilot/skill_assets.py#L26) 按问题类型装载，内容作为方法提示进入上下文（[`investigator.py` L687-L739](../../opspilot/investigator.py#L687-L739)） | **采纳**：Skill 只给方法、不定义权限；**裁剪**：暂不引入 `load_skill` 工具和工具遮蔽；**拒绝**：用工具可见性当授权 | `tests/test_d5_context.py`、`tests/test_m1_chat.py` |
-| Ragent `AgentChatServiceImpl` L221-L283、L343-L372 | 会话闸门、SSE 断开取消、收尾补存、再调度后台任务 | 任务/Run 的 worker fence 在 [`chat.py` L66](../../opspilot/domain/chat.py#L66)；Assistant 调用账本在 [`domain/assistant.py` L299-L330](../../opspilot/domain/assistant.py#L299-L330)；实验账本在 [`assistant_experiment.py` L216-L260](../../opspilot/domain/assistant_experiment.py#L216-L260) | **采纳**：取消必须收口、收尾顺序明确；**保留差异**：OpsPilot 还要持久化 `UNKNOWN` 并禁止盲目重发 | `tests/test_ar02_assistant.py`；取消 `UNKNOWN` 的完整收口仍是 AR-04A 候选，未入 `main` |
-| Ragent `AgentToolBatchMiddleware` L56-L97 | 工具批边界与“执行前短路”事实，不依赖追踪开关 | `assistant.py` 的 `awrap_tool_call`（L662）在 MCP 调用前后持久登记 `assistant_calls`；实验账本在 `reserve_dispatch`/`complete_dispatch`/`mark_unknown` | **采纳**：执行事实与可观测性解耦；**裁剪**：不新建 batch 表，复用现有调用记录 | `tests/test_ar02_assistant.py` |
+| Ragent `AgentChatServiceImpl` L221-L283、L343-L372 | 会话闸门、SSE 断开取消、收尾补存、再调度后台任务 | 任务/Run 的 worker fence 在 [`chat.py` L66](../../opspilot/domain/chat.py#L66)；Assistant 调用账本在 [`domain/assistant.py` L299-L330](../../opspilot/domain/assistant.py#L299-L330)；实验账本在 [`assistant_experiment.py` L216-L260](../../opspilot/domain/assistant_experiment.py#L216-L260) | **采纳**：取消必须收口、收尾顺序明确；**保留差异**：OpsPilot 还要持久化 `UNKNOWN` 并禁止盲目重发 | `tests/test_ar02_assistant.py`、`tests/test_ar04a_compression_cancel_hf_01.py`；AR-04A 已合并离线 RED/GREEN，真实 Provider 取消质量 `NOT_RUN` |
+| Ragent `AgentToolBatchMiddleware` L56-L97 | 工具批边界与“执行前短路”事实，不依赖追踪开关 | `assistant.py` 的 `awrap_tool_call`（L683）在 MCP 调用前后持久登记 `assistant_calls`；实验账本在 `reserve_dispatch`/`complete_dispatch`/`mark_unknown` | **采纳**：执行事实与可观测性解耦；**裁剪**：不新建 batch 表，复用现有调用记录 | `tests/test_ar02_assistant.py` |
 | Pi `system-prompt.ts` L173-L181 | 技能清单进系统提示，正文按需读取 | 当前 Skill 内容整体进入方法提示，没有按需加载 | **裁剪**：暂不引入，因为会改变工具与权限边界；保留为后续有界实验候选 | `tests/test_d5_context.py` |
 | Pi `docs/how-pi-works.md` L41-L49 | 扩展是进程内模块，能力大但信任边界弱 | OpsPilot 用 Domain 显式接口和冻结合同，不开放进程内扩展 | **拒绝**：不引入第三方进程内扩展平台 | 方向性判断，无运行证据 |
 
@@ -118,7 +119,7 @@
 
 **不负责：** 上下文压缩与摘要账本、Memory 检索/写入、Knowledge 搜索、Skill 选择策略、MCP 传输、授权/审批/预算/幂等/Usage 收口、业务事务。
 
-判断方法：如果把某个能力从 Core 拿掉，模型仍然能“决定下一步做什么”，只是少了一种信息来源或保障，它就不属于 Core。Pi 的 `packages/agent` 和 Ragent 对 AgentScope 的复用都符合这一点；OpsPilot 也应保持 `create_agent` 只承载循环，把 `Loop` 中间件限制在“调用前后的必要保障”，不要让它长成第二个 Runtime。
+判断方法：如果把某个能力从 Core 拿掉，模型仍然能“决定下一步做什么”，只是少了一种信息来源或保障，它就不属于 Core。Pi 自研的轻量循环和 Ragent 对 AgentScope 的复用都符合这一职责划分；OpsPilot 也应保持 `create_agent` 只承载循环，把 `Loop` 中间件限制在“调用前后的必要保障”，不要让它长成第二个 Runtime。
 
 ### 4.2 职责分离
 
@@ -147,9 +148,11 @@ OpsPilot 现在至少有三种外部调用：回答模型调用、上下文压�
 
 **当前实现状态（必须如实区分）：**
 
-- `ASSISTANT_V1` 的模型/工具调用已接入 `assistant_calls`；启用实验账本时，同时接入 `reserve_dispatch`/`complete_dispatch`/`mark_unknown`，见 [`assistant.py` L585-L660](../../opspilot/assistant.py#L585-L660) 和 [`domain/assistant.py` L299-L330](../../opspilot/domain/assistant.py#L299-L330)。
-- 经典 Chat Worker 的压缩调用仍是 [`worker.py` L376](../../opspilot/web/worker.py#L376) 的直接 `model.ainvoke`，由 `chat_attempts` / `context_compression_attempts` 计数，但没有接入实验账本。这是历史路径的已知差异，不应被描述成“所有调用已统一”。
-- 截至 2026-11-04，存在一个未合入 `main` 的 AR-04A 候选分支，尝试把 Assistant 压缩调用接入 `reserve_dispatch`/`complete_dispatch`/`mark_unknown` 并补取消收口；它不能作为当前实现或验收结论引用。
+- `ASSISTANT_V1` 的回答模型调用在 [`assistant.py` L593-L681](../../opspilot/assistant.py#L593-L681)，MCP 工具调用在 L683 起；两者都持久登记 `assistant_calls`，启用实验账本时同时接入 `reserve_dispatch`/`complete_dispatch`/`mark_unknown`，见 [`domain/assistant.py` L299-L330](../../opspilot/domain/assistant.py#L299-L330)。
+- `ASSISTANT_V1` 的 Context 压缩调用由 [`_prepare_assistant_context_impl` L949-L1134](../../opspilot/assistant.py#L949-L1134) 驱动：先持久预留，再调用模型，结算 Usage；取消由 [`_close_cancelled_compression` L858-L928](../../opspilot/assistant.py#L858-L928) 重读数据库后收口，未外发标 `FAILED`/`CANCELLED_BEFORE_DISPATCH`，已外发标 `UNKNOWN` 并保留费用预留。
+- 同一 Run 的多次压缩批次会在每次新 attempt 重置 `call_id`/`logical_key`/`dispatch_started`/`settled`，见 [`assistant.py` L999-L1005](../../opspilot/assistant.py#L999-L1005)；离线 Mock 测试覆盖了“首批 OK、次批取消”的场景。
+- 经典 Chat Worker 的压缩调用仍是 [`worker.py` L376](../../opspilot/web/worker.py#L376) 的直接 `model.ainvoke`，由 `chat_attempts` / `context_compression_attempts` 计数，但没有接入实验账本。这是历史路径的已知差异，不能写成“全系统完全统一”。
+- AR-04A 已于 2026-11-04 Fast-forward 合入 `main`（`9fc3b4e`），但结论仅为 `ACCEPT_WITH_LIMITS`：J6 正式纠错旅程 `NOT_COVERED`，真实 Provider 长会话质量 `NOT_RUN`，浏览器 `HOLD / NOT_RUN`，最新候选全量 pytest 未完成。Mock 通过和账本收口不等于生产级费用可靠性已证明。
 
 **给新 Agent 的规则：** 新增一种模型调用时，先找现有入口复用；如果现有入口类型不匹配，扩展该入口的 `kind` 或适配层，**不要**在 `assistant.py` 里新建一张表、一个新的计数器或一套新的“先 RESERVED 后 OK”的状态机。判断重复的搜索起点：`reserve_dispatch`、`complete_dispatch`、`mark_unknown`、`mark_not_dispatched`、`assistant_calls`、`context_compression_attempts`。
 
@@ -169,12 +172,16 @@ Ragent 的中间件默认不规定工具顺序，Pi 的 `finishTurn` 把继续/�
 
 ### 4.5 渐进解耦
 
-抽取模块的条件，至少同时满足两条：
+发现重复实现、职责冲突，或者单模块职责膨胀已经造成可验证的维护、测试或变更风险时，可以提出有界解耦。必须说明现有问题、最小调整、替代方案和回归风险。不能仅凭文件行数、外部项目结构或抽象美观开展重构。
 
-1. 出现**两个以上真实调用点**，且它们对同一职责有重复实现；
-2. 重复已经造成**职责冲突**（例如两套预算、两套幂等、两套取消语义），而不是“看起来不够优雅”。
+具体约束：
 
-只满足“外部项目这样分”不构成理由。当前值得盯住的是 `opspilot/assistant.py`：它同时包含循环中间件、调用账本适配、取消/未知收口和上下文刷新。AR-04A 的隔离候选已经暴露这些语义的复杂度；但在候选合入、出现第二个真实复用点之前，**不做大规模重构**。先保持边界清晰，再按证据抽取。
+- `opspilot/assistant.py` 应保持薄协调层；循环、调用保障、取消/未知收口和上下文刷新不应继续无界堆积。
+- 模型调用保障应尽量统一复用现有 `assistant_calls` / 实验账本，不另建计数器或状态机。
+- 不为拆分而创造新平台、新 Runtime 或第二套状态机。
+- 本次只修改文档，不执行解耦重构。
+
+当前 `assistant.py` 同时包含循环中间件、调用账本适配、取消/未知收口和上下文刷新；AR-04A 合并后这些语义更完整，也更需要边界清晰。只有出现上述可验证风险时，才提出最小抽取，而不是按外部项目结构照搬。
 
 ## 5. 判断“是不是在重复实现已有能力”
 
@@ -211,19 +218,23 @@ Ragent 的中间件默认不规定工具顺序，Pi 的 `finishTurn` 把继续/�
 
 ## 7. 未验证项与维护
 
-复核方式（2026-11-04）：
+复核方式（固定 commit，不依赖分支 HEAD）：
 
 ```powershell
-git clone --depth 1 https://github.com/nageoffer/ragent.git
-git -C ragent rev-parse HEAD   # 200dca86ac04d3a27f7cfffd7d3dd4d2b1c41129
-git clone --depth 1 https://github.com/earendil-works/pi.git
-git -C pi rev-parse HEAD       # d8981c7ba00a722c897d7270b7f421418512a784
+git clone https://github.com/nageoffer/ragent.git ragent
+git -C ragent checkout --detach 200dca86ac04d3a27f7cfffd7d3dd4d2b1c41129
+git -C ragent rev-parse HEAD   # 必须为 200dca86ac04d3a27f7cfffd7d3dd4d2b1c41129
+
+git clone https://github.com/earendil-works/pi.git pi
+git -C pi checkout --detach d8981c7ba00a722c897d7270b7f421418512a784
+git -C pi rev-parse HEAD       # 必须为 d8981c7ba00a722c897d7270b7f421418512a784
 ```
 
-随后按表内路径、行号打开文件；行号只对上述 commit 有效，仓库更新后必须重新核对。
+必须核对 `rev-parse HEAD` 输出与注释一致；不一致说明检出失败，不能继续引用。外部项目更新不影响已经冻结的源码参考版本：本文引用的是上述固定 commit 的树，分支 HEAD 前进不改变该树的内容；路径和行号只对该 commit 有效。
 
 - Ragent 与 Pi 都只做了静态源码阅读；没有启动服务、没有调用真实 Provider、没有运行其测试。本文不能支持“它们在生产中如何表现”的结论。
-- OpsPilot 的映射以 `48234e5` 为准；AR-04A 的记账/取消候选是隔离分支，未合入 `main`，不能写成已实现。
+- OpsPilot 的映射以 `9fc3b4e`（AR-04A 合并后）为准；AR-04A 只获 `ACCEPT_WITH_LIMITS`，J6、真实 Provider、浏览器与全量 pytest 缺口仍按未覆盖处理，不能写成全面 PASS。
 - 外部仓库会继续移动；引用具体机制时必须同时给 commit 和路径。重命名（如 `badlogic/pi-mono` → `earendil-works/pi`）要记录实际解析结果，不能只写旧地址。
 - 本文不建立第二套治理。与 `PROJECT_NORTH_STAR.md`、冻结任务卡或安全合同冲突时，以这些文件为准，并停止相关变更请求裁决。
 - 更新记录：2026-11-04 初版，核对 Ragent `200dca86` 与 Pi `d8981c7`；补入五条原则、对照矩阵和“重复实现”检查清单。
+- 更新记录：2026-11-04 集成修订，基于 `main@9fc3b4e` 移植原文档候选，修正 Pi 循环归属、渐进解耦条件、外部源码固定 Commit 检出命令，并同步 AR-04A 已合并状态与剩余缺口。
