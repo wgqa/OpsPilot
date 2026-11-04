@@ -1049,6 +1049,7 @@ def _validate_summary_document(value: str, source_sequence_map: dict[str, str]) 
 
 def _prepare_context(
     connection: sqlite3.Connection, run: sqlite3.Row, model_id: str, db_path: str | Path,
+    *, reserved_tokens: int = 0,
 ) -> dict[str, Any]:
     tenant_id, session_id = str(run["tenant_id"]), str(run["session_id"])
     task_id = str(run["task_id"]) if run["task_id"] is not None else None
@@ -1337,6 +1338,16 @@ def _prepare_context(
     if strategy not in CONTEXT_STRATEGIES:
         raise ValueError("OPSPILOT_CONTEXT_STRATEGY must be RECENT_WINDOW, ROLLING_SUMMARY, or HYBRID.")
     budget["strategy"] = strategy
+    # A tool-using agent spends part of the same model input budget on the
+    # tool schemas. Reserve that footprint here so selection and compression
+    # decisions match the wire request instead of failing later in
+    # investigator_context_budget.
+    reserved = max(0, int(reserved_tokens))
+    effective_budget = dict(budget)
+    effective_budget["input_budget_tokens"] = max(
+        0, int(budget["input_budget_tokens"]) - reserved
+    )
+    effective_budget["reserved_tokens"] = reserved
     if strategy == "RECENT_WINDOW":
         visible_history = visible_history[-CHAT_RECENT_WINDOW_MESSAGES:]
     visible_history = [item for item in visible_history if item["message_id"] not in task_input_anchors]
@@ -1358,12 +1369,12 @@ def _prepare_context(
     compression_required = (
         strategy == "ROLLING_SUMMARY" and bool(new_old_history)
     ) or (
-        strategy == "HYBRID" and full_estimate > int(budget["input_budget_tokens"]) and bool(new_old_history)
+        strategy == "HYBRID" and full_estimate > int(effective_budget["input_budget_tokens"]) and bool(new_old_history)
     )
     compression_work: dict[str, Any] | None = None
     if compression_required:
         previous_summary = json.loads(str(summary["summary_json"])) if summary is not None else None
-        compression_limit = min(MAX_COMPRESSION_INPUT_TOKENS, int(budget["input_budget_tokens"]))
+        compression_limit = min(MAX_COMPRESSION_INPUT_TOKENS, int(effective_budget["input_budget_tokens"]))
         selected_old_history: list[dict[str, Any]] = []
         compression_messages: list[dict[str, str]] = []
         compression_estimate = 0
@@ -1549,7 +1560,7 @@ def _prepare_context(
                 f"{item['anchor_kind']} (UNTRUSTED USER INPUT): {item['body']}" if is_anchor else item["body"]}],
             "source_refs": [str(item["message_id"])], "history_item": item,
         })
-    allocation = allocate_context_blocks(blocks, budget=budget, strategy=strategy)
+    allocation = allocate_context_blocks(blocks, budget=effective_budget, strategy=strategy)
     selected_blocks = allocation["selected_blocks"]
     selected = [block for block in selected_blocks if isinstance(block.get("history_item"), dict)]
     selected_history = [dict(block["history_item"]) for block in selected]
@@ -1605,6 +1616,8 @@ def _prepare_context(
     context_budget = {
         **budget, "strategy": strategy, "estimated_input_tokens": allocation["estimated_input_tokens"],
         "input_budget_tokens": allocation["input_budget_tokens"], "utilization": allocation["utilization"],
+        "reserved_tokens": reserved,
+        "configured_input_budget_tokens": int(budget["input_budget_tokens"]),
     }
     return {
         "needs_compression": False, "messages": final_messages,
@@ -1701,7 +1714,8 @@ def _fail_exhausted_chat_run(connection: sqlite3.Connection, run: sqlite3.Row, r
 
 
 def prepare_chat_compression_attempt(
-    path: str | Path, run_id: str, worker_id: str, model_id: str,
+    path: str | Path, run_id: str, worker_id: str, model_id: str, *,
+    reserved_tokens: int = 0,
 ) -> dict[str, Any] | None:
     """Persist a bounded summary request before provider I/O; return None when no compression is needed."""
     with connect(path) as connection:
@@ -1733,7 +1747,7 @@ def prepare_chat_compression_attempt(
         stopped = _stop_at_auxiliary_limit(connection,run)
         if stopped:
             return stopped
-        prepared = _prepare_context(connection, run, model_id, path)
+        prepared = _prepare_context(connection, run, model_id, path, reserved_tokens=reserved_tokens)
         if not prepared.get("needs_compression"):
             return None
         budget = context_budget_for_model(model_id)
@@ -1759,6 +1773,7 @@ def prepare_chat_compression_attempt(
             "covered_from_seq": work["covered_from_seq"],
             "covered_to_seq": work["covered_to_seq"],
             "parent_summary_id": work["parent_summary_id"],
+            "reserved_tokens": max(0, int(reserved_tokens)),
         }
         connection.execute(
             """INSERT INTO context_compression_attempts
@@ -1780,8 +1795,11 @@ def prepare_chat_compression_attempt(
 
 def _current_compression_work(
     connection: sqlite3.Connection, run: sqlite3.Row, model_id: str, db_path: str | Path,
+    *, reserved_tokens: int = 0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    prepared = _prepare_context(connection, run, model_id, db_path)
+    prepared = _prepare_context(
+        connection, run, model_id, db_path, reserved_tokens=reserved_tokens
+    )
     work = prepared.get("compression_work")
     if not prepared.get("needs_compression") or not isinstance(work, dict):
         raise TaskControlError("CONTEXT_COMPRESSION_NO_LONGER_REQUIRED")
@@ -1804,10 +1822,13 @@ def assert_chat_compression_sources_current(
         if run is None or str(run["status"]) != "RUNNING":
             raise TaskControlError("TASK_RUN_NOT_ACTIVE")
         try:
-            prepared, work = _current_compression_work(connection, run, str(attempt["model_id"]), path)
+            saved = json.loads(str(attempt["source_dependencies_json"]))
+            prepared, work = _current_compression_work(
+                connection, run, str(attempt["model_id"]), path,
+                reserved_tokens=int(saved.get("reserved_tokens", 0) or 0),
+            )
             current_digest = _digest(_canonical(work["dependencies"]))
             current_prompt_digest = _digest(_canonical(prepared["compression_messages"]))
-            saved = json.loads(str(attempt["source_dependencies_json"]))
             if current_digest != _digest(_canonical(saved.get("dependencies", []))) or current_prompt_digest != str(attempt["prompt_digest"]):
                 raise TaskControlError("CONTEXT_COMPRESSION_SOURCE_INVALIDATED")
         except Exception as error:
@@ -1837,7 +1858,10 @@ def complete_chat_compression_attempt(
         if run is None or str(run["status"]) != "RUNNING":
             raise TaskControlError("TASK_RUN_NOT_ACTIVE")
         saved = json.loads(str(attempt["source_dependencies_json"]))
-        prepared, work = _current_compression_work(connection, run, str(attempt["model_id"]), path)
+        prepared, work = _current_compression_work(
+            connection, run, str(attempt["model_id"]), path,
+            reserved_tokens=int(saved.get("reserved_tokens", 0) or 0),
+        )
         current_dependencies = work["dependencies"]
         if (
             _digest(_canonical(current_dependencies)) != _digest(_canonical(saved.get("dependencies", [])))
@@ -1974,11 +1998,14 @@ def assert_chat_context_current(path: str | Path, worker_id: str, attempt_id: st
         manifest = connection.execute("SELECT * FROM chat_context_manifests WHERE attempt_id = ?", (attempt_id,)).fetchone()
         if manifest is None:
             raise TaskControlError("CHAT_CONTEXT_MANIFEST_MISSING")
-        prepared = _prepare_context(connection, run, str(attempt["model_id"]), path)
+        truncation = json.loads(str(manifest["truncation_json"]))
+        reserved = int((truncation.get("context_budget") or {}).get("reserved_tokens", 0) or 0)
+        prepared = _prepare_context(
+            connection, run, str(attempt["model_id"]), path, reserved_tokens=reserved
+        )
         current_digest = _digest(_canonical(prepared.get("messages", [])))
         if prepared.get("needs_compression") or current_digest != str(attempt["prompt_digest"]):
             raise TaskControlError("CHAT_CONTEXT_INVALIDATED_BEFORE_PROVIDER")
-        truncation = json.loads(str(manifest["truncation_json"]))
         if _canonical(prepared.get("context_blocks", [])) != _canonical(truncation.get("context_blocks", [])):
             raise TaskControlError("CHAT_CONTEXT_BLOCKS_CHANGED_BEFORE_PROVIDER")
         if _canonical(prepared.get("prior_readonly_followup_refs", [])) != _canonical(
@@ -1988,7 +2015,10 @@ def assert_chat_context_current(path: str | Path, worker_id: str, attempt_id: st
         return {"current": True, "prompt_digest": current_digest}
 
 
-def prepare_chat_attempt(path: str | Path, run_id: str, worker_id: str, model_id: str) -> dict[str, Any]:
+def prepare_chat_attempt(
+    path: str | Path, run_id: str, worker_id: str, model_id: str, *,
+    reserved_tokens: int = 0,
+) -> dict[str, Any]:
     """Persist model attempt and its authorized context manifest before provider I/O."""
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -2018,7 +2048,7 @@ def prepare_chat_attempt(path: str | Path, run_id: str, worker_id: str, model_id
         stopped = _stop_at_auxiliary_limit(connection,run)
         if stopped:
             return stopped
-        prepared = _prepare_context(connection, run, model_id, path)
+        prepared = _prepare_context(connection, run, model_id, path, reserved_tokens=reserved_tokens)
         if prepared.get("needs_compression"):
             return {"error": "CHAT_CONTEXT_COMPRESSION_REQUIRED", "run_id": run_id}
         prompt_digest = _digest(_canonical(prepared["messages"]))

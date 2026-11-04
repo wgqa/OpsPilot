@@ -1,0 +1,93 @@
+{
+  "task": "AR-04A-CONTEXT-JOURNEY-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "recommendation": "ACCEPT_WITH_LIMITS",
+  "implementer": "main-code-development-agent-worktree",
+  "date": "2026-11-04",
+  "repo": "wgqa/OpsPilot",
+  "baseline_sha": "48234e5dabb6ed28ea816b8ebc438288409353b8",
+  "candidate_branch": "codex/ar04a-context-journey-01",
+  "candidate_sha": "PENDING_COMMIT",
+  "code_sha": "PENDING_COMMIT",
+  "authoritative_files": {
+    "PROJECT_NORTH_STAR.md": "1f737712c7a36ceb34433ac09c3fbba3c3305542",
+    "AGENTS.md": "32c45506cceeaa8c76a5c56bf8360ff476b58856",
+    "SKILL.md": "d405c8d413d633824b279202cc1503dab4cf0b03"
+  },
+  "provider_calls": 0,
+  "business_writes": 0,
+  "browser_verification": "NOT_RUN",
+  "gap_reproduced": {
+    "baseline_case": "6th chat turn and the binding Run of the same long session",
+    "baseline_status": "FAILED",
+    "user_visible": "ASSISTANT_STOP:ContextBudgetExceeded:INVESTIGATOR_CONTEXT_EXCEEDS_BUDGET (15466 > 12000 tokens)",
+    "log": "runs/red-baseline-journey.log",
+    "candidate_status": "SUCCEEDED for every journey Run"
+  },
+  "journey": {
+    "spec": "GOLD.md",
+    "cases": ["J1", "J2", "J3", "J4-bind", "J5", "J6-formal-correction", "J7"],
+    "covered": ["J1", "J2", "J3", "J4-bind", "J5", "J7"],
+    "not_covered": ["J6-formal-correction"],
+    "trace": "TRACE.jsonl",
+    "max_outbound_estimated_tokens": 11179,
+    "input_budget_tokens": 12000,
+    "compressed_summary_reached_wire": true,
+    "task_scope_summary_reuse": "NOT_IMPLEMENTED"
+  },
+  "tests": {
+    "new_acceptance": {
+      "file": "tests/test_ar04a_context_journey_01.py",
+      "passed": 4,
+      "failed": 0,
+      "seconds": 41.14,
+      "log": "runs/pytest-ar04a-journey.log"
+    },
+    "targeted_regression": {
+      "files": [
+        "tests/test_m302_context.py",
+        "tests/test_ar02_journey_p0.py",
+        "tests/test_ar02_context_continuity_01.py",
+        "tests/test_m1_chat.py",
+        "tests/test_ar02_assistant.py"
+      ],
+      "passed": 32,
+      "failed": 0,
+      "seconds": 43.61
+    },
+    "full_suite": {
+      "collected": 679,
+      "passed": 678,
+      "failed": 1,
+      "seconds": 832.02,
+      "command": "python -X utf8 -m pytest tests -p no:cacheprovider -q",
+      "known_failure": "tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix",
+      "log": "runs/pytest-full-suite.log"
+    }
+  },
+  "code_change": {
+    "files": [
+      "opspilot/assistant.py",
+      "opspilot/domain/chat.py",
+      "opspilot/domain/context_engineering.py"
+    ],
+    "insertions": 181,
+    "deletions": 28,
+    "new_tables": 0,
+    "new_runtime": false
+  },
+  "safety": {
+    "invalidated_summary_not_sent": "TESTED",
+    "over_budget_fails_closed_without_provider_call": "TESTED",
+    "task_scope_isolation": "TESTED",
+    "business_writes_zero": "TESTED",
+    "approval_or_action_paths_touched": false
+  },
+  "limitations": [
+    "J6 formal correction not end-to-end covered in this journey",
+    "Task-less summary is not reused inside a Task Run (existing isolation boundary)",
+    "Material older than the recent window can still be evicted for Task Runs",
+    "Tool-result reserve is a bounded 1024-token estimate",
+    "No real paid Provider and no browser evidence"
+  ]
+}

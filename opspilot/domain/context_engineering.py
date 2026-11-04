@@ -221,6 +221,10 @@ def investigator_context_budget(
     memories = metadata.get("selected_memories", [])
     knowledge = metadata.get("selected_knowledge", [])
     prior_followups = metadata.get("prior_readonly_followups", [])
+    summary_refs = metadata.get("summary_refs", [])
+    summary_refs = [
+        item for item in summary_refs if isinstance(item, dict) and item.get("summary_id")
+    ] if isinstance(summary_refs, list) else []
     component_estimates = metadata.get("context_component_estimates", {})
     component_estimates = component_estimates if isinstance(component_estimates, dict) else {}
     selected_inputs = [
@@ -275,8 +279,10 @@ def investigator_context_budget(
         },
         {
             "block_id": "investigator-historical-summary", "category": "HISTORICAL_SUMMARY",
-            "authority": "NONE_IN_INVESTIGATION_RUN", "status": "NOT_APPLICABLE",
-            "estimated_tokens": 0, "source_refs": [],
+            "authority": "UNTRUSTED_DERIVED_CONTEXT" if summary_refs else "NONE_IN_INVESTIGATION_RUN",
+            "status": "SELECTED" if summary_refs else "NOT_APPLICABLE",
+            "estimated_tokens": int(component_estimates.get("historical_summary", 0)),
+            "source_refs": [f"summary:{item['summary_id']}" for item in summary_refs],
         },
         {
             "block_id": "investigator-external-guidance", "category": "EXTERNAL_GUIDANCE",
