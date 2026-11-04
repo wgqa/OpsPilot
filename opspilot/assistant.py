@@ -855,9 +855,100 @@ def _settle_compression_replay(path, experiment_id, run_id, logical_key, usage):
         raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
 
 
+def _close_cancelled_compression(path, run_id, worker_id, state, experiment_id):
+    """Persist a conservative terminal state for a cancelled compression dispatch.
+
+    Runs synchronously so a second cancellation cannot skip the ledger close. The
+    database is re-read instead of trusting only in-memory flags.
+    """
+    from opspilot.domain.assistant_experiment import (
+        mark_not_dispatched, mark_unknown, read_dispatch,
+    )
+    from opspilot.domain.chat import fail_chat_compression_attempt
+
+    call_id = state.get("call_id")
+    logical_key = state.get("logical_key")
+    dispatch_started = bool(state.get("dispatch_started"))
+    settled = bool(state.get("settled"))
+    attempt_ids: list[str] = []
+    if state.get("attempt_id"):
+        attempt_ids.append(str(state["attempt_id"]))
+    with connect(path) as connection:
+        if call_id is None and logical_key:
+            row = connection.execute(
+                "SELECT call_id FROM assistant_calls WHERE run_id=? AND kind='MODEL' AND logical_key=?",
+                (run_id, logical_key),
+            ).fetchone()
+            if row is not None:
+                call_id = str(row["call_id"])
+        for row in connection.execute(
+            "SELECT attempt_id FROM context_compression_attempts WHERE run_id=? AND status='RESERVED'",
+            (run_id,),
+        ).fetchall():
+            attempt_ids.append(str(row["attempt_id"]))
+    try:
+        if call_id is not None and not settled:
+            if dispatch_started:
+                # The request may have reached the Provider: keep the full
+                # reservation and record UNKNOWN instead of releasing spend.
+                domain.finish(path, call_id, "UNKNOWN")
+                if experiment_id and logical_key:
+                    mark_unknown(
+                        path, experiment_id=experiment_id, run_id=run_id,
+                        kind="MODEL", logical_key=logical_key,
+                        error_code="CancelledError",
+                    )
+            else:
+                domain.finish(
+                    path, call_id, "FAILED",
+                    {"error": "CANCELLED_BEFORE_DISPATCH"},
+                )
+                if experiment_id and logical_key:
+                    dispatch = read_dispatch(
+                        path, experiment_id=experiment_id, run_id=run_id,
+                        kind="MODEL", logical_key=logical_key,
+                    )
+                    if dispatch is not None and dispatch["status"] == "RESERVED":
+                        mark_not_dispatched(
+                            path, experiment_id=experiment_id, run_id=run_id,
+                            kind="MODEL", logical_key=logical_key,
+                            reason_code="CANCELLED_BEFORE_DISPATCH",
+                        )
+    finally:
+        for attempt_id in dict.fromkeys(attempt_ids):
+            try:
+                fail_chat_compression_attempt(
+                    path, worker_id, attempt_id, "CancelledError",
+                )
+            except Exception as error:  # already terminal: never mask cancellation
+                print(
+                    f"COMPRESSION_CANCEL_CLEANUP_FAILED attempt_id={attempt_id} "
+                    f"error={type(error).__name__}",
+                    flush=True,
+                )
+
+
 async def _prepare_assistant_context(
     path, run_id, worker_id, model_id, model, *, reserved_tokens: int = 0,
     experiment_id=None,
+):
+    state = {
+        "attempt_id": None, "call_id": None, "logical_key": None,
+        "dispatch_started": False, "settled": False,
+    }
+    try:
+        return await _prepare_assistant_context_impl(
+            path, run_id, worker_id, model_id, model,
+            reserved_tokens=reserved_tokens, experiment_id=experiment_id, state=state,
+        )
+    except asyncio.CancelledError:
+        _close_cancelled_compression(path, run_id, worker_id, state, experiment_id)
+        raise
+
+
+async def _prepare_assistant_context_impl(
+    path, run_id, worker_id, model_id, model, *, reserved_tokens: int = 0,
+    experiment_id=None, state=None,
 ):
     """Reuse the existing bounded chat-context compression before the first Provider call.
 
@@ -889,9 +980,8 @@ async def _prepare_assistant_context(
 
     while True:
         try:
-            compression = await asyncio.to_thread(
-                prepare_chat_compression_attempt, path, run_id, worker_id, model_id,
-                reserved_tokens=reserved_tokens,
+            compression = prepare_chat_compression_attempt(
+                path, run_id, worker_id, model_id, reserved_tokens=reserved_tokens,
             )
         except ContextBudgetExceeded as error:
             return stop(error.code)
@@ -903,10 +993,9 @@ async def _prepare_assistant_context(
         if compression.get("error"):
             return compression
         attempt_id = str(compression["attempt_id"])
+        state["attempt_id"] = attempt_id
         try:
-            current = await asyncio.to_thread(
-                assert_chat_compression_sources_current, path, worker_id, attempt_id,
-            )
+            current = assert_chat_compression_sources_current(path, worker_id, attempt_id)
             if not current.get("current"):
                 continue
             messages = [
@@ -922,45 +1011,40 @@ async def _prepare_assistant_context(
                 "messages": compression["messages"],
             }
             logical_key = "context-compression:" + digest_json(compression["messages"])
+            state["logical_key"] = logical_key
             try:
-                call, fresh = await asyncio.to_thread(
-                    domain.reserve, path, run_id, "MODEL", logical_key, wire,
-                    worker_id, experiment_id=experiment_id,
+                call, fresh = domain.reserve(
+                    path, run_id, "MODEL", logical_key, wire, worker_id,
+                    experiment_id=experiment_id,
                 )
             except TaskControlError as error:
                 code = str(getattr(error, "code", None) or "ASSISTANT_MODEL_RESERVE_FAILED")
-                await asyncio.to_thread(
-                    fail_chat_compression_attempt, path, worker_id, attempt_id, code,
-                )
+                fail_chat_compression_attempt(path, worker_id, attempt_id, code)
                 return stop(code)
+            state["call_id"] = str(call["call_id"])
             if fresh:
                 if experiment_id:
                     try:
-                        campaign = await asyncio.to_thread(
-                            reserve_dispatch, path, experiment_id=experiment_id,
+                        campaign = reserve_dispatch(
+                            path, experiment_id=experiment_id,
                             run_id=run_id, kind="MODEL", logical_key=logical_key,
                             request=wire,
                         )
                     except ExperimentBudgetError as error:
-                        await asyncio.to_thread(
-                            domain.finish, path, call["call_id"], "FAILED",
-                            {"error": error.code},
+                        domain.finish(
+                            path, call["call_id"], "FAILED", {"error": error.code},
                         )
-                        await asyncio.to_thread(
-                            fail_chat_compression_attempt, path, worker_id,
-                            attempt_id, error.code,
+                        fail_chat_compression_attempt(
+                            path, worker_id, attempt_id, error.code,
                         )
                         return stop(error.code)
                     if not campaign.get("dispatch"):
                         code = "AR02_LIVE_CAMPAIGN_REPLAY_CONFLICT"
-                        await asyncio.to_thread(
-                            domain.finish, path, call["call_id"], "FAILED", {"error": code},
-                        )
-                        await asyncio.to_thread(
-                            fail_chat_compression_attempt, path, worker_id, attempt_id, code,
-                        )
+                        domain.finish(path, call["call_id"], "FAILED", {"error": code})
+                        fail_chat_compression_attempt(path, worker_id, attempt_id, code)
                         return stop(code)
                 try:
+                    state["dispatch_started"] = True
                     response = await _compression_model(model).ainvoke(messages)
                     text = str(getattr(response, "content", "") or "")
                     metadata = getattr(response, "response_metadata", None)
@@ -970,67 +1054,59 @@ async def _prepare_assistant_context(
                     ) or None
                     usage = Loop._usage_from_messages([response])
                     if experiment_id:
-                        settlement = await asyncio.to_thread(
-                            complete_dispatch, path, experiment_id=experiment_id,
+                        settlement = complete_dispatch(
+                            path, experiment_id=experiment_id,
                             run_id=run_id, kind="MODEL", logical_key=logical_key,
                             usage=usage,
                         )
-                        state = str(settlement.get("usage_state"))
-                        if state != "KNOWN":
+                        usage_state = str(settlement.get("usage_state"))
+                        if usage_state != "KNOWN":
                             code = (
-                                "AR02_LIVE_USAGE_VIOLATION" if state == "VIOLATION"
+                                "AR02_LIVE_USAGE_VIOLATION" if usage_state == "VIOLATION"
                                 else "AR02_LIVE_USAGE_UNKNOWN"
                             )
-                            await asyncio.to_thread(
-                                domain.finish, path, call["call_id"], "FAILED",
-                                {"error": code},
+                            domain.finish(
+                                path, call["call_id"], "FAILED", {"error": code},
                             )
-                            await asyncio.to_thread(
-                                fail_chat_compression_attempt, path, worker_id,
-                                attempt_id, code,
+                            fail_chat_compression_attempt(
+                                path, worker_id, attempt_id, code,
                             )
                             return stop(code)
-                    await asyncio.to_thread(
-                        domain.finish, path, call["call_id"], "OK",
+                    domain.finish(
+                        path, call["call_id"], "OK",
                         {"content": text, "provider_response_id": provider_id},
                         [getattr(response, "usage_metadata", None)],
                     )
+                    state["settled"] = True
                 except asyncio.CancelledError:
                     raise
                 except BaseException as error:
                     code = str(
                         getattr(error, "code", None) or "CHAT_CONTEXT_COMPRESSION_FAILED"
                     )
-                    await asyncio.to_thread(
-                        domain.finish, path, call["call_id"], "UNKNOWN",
-                    )
+                    domain.finish(path, call["call_id"], "UNKNOWN")
                     if experiment_id:
-                        await asyncio.to_thread(
-                            mark_unknown, path, experiment_id=experiment_id,
+                        mark_unknown(
+                            path, experiment_id=experiment_id,
                             run_id=run_id, kind="MODEL", logical_key=logical_key,
                             error_code=type(error).__name__,
                         )
-                    await asyncio.to_thread(
-                        fail_chat_compression_attempt, path, worker_id,
-                        attempt_id, code,
-                    )
+                    fail_chat_compression_attempt(path, worker_id, attempt_id, code)
                     return stop(code)
             else:
                 text, provider_id, usage = _cached_compression_result(call)
                 if experiment_id:
                     try:
-                        await asyncio.to_thread(
-                            _settle_compression_replay, path, experiment_id,
-                            run_id, logical_key, usage,
+                        _settle_compression_replay(
+                            path, experiment_id, run_id, logical_key, usage,
                         )
                     except ExperimentBudgetError as error:
-                        await asyncio.to_thread(
-                            fail_chat_compression_attempt, path, worker_id,
-                            attempt_id, error.code,
+                        fail_chat_compression_attempt(
+                            path, worker_id, attempt_id, error.code,
                         )
                         return stop(error.code)
-            result = await asyncio.to_thread(
-                complete_chat_compression_attempt, path, worker_id, attempt_id, text,
+            result = complete_chat_compression_attempt(
+                path, worker_id, attempt_id, text,
                 provider_response_id=provider_id,
                 input_tokens=(usage or {}).get("input_tokens"),
                 output_tokens=(usage or {}).get("output_tokens"),
@@ -1043,9 +1119,8 @@ async def _prepare_assistant_context(
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            await asyncio.to_thread(
-                fail_chat_compression_attempt, path, worker_id, attempt_id,
-                type(error).__name__,
+            fail_chat_compression_attempt(
+                path, worker_id, attempt_id, type(error).__name__,
             )
             return stop("CHAT_CONTEXT_COMPRESSION_FAILED")
 

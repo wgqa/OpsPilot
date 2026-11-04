@@ -263,7 +263,16 @@ def _prepare_six_turn_history(client, headers, session_id):
     items = []
     for index, body in enumerate(_chat_bodies()[:6], start=1):
         item, run = _send(client, headers, session_id, f"hf-history-{index}", body)
-        assert run["status"] == "SUCCEEDED", run
+        if run["status"] != "SUCCEEDED":
+            answers = [
+                row["body"] for row in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+                if row["role"] == "ASSISTANT"
+            ]
+            raise AssertionError({
+                "turn": index, "status": run["status"],
+                "blocked_reason": run.get("blocked_reason"),
+                "notice": answers[-1][:300] if answers else None,
+            })
         items.append(item)
     return items
 

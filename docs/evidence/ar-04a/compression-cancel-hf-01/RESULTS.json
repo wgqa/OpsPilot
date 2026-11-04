@@ -1,0 +1,87 @@
+{
+  "task": "AR-04A-COMPRESSION-CANCEL-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "recommendation": "MERGE_READY",
+  "date": "2026-11-04",
+  "repo": "wgqa/OpsPilot",
+  "base_sha": "f53d6886beb24b6cb6c5e4398b280660d5bacf88",
+  "main_sha_unchanged": "48234e5dabb6ed28ea816b8ebc438288409353b8",
+  "branch": "codex/ar04a-compression-cancel-hf-01",
+  "candidate_sha": "PENDING_COMMIT",
+  "provider_calls_real": 0,
+  "problem": {
+    "object": "opspilot/assistant.py::_prepare_assistant_context cancellation path",
+    "baseline_state_after_cancel": {
+      "assistant_calls": "RESERVED",
+      "ar02_live_dispatches": "RESERVED",
+      "context_compression_attempts": "RESERVED",
+      "experiment_budget": "OPEN"
+    },
+    "logs": [
+      "runs/red-single-cancel.log",
+      "runs/red-baseline-cancel-suite.log"
+    ]
+  },
+  "fix": {
+    "file": "opspilot/assistant.py",
+    "state_flags": ["attempt_id", "call_id", "logical_key", "dispatch_started", "settled"],
+    "cancellation_points": "only the Provider await; ledger writes in the compression section are synchronous short transactions",
+    "cleanup": "_close_cancelled_compression re-reads the database and closes the call, dispatch and compression attempt synchronously before re-raising CancelledError",
+    "states": {
+      "settled": "keep the confirmed settlement",
+      "sent_unknown": "Model Call UNKNOWN + Dispatch UNKNOWN with reservation kept + BUDGET_BREACH",
+      "reserved_only": "Model Call FAILED + Dispatch NOT_DISPATCHED when reserved + budget stays OPEN"
+    },
+    "new_tables": 0
+  },
+  "tests": {
+    "file": "tests/test_ar04a_compression_cancel_hf_01.py",
+    "cases": {
+      "in_flight_cancel_records_unknown": "PASSED",
+      "recovery_does_not_resend": "PASSED",
+      "pre_dispatch_cancel_no_dangling_dispatch": "PASSED"
+    },
+    "cancel_passed": 3,
+    "cancel_seconds": 30.42,
+    "cancel_log": "runs/pytest-cancel-hf.log",
+    "combined_with_hf_and_ar04a": {
+      "passed": 13,
+      "failed": 0,
+      "seconds": 137.34,
+      "log": "runs/green-cancel-hf-ar04a.log"
+    },
+    "baseline_red": {
+      "suite_failed": true,
+      "observed": "('RESERVED', 'RESERVED', 'RESERVED', 'OPEN')",
+      "log": "runs/red-baseline-cancel-suite.log"
+    },
+    "full_suite": "NOT_RUN_BY_SCOPE"
+  },
+  "ledger_final_states": {
+    "in_flight_cancel": {
+      "assistant_calls": "UNKNOWN",
+      "dispatch": "UNKNOWN / reservation kept",
+      "budget": "BUDGET_BREACH",
+      "summary": "none"
+    },
+    "recovery_replay": {
+      "provider_requests": "no second compression request",
+      "run": "FAILED with ASSISTANT_EXTERNAL_RESULT_UNKNOWN"
+    },
+    "pre_dispatch_cancel": {
+      "assistant_calls": "FAILED",
+      "dispatch": "absent",
+      "budget": "OPEN"
+    },
+    "success": {
+      "assistant_calls": "OK with Usage",
+      "dispatch": "OK / KNOWN / settled",
+      "summary": "CURRENT"
+    }
+  },
+  "limitations": [
+    "Only the ASSISTANT_V1 compression section is covered",
+    "A post-cancellation Run retry is still possible but stops on ASSISTANT_EXTERNAL_RESULT_UNKNOWN without resending",
+    "Mock Provider only; real Provider and browser NOT_RUN"
+  ]
+}
