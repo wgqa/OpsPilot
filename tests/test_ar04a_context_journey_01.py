@@ -133,7 +133,7 @@ def _model_wires(db_path, run_id):
     from opspilot.domain.database import connect
 
     with connect(db_path) as connection:
-        return [
+        wires = [
             json.loads(row["request_json"])
             for row in connection.execute(
                 "SELECT request_json FROM assistant_calls "
@@ -141,6 +141,9 @@ def _model_wires(db_path, run_id):
                 (run_id,),
             )
         ]
+    # Compression is a real model dispatch but not an answer wire: it carries no
+    # WORK_CONTEXT/tool-schema budget and is asserted in the HF budget test.
+    return [wire for wire in wires if wire.get("purpose") != "CONTEXT_COMPRESSION"]
 
 
 def _business_write_counts(db_path, task_id):

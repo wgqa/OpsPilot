@@ -1,0 +1,99 @@
+{
+  "task": "AR-04A-COMPRESSION-BUDGET-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "recommendation": "MERGE_READY",
+  "date": "2026-11-04",
+  "repo": "wgqa/OpsPilot",
+  "base_sha": "1624d7bddab535495a758f5e22fc79ad0ced9174",
+  "main_sha_unchanged": "48234e5dabb6ed28ea816b8ebc438288409353b8",
+  "branch": "codex/ar04a-compression-budget-hf-01",
+  "candidate_sha": "PENDING_COMMIT",
+  "provider_calls_real": 0,
+  "problem": {
+    "object": "opspilot/assistant.py::_prepare_assistant_context -> model.ainvoke(messages)",
+    "missing": [
+      "domain.reserve (run model count / Task auxiliary budget / durable model call)",
+      "reserve_dispatch (AR-02/AR-03 campaign count and cost reservation)",
+      "complete_dispatch (actual Usage settlement)",
+      "mark_unknown (UNKNOWN spend retained and not resent)"
+    ],
+    "baseline_reproduction": {
+      "compression_wire_max_tokens": 2048,
+      "assistant_calls_model_rows_for_compression": 0,
+      "experiment_dispatch_rows_for_compression": 0,
+      "provider_limit_exhausted_still_sent_request_number": 17,
+      "logs": [
+        "runs/red-baseline-compression-cap.log",
+        "runs/red-baseline-provider-limit.log"
+      ]
+    }
+  },
+  "fix": {
+    "file": "opspilot/assistant.py",
+    "reused_domain_primitives": [
+      "assistant.reserve",
+      "assistant.finish",
+      "assistant_experiment.reserve_dispatch",
+      "assistant_experiment.complete_dispatch",
+      "assistant_experiment.mark_unknown",
+      "assistant_experiment.read_dispatch"
+    ],
+    "logical_key": "context-compression:<sha256 of compression messages>",
+    "output_cap": {
+      "max_tokens": 512,
+      "wire_check": "max_tokens==512, no max_completion_tokens, thinking==disabled"
+    },
+    "new_tables": 0
+  },
+  "tests": {
+    "hf_file": "tests/test_ar04a_compression_budget_hf_01.py",
+    "hf_cases": {
+      "positive_reserved_counted_settled_capped": "PASSED",
+      "provider_limit_zero_dispatch": "PASSED",
+      "usd_limit_zero_dispatch": "PASSED",
+      "unknown_outcome_not_resent": "PASSED",
+      "replay_not_sent_twice": "PASSED",
+      "non_experiment_path_counted": "PASSED"
+    },
+    "hf_passed": 6,
+    "hf_failed": 0,
+    "hf_seconds": 68.77,
+    "hf_log": "runs/pytest-hf.log",
+    "ar04a_journey": {
+      "passed": 4,
+      "failed": 0,
+      "seconds": 39.45,
+      "log": "runs/pytest-ar04a-journey.log"
+    },
+    "targeted_regression": {
+      "files": [
+        "tests/test_m302_context.py",
+        "tests/test_ar02_journey_p0.py",
+        "tests/test_ar02_context_continuity_01.py",
+        "tests/test_m1_chat.py",
+        "tests/test_ar02_assistant.py"
+      ],
+      "passed": 42,
+      "failed": 0,
+      "seconds": 151.42,
+      "log": "runs/pytest-targeted-regression.log"
+    },
+    "full_suite": {
+      "status": "NOT_COMPLETED_ENVIRONMENT_HANG",
+      "note": "this candidate's full-suite attempt stalled at 21% and was stopped after 16+ minutes; an earlier full-suite attempt at the AR-04A commit stalled at 31% in the same container. Both stalls are in the MCP/stdio-heavy region, not reported test failures",
+      "log": "runs/pytest-full-suite.log"
+    }
+  },
+  "ledger_mapping": {
+    "assistant_calls": "kind=MODEL, logical_key=context-compression:*, status OK/UNKNOWN, usage_json actual tokens",
+    "ar02_live_dispatches": "same logical_key; status OK/UNKNOWN, usage_state KNOWN, settled_usd_micro actual",
+    "context_compression_attempts": "SUCCEEDED with provider_response_id and tokens",
+    "context_summaries": "CURRENT after settlement"
+  },
+  "limitations": [
+    "Mock Provider only; no real paid Provider call",
+    "Classic chat worker compression path unchanged",
+    "Replay dedupe is per identical compression request digest; changed sources intentionally re-charge",
+    "AR-04A J6 / task-scope summary limitations unchanged"
+  ]
+}

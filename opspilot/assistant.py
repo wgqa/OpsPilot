@@ -25,7 +25,7 @@ from opspilot.domain.database import connect
 from opspilot.domain.d2 import canonical_json, digest_json, reserve_attempt, finish_attempt, record_tool_observation
 from opspilot.domain.chat import (
     prepare_chat_attempt, complete_chat_attempt, fail_chat_attempt,
-    _prepare_context, record_chat_limit_in_transaction,
+    _prepare_context, record_chat_limit_in_transaction, MAX_COMPRESSION_OUTPUT_TOKENS,
 )
 from opspilot.domain.context_engineering import investigator_context_budget, estimate_text_tokens
 from opspilot.domain.task_control import TaskControlError
@@ -806,15 +806,73 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
         except asyncio.CancelledError:pass
         end_execution_interval(path,run['task_id'])
 
+def _compression_model(model):
+    """Bind the compression output cap without losing the Provider's pinned wire options."""
+    extra_body = dict(getattr(model, "extra_body", None) or {})
+    extra_body["max_tokens"] = MAX_COMPRESSION_OUTPUT_TOKENS
+    return model.bind(extra_body=extra_body)
+
+
+def _cached_compression_result(call):
+    """Read a durable Provider result for an identical compression request."""
+    try:
+        result = json.loads(call["result_json"]) if call.get("result_json") else None
+        usage_list = json.loads(call["usage_json"]) if call.get("usage_json") else []
+    except (TypeError, ValueError, json.JSONDecodeError):
+        result, usage_list = None, []
+    text = result.get("content") if isinstance(result, dict) else None
+    provider_id = result.get("provider_response_id") if isinstance(result, dict) else None
+    usage = (
+        usage_list[0]
+        if isinstance(usage_list, list) and usage_list and isinstance(usage_list[0], dict)
+        else {}
+    )
+    return (text if isinstance(text, str) else ""), provider_id, usage
+
+
+def _settle_compression_replay(path, experiment_id, run_id, logical_key, usage):
+    """Settle only an already-reserved campaign dispatch; never resend a Provider request."""
+    from opspilot.domain.assistant_experiment import (
+        ExperimentBudgetError, complete_dispatch, read_dispatch,
+    )
+    prior = read_dispatch(
+        path, experiment_id=experiment_id, run_id=run_id, kind="MODEL",
+        logical_key=logical_key,
+    )
+    if prior is None:
+        return
+    if prior["status"] == "RESERVED":
+        settlement = complete_dispatch(
+            path, experiment_id=experiment_id, run_id=run_id, kind="MODEL",
+            logical_key=logical_key, usage=usage or None,
+        )
+        if str(settlement.get("usage_state")) != "KNOWN":
+            raise ExperimentBudgetError("AR02_LIVE_USAGE_UNKNOWN")
+        return
+    if prior["status"] != "OK":
+        raise ExperimentBudgetError("AR02_LIVE_CALL_OUTCOME_UNKNOWN")
+    if str(prior.get("usage_state")) != "KNOWN":
+        raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+
+
 async def _prepare_assistant_context(
     path, run_id, worker_id, model_id, model, *, reserved_tokens: int = 0,
+    experiment_id=None,
 ):
     """Reuse the existing bounded chat-context compression before the first Provider call.
 
     The classic streaming chat worker owns its own attempt lifecycle. This path has
     no stream to protect, so it drives the same Domain primitives directly instead of
     re-implementing summary generation, source currentness checks or invalidation.
+
+    The compression request is a real model dispatch, so it goes through the same
+    run-scoped model-count budget, auxiliary Task budget and AR-02/AR-03 experiment
+    ledger as the answer loop: durable reserve before I/O, Usage settlement, no
+    resend on UNKNOWN, and a stable request key so a retry reuses the recorded result.
     """
+    from opspilot.domain.assistant_experiment import (
+        ExperimentBudgetError, complete_dispatch, mark_unknown, reserve_dispatch,
+    )
     from opspilot.domain.chat import (
         assert_chat_compression_sources_current,
         complete_chat_compression_attempt,
@@ -823,6 +881,12 @@ async def _prepare_assistant_context(
     )
     from opspilot.domain.context_engineering import ContextBudgetExceeded
 
+    def stop(code: str) -> dict[str, object]:
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            record_chat_limit_in_transaction(connection, run_id, code)
+        return {"error": code, "run_id": run_id}
+
     while True:
         try:
             compression = await asyncio.to_thread(
@@ -830,10 +894,7 @@ async def _prepare_assistant_context(
                 reserved_tokens=reserved_tokens,
             )
         except ContextBudgetExceeded as error:
-            with connect(path) as connection:
-                connection.execute("BEGIN IMMEDIATE")
-                record_chat_limit_in_transaction(connection, run_id, error.code)
-            return {"error": error.code, "run_id": run_id}
+            return stop(error.code)
         if compression is None:
             return await asyncio.to_thread(
                 prepare_chat_attempt, path, run_id, worker_id, model_id,
@@ -854,22 +915,126 @@ async def _prepare_assistant_context(
                 else HumanMessage(content=str(item["content"]))
                 for item in compression["messages"]
             ]
-            response = await model.ainvoke(messages)
-            usage = getattr(response, "usage_metadata", None)
-            usage = usage if isinstance(usage, dict) else {}
-            metadata = getattr(response, "response_metadata", None)
-            metadata = metadata if isinstance(metadata, dict) else {}
-            token_usage = metadata.get("token_usage")
-            token_usage = token_usage if isinstance(token_usage, dict) else {}
+            wire = {
+                "purpose": "CONTEXT_COMPRESSION",
+                "model_id": model_id,
+                "max_output_tokens": MAX_COMPRESSION_OUTPUT_TOKENS,
+                "messages": compression["messages"],
+            }
+            logical_key = "context-compression:" + digest_json(compression["messages"])
+            try:
+                call, fresh = await asyncio.to_thread(
+                    domain.reserve, path, run_id, "MODEL", logical_key, wire,
+                    worker_id, experiment_id=experiment_id,
+                )
+            except TaskControlError as error:
+                code = str(getattr(error, "code", None) or "ASSISTANT_MODEL_RESERVE_FAILED")
+                await asyncio.to_thread(
+                    fail_chat_compression_attempt, path, worker_id, attempt_id, code,
+                )
+                return stop(code)
+            if fresh:
+                if experiment_id:
+                    try:
+                        campaign = await asyncio.to_thread(
+                            reserve_dispatch, path, experiment_id=experiment_id,
+                            run_id=run_id, kind="MODEL", logical_key=logical_key,
+                            request=wire,
+                        )
+                    except ExperimentBudgetError as error:
+                        await asyncio.to_thread(
+                            domain.finish, path, call["call_id"], "FAILED",
+                            {"error": error.code},
+                        )
+                        await asyncio.to_thread(
+                            fail_chat_compression_attempt, path, worker_id,
+                            attempt_id, error.code,
+                        )
+                        return stop(error.code)
+                    if not campaign.get("dispatch"):
+                        code = "AR02_LIVE_CAMPAIGN_REPLAY_CONFLICT"
+                        await asyncio.to_thread(
+                            domain.finish, path, call["call_id"], "FAILED", {"error": code},
+                        )
+                        await asyncio.to_thread(
+                            fail_chat_compression_attempt, path, worker_id, attempt_id, code,
+                        )
+                        return stop(code)
+                try:
+                    response = await _compression_model(model).ainvoke(messages)
+                    text = str(getattr(response, "content", "") or "")
+                    metadata = getattr(response, "response_metadata", None)
+                    metadata = metadata if isinstance(metadata, dict) else {}
+                    provider_id = str(
+                        getattr(response, "id", None) or metadata.get("id") or ""
+                    ) or None
+                    usage = Loop._usage_from_messages([response])
+                    if experiment_id:
+                        settlement = await asyncio.to_thread(
+                            complete_dispatch, path, experiment_id=experiment_id,
+                            run_id=run_id, kind="MODEL", logical_key=logical_key,
+                            usage=usage,
+                        )
+                        state = str(settlement.get("usage_state"))
+                        if state != "KNOWN":
+                            code = (
+                                "AR02_LIVE_USAGE_VIOLATION" if state == "VIOLATION"
+                                else "AR02_LIVE_USAGE_UNKNOWN"
+                            )
+                            await asyncio.to_thread(
+                                domain.finish, path, call["call_id"], "FAILED",
+                                {"error": code},
+                            )
+                            await asyncio.to_thread(
+                                fail_chat_compression_attempt, path, worker_id,
+                                attempt_id, code,
+                            )
+                            return stop(code)
+                    await asyncio.to_thread(
+                        domain.finish, path, call["call_id"], "OK",
+                        {"content": text, "provider_response_id": provider_id},
+                        [getattr(response, "usage_metadata", None)],
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except BaseException as error:
+                    code = str(
+                        getattr(error, "code", None) or "CHAT_CONTEXT_COMPRESSION_FAILED"
+                    )
+                    await asyncio.to_thread(
+                        domain.finish, path, call["call_id"], "UNKNOWN",
+                    )
+                    if experiment_id:
+                        await asyncio.to_thread(
+                            mark_unknown, path, experiment_id=experiment_id,
+                            run_id=run_id, kind="MODEL", logical_key=logical_key,
+                            error_code=type(error).__name__,
+                        )
+                    await asyncio.to_thread(
+                        fail_chat_compression_attempt, path, worker_id,
+                        attempt_id, code,
+                    )
+                    return stop(code)
+            else:
+                text, provider_id, usage = _cached_compression_result(call)
+                if experiment_id:
+                    try:
+                        await asyncio.to_thread(
+                            _settle_compression_replay, path, experiment_id,
+                            run_id, logical_key, usage,
+                        )
+                    except ExperimentBudgetError as error:
+                        await asyncio.to_thread(
+                            fail_chat_compression_attempt, path, worker_id,
+                            attempt_id, error.code,
+                        )
+                        return stop(error.code)
             result = await asyncio.to_thread(
-                complete_chat_compression_attempt, path, worker_id, attempt_id,
-                str(getattr(response, "content", "") or ""),
-                provider_response_id=str(
-                    getattr(response, "id", None) or metadata.get("id") or ""
-                ) or None,
-                input_tokens=usage.get("input_tokens", token_usage.get("prompt_tokens")),
-                output_tokens=usage.get("output_tokens", token_usage.get("completion_tokens")),
-                total_tokens=usage.get("total_tokens", token_usage.get("total_tokens")),
+                complete_chat_compression_attempt, path, worker_id, attempt_id, text,
+                provider_response_id=provider_id,
+                input_tokens=(usage or {}).get("input_tokens"),
+                output_tokens=(usage or {}).get("output_tokens"),
+                total_tokens=(usage or {}).get("total_tokens"),
             )
             if result.get("status") == "INVALIDATED":
                 continue
@@ -882,7 +1047,7 @@ async def _prepare_assistant_context(
                 fail_chat_compression_attempt, path, worker_id, attempt_id,
                 type(error).__name__,
             )
-            return {"error": "CHAT_CONTEXT_COMPRESSION_FAILED", "run_id": run_id}
+            return stop("CHAT_CONTEXT_COMPRESSION_FAILED")
 
 
 async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None):
@@ -936,7 +1101,8 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             reserved_tokens+=ASSISTANT_TOOL_RESULT_RESERVE
         if delivery is None:
             prepared=await _prepare_assistant_context(
-                path,run_id,worker_id,model_id,model,reserved_tokens=reserved_tokens
+                path,run_id,worker_id,model_id,model,reserved_tokens=reserved_tokens,
+                experiment_id=experiment_id,
             )
             if prepared.get('error'): return prepared
             delivery=prepared['attempt_id']
