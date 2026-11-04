@@ -86,6 +86,8 @@ AR-04A 新增的压缩调用只写 `context_compression_attempts`，**没有**�
 
 ## 8. 候选 SHA 与建议
 
-见 `RESULTS.json`。本轮只提交隔离候选，不合并 main。
+- 代码 + 测试 + 证据提交：`dcefa8f469a04a7151a9a6807131337057c5c2a1`（已推送 `origin/codex/ar04a-compression-budget-hf-01`）
+- 分支 head 若再有一个仅更新本文件/RESULTS 记录字段的提交，代码树与该提交相同；以远端分支 head 为准
+- 本轮只提交隔离候选，不合并 main
 
 **建议：** `MERGE_READY`（就本 HF 的预算边界而言），仍由主 Agent 独立核验后决定合并。
