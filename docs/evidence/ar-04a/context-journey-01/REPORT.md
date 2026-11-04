@@ -77,7 +77,9 @@
 
 ## 7. 最终候选 SHA
 
-见 `RESULTS.json`。本任务只提交隔离候选，不合并 `main`。
+- 代码 + 测试 + 证据提交：`b6f3ea54b2dcc2589b5c3172303faa7bcb307082`（已推送到 `origin/codex/ar04a-context-journey-01`）
+- 分支 head 上可能再有一个仅更新本文件/RESULTS 记录字段的 bookkeeping 提交，代码树与 `b6f3ea5` 相同；以 `git rev-parse origin/codex/ar04a-context-journey-01` 为准
+- 本任务只提交隔离候选，不合并 `main`
 
 ## 8. 建议
 
