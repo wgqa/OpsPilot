@@ -354,7 +354,8 @@ class _CampaignState:
             or budget["mcp_limit"] != MCP_LIMIT
             or budget["budget_usd_micro"] != BUDGET_USD_MICRO
             or budget["price_version"] != PRICE_VERSION
-            or budget["provider_used"] > PROVIDER_LIMIT or budget["mcp_used"] > MCP_LIMIT
+            or budget["provider_used"] > PROVIDER_LIMIT
+            or (MCP_LIMIT is not None and budget["mcp_used"] > MCP_LIMIT)
             or budget["usd_reserved_micro"] + budget["usd_settled_micro"] > BUDGET_USD_MICRO
             or budget["provider_used"] != self.request_count + 1
         ):
@@ -612,8 +613,19 @@ def _create_user_run(case_id: str, body: str, bound: bool) -> dict[str, Any]:
             before = execution_budget_snapshot(DOMAIN_DB, str(accepted["task_id"]))
             if before["deadline_ms"] != 300_000:
                 raise RuntimeError("TASK_ACTIVE_TIME_BUDGET_MISMATCH")
-            configured = configure_s3_experiment_budget(DOMAIN_DB, str(accepted["task_id"]), 16, 10)
-            if configured != {"MODEL": 16, "MCP": 10} or task_attempt_limits(DOMAIN_DB, str(accepted["task_id"])) != configured:
+            from opspilot.domain.assistant_experiment import AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID
+            if EXPERIMENT_ID == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
+                from opspilot.domain.d2 import configure_material_remainder_budget
+                configured = configure_material_remainder_budget(
+                    DOMAIN_DB, str(accepted["task_id"]), EXPERIMENT_ID,
+                )
+                expected_limits = {"MODEL": 16, "MCP": None}
+            else:
+                configured = configure_s3_experiment_budget(
+                    DOMAIN_DB, str(accepted["task_id"]), 16, 10,
+                )
+                expected_limits = {"MODEL": 16, "MCP": 10}
+            if configured != expected_limits or task_attempt_limits(DOMAIN_DB, str(accepted["task_id"])) != configured:
                 raise RuntimeError("TRUSTED_TASK_BUDGET_CONFIGURATION_MISMATCH")
             after = execution_budget_snapshot(DOMAIN_DB, str(accepted["task_id"]))
             if after["deadline_ms"] != before["deadline_ms"]:
@@ -1048,7 +1060,7 @@ def _campaign_stop_reason(state: _CampaignState) -> str | None:
         return "CAMPAIGN_BUDGET_CLOSED_STOP_ALL"
     if budget["provider_used"] >= PROVIDER_LIMIT:
         return "PROVIDER_REQUEST_LIMIT_REACHED"
-    if budget["mcp_used"] >= MCP_LIMIT:
+    if MCP_LIMIT is not None and budget["mcp_used"] >= MCP_LIMIT:
         return "MCP_TOOL_CALL_LIMIT_REACHED"
     if budget["usd_reserved_micro"] + budget["usd_settled_micro"] >= BUDGET_USD_MICRO:
         return "APPLICATION_BUDGET_REACHED"

@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import os
+import subprocess
 import sys
 from urllib.parse import urlparse
 from pathlib import Path
@@ -42,6 +43,124 @@ MATERIAL_RESUME_02_AUTHORIZATION_ID = "AR03-MATERIAL-LIVE-01-RESUME-02-USER-AUTH
 MATERIAL_RESUME_02_TOKEN_ENV = "OPSPILOT_AR03_MATERIAL_RESUME_02_ONE_SHOT_TOKEN"
 MATERIAL_RESUME_02_AUTH_RECORD = ROOT / "docs" / "evidence" / "ar-03" / "material-live-01" / "resume-02" / "PAID_AUTHORIZATION.json"
 MATERIAL_RESUME_02_CLAIM = ROOT.parent.parent / ".runtime" / "ar03-material-live-01-resume-02-authorization" / "claim.json"
+
+MATERIAL_REMAINDER_LIVE_EXPERIMENT_ID = "AR-03-MATERIAL-REMAINDER-01"
+MATERIAL_REMAINDER_LIVE_AUTHORIZATION_ID = "AR03-MATERIAL-REMAINDER-01-USER-AUTH-2026-11-04"
+MATERIAL_REMAINDER_LIVE_TOKEN_ENV = "OPSPILOT_AR03_MATERIAL_REMAINDER_LIVE_ONE_SHOT_TOKEN"
+MATERIAL_REMAINDER_LIVE_AUTH_RECORD = ROOT / "docs" / "evidence" / "ar-03" / "material-remainder-live-01" / "PAID_AUTHORIZATION.json"
+MATERIAL_REMAINDER_LIVE_CLAIM = ROOT.parent.parent / ".runtime" / "ar03-material-remainder-live-01-live" / "claim.json"
+
+
+def _material_remainder_live_expected_authorization() -> dict[str, object]:
+    """Freeze only the user's exact three-case paid authorization."""
+    return {
+        "authorization_id": MATERIAL_REMAINDER_LIVE_AUTHORIZATION_ID,
+        "experiment_id": MATERIAL_REMAINDER_LIVE_EXPERIMENT_ID,
+        "status": "AUTHORIZED_ONE_SHOT",
+        "authorized_on": "2026-11-04",
+        "authorization_source": "User-provided AR-03-MATERIAL-REMAINDER-LIVE-01 task card",
+        "authorization_card_sha256": "eeefc82822c81cc644f2b7eae674e96e7f6fbb48fd978484285d75d01c8ed47",
+        "branch": "codex/ar03-material-remainder-01-live",
+        "base_sha": "abd25e20b308df3c95f81c4039295908f399ef71",
+        "frozen_cases_blob": "faf16fbb857278e98f8afbe179fe327855132967",
+        "case_ids": ["MAT-05-BOUND-PROCESSED", "MAT-06-SKILL-OFF", "MAT-06-SKILL-ON"],
+        "provider": "DeepSeek",
+        "model": "deepseek-flash",
+        "thinking": {"type": "disabled"},
+        "max_tokens": 2048,
+        "tool_choice": "auto when tools are supplied",
+        "parallel_tool_calls": False,
+        "stream": False,
+        "context_input_limit_tokens": 12000,
+        "provider_limit": 16,
+        "mcp_limit": None,
+        "application_budget_usd_micro": 10_500_000,
+        "provider_reservation_usd_micro": 645_600,
+        "price_version": "DEEPSEEK_FLASH_PEAK_2026-11-01",
+        "provider_timeout_seconds": 30,
+        "provider_concurrency": 1,
+        "mcp_handler_timeout_seconds": 12,
+        "assistant_run_timeout_seconds": 60,
+        "task_active_timeout_ms": 300_000,
+        "langgraph_recursion_limit": 36,
+        "campaign_wall_clock_seconds": 3600,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "business_writes_allowed": False,
+        "historical_claims_reusable": False,
+    }
+
+
+def _material_remainder_live_expected_claim(
+    authorization_record_sha256: str, *, branch: str, head: str,
+) -> dict[str, object]:
+    return {
+        "claim_id": f"{MATERIAL_REMAINDER_LIVE_EXPERIMENT_ID}:one-shot:{MATERIAL_REMAINDER_LIVE_AUTHORIZATION_ID}",
+        "authorization_id": MATERIAL_REMAINDER_LIVE_AUTHORIZATION_ID,
+        "experiment_id": MATERIAL_REMAINDER_LIVE_EXPERIMENT_ID,
+        "branch": branch,
+        "execution_head_sha": head,
+        "base_sha": "abd25e20b308df3c95f81c4039295908f399ef71",
+        "status": "CLAIMED_ONE_SHOT_NO_RETRY",
+        "provider_limit": 16,
+        "mcp_limit": None,
+        "application_budget_usd_micro": 10_500_000,
+        "provider_reservation_usd_micro": 645_600,
+        "price_version": "DEEPSEEK_FLASH_PEAK_2026-11-01",
+        "campaign_wall_clock_seconds": 3600,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "authorization_record_sha256": authorization_record_sha256,
+    }
+
+
+def _material_remainder_live_one_shot_authorized(experiment_id: str) -> bool:
+    """Require the exact user grant, a fresh claim, and its process-only token."""
+    if (
+        experiment_id != MATERIAL_REMAINDER_LIVE_EXPERIMENT_ID
+        or os.environ.get("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "").strip() != experiment_id
+        or os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "").strip() != "1"
+    ):
+        return False
+    token = os.environ.get(MATERIAL_REMAINDER_LIVE_TOKEN_ENV, "")
+    if not token:
+        return False
+    try:
+        authorization_bytes = MATERIAL_REMAINDER_LIVE_AUTH_RECORD.read_bytes()
+        authorization = json.loads(authorization_bytes.decode("utf-8"))
+        claim = json.loads(MATERIAL_REMAINDER_LIVE_CLAIM.read_text(encoding="utf-8"))
+        branch_result = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=ROOT,
+            capture_output=True, text=True, check=False,
+        )
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT,
+            capture_output=True, text=True, check=False,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if branch_result.returncode or head_result.returncode:
+        return False
+    branch, head = branch_result.stdout.strip(), head_result.stdout.strip()
+    if type(authorization) is not dict or authorization != _material_remainder_live_expected_authorization():
+        return False
+    if branch != authorization.get("branch"):
+        return False
+    if type(claim) is not dict:
+        return False
+    expected = _material_remainder_live_expected_claim(
+        hashlib.sha256(authorization_bytes).hexdigest(), branch=branch, head=head,
+    )
+    if set(claim) != set(expected) | {"claimed_at", "token_sha256"}:
+        return False
+    if any(type(claim.get(key)) is not type(value) or claim.get(key) != value for key, value in expected.items()):
+        return False
+    if type(claim.get("claimed_at")) is not str or not claim["claimed_at"]:
+        return False
+    token_digest = claim.get("token_sha256")
+    if type(token_digest) is not str or len(token_digest) != 64:
+        return False
+    return hmac.compare_digest(token_digest, hashlib.sha256(token.encode("utf-8")).hexdigest())
 
 
 def _resume02_expected_authorization() -> dict[str, object]:
@@ -242,7 +361,7 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     experiment_id = os.environ.get(EXPERIMENT_ENV, "").strip()
     if experiment_id in EXPERIMENTS_AWAITING_PAID_AUTHORIZATION:
         if experiment_id == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
-            authorized = False  # No paid authorization/claim exists in this free-only slice.
+            authorized = _material_remainder_live_one_shot_authorized(experiment_id)
         elif experiment_id == MATERIAL_RESUME_02_EXPERIMENT_ID:
             authorized = _material_resume_02_one_shot_authorized(experiment_id)
         else:
@@ -685,7 +804,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         if prepared.get('error'): return prepared
         delivery=prepared['attempt_id']
         with connect(path) as c:c.execute('UPDATE assistant_runs SET delivery_attempt_id=? WHERE run_id=?',(delivery,run_id))
-    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV}})
+    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV}})
     async with Client(params) as client:
         listed=await client.list_tools()
         specs=[];tools=[]
