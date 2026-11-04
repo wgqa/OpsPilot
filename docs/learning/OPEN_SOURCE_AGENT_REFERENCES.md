@@ -150,7 +150,7 @@ OpsPilot 现在至少有三种外部调用：回答模型调用、上下文压�
 
 - `ASSISTANT_V1` 的回答模型调用在 [`assistant.py` L593-L681](../../opspilot/assistant.py#L593-L681)，MCP 工具调用在 L683 起；两者都持久登记 `assistant_calls`，启用实验账本时同时接入 `reserve_dispatch`/`complete_dispatch`/`mark_unknown`，见 [`domain/assistant.py` L299-L330](../../opspilot/domain/assistant.py#L299-L330)。
 - `ASSISTANT_V1` 的 Context 压缩调用由 [`_prepare_assistant_context_impl` L949-L1134](../../opspilot/assistant.py#L949-L1134) 驱动：先持久预留，再调用模型，结算 Usage；取消由 [`_close_cancelled_compression` L858-L928](../../opspilot/assistant.py#L858-L928) 重读数据库后收口，未外发标 `FAILED`/`CANCELLED_BEFORE_DISPATCH`，已外发标 `UNKNOWN` 并保留费用预留。
-- 同一 Run 的多次压缩批次会在每次新 attempt 重置 `call_id`/`logical_key`/`dispatch_started`/`settled`，见 [`assistant.py` L999-L1005](../../opspilot/assistant.py#L999-L1005)；离线 Mock 测试覆盖了“首批 OK、次批取消”的场景。
+- 同一 Run 的多次压缩批次会在每次新 attempt 重置 `call_id`/`logical_key`/`dispatch_started`/`settled`，见 [`assistant.py` L999-L1005](../../opspilot/assistant.py#L999-L1005)；离线 Mock 测试覆盖了取消、`UNKNOWN` 收口与“首批 OK、次批取消”的多批次隔离场景。
 - 经典 Chat Worker 的压缩调用仍是 [`worker.py` L376](../../opspilot/web/worker.py#L376) 的直接 `model.ainvoke`，由 `chat_attempts` / `context_compression_attempts` 计数，但没有接入实验账本。这是历史路径的已知差异，不能写成“全系统完全统一”。
 - AR-04A 已于 2026-11-04 Fast-forward 合入 `main`（`9fc3b4e`），但结论仅为 `ACCEPT_WITH_LIMITS`：J6 正式纠错旅程 `NOT_COVERED`，真实 Provider 长会话质量 `NOT_RUN`，浏览器 `HOLD / NOT_RUN`，最新候选全量 pytest 未完成。Mock 通过和账本收口不等于生产级费用可靠性已证明。
 
