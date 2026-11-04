@@ -1,0 +1,119 @@
+F
+================================== FAILURES ===================================
+_ test_r1_offline_api_worker_same_session_protocol_material_binding_and_followup _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-remainder-01/.pytest-tmp-r1-20261104-04/test_r1_offline_api_worker_sam0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar03-material-remainder-01/.pytest-tmp-r1-20261104-04/test_r1_offline_api_worker_sam0')
+
+    def test_r1_offline_api_worker_same_session_protocol_material_binding_and_followup(
+        demo_db, tmp_path,
+    ):
+        setup = prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2,
+        )
+        model_instances = [
+            IntegrationFixtureModel(mode="unbound"),
+            MaterialAwareFixtureModel(mode="material"),
+            R1BoundStateFixtureModel(mode="bound", receiver_state="QUEUED"),
+            R1BoundStateFixtureModel(mode="bound", receiver_state="QUEUED"),
+        ]
+        models = deque(model_instances)
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "r1-offline-worker.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.popleft(),
+        )
+        accepted = []
+    
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+    
+            # J1: protocol consultation works without a TaskBinding.
+            j1 = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "r1-j1-protocol"},
+                json={"body": "����׼���Ӿɻص�Э���������°棬��Ҫ�޸���Щ���ݣ�"},
+            )
+            assert j1.status_code == 202, j1.text
+            j1_item = j1.json()
+            accepted.append(j1_item)
+            assert _wait_run(client, j1_item["run_id"])["status"] == "SUCCEEDED"
+    
+            # J2: a pasted configuration remains user material in the same Session.
+            material = (
+                "���������ã���Щ�ط���Ҫ�ģ�֮ǰ�Ľ��ۻ�������\n"
+                "```json\n{\"retry\":{\"max_attempts\":5}}\n```"
+            )
+            j2 = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "r1-j2-material"},
+                json={"body": material},
+            )
+            assert j2.status_code == 202, j2.text
+            j2_item = j2.json()
+            accepted.append(j2_item)
+            assert _wait_run(client, j2_item["run_id"])["status"] == "SUCCEEDED"
+    
+            # J3: only the trusted order endpoint establishes TaskBinding and starts
+            # the current investigation. Chat text did not grant this access.
+            resources = client.get("/api/s3/order-resources", headers=headers)
+            assert resources.status_code == 200, resources.text
+            assert any(item["order_id"] == "ar03-order" for item in resources.json()["items"])
+            bind = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": "r1-j3-bind-investigate"},
+                json={
+                    "order_id": "ar03-order",
+                    "initial_message": "��������Э���ѯ��������Ļص��¼�Ŀǰ�Ƿ�����ɣ���˵��δ֪���",
+                },
+            )
+            assert bind.status_code == 202, bind.text
+            bind_item = bind.json()
+            accepted.append(bind_item)
+            task_id = bind_item["task_id"]
+            assert task_id
+            assert _wait_run(client, bind_item["run_id"])["status"] == "SUCCEEDED"
+    
+            # J4: a same-Task follow-up performs a fresh Run and can be restored by
+            # re-reading persistent messages. This does not simulate a browser.
+            j4 = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "r1-j4-followup"},
+                json={
+                    "body": "�ص��ղ�����¼������շ����������������ڵ�ǰͬһ�¼�֤�ݻش�",
+                    "task_id": task_id,
+                },
+            )
+            assert j4.status_code == 202, j4.text
+            j4_item = j4.json()
+            accepted.append(j4_item)
+            assert _wait_run(client, j4_item["run_id"])["status"] == "SUCCEEDED"
+    
+            first_read = client.get(f"/api/sessions/{session_id}/messages?limit=500")
+            second_read = client.get(f"/api/sessions/{session_id}/messages?limit=500")
+            assert first_read.status_code == second_read.status_code == 200
+            messages = first_read.json()["items"]
+            restored = second_read.json()["items"]
+            assert [(item["message_id"], item["body"]) for item in messages] == [
+                (item["message_id"], item["body"]) for item in restored
+            ]
+            answers = {
+                item["answer_source_message_id"]: item
+                for item in messages
+                if item["role"] == "ASSISTANT"
+            }
+            assert set(answers) == {item["message_id"] for item in accepted}
+            assert "callback-retry-contract" in answers[j1_item["message_id"]]["body"]
+>           assert "max_attempts=5" in answers[j2_item["message_id"]]["body"]
+E           AssertionError: assert 'max_attempts=5' in '��ǰ��վ������δ�������ṩ���ã����ܾݴ��ж�����Ӱ�졣'
+
+tests\test_r1_integration_web_journey_01.py:193: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_r1_integration_web_journey_01.py::test_r1_offline_api_worker_same_session_protocol_material_binding_and_followup
+1 failed in 8.33s
