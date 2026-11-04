@@ -155,3 +155,11 @@
 - [x] 说明来源失效复现与最小修复；Memory 撤销或 Knowledge 过期后，旧模型说明不再进入后续真实聊天 Context，事实诊断与历史审计分开保留。
 - [x] 源码、原始日志、机器结果、全部补充尝试、截图及学习材料见 [M4-02 REPORT](docs/evidence/vnext/m4-02/REPORT.md)。
 - [ ] 主 Agent 独立验收。未授权进入下一阶段；不自签 M4 总体 PASS，不重发回调，不新增业务写能力。
+
+## R1 主线集成门禁与当前成品路线（2026-11-04）
+
+- AR-02/AR-03：本候选集成既有代码与历史证据；本门禁未调用 Provider、未做业务写入，也不提升历史 PARTIAL/UNKNOWN/HOLD 结果。
+- R1-ENGINE：候选 `91a067aa083c2d4446d88a09d84164ea4c3bb956` 已完成代码/离线回归审查；主线放行仍 HOLD，原因与测试证据见 [`R1 主线集成门禁报告`](docs/evidence/r1-main-integration-gate-01/REPORT.md)。
+- R1-INTERACTIVE：`HOLD / NOT_RUN / BROWSER_STOP_ACTIVE`；前端类型、构建和投影测试不能替代真实浏览器验收。
+- `main` 仍为 `ec8c3582f6d145eec9979c43607302731411ead8`，尚未合并；门禁评审分支不代表主线正式版本。
+- 按当前任务卡记录的后续顺序为 AR-04A/04B → AR-05 可信 S2/S1 回接 → AR-06/R2 综合验收；这些阶段仍需各自授权。本索引不声称 10 月 31 日路线共识此前已入库，也不代替其原始记录。

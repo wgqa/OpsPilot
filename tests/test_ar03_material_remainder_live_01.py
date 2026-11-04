@@ -44,10 +44,6 @@ def test_live_authorization_requires_a_new_exact_one_shot_claim(tmp_path, monkey
     guard = getattr(assistant, "_material_remainder_live_one_shot_authorized", None)
     assert callable(guard)
 
-    branch = subprocess.run(
-        ["git", "branch", "--show-current"], cwd=ROOT, capture_output=True,
-        text=True, check=True,
-    ).stdout.strip()
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
         text=True, check=True,
@@ -58,8 +54,9 @@ def test_live_authorization_requires_a_new_exact_one_shot_claim(tmp_path, monkey
     auth_bytes = (json.dumps(auth, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
     auth_path.write_bytes(auth_bytes)
     token = "offline-only-one-shot-token"
+    authorized_branch = auth["branch"]
     claim = assistant._material_remainder_live_expected_claim(
-        hashlib.sha256(auth_bytes).hexdigest(), branch=branch, head=head,
+        hashlib.sha256(auth_bytes).hexdigest(), branch=authorized_branch, head=head,
     )
     claim.update({
         "claimed_at": "2026-11-04T00:00:00+00:00",
@@ -69,17 +66,35 @@ def test_live_authorization_requires_a_new_exact_one_shot_claim(tmp_path, monkey
 
     monkeypatch.setattr(assistant, "MATERIAL_REMAINDER_LIVE_AUTH_RECORD", auth_path)
     monkeypatch.setattr(assistant, "MATERIAL_REMAINDER_LIVE_CLAIM", claim_path)
+
+    real_run = subprocess.run
+
+    def run_as_authorized_checkout(args, **kwargs):
+        if args == ["git", "branch", "--show-current"]:
+            return subprocess.CompletedProcess(args, 0, authorized_branch + "\n", "")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(assistant.subprocess, "run", run_as_authorized_checkout)
     monkeypatch.setenv(assistant.MATERIAL_REMAINDER_LIVE_TOKEN_ENV, token)
     monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
     assert guard(EXPERIMENT_ID) is True
     assert guard("AR-03-MATERIAL-LIVE-01-RESUME-02") is False
 
+    def run_as_unapproved_checkout(args, **kwargs):
+        if args == ["git", "branch", "--show-current"]:
+            return subprocess.CompletedProcess(args, 0, "codex/unapproved-branch\n", "")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(assistant.subprocess, "run", run_as_unapproved_checkout)
+    assert guard(EXPERIMENT_ID) is False
+    monkeypatch.setattr(assistant.subprocess, "run", run_as_authorized_checkout)
+
     claim["branch"] = "codex/unapproved-branch"
     claim_path.write_text(json.dumps(claim, sort_keys=True), encoding="utf-8")
     assert guard(EXPERIMENT_ID) is False
 
-    claim["branch"] = branch
+    claim["branch"] = authorized_branch
     claim_path.write_text(json.dumps(claim, sort_keys=True), encoding="utf-8")
     monkeypatch.setenv(assistant.MATERIAL_REMAINDER_LIVE_TOKEN_ENV, "wrong-token")
     assert guard(EXPERIMENT_ID) is False
@@ -122,12 +137,29 @@ def test_one_shot_claim_is_atomic_and_cannot_be_reused(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "CLAIM", claim_path)
     monkeypatch.setattr(runner, "AUTH_RECORD", auth_path)
     git = runner._git
+
+    def git_as_authorized_checkout(*args, **kwargs):
+        if args == ("status", "--porcelain=v1"):
+            return ""
+        if args == ("branch", "--show-current"):
+            return runner.BRANCH
+        return git(*args, **kwargs)
+
     monkeypatch.setattr(
         runner, "_git",
-        lambda *args, **kwargs: "" if args == ("status", "--porcelain=v1") else git(*args, **kwargs),
+        git_as_authorized_checkout,
     )
     monkeypatch.setattr(assistant, "MATERIAL_REMAINDER_LIVE_AUTH_RECORD", auth_path)
     monkeypatch.setattr(assistant, "MATERIAL_REMAINDER_LIVE_CLAIM", claim_path)
+
+    real_run = subprocess.run
+
+    def run_as_authorized_checkout(args, **kwargs):
+        if args == ["git", "branch", "--show-current"]:
+            return subprocess.CompletedProcess(args, 0, runner.BRANCH + "\n", "")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(assistant.subprocess, "run", run_as_authorized_checkout)
 
     head = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True,
