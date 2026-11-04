@@ -993,7 +993,16 @@ async def _prepare_assistant_context_impl(
         if compression.get("error"):
             return compression
         attempt_id = str(compression["attempt_id"])
-        state["attempt_id"] = attempt_id
+        # Each compression attempt owns its own dispatch identity. Without this
+        # reset, a second batch in the same Run would inherit the previous
+        # attempt's call_id / settled flag and skip UNKNOWN cleanup on cancel.
+        state.update({
+            "attempt_id": attempt_id,
+            "call_id": None,
+            "logical_key": None,
+            "dispatch_started": False,
+            "settled": False,
+        })
         try:
             current = assert_chat_compression_sources_current(path, worker_id, attempt_id)
             if not current.get("current"):

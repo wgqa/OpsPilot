@@ -64,19 +64,22 @@ AssertionError: ('RESERVED', 'RESERVED', 'RESERVED', 'OPEN')
 
 ## 5. 测试（Mock Provider，0 真实请求）
 
-`tests/test_ar04a_compression_cancel_hf_01.py`，3 项：
+`tests/test_ar04a_compression_cancel_hf_01.py`，4 项：
 
 1. **在途取消**：压缩 Provider 请求挂起后取消 Worker → Call/Dispatch `UNKNOWN`、预留保留、预算 `BUDGET_BREACH`、尝试 `FAILED`、无摘要、Provider 只收到 1 次请求。
 2. **取消后恢复重放**：把 Run 置 `INTERRUPTED_RECOVERABLE` 并重启 Worker → Run `FAILED` 且 `blocked_reason` 含 `ASSISTANT_EXTERNAL_RESULT_UNKNOWN`，**没有第二次压缩请求**，账本保持 `UNKNOWN`/`BUDGET_BREACH`。
-3. **预留阶段取消**：在 `domain.reserve` 成功后注入取消 → Call `FAILED`、无 Dispatch、预算 `OPEN`、尝试 `FAILED`、零 Provider 请求。
+3. **同 Run 两批压缩**（本轮新增）：第一批正常返回并结算 `OK/KNOWN`；制造依赖失效使第一批 `INVALIDATED`，触发第二批；第二批 Provider 在途时取消 → 第一批保持 `OK/KNOWN` 与已结算金额，第二批 `UNKNOWN` + 预留保留 + `BUDGET_BREACH`，三张表均无 `RESERVED`，Provider 恰好收到 2 次压缩请求。
+4. **预留阶段取消**：在 `domain.reserve` 成功后注入取消 → Call `FAILED`、无 Dispatch、预算 `OPEN`、尝试 `FAILED`、零 Provider 请求。
 
 ## 6. 回归
 
 | 套件 | 结果 | 日志 |
 |---|---|---|
-| 取消 3 项 | 3 passed（30.42s） | `runs/pytest-cancel-hf.log` |
-| 取消 3 + HF 6 + AR-04A 4 | 13 passed（137.34s） | `runs/green-cancel-hf-ar04a.log` |
+| 取消 4 项 | 4 passed（38.62s） | `runs/pytest-cancel-hf.log` |
+| 取消 4 + HF 6 + AR-04A 4 | 14 passed（140.30s） | `runs/green-cancel-hf-ar04a.log` |
+| 定向回归（context / chat / assistant / journey） | 32 passed（42.48s） | `runs/pytest-targeted-regression-final.log` |
 | 基线 RED（同一取消套件，`f53d688`） | 失败，复现 `RESERVED/OPEN` | `runs/red-baseline-cancel-suite.log` |
+| 两批压缩 RED（本分支修正前） | 第二批遗留 `RESERVED` | `runs/red-two-batch-cancel.log` |
 
 全量 pytest 未强制重跑（任务允许按影响定向回归）；真实 Provider 与浏览器 `NOT_RUN`。
 
@@ -86,9 +89,29 @@ AssertionError: ('RESERVED', 'RESERVED', 'RESERVED', 'OPEN')
 - 取消后 Run 的重试仍可能由 Worker 触发一次，但会被 `ASSISTANT_EXTERNAL_RESULT_UNKNOWN` 安全终止，不会重发压缩请求。
 - Mock Provider 证明的是账本状态机，不是真实 Provider 计费。
 
-## 8. 候选 SHA 与建议
+## 8. 最终修正：同一 Run 多次压缩的状态重置（2026-11-04）
 
-- 代码 + 测试 + 证据提交：`8358a21e9dd99e7f2e66fcc7b881ee96b7e1b123`（已推送 `origin/codex/ar04a-compression-cancel-hf-01`）
+**问题：** `state`（`call_id` / `logical_key` / `dispatch_started` / `settled`）只在函数入口初始化一次。同一 Run 进入第二批压缩时，`settled=True` 仍来自第一批；若第二批 Provider 在途时取消，`_close_cancelled_compression` 会误判“已结算”而跳过 UNKNOWN 收口，第二批 `assistant_calls` / `ar02_live_dispatches` 遗留 `RESERVED`（RED 日志 `runs/red-two-batch-cancel.log`：`assert 'RESERVED' == 'UNKNOWN'`）。
+
+**修正：** 每次新压缩尝试开始时完整重置本批状态：
+
+```python
+state.update({
+    "attempt_id": attempt_id,
+    "call_id": None,
+    "logical_key": None,
+    "dispatch_started": False,
+    "settled": False,
+})
+```
+
+后续赋值（`call_id`、`logical_key`、`dispatch_started`、`settled`）与收口查库因此都只对应当前批次；第一批的 `OK/KNOWN` 结算不被覆盖。
+
+**GREEN：** 新增两批压缩测试通过；取消 4 项 38.62s、与 HF/AR-04A 合并 14 项 140.30s、定向回归 32 项 42.48s。
+
+## 9. 候选 SHA 与建议
+
+- 代码 + 测试 + 证据提交：`PENDING`
 - 分支 head 若再有一个仅更新本文件/RESULTS 记录字段的提交，代码树与该提交相同；以远端分支 head 为准
 - 只提交隔离候选，不合并 main
 

@@ -7,8 +7,8 @@
   "base_sha": "f53d6886beb24b6cb6c5e4398b280660d5bacf88",
   "main_sha_unchanged": "48234e5dabb6ed28ea816b8ebc438288409353b8",
   "branch": "codex/ar04a-compression-cancel-hf-01",
-  "candidate_sha": "8358a21e9dd99e7f2e66fcc7b881ee96b7e1b123",
-  "head_note": "candidate_sha is the commit with implementation, tests and evidence; a later bookkeeping commit may only update this field and REPORT.md",
+  "candidate_sha": "PENDING_COMMIT",
+  "head_note": "candidate_sha is the final commit with the state-reset fix, tests and evidence; a later bookkeeping commit may only update this field and REPORT.md",
   "provider_calls_real": 0,
   "problem": {
     "object": "opspilot/assistant.py::_prepare_assistant_context cancellation path",
@@ -18,14 +18,17 @@
       "context_compression_attempts": "RESERVED",
       "experiment_budget": "OPEN"
     },
+    "two_batch_bug": "second compression attempt inherited settled=True from the first batch, so cancellation cleanup skipped UNKNOWN and left RESERVED",
     "logs": [
       "runs/red-single-cancel.log",
-      "runs/red-baseline-cancel-suite.log"
+      "runs/red-baseline-cancel-suite.log",
+      "runs/red-two-batch-cancel.log"
     ]
   },
   "fix": {
     "file": "opspilot/assistant.py",
     "state_flags": ["attempt_id", "call_id", "logical_key", "dispatch_started", "settled"],
+    "per_attempt_reset": "state.update({attempt_id, call_id=None, logical_key=None, dispatch_started=False, settled=False}) at every new compression attempt",
     "cancellation_points": "only the Provider await; ledger writes in the compression section are synchronous short transactions",
     "cleanup": "_close_cancelled_compression re-reads the database and closes the call, dispatch and compression attempt synchronously before re-raising CancelledError",
     "states": {
@@ -40,21 +43,39 @@
     "cases": {
       "in_flight_cancel_records_unknown": "PASSED",
       "recovery_does_not_resend": "PASSED",
+      "two_batch_cancel_keeps_first_settled": "PASSED",
       "pre_dispatch_cancel_no_dangling_dispatch": "PASSED"
     },
-    "cancel_passed": 3,
-    "cancel_seconds": 30.42,
+    "cancel_passed": 4,
+    "cancel_seconds": 38.62,
     "cancel_log": "runs/pytest-cancel-hf.log",
     "combined_with_hf_and_ar04a": {
-      "passed": 13,
+      "passed": 14,
       "failed": 0,
-      "seconds": 137.34,
+      "seconds": 140.30,
       "log": "runs/green-cancel-hf-ar04a.log"
+    },
+    "targeted_regression": {
+      "files": [
+        "tests/test_m302_context.py",
+        "tests/test_ar02_journey_p0.py",
+        "tests/test_ar02_context_continuity_01.py",
+        "tests/test_m1_chat.py",
+        "tests/test_ar02_assistant.py"
+      ],
+      "passed": 32,
+      "failed": 0,
+      "seconds": 42.48,
+      "log": "runs/pytest-targeted-regression-final.log"
     },
     "baseline_red": {
       "suite_failed": true,
       "observed": "('RESERVED', 'RESERVED', 'RESERVED', 'OPEN')",
       "log": "runs/red-baseline-cancel-suite.log"
+    },
+    "two_batch_red": {
+      "observed": "second batch assistant_calls status RESERVED after cancel",
+      "log": "runs/red-two-batch-cancel.log"
     },
     "full_suite": "NOT_RUN_BY_SCOPE"
   },

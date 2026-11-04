@@ -16,7 +16,9 @@ from test_ar04a_compression_budget_hf_01 import (
     EXPERIMENT_ID, MockProvider, _completion, _prepare_six_turn_history, _send,
     _summary_document,
 )
-from test_ar04a_context_journey_01 import ORIGIN, PASSWORDS, _chat_bodies, _login
+from test_ar04a_context_journey_01 import (
+    ORIGIN, PASSWORDS, _chat_bodies, _login, _padded,
+)
 
 def _compression_in(body: dict) -> bool:
     return any(
@@ -66,6 +68,35 @@ class BlockingProvider(MockProvider):
                 self.compression_requests.append(body)
                 self.compression_started.set()
                 while True:  # hold the Provider request open until cancelled
+                    await asyncio.sleep(0.05)
+            return httpx.Response(
+                200, json=_completion("HTTP 202 只表示受理，不证明下游处理完成。", index),
+            )
+        return handle
+
+
+class TwoBatchProvider(BlockingProvider):
+    """First compression is answered; the second stays in flight until cancelled."""
+
+    def __init__(self):
+        super().__init__()
+        self.second_started = threading.Event()
+        self.compression_seen = 0
+
+    def handler(self):
+        async def handle(request: httpx.Request) -> httpx.Response:
+            body = json.loads((await request.aread()).decode("utf-8"))
+            index = len(self.requests)
+            self.requests.append(body)
+            if _compression_in(body):
+                self.compression_seen += 1
+                self.compression_requests.append(body)
+                if self.compression_seen == 1:
+                    return httpx.Response(
+                        200, json=_completion(_summary_document(body), index),
+                    )
+                self.second_started.set()
+                while True:
                     await asyncio.sleep(0.05)
             return httpx.Response(
                 200, json=_completion("HTTP 202 只表示受理，不证明下游处理完成。", index),
@@ -199,6 +230,121 @@ def test_cancelled_compression_is_not_resent_on_recovery(demo_db, tmp_path):
     _, dispatch, _, budget_status, _ = _rows(demo_db)
     assert str(dispatch["status"]) == "UNKNOWN"
     assert budget_status == "BUDGET_BREACH"
+
+
+def test_second_compression_cancel_keeps_first_settled(demo_db, tmp_path, monkeypatch):
+    """Two compression batches in one Run: the first stays settled, the second is UNKNOWN."""
+    import hashlib
+
+    from fastapi.testclient import TestClient
+    from opspilot.domain import chat as chat_domain
+    from opspilot.domain.assistant_experiment import initialize_experiment
+    from opspilot.domain.database import connect
+
+    initialize_experiment(demo_db, EXPERIMENT_ID)
+    provider = TwoBatchProvider()
+    app = _make_app(demo_db, tmp_path, provider, experiment_id=EXPERIMENT_ID)
+
+    real_assert = chat_domain.assert_chat_compression_sources_current
+    mutated = {"done": False}
+
+    def assert_then_mutate(*args, **kwargs):
+        result = real_assert(*args, **kwargs)
+        if result.get("current") and not mutated["done"]:
+            # Simulate a source change between compression reservation and commit:
+            # the first summary is invalidated, so a second batch is needed.
+            mutated["done"] = True
+            with connect(demo_db) as connection:
+                row = connection.execute(
+                    "SELECT message_id, body FROM messages WHERE role='ASSISTANT' "
+                    "ORDER BY sequence LIMIT 1"
+                ).fetchone()
+                body = str(row["body"]) + " [source updated]"
+                connection.execute(
+                    "UPDATE messages SET body=?, body_digest=? WHERE message_id=?",
+                    (body, hashlib.sha256(body.encode("utf-8")).hexdigest(), str(row["message_id"])),
+                )
+        return result
+
+    monkeypatch.setattr(
+        chat_domain, "assert_chat_compression_sources_current", assert_then_mutate,
+    )
+    manager = TestClient(app)
+    client = manager.__enter__()
+    try:
+        headers = _login(client)
+        session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+        # Seven moderate turns stay below the budget; the eighth (pasted material)
+        # triggers compression once the first user/assistant pair is old history.
+        for index in range(1, 8):
+            item, run = _send(
+                client, headers, session_id, f"hf-two-batch-history-{index}",
+                _padded(f"第 {index} 轮追问：协议里的重试与 ACK 语义是什么？", 600),
+            )
+            assert run["status"] == "SUCCEEDED", run
+        response = client.post(
+            f"/api/sessions/{session_id}/assistant/messages",
+            headers={**headers, "Idempotency-Key": "hf-two-batch-cancel"},
+            json={"body": _padded("最后一批排查材料：回调配置如下。", 5000)},
+        )
+        assert response.status_code == 202, response.text
+        if not provider.second_started.wait(timeout=30):
+            with connect(demo_db) as connection:
+                attempts = connection.execute(
+                    "SELECT status, error_class FROM context_compression_attempts ORDER BY created_at"
+                ).fetchall()
+                calls = connection.execute(
+                    "SELECT status, logical_key FROM assistant_calls WHERE kind='MODEL' ORDER BY created_at"
+                ).fetchall()
+                run_row = connection.execute(
+                    "SELECT blocked_reason FROM task_runs WHERE run_id=?",
+                    (response.json()["run_id"],),
+                ).fetchone()
+            items = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            raise AssertionError({
+                "attempts": [dict(row) for row in attempts],
+                "calls": [dict(row) for row in calls],
+                "compression_seen": provider.compression_seen,
+                "mutated": mutated["done"],
+                "blocked_reason": run_row[0] if run_row else None,
+                "last_notice": items[-1]["body"][:300] if items else None,
+            })
+    finally:
+        manager.__exit__(None, None, None)
+
+    with connect(demo_db) as connection:
+        calls = connection.execute(
+            "SELECT * FROM assistant_calls WHERE kind='MODEL' "
+            "AND logical_key LIKE 'context-compression:%' ORDER BY created_at"
+        ).fetchall()
+        dispatches = connection.execute(
+            "SELECT * FROM ar02_live_dispatches WHERE logical_key LIKE 'context-compression:%' "
+            "ORDER BY created_at"
+        ).fetchall()
+        attempts = connection.execute(
+            "SELECT * FROM context_compression_attempts ORDER BY created_at"
+        ).fetchall()
+        budget = connection.execute(
+            "SELECT status FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+            (EXPERIMENT_ID,),
+        ).fetchone()
+        summary_count = connection.execute("SELECT COUNT(*) FROM context_summaries").fetchone()[0]
+
+    assert len(calls) == 2, [str(row["status"]) for row in calls]
+    assert str(calls[0]["status"]) == "OK"
+    assert str(calls[1]["status"]) == "UNKNOWN"
+    assert len(dispatches) == 2
+    assert str(dispatches[0]["status"]) == "OK"
+    assert str(dispatches[0]["usage_state"]) == "KNOWN"
+    assert int(dispatches[0]["settled_usd_micro"]) > 0
+    assert str(dispatches[1]["status"]) == "UNKNOWN"
+    assert int(dispatches[1]["reserved_usd_micro"]) > 0
+    assert str(budget["status"]) == "BUDGET_BREACH"
+    assert summary_count == 0
+    assert not any(str(row["status"]) == "RESERVED" for row in calls)
+    assert not any(str(row["status"]) == "RESERVED" for row in dispatches)
+    assert not any(str(row["status"]) == "RESERVED" for row in attempts)
+    assert provider.compression_seen == 2
 
 
 def test_cancel_during_reservation_leaves_no_dangling_dispatch(demo_db, tmp_path, monkeypatch):
