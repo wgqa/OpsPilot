@@ -4,6 +4,7 @@ from pathlib import Path
 import asyncio
 import hashlib
 import json
+import threading
 import time
 
 import pytest
@@ -355,11 +356,31 @@ def test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_work
     from opspilot.domain.assistant_experiment import read_budget
     from opspilot.domain.database import connect
     from opspilot.web.app import create_app
+    from opspilot.web import worker as worker_module
 
     accepted = _prepare_bound_run(
         demo_db, tmp_path / "capacity-checkpoint.sqlite3", "MAT-04-BOUND-QUEUED",
     )
     model = _RepeatedReadModel(calls=11)
+    dispatch_finished = threading.Event()
+    worker_idle = threading.Event()
+    original_dispatch_run = worker_module._dispatch_run
+    original_next_worker_run = worker_module.next_worker_run
+
+    async def tracked_dispatch_run(*args, **kwargs):
+        try:
+            return await original_dispatch_run(*args, **kwargs)
+        finally:
+            dispatch_finished.set()
+
+    def tracked_next_worker_run(*args, **kwargs):
+        result = original_next_worker_run(*args, **kwargs)
+        if dispatch_finished.is_set() and result is None:
+            worker_idle.set()
+        return result
+
+    monkeypatch.setattr(worker_module, "_dispatch_run", tracked_dispatch_run)
+    monkeypatch.setattr(worker_module, "next_worker_run", tracked_next_worker_run)
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "0")
     monkeypatch.setenv("OPSPILOT_AR03_MATERIAL_SKILL_MODE", "OFF")
     app = create_app(
@@ -371,6 +392,8 @@ def test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_work
     with TestClient(app) as client:
         headers = _login(client)
         run = _wait_run(client, accepted["run_id"])
+        assert dispatch_finished.wait(timeout=30), "Worker dispatch did not finish after the Run became terminal"
+        assert worker_idle.wait(timeout=30), "Worker did not return to its idle poll before TestClient shutdown"
         messages = client.get(
             f"/api/sessions/{accepted['session_id']}/messages", headers=headers,
         )

@@ -1,0 +1,49 @@
+Commands executed for R1-SHUTDOWN-HF-01
+========================================
+
+Environment:
+  Worktree: D:\学习\agent新项目\.worktrees\r1-main-integration-gate-01
+  Python: D:\学习\agent新项目\.venv\Scripts\python.exe
+  Private test-only probe: D:\学习\agent新项目\.private-evidence\r1-main-integration-gate-01\closeout_shutdown_probe_v2.py
+  Raw stdout/stderr logs are preserved under the private directory recorded in LOG_INDEX.txt.
+
+1. Compile the target test after the test-only lifecycle change:
+  & 'D:\学习\agent新项目\.venv\Scripts\python.exe' -m py_compile tests/test_ar03_material_remainder_01.py
+  Result: exit 0.
+
+2. Pre-fix target diagnostic (probe injected only for this test):
+  $env:PYTHONPATH = 'D:\学习\agent新项目\.private-evidence\r1-main-integration-gate-01;' + $env:PYTHONPATH
+  & 'D:\学习\agent新项目\.venv\Scripts\python.exe' -m pytest -vv -s -p closeout_shutdown_probe_v2 -o faulthandler_timeout=30 --tb=short --basetemp 'D:\学习\agent新项目\.pytest-r1-shutdown-hf01-target-v2' 'tests/test_ar03_material_remainder_01.py::test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_worker'
+  Result: 1 passed, exit 0; cancellation inside MCP cleanup was observed.
+
+3. Pre-fix ordered adjacent composition with probe:
+  $env:PYTHONPATH = 'D:\学习\agent新项目\.private-evidence\r1-main-integration-gate-01;' + $env:PYTHONPATH
+  & 'D:\学习\agent新项目\.venv\Scripts\python.exe' -m pytest -vv -s -p closeout_shutdown_probe_v2 -o faulthandler_timeout=30 --tb=short --basetemp 'D:\学习\agent新项目\.pytest-r1-shutdown-hf01-adjacent-v2' `
+    'tests/test_ar03_material_remainder_01.py::test_remainder_campaign_counts_mcp_without_a_low_call_ceiling' `
+    'tests/test_ar03_material_remainder_01.py::test_remainder_limits_are_experiment_scoped_and_legacy_defaults_stay' `
+    'tests/test_ar03_material_remainder_01.py::test_remainder_policy_allows_multiple_runs_but_keeps_task_time_budget' `
+    'tests/test_ar03_material_remainder_01.py::test_remainder_paid_provider_is_still_fail_closed' `
+    'tests/test_ar03_material_remainder_01.py::test_remainder_bound_policy_is_idempotent_and_deadline_still_stops_mcp' `
+    'tests/test_ar03_material_remainder_01.py::test_remainder_task_policy_requires_its_campaign_row' `
+    'tests/test_ar03_material_remainder_01.py::test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_worker' `
+    'tests/test_ar03_material_remainder_01.py::test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[QUEUED-OFF]'
+  Result: 8 passed in 13.27s, exit 0.
+
+4. Post-fix target diagnostic:
+  $env:PYTHONPATH = 'D:\学习\agent新项目\.private-evidence\r1-main-integration-gate-01;' + $env:PYTHONPATH
+  & 'D:\学习\agent新项目\.venv\Scripts\python.exe' -m pytest -vv -s -p closeout_shutdown_probe_v2 -o faulthandler_timeout=30 --tb=short --basetemp 'D:\学习\agent新项目\.pytest-r1-shutdown-hf01-target-green-v1' 'tests/test_ar03_material_remainder_01.py::test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_worker'
+  Result: 1 passed in 5.50s, exit 0.
+
+5. Post-fix target without diagnostic plugin:
+  & 'D:\学习\agent新项目\.venv\Scripts\python.exe' -m pytest -vv -s -o faulthandler_timeout=30 --tb=short --basetemp 'D:\学习\agent新项目\.pytest-r1-shutdown-hf01-target-plain-v1' 'tests/test_ar03_material_remainder_01.py::test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_worker'
+  Result: 1 passed in 4.98s, exit 0.
+
+6. One full pytest run after the change (probe hooks only the target test):
+  $env:PYTHONPATH = 'D:\学习\agent新项目\.private-evidence\r1-main-integration-gate-01;' + $env:PYTHONPATH
+  & 'D:\学习\agent新项目\.venv\Scripts\python.exe' -m pytest -vv -s -p closeout_shutdown_probe_v2 -o faulthandler_timeout=60 --tb=short --basetemp 'D:\学习\agent新项目\.pytest-r1-shutdown-hf01-full-v1'
+  Result: 674 passed, 1 failed in 728.94s; exit 1. The only failure is the obsolete historical C1 RED listed in FAILURES.md. The suite completed past the previous ~31% shutdown wait.
+
+7. Final hygiene checks:
+  & 'D:\学习\agent新项目\.venv\Scripts\python.exe' -m json.tool 'docs/evidence/r1-main-integration-gate-01/shutdown-hf-01/RESULTS.json'
+  git diff --check
+  Result: both passed.

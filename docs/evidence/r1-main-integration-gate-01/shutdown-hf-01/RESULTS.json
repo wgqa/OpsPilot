@@ -1,0 +1,75 @@
+{
+  "task": "R1-SHUTDOWN-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "merge_recommendation": "MERGE_READY",
+  "base_sha": "759d0af9ff09c8995bc6fcfa01870264f201d258",
+  "remote_main_at_open": "ec8c3582f6d145eec9979c43607302731411ead8",
+  "branch": "codex/r1-main-integration-gate-01",
+  "production_source_changed": false,
+  "frontend_changed": false,
+  "provider_requests": 0,
+  "external_business_writes": 0,
+  "environment": {
+    "os": "Windows",
+    "python": "3.14.0",
+    "pytest": "9.1.1",
+    "anyio": "4.15.1",
+    "langsmith_pytest_plugin": "0.14.11"
+  },
+  "tests": [
+    {
+      "name": "pre_fix_target_with_shutdown_probe",
+      "command": "python -m pytest -vv -s -p closeout_shutdown_probe_v2 -o faulthandler_timeout=30 --tb=short --basetemp <fresh-basetemp> tests/test_ar03_material_remainder_01.py::test_remainder_repeated_same_tool_can_cross_old_ten_mcp_limit_in_formal_worker",
+      "result": "1 passed",
+      "exit_code": 0,
+      "observation": "TestClient shutdown cancelled Worker during MCP Client.__aexit__; Worker acknowledged cancellation and worker.release ran. Isolated run did not hang."
+    },
+    {
+      "name": "pre_fix_ordered_adjacent_composition_with_probe",
+      "result": "8 passed in 13.27s",
+      "exit_code": 0,
+      "observation": "Same test-only cancellation race observed."
+    },
+    {
+      "name": "post_fix_target_with_shutdown_probe",
+      "result": "1 passed in 5.50s",
+      "exit_code": 0,
+      "observation": "MCP client exit and Assistant return occur before TestClient shutdown; Worker is at empty poll when shutdown cancellation is requested."
+    },
+    {
+      "name": "post_fix_target_without_probe",
+      "result": "1 passed in 4.98s",
+      "exit_code": 0
+    },
+    {
+      "name": "full_pytest_after_fix_with_probe_on_target_only",
+      "collected": 675,
+      "passed": 674,
+      "failed": 1,
+      "duration_seconds": 728.94,
+      "wall_seconds": 730.68,
+      "exit_code": 1,
+      "target_test": "PASSED",
+      "failure": "test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix"
+    },
+    {
+      "name": "git_diff_check",
+      "result": "passed",
+      "exit_code": 0
+    }
+  ],
+  "root_cause": {
+    "confirmed": "The test treated terminal Domain Run status as Worker dispatch completion and closed TestClient while MCP Client cleanup remained in progress.",
+    "fix": "The test now waits for _dispatch_run completion and next_worker_run returning no pending work before leaving TestClient.",
+    "production_worker_bug_reproduced": false,
+    "historical_full_suite_hang_exclusive_causality": "strongly supported, not separately captured as a stuck asyncio task"
+  },
+  "legacy_c1_red": {
+    "preserved": true,
+    "obsolete_intent": "READONLY_FOLLOWUP",
+    "current_contract": "FOLLOW_UP + readonly_action=INVESTIGATE",
+    "current_contract_positive_tests_passed": 3
+  },
+  "browser_acceptance": "NOT_RUN / BLOCKED_BY_TOOL_ENVIRONMENT",
+  "raw_logs": "Private raw logs preserved locally; hashes and local path are in runs/LOG_INDEX.txt."
+}
