@@ -25,3 +25,11 @@
 原全量运行中的四项候选相关失败已保存于 `runs/pytest-full-attempt-02.log`。测试修正仅将 one-shot 测试中的 Git branch 查询模拟为已授权分支，并额外验证非授权 checkout 会拒绝；Worker 的原子 claim、授权记录摘要、token 摘要及重复 claim 拒绝逻辑未改。Server 测试现在检查实际传入的模型工厂和 Origin；Server 实现未改。
 
 GREEN：`tests/test_ar03_material_remainder_live_01.py` 与 `tests/test_m1_web_server.py` 共 7/7 通过；11 次同名只读 MCP 真实 Worker 测试独立运行 1/1 通过。全量套件在此之后未取得新鲜完整摘要。
+
+
+## 2026-11-04 收口诊断补充
+
+- 受控全量 pytest 收集 675 项，在约 31% 的目标 Worker 测试上下文退出处停滞；60 秒 faulthandler 栈定位到 TestClient.wait_shutdown / TestClient.__exit__。业务 Run SUCCEEDED，11 个 MCP Attempt 均 OK。人工停止，无全量摘要，最终进程退出码未捕获。
+- 邻接组合 8/8（13.31 秒）；原顺序前缀 213/213（198.84 秒，临时 task dump 插件改变调度）；现行 FOLLOW_UP + INVESTIGATE 正式只读路径 1/1（4.87 秒）。均非全量结果。
+- shutdown 的具体未完成 asyncio Task 未查明，无生产代码修复；不能排除 Worker 生命周期风险。
+- 三个 SQLite 只读复核未发现真实凭据或客户数据；旧 SQLite 阻断判断由本轮证据更新，不再单独阻断。

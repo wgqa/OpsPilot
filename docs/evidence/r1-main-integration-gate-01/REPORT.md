@@ -71,3 +71,7 @@
 6. **证据与停止线：** 测试与 lint 的失败/中断均保留；公开 SQLite 历史与未完成全量复跑未关闭前停止，不合并、不推送、不进入 AR-04。
 
 **裁决建议：`HOLD`。** 范围是代码发布与主线合并门禁；尚未验证：浏览器交互、真实 Provider、全量 pytest 在夹具修正后的完整退出结果。由于历史私有 SQLite 暴露和复跑不完整，不建议当前候选进入 main。由主 Agent 决定后续安全发布/历史治理，不由实施方自签 PASS。
+
+## 2026-11-04 收口更新
+
+本次诊断补充见 CLOSEOUT_REPORT.md。它更新了全量 pytest 在 TestClient lifespan shutdown 等待处停滞的证据，并复核了现行 FOLLOW_UP 正例与授权 SQLite。此前将模拟 SQLite 列作发布阻断的判断已更新，不再单独阻止发布。全量 pytest 仍未取得完整终态，因此当前建议仍为 HOLD。

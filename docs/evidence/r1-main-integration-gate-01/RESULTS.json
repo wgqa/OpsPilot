@@ -68,34 +68,138 @@
     }
   },
   "frontend": {
-    "npm_ci": {"command": "npm ci --cache D:\\学习\\agent新项目\\.npm-cache-r1-main-integration-gate-01 --no-audit --no-fund", "status": "PASS", "exit_code": 0, "packages_added": 140, "cache_on_d": true},
-    "typecheck": {"command": "npm run typecheck", "status": "PASS", "exit_code": 0},
-    "production_build": {"command": "npm run build", "status": "PASS", "exit_code": 0},
+    "npm_ci": {
+      "command": "npm ci --cache D:\\学习\\agent新项目\\.npm-cache-r1-main-integration-gate-01 --no-audit --no-fund",
+      "status": "PASS",
+      "exit_code": 0,
+      "packages_added": 140,
+      "cache_on_d": true
+    },
+    "typecheck": {
+      "command": "npm run typecheck",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    "production_build": {
+      "command": "npm run build",
+      "status": "PASS",
+      "exit_code": 0
+    },
     "full_lint": {
       "command": "npm run lint",
       "status": "FAIL_HISTORICAL_UNCHANGED_FILE",
       "exit_code": 1,
       "file": "frontend/e2e/m4-03-s3-journey.mjs",
-      "issues": ["unused access import", "setTimeout undefined"],
+      "issues": [
+        "unused access import",
+        "setTimeout undefined"
+      ],
       "blob_matches_main": true
     },
-    "changed_frontend_files_lint": {"command": "npm exec eslint -- e2e/ar03-web-01.mjs src/App.vue src/api.ts src/assistant-entry.ts test/assistant-entry.test.ts", "status": "PASS", "exit_code": 0},
-    "conversation_projection_tests": {"command": "node --experimental-strip-types --test test/conversation.test.ts test/stage-b-closeout.test.ts test/stage-b-correction-sidecar.test.ts", "status": "PASS", "passed": 17, "failed": 0, "exit_code": 0}
+    "changed_frontend_files_lint": {
+      "command": "npm exec eslint -- e2e/ar03-web-01.mjs src/App.vue src/api.ts src/assistant-entry.ts test/assistant-entry.test.ts",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    "conversation_projection_tests": {
+      "command": "node --experimental-strip-types --test test/conversation.test.ts test/stage-b-closeout.test.ts test/stage-b-correction-sidecar.test.ts",
+      "status": "PASS",
+      "passed": 17,
+      "failed": 0,
+      "exit_code": 0
+    }
   },
   "diff_check": {
     "full_candidate": "WARNINGS_IN_HISTORICAL_EVIDENCE_ONLY",
     "source_test_and_tasks_paths": "CLEAN"
   },
-  "live_calls": {"provider_http_requests": 0, "mcp_external_calls": 0, "business_writes": 0},
+  "live_calls": {
+    "provider_http_requests": 0,
+    "mcp_external_calls": 0,
+    "business_writes": 0
+  },
   "public_artifact_gate": {
     "obvious_credentials_found": false,
     "private_authorization_sqlite_count": 3,
-    "private_authorization_sqlite_sizes_bytes": [28672, 28672, 28672],
+    "private_authorization_sqlite_sizes_bytes": [
+      28672,
+      28672,
+      28672
+    ],
     "historical_blobs_present": true,
-    "blocks_public_release_and_merge": true
+    "blocks_public_release_and_merge": false,
+    "assessment": "read-only review found only simulated authorization/attempt ledgers; no confirmed real credentials or customer data",
+    "details_file": "runs/sqlite-public-assets-audit.json"
   },
   "interactive_status": "HOLD_NOT_RUN_BROWSER_STOP_ACTIVE",
   "main_changed": false,
   "paid_provider_authorized_or_used": false,
-  "merge_ready": false
+  "merge_ready": false,
+  "closeout_diagnostics": {
+    "base_candidate_sha": "aafa2149c87e3f6be3a80275ea44a0c2a2eaf895",
+    "remote_main": "ec8c3582f6d145eec9979c43607302731411ead8",
+    "full_pytest": {
+      "collected": 675,
+      "last_progress_percent": 31,
+      "faulthandler_seconds": 60,
+      "status": "INTERRUPTED_AFTER_TESTCLIENT_SHUTDOWN_WAIT",
+      "pytest_summary": null,
+      "process_exit_code": "NOT_CAPTURED",
+      "target_test_result": "NOT_REPORTED; shutdown blocked at TestClient context exit before post-context assertions"
+    },
+    "stack_location": "Starlette TestClient.wait_shutdown -> TestClient.__exit__ at test_ar03_material_remainder_01.py:371",
+    "persisted_run": {
+      "task_run": "SUCCEEDED",
+      "chat_attempt": "SUCCEEDED",
+      "assistant_calls": {
+        "total": 23,
+        "model": 12,
+        "mcp": 11,
+        "all_ok": true
+      },
+      "d2_attempts": {
+        "total": 11,
+        "tool": "get_callback_delivery",
+        "all_ok": true
+      }
+    },
+    "tests": [
+      {
+        "name": "adjacent_worker_sequence",
+        "passed": 8,
+        "duration_seconds": 13.31,
+        "exit_code": 0,
+        "full_suite": false
+      },
+      {
+        "name": "ordered_prefix_with_shutdown_probe",
+        "passed": 213,
+        "duration_seconds": 198.84,
+        "exit_code": 0,
+        "full_suite": false,
+        "timing_instrumented": true
+      },
+      {
+        "name": "current_legal_follow_up_and_mcp",
+        "passed": 1,
+        "duration_seconds": 4.87,
+        "exit_code": 0,
+        "provider_http": 0,
+        "business_writes": 0
+      }
+    ],
+    "historical_c1_red": {
+      "deprecated_intent": "READONLY_FOLLOWUP",
+      "current_contract": "FOLLOW_UP + readonly_action=INVESTIGATE",
+      "preserved": true
+    },
+    "sqlite_recheck": {
+      "audit": "runs/sqlite-public-assets-audit.json",
+      "real_credentials_or_customer_data_found": false,
+      "blocks_publication_or_merge": false
+    },
+    "code_changes": [],
+    "merge_recommendation": "HOLD",
+    "hold_reason": "Complete post-fix pytest did not terminate; exact pending ASGI shutdown task remains unidentified."
+  }
 }
