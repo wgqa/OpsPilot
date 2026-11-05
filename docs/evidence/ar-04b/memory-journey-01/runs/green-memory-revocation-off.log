@@ -1,0 +1,138 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04b-memory-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 3 items
+
+tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire FAILED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_revocation_before_provider_boundary_blocks_stale_memory_and_keeps_valid_path PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_revocation_after_send_prevents_answer_commit PASSED
+
+================================== FAILURES ===================================
+_ test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire __
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-green-06/test_ar04b_confirmed_cross_tas0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-green-06/test_ar04b_confirmed_cross_tas0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000011635967360>
+
+    def test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire(
+        demo_db: Path, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Pair Memory ON/OFF on the formal API/Worker wire and preserve current MCP facts."""
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_journey_p0 import JourneyFixtureModel
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2)
+        _seed_async_project_approver(demo_db)
+        models = [
+            MemoryWireFixtureModel(mode="source-task"),
+            JourneyFixtureModel(mode="receiver"),
+            JourneyFixtureModel(mode="receiver"),
+        ]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-worker.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+    
+        with TestClient(app) as client:
+            source_item, candidate_item, support_headers = _create_approved_semantic_memory(
+                client, ORIGIN, PASSWORDS, _login(client, ORIGIN, PASSWORDS, "support-a"),
+                suffix="e1-related-semantic",
+            )
+            assert candidate_item["state"] == "ACTIVE"
+    
+            def start_target(idempotency_key: str) -> tuple[dict[str, object], str, str]:
+                session_id = client.post("/api/sessions", headers=support_headers).json()["session_id"]
+                response = client.post(
+                    f"/api/sessions/{session_id}/assistant/order",
+                    headers={**support_headers, "Idempotency-Key": idempotency_key},
+                    json={
+                        "order_id": "ar02-order",
+                        "initial_message": "The new callback for this order is not confirmed yet. What should I check first?",
+                    },
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                assert item["task_id"] != source_item["task_id"]
+                assert _wait_for_run(client, str(item["run_id"]))["status"] == "SUCCEEDED"
+                answers = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+                answer = next(message for message in answers if message["role"] == "ASSISTANT")
+                assert "QUEUED" in answer["body"]
+                assert "�в��ܳ�Ϊ�������" in answer["body"]
+                return item, session_id, answer["body"]
+    
+            on_item, on_session, on_answer = start_target("ar04b-target-on")
+            # Test-only OFF arm: disable only Memory selection. The same assistant,
+            # tool schemas, trusted binding and Domain observations remain active.
+            import opspilot.domain.chat as chat_domain
+            original_current_memories = chat_domain._current_memories
+            monkeypatch.setattr(
+                chat_domain, "_current_memories",
+                lambda connection, task_id, state, evidence, excluded_sources=None: [],
+            )
+            off_item, off_session, off_answer = start_target("ar04b-target-off")
+            monkeypatch.setattr(chat_domain, "_current_memories", original_current_memories)
+    
+        with connect(demo_db) as connection:
+            calls = connection.execute(
+                """SELECT run_id,call_id,kind,status,request_json,result_json,evidence_id,observation_id
+                   FROM assistant_calls WHERE run_id IN (?, ?) ORDER BY created_at""",
+                (on_item["run_id"], off_item["run_id"]),
+            ).fetchall()
+            protected_writes = {
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("s3_diagnoses", "d3_action_intents", "d3_action_ledgers", "s3_handoff_receipts")
+            }
+        manifests_by_run = {}
+        for run_id in (on_item["run_id"], off_item["run_id"]):
+            with connect(demo_db) as connection:
+                row = connection.execute(
+                    "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                    (run_id,),
+                ).fetchone()
+            manifests_by_run[run_id] = json.loads(str(row["memory_refs_json"]))
+        manifest_memories = manifests_by_run[str(on_item["run_id"])]
+        assert [item["memory_id"] for item in manifest_memories] == [candidate_item["memory_id"]]
+        assert manifests_by_run[str(off_item["run_id"])] == []
+        on_calls = [row for row in calls if row["kind"] == "MODEL" and row["run_id"] == on_item["run_id"]]
+        off_calls = [row for row in calls if row["kind"] == "MODEL" and row["run_id"] == off_item["run_id"]]
+        mcp_calls = [row for row in calls if row["kind"] == "MCP"]
+        assert len(on_calls) >= 2 and len(off_calls) >= 2
+        assert {json.loads(str(row["request_json"]))["name"] for row in mcp_calls} >= {
+            "get_callback_delivery", "get_receiver_processing",
+        }
+        actual_wires = [json.loads(str(row["request_json"])) for row in on_calls]
+        actual_model_messages = [
+            json.dumps(wire["messages"], ensure_ascii=False, sort_keys=True) for wire in actual_wires
+        ]
+        for wire in actual_wires:
+            wire_refs = wire["source_refs"]["selected_memory_refs"]
+            assert [item["memory_id"] for item in wire_refs] == [candidate_item["memory_id"]]
+            assert wire["context_blocks"]
+            external = next(
+                item for item in wire["context_blocks"]
+                if item["block_id"] == "investigator-external-guidance"
+            )
+            assert external["status"] == "SELECTED"
+            assert candidate_item["memory_id"] in external["source_refs"]
+        assert manifest_memories[0]["version"] == candidate_item["version"]
+        assert manifest_memories[0]["digest"] == candidate_item["content_digest"]
+        assert protected_writes == {key: 0 for key in protected_writes}
+        for wire_text in actual_model_messages:
+            assert candidate_item["memory_id"] in wire_text
+        for wire in actual_wires:
+            assert wire["context_budget"]["estimated_input_tokens"] <= wire["context_budget"]["input_budget_tokens"]
+>           assert wire["context_budget"]["context_component_estimates"]["external_guidance"] > 0
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'context_component_estimates'
+
+tests\test_ar04b_memory_journey_01.py:240: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire - KeyError: 'context_component_estimates'
+======================== 1 failed, 2 passed in 14.18s =========================

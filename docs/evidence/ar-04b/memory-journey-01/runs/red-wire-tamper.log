@@ -1,0 +1,60 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04b-memory-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_ar04b_memory_journey_01.py::test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered FAILED
+
+================================== FAILURES ===================================
+_ test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-wire-tamper-red/test_ar04b_answer_commit_rejec0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-wire-tamper-red/test_ar04b_answer_commit_rejec0')
+
+    def test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered(
+        demo_db: Path, tmp_path: Path,
+    ) -> None:
+        """A source ref and digest alone cannot claim guidance that the Provider did not receive."""
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2)
+        _seed_async_project_approver(demo_db)
+        tamper_model = MemoryGuidanceTamperedAfterSendFixtureModel(
+            mode="tampered-wire", db_path=str(demo_db), memory_id="pending",
+        )
+        models = [MemoryWireFixtureModel(mode="source-task"), tamper_model]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-wire-tamper.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+        with TestClient(app) as client:
+            _, memory, support = _create_approved_semantic_memory(
+                client, ORIGIN, PASSWORDS, _login(client, ORIGIN, PASSWORDS, "support-a"),
+                suffix="wire-tamper",
+            )
+            tamper_model.memory_id = str(memory["memory_id"])
+            session_id = client.post("/api/sessions", headers=support).json()["session_id"]
+            response = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**support, "Idempotency-Key": "ar04b-wire-tamper-target"},
+                json={"order_id": "ar02-order", "initial_message": "Check the current callback receiver."},
+            )
+            assert response.status_code == 202, response.text
+            target = response.json()
+            run = _wait_for_run(client, str(target["run_id"]))
+    
+        assert tamper_model.seen
+>       assert run["status"] != "SUCCEEDED"
+E       AssertionError: assert 'SUCCEEDED' != 'SUCCEEDED'
+
+tests\test_ar04b_memory_journey_01.py:375: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered - AssertionError: assert 'SUCCEEDED' != 'SUCCEEDED'
+============================== 1 failed in 4.89s ==============================

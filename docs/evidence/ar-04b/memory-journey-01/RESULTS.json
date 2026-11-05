@@ -1,0 +1,105 @@
+{
+  "task": "AR-04B-MEMORY-JOURNEY-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "baseline": {
+    "frozen_gold_commit": "8db87e10cacbd3836ada099b38c82e38d3665035",
+    "frozen_origin_main": "134df49f792dfdf8d4b9a3b846d218af5c34ec6d",
+    "implementation_commit": "bdf696fb6189199123c2c87b32614d745a2f604f",
+    "candidate_sha": "Reported as final branch HEAD in handoff; not self-referential in this file.",
+    "gold_blob": "f5056cbb3344208e2e34671ea08a50963d3aea3d",
+    "north_star_blob": "e36f2f75509738551ac6d4a2de5b4f9cf44a7991",
+    "agents_blob": "f174a6ab7f23f9e6d8b3ef98d455b99a75193143",
+    "skill_blob": "d405c8d413d633824b279202cc1503dab4cf0b03"
+  },
+  "tests": [
+    {
+      "suite": "AR-04B targeted",
+      "passed": 9,
+      "failed": 0,
+      "duration_seconds": 51.29,
+      "log": "runs/green-ar04b-final-03.log",
+      "command": "python -m pytest -vv -s tests/test_ar04b_memory_journey_01.py --basetemp=docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-ar04b-final-03"
+    },
+    {
+      "suite": "M3 Episodic/Semantic + D5 Context",
+      "passed": 28,
+      "failed": 0,
+      "duration_seconds": 16.96,
+      "log": "runs/regression-memory-d5.log"
+    },
+    {
+      "suite": "AR-02 Assistant + M1 TaskControl",
+      "passed": 14,
+      "failed": 0,
+      "duration_seconds": 12.03,
+      "log": "runs/regression-assistant-taskcontrol.log"
+    },
+    {
+      "suite": "AR-04A Context + compression cancellation",
+      "passed": 7,
+      "failed": 1,
+      "duration_seconds": 74.19,
+      "log": "runs/regression-ar04a-context.log",
+      "failure": "test_ar04a_invalidated_summary_is_not_sent_to_the_model",
+      "assessment": "The assertion searches the full request record and sees the invalid summary ID in excluded_sources provenance. The summary is NOT_APPLICABLE with zero selected tokens, and its content is absent from model messages. The test remains failed and was not changed."
+    }
+  ],
+  "execution": {
+    "real_provider_http_requests": 0,
+    "deepseek_calls": 0,
+    "real_browser_runs": 0,
+    "external_business_writes": 0,
+    "local_mcp_successful_attempt_rows": 23,
+    "deterministic_fixture_model_call_rows": {
+      "ok": 50,
+      "failed": 1,
+      "meaning": "Local Fixture Model handler/reservation rows across isolated test DBs; not Provider HTTP or paid usage."
+    },
+    "input_budget_tokens": 12000,
+    "e1_estimated_input_tokens": {
+      "on": [
+        1970,
+        2470,
+        2762
+      ],
+      "off": [
+        1720,
+        2218,
+        2508
+      ],
+      "estimator": "tiktoken cl100k_base 0.14.0 estimates; not provider-reported usage."
+    }
+  },
+  "cases": {
+    "E1": "PASS_OFFLINE_WIRE_AND_DOMAIN; ON/OFF final answers and MCP choices equal; selected Memory appears in all ON handler inputs.",
+    "E2": "PASS_DETERMINISTIC_CURRENT_QUEUED; Episodic method Memory is ON only; current same-Event Delivery/Receiver observations are used.",
+    "E3": "PASS_DETERMINISTIC_CURRENT_PROCESSED; current same-Event PROCESSED observation changes the conclusion from QUEUED; ON/OFF agree within each state.",
+    "E4": "PASS_SCOPE_AND_LEGAL_PATH; foreign Tenant Memory absent while Tenant B current order query succeeds.",
+    "E5": "PASS_OFFLINE_REVOCATION_BOUNDARIES; pre-send/checkpoint stale content is rejected, after-send answer is not committed, and post-revocation ON/OFF proceeds with empty Memory refs.",
+    "E6": "PASS_OFFLINE_UNRELATED_MEMORY; same current tools and answer ON/OFF; no protected writes.",
+    "J6": "PASS_OFFLINE_SAME_TASK_FOLLOWUP; same Session/Task, prior answer in subsequent wire, current Receiver re-read, draft unsubmitted."
+  },
+  "gold": {
+    "G1": "PASS_OFFLINE_FORMAL_CANDIDATE_AND_CONFIRMATION",
+    "G2": "PASS_MOCK_MODEL_HANDLER_INPUT_ONLY; real Provider not run",
+    "G3": "PASS_OFFLINE_MANIFEST_WIRE_PARITY_AND_TAMPER_REJECTION",
+    "G4": "PASS_OFFLINE_CURRENT_MCP_FACTS_PREVAIL",
+    "G5": "PARTIAL_DETERMINISTIC_FIXTURE_ONLY; real LLM autonomy not tested",
+    "G6": "PASS_OFFLINE_SCOPE_EXCLUSION_AND_LEGAL_POSITIVE",
+    "G7": "PASS_OFFLINE_REVOCATION_AND_REENTRY",
+    "G8": "PASS_OFFLINE_BEFORE_SEND_CHECKPOINT_AND_AFTER_SEND",
+    "G9": "PARTIAL_WITHIN_12000_BUDGET; selected Memory estimated and included; related budget regressions pass; no dedicated over-limit Memory boundary in this slice",
+    "G10": "PASS_OFFLINE_ZERO_PROTECTED_WRITES_AND_NO_RECEIPT"
+  },
+  "levels": {
+    "level_1_capability_wiring": "DEMONSTRATED_OFFLINE",
+    "level_2_reasonable_decision": "DETERMINISTIC_FIXTURE_ONLY",
+    "level_3_repeatable_real_user_benefit": "NOT_PROVEN"
+  },
+  "limitations": [
+    "No real Provider Completion, Provider Usage, or charged token count.",
+    "Fixture ON/OFF answers and tool paths were equal; no quality improvement demonstrated.",
+    "AR-04A regression has one unresolved assertion failure described above.",
+    "No full pytest run in this slice."
+  ]
+}

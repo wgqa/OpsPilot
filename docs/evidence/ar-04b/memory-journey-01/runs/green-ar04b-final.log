@@ -1,0 +1,145 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04b-memory-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 8 items
+
+tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_unrelated_valid_semantic_memory_does_not_block_current_investigation PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_cross_tenant_memory_is_not_visible_and_legal_tenant_b_query_still_works FAILED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_revocation_before_provider_boundary_blocks_stale_memory_and_keeps_valid_path PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_revocation_after_checkpoint_load_blocks_stale_continuation PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_revocation_after_send_prevents_answer_commit PASSED
+
+================================== FAILURES ===================================
+_ test_ar04b_cross_tenant_memory_is_not_visible_and_legal_tenant_b_query_still_works _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-ar04b-final/test_ar04b_cross_tenant_memory0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-ar04b-final/test_ar04b_cross_tenant_memory0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B5443D59D0>
+
+    def test_ar04b_cross_tenant_memory_is_not_visible_and_legal_tenant_b_query_still_works(
+        demo_db: Path, tmp_path: Path, monkeypatch,
+    ) -> None:
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+        from test_ar02_journey_p0 import JourneyFixtureModel
+    
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order")
+        prepare_s3_fixture(
+            demo_db, "DELIVERED_PENDING", tenant_id="tenant-b", order_id="ar04b-tenant-b-order",
+        )
+        _seed_async_project_approver(demo_db)
+        models = [
+            MemoryWireFixtureModel(mode="source-task"),
+            JourneyFixtureModel(mode="receiver"),
+            JourneyFixtureModel(mode="receiver"),
+        ]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-cross-tenant.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+        with TestClient(app) as client:
+            _, memory, support_a = _create_approved_semantic_memory(
+                client, ORIGIN, PASSWORDS, _login(client, ORIGIN, PASSWORDS, "support-a"),
+                suffix="cross-tenant-a",
+            )
+            support_b = _login(client, ORIGIN, PASSWORDS, "support-b")
+    
+            def run_target(key: str) -> tuple[dict[str, object], str, str]:
+                session_id = client.post("/api/sessions", headers=support_b).json()["session_id"]
+                accepted = client.post(
+                    f"/api/sessions/{session_id}/assistant/order",
+                    headers={**support_b, "Idempotency-Key": key},
+                    json={
+                        "order_id": "ar04b-tenant-b-order",
+                        "initial_message": "What is the current callback state for the bound order?",
+                    },
+                )
+                assert accepted.status_code == 202, accepted.text
+                item = accepted.json()
+                assert _wait_for_run(client, str(item["run_id"]))["status"] == "SUCCEEDED"
+                answer = next(
+                    message for message in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+                    if message["role"] == "ASSISTANT"
+                )["body"]
+                assert "QUEUED" in answer
+                return item, session_id, answer
+    
+            on_item, on_session, on_answer = run_target("ar04b-cross-tenant-on")
+            import opspilot.domain.chat as chat_domain
+            original_current_memories = chat_domain._current_memories
+            monkeypatch.setattr(
+                chat_domain, "_current_memories",
+                lambda connection, task_id, state, evidence, excluded_sources=None: [],
+            )
+            off_item, off_session, off_answer = run_target("ar04b-cross-tenant-off")
+            monkeypatch.setattr(chat_domain, "_current_memories", original_current_memories)
+    
+        with connect(demo_db) as connection:
+            on_manifest = connection.execute(
+                "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                (on_item["run_id"],),
+            ).fetchone()
+            off_manifest = connection.execute(
+                "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                (off_item["run_id"],),
+            ).fetchone()
+            calls = [dict(row) for row in connection.execute(
+                "SELECT run_id,kind,request_json,result_json FROM assistant_calls WHERE run_id IN (?,?)",
+                (on_item["run_id"], off_item["run_id"]),
+            )]
+            tenant_a_task = connection.execute(
+                "SELECT tenant_id FROM task_bindings WHERE task_id=?", (memory["source_task_id"],),
+            ).fetchone()
+            tenant_b_task = connection.execute(
+                "SELECT tenant_id FROM task_bindings WHERE task_id=?", (on_item["task_id"],),
+            ).fetchone()
+        assert tenant_a_task["tenant_id"] == "tenant-a"
+        assert tenant_b_task["tenant_id"] == "tenant-b"
+        assert json.loads(str(on_manifest["memory_refs_json"])) == []
+        assert json.loads(str(off_manifest["memory_refs_json"])) == []
+        assert support_a["Origin"] == support_b["Origin"] == ORIGIN
+        on_model_wires = [json.loads(item["request_json"]) for item in calls if item["run_id"] == on_item["run_id"] and item["kind"] == "MODEL"]
+        off_model_wires = [json.loads(item["request_json"]) for item in calls if item["run_id"] == off_item["run_id"] and item["kind"] == "MODEL"]
+        assert on_model_wires and off_model_wires
+        assert all(memory["memory_id"] not in json.dumps(wire["messages"]) for wire in on_model_wires + off_model_wires)
+        on_tools = {json.loads(item["request_json"])["name"] for item in calls if item["run_id"] == on_item["run_id"] and item["kind"] == "MCP"}
+        off_tools = {json.loads(item["request_json"])["name"] for item in calls if item["run_id"] == off_item["run_id"] and item["kind"] == "MCP"}
+        assert on_tools == off_tools == {"get_callback_delivery", "get_receiver_processing"}
+        assert on_answer == off_answer
+        trace_path = tmp_path / "ar04b-cross-tenant-on-off.json"
+        trace_path.write_text(json.dumps({
+            "evidence_level": "FORMAL_API_WORKER_FIXTURE_MODEL_MCP_DOMAIN",
+            "pair": "E4_CROSS_TENANT_MEMORY_EXCLUSION_WITH_LEGAL_TENANT_QUERY",
+            "foreign_memory_id": memory["memory_id"], "foreign_source_task_id": memory["source_task_id"],
+            "foreign_tenant_id": tenant_a_task["tenant_id"], "target_tenant_id": tenant_b_task["tenant_id"],
+            "on": {"task_id": on_item["task_id"], "run_id": on_item["run_id"],
+                   "session_id": on_session, "answer": on_answer,
+                   "manifest_memory_refs": json.loads(str(on_manifest["memory_refs_json"]))},
+            "off": {"task_id": off_item["task_id"], "run_id": off_item["run_id"],
+                    "session_id": off_session, "answer": off_answer,
+                    "manifest_memory_refs": json.loads(str(off_manifest["memory_refs_json"]))},
+>           "model_call_counts": {"on": len(on_model_calls), "off": len(off_model_calls)},
+                                            ^^^^^^^^^^^^^^
+            "calls": [
+                {"run_id": item["run_id"], "kind": item["kind"],
+                 "request": json.loads(item["request_json"]),
+                 "result": json.loads(item["result_json"]) if item["result_json"] else None,
+                 "evidence_id": item.get("evidence_id"), "observation_id": item.get("observation_id")}
+                for item in calls
+            ],
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+E       NameError: name 'on_model_calls' is not defined
+
+tests\test_ar04b_memory_journey_01.py:872: NameError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_cross_tenant_memory_is_not_visible_and_legal_tenant_b_query_still_works - NameError: name 'on_model_calls' is not defined
+======================== 1 failed, 7 passed in 42.95s =========================

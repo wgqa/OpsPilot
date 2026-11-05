@@ -1,0 +1,242 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04b-memory-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 4 items
+
+tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire FAILED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_unrelated_valid_semantic_memory_does_not_block_current_investigation FAILED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_revocation_after_send_prevents_answer_commit PASSED
+
+================================== FAILURES ===================================
+_ test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire __
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-green-wire-e6-02/test_ar04b_confirmed_cross_tas0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-green-wire-e6-02/test_ar04b_confirmed_cross_tas0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B7AD467BB0>
+
+    def test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire(
+        demo_db: Path, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Pair Memory ON/OFF on the formal API/Worker wire and preserve current MCP facts."""
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_journey_p0 import JourneyFixtureModel
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2)
+        _seed_async_project_approver(demo_db)
+        models = [
+            MemoryWireFixtureModel(mode="source-task"),
+            JourneyFixtureModel(mode="receiver"),
+            JourneyFixtureModel(mode="receiver"),
+        ]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-worker.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+    
+        with TestClient(app) as client:
+            source_item, candidate_item, support_headers = _create_approved_semantic_memory(
+                client, ORIGIN, PASSWORDS, _login(client, ORIGIN, PASSWORDS, "support-a"),
+                suffix="e1-related-semantic",
+            )
+            assert candidate_item["state"] == "ACTIVE"
+    
+            def start_target(idempotency_key: str) -> tuple[dict[str, object], str, str]:
+                session_id = client.post("/api/sessions", headers=support_headers).json()["session_id"]
+                response = client.post(
+                    f"/api/sessions/{session_id}/assistant/order",
+                    headers={**support_headers, "Idempotency-Key": idempotency_key},
+                    json={
+                        "order_id": "ar02-order",
+                        "initial_message": "The new callback for this order is not confirmed yet. What should I check first?",
+                    },
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                assert item["task_id"] != source_item["task_id"]
+                assert _wait_for_run(client, str(item["run_id"]))["status"] == "SUCCEEDED"
+                answers = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+                answer = next(message for message in answers if message["role"] == "ASSISTANT")
+                assert "QUEUED" in answer["body"]
+                assert "�в��ܳ�Ϊ�������" in answer["body"]
+                return item, session_id, answer["body"]
+    
+            on_item, on_session, on_answer = start_target("ar04b-target-on")
+            # Test-only OFF arm: disable only Memory selection. The same assistant,
+            # tool schemas, trusted binding and Domain observations remain active.
+            import opspilot.domain.chat as chat_domain
+            original_current_memories = chat_domain._current_memories
+            monkeypatch.setattr(
+                chat_domain, "_current_memories",
+                lambda connection, task_id, state, evidence, excluded_sources=None: [],
+            )
+            off_item, off_session, off_answer = start_target("ar04b-target-off")
+            monkeypatch.setattr(chat_domain, "_current_memories", original_current_memories)
+    
+        with connect(demo_db) as connection:
+            calls = connection.execute(
+                """SELECT run_id,call_id,kind,status,request_json,result_json,evidence_id,observation_id
+                   FROM assistant_calls WHERE run_id IN (?, ?) ORDER BY created_at""",
+                (on_item["run_id"], off_item["run_id"]),
+            ).fetchall()
+            protected_writes = {
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("s3_diagnoses", "d3_action_intents", "d3_action_ledgers", "s3_handoff_receipts")
+            }
+        manifests_by_run = {}
+        for run_id in (on_item["run_id"], off_item["run_id"]):
+            with connect(demo_db) as connection:
+                row = connection.execute(
+                    "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                    (run_id,),
+                ).fetchone()
+            manifests_by_run[run_id] = json.loads(str(row["memory_refs_json"]))
+        manifest_memories = manifests_by_run[str(on_item["run_id"])]
+        assert [item["memory_id"] for item in manifest_memories] == [candidate_item["memory_id"]]
+        assert manifests_by_run[str(off_item["run_id"])] == []
+        on_calls = [row for row in calls if row["kind"] == "MODEL" and row["run_id"] == on_item["run_id"]]
+        off_calls = [row for row in calls if row["kind"] == "MODEL" and row["run_id"] == off_item["run_id"]]
+        mcp_calls = [row for row in calls if row["kind"] == "MCP"]
+        assert len(on_calls) >= 2 and len(off_calls) >= 2
+        assert {json.loads(str(row["request_json"]))["name"] for row in mcp_calls} >= {
+            "get_callback_delivery", "get_receiver_processing",
+        }
+        actual_wires = [json.loads(str(row["request_json"])) for row in on_calls]
+        actual_model_messages = [
+            "\n".join(str(message.get("content", "")) for message in wire["messages"])
+            for wire in actual_wires
+        ]
+        for wire in actual_wires:
+            wire_refs = wire["source_refs"]["selected_memory_refs"]
+            assert [item["memory_id"] for item in wire_refs] == [candidate_item["memory_id"]]
+            assert wire_refs[0]["version"] == candidate_item["version"]
+            assert wire_refs[0]["digest"] == candidate_item["content_digest"]
+            assert wire["context_blocks"]
+            external = next(
+                item for item in wire["context_blocks"]
+                if item["block_id"] == "investigator-external-guidance"
+            )
+            assert external["status"] == "SELECTED"
+            assert candidate_item["memory_id"] in external["source_refs"]
+        assert manifest_memories[0]["version"] == candidate_item["version"]
+        assert manifest_memories[0]["digest"] == candidate_item["content_digest"]
+        assert protected_writes == {key: 0 for key in protected_writes}
+        for wire_text in actual_model_messages:
+>           assert candidate_item["memory_id"] in wire_text
+E           AssertionError: assert 'semantic-4d2a7d55-78f7-40a2-a917-7b67cd236bc8' in '\n'
+
+tests\test_ar04b_memory_journey_01.py:282: AssertionError
+_ test_ar04b_unrelated_valid_semantic_memory_does_not_block_current_investigation _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-green-wire-e6-02/test_ar04b_unrelated_valid_sem0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-green-wire-e6-02/test_ar04b_unrelated_valid_sem0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B7B01363F0>
+
+    def test_ar04b_unrelated_valid_semantic_memory_does_not_block_current_investigation(
+        demo_db: Path, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """A valid but unrelated project hint is non-authoritative; current MCP still completes the task."""
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+        from test_ar02_journey_p0 import JourneyFixtureModel
+    
+        unrelated_hint = (
+            "For billing disputes, reconcile monthly invoice totals to the finance ledger; "
+            "this is not a callback procedure."
+        )
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2)
+        _seed_async_project_approver(demo_db)
+        models = [
+            MemoryWireFixtureModel(mode="source-task"),
+            JourneyFixtureModel(mode="receiver"),
+            JourneyFixtureModel(mode="receiver"),
+        ]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-unrelated-memory.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+        with TestClient(app) as client:
+            _, memory, support = _create_approved_semantic_memory(
+                client, ORIGIN, PASSWORDS, _login(client, ORIGIN, PASSWORDS, "support-a"),
+                suffix="unrelated-valid", content=unrelated_hint,
+            )
+    
+            def run_target(key: str) -> tuple[dict[str, object], str, str]:
+                session_id = client.post("/api/sessions", headers=support).json()["session_id"]
+                response = client.post(
+                    f"/api/sessions/{session_id}/assistant/order",
+                    headers={**support, "Idempotency-Key": key},
+                    json={
+                        "order_id": "ar02-order",
+                        "initial_message": "What is the current callback state for the bound order?",
+                    },
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                assert _wait_for_run(client, str(item["run_id"]))["status"] == "SUCCEEDED"
+                answer = next(
+                    message for message in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+                    if message["role"] == "ASSISTANT"
+                )["body"]
+                return item, session_id, answer
+    
+            on_item, on_session, on_answer = run_target("ar04b-unrelated-memory-on")
+            import opspilot.domain.chat as chat_domain
+            original_current_memories = chat_domain._current_memories
+            monkeypatch.setattr(
+                chat_domain, "_current_memories",
+                lambda connection, task_id, state, evidence, excluded_sources=None: [],
+            )
+            off_item, off_session, off_answer = run_target("ar04b-unrelated-memory-off")
+            monkeypatch.setattr(chat_domain, "_current_memories", original_current_memories)
+    
+        with connect(demo_db) as connection:
+            run_ids = (on_item["run_id"], off_item["run_id"])
+            manifests = {
+                run_id: json.loads(str(connection.execute(
+                    "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                    (run_id,),
+                ).fetchone()["memory_refs_json"]))
+                for run_id in run_ids
+            }
+            calls = [dict(row) for row in connection.execute(
+                "SELECT run_id,kind,request_json,result_json,evidence_id,observation_id FROM assistant_calls "
+                "WHERE run_id IN (?,?) ORDER BY created_at", run_ids,
+            )]
+            protected_writes = {
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("s3_diagnoses", "d3_action_intents", "d3_action_ledgers", "s3_handoff_receipts")
+            }
+    
+        assert [item["memory_id"] for item in manifests[on_item["run_id"]]] == [memory["memory_id"]]
+        assert manifests[off_item["run_id"]] == []
+        on_model_calls = [item for item in calls if item["run_id"] == on_item["run_id"] and item["kind"] == "MODEL"]
+        off_model_calls = [item for item in calls if item["run_id"] == off_item["run_id"] and item["kind"] == "MODEL"]
+        on_wire_text = "\n".join(
+            str(message.get("content", ""))
+            for call in on_model_calls
+            for message in json.loads(call["request_json"])["messages"]
+        )
+        off_wire_text = "\n".join(
+            str(message.get("content", ""))
+            for call in off_model_calls
+            for message in json.loads(call["request_json"])["messages"]
+        )
+>       assert memory["memory_id"] in on_wire_text and unrelated_hint in on_wire_text
+E       AssertionError: assert ('semantic-e051eb45-d105-49d4-b8ef-fe8e4c204a90' in '\n\n\n\n\n\n\n\n\n\n\n')
+
+tests\test_ar04b_memory_journey_01.py:497: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire - AssertionError: assert 'semantic-4d2a7d55-78f7-40a2-a917-7b67cd236bc8' in '\n'
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_unrelated_valid_semantic_memory_does_not_block_current_investigation - AssertionError: assert ('semantic-e051eb45-d105-49d4-b8ef-fe8e4c204a90' in '\n\n\n\n\n\n\n\n\n\n\n')
+======================== 2 failed, 2 passed in 19.86s =========================

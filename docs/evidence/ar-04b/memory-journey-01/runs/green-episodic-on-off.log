@@ -1,0 +1,115 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04b-memory-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact FAILED
+
+================================== FAILURES ===================================
+_ test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-green-episodic-01/test_ar04b_confirmed_episodic_0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-green-episodic-01/test_ar04b_confirmed_episodic_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000264E80CF820>
+
+    def test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact(
+        demo_db: Path, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Pair an approved S3 Episodic Memory ON/OFF; current same-Event MCP wins."""
+        from opspilot.domain.database import connect, reset_fixture
+        from opspilot.domain.s3 import persist_s3_diagnosis, prepare_s3_fixture
+        from opspilot.domain.task_control import apply_pending_critical_inputs, claim_task_run, finish_task_run
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+        from test_ar02_journey_p0 import JourneyFixtureModel
+        from test_m4_03_s3 import _evidence, _facts, _task
+    
+        reset_fixture(demo_db, "S1_POS")
+        prepare_s3_fixture(
+            demo_db, "DELIVERY_FAILED", order_id="ar04b-episodic-source",
+            attempt_count=3, retry_state="EXHAUSTED",
+        )
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order")
+        _seed_async_project_approver(demo_db)
+        source_identity, source = _task(
+            demo_db, "ar04b-episodic-source",
+            text="A prior callback delivery failed. Record only the verified method, not a current customer state.",
+        )
+        claim_task_run(demo_db, source_identity, str(source["run_id"]))
+        apply_pending_critical_inputs(demo_db, source_identity, str(source["run_id"]))
+        order, delivery, receiver = _facts(demo_db, source)
+        source_evidence = [
+            _evidence(demo_db, source, "get_order_status", order),
+            _evidence(demo_db, source, "get_callback_delivery", delivery),
+            _evidence(demo_db, source, "get_receiver_processing", receiver),
+        ]
+        diagnosis = persist_s3_diagnosis(
+            demo_db, str(source["task_id"]), str(source["run_id"]), source_evidence,
+        )
+        assert diagnosis["outcome"] == "CALLBACK_DELIVERY_FAILED"
+        finish_task_run(demo_db, source_identity, str(source["run_id"]), "SUCCEEDED")
+    
+        on_model = JourneyFixtureModel(mode="receiver")
+        off_model = JourneyFixtureModel(mode="receiver")
+        models = [on_model, off_model]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-episodic.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+        with TestClient(app) as client:
+            support = _login(client, ORIGIN, PASSWORDS, "support-a")
+            candidate = client.post(
+                f"/api/tasks/{source['task_id']}/memories/candidates",
+                headers={**support, "Idempotency-Key": "ar04b-episodic-candidate"}, json={},
+            )
+            assert candidate.status_code == 201, candidate.text
+            candidate_item = candidate.json()
+            approver = _login(client, ORIGIN, PASSWORDS, "approver-a")
+            confirmed = client.post(
+                f"/api/memories/{candidate_item['memory_id']}/confirm",
+                headers={**approver, "Idempotency-Key": "ar04b-episodic-confirm"}, json={},
+            )
+            assert confirmed.status_code == 200, confirmed.text
+            assert confirmed.json()["state"] == "ACTIVE"
+    
+            def run_target(key: str) -> tuple[dict[str, object], str]:
+                session_id = client.post("/api/sessions", headers=support).json()["session_id"]
+                accepted = client.post(
+                    f"/api/sessions/{session_id}/assistant/order",
+                    headers={**support, "Idempotency-Key": key},
+                    json={
+                        "order_id": "ar02-order",
+                        "initial_message": "This callback resembles an earlier failure. What is its current state?",
+                    },
+                )
+                assert accepted.status_code == 202, accepted.text
+                item = accepted.json()
+                assert _wait_for_run(client, str(item["run_id"]))["status"] == "SUCCEEDED"
+                answer = next(
+                    message for message in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+                    if message["role"] == "ASSISTANT"
+                )["body"]
+                assert "QUEUED" in answer and "�в��ܳ�Ϊ�������" in answer
+                return item, answer
+    
+>           on_item, on_answer = run_target("ar04b-episodic-on")
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar04b_memory_journey_01.py:373: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+key = 'ar04b-episodic-on'
+
+    def run_target(key: str) -> tuple[dict[str, object], str]:
+>       session_id = client.post("/api/sessions", headers=support).json()["session_id"]
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'session_id'
+
+tests\test_ar04b_memory_journey_01.py:354: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact - KeyError: 'session_id'
+============================== 1 failed in 3.76s ==============================

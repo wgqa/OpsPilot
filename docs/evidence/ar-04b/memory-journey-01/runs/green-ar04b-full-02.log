@@ -1,0 +1,324 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04b-memory-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 7 items
+
+tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_cross_task_memory_is_present_on_formal_assistant_wire PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered FAILED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_unrelated_valid_semantic_memory_does_not_block_current_investigation PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact FAILED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_cross_tenant_memory_is_not_visible_and_legal_tenant_b_query_still_works PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_revocation_before_provider_boundary_blocks_stale_memory_and_keeps_valid_path PASSED
+tests/test_ar04b_memory_journey_01.py::test_ar04b_revocation_after_send_prevents_answer_commit PASSED
+
+================================== FAILURES ===================================
+_ test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-ar04b-full-02/test_ar04b_answer_commit_rejec0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-ar04b-full-02/test_ar04b_answer_commit_rejec0')
+
+    def test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered(
+        demo_db: Path, tmp_path: Path,
+    ) -> None:
+        """A source ref and digest alone cannot claim guidance that the Provider did not receive."""
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2)
+        _seed_async_project_approver(demo_db)
+        tamper_model = MemoryGuidanceTamperedAfterSendFixtureModel(
+            mode="tampered-wire", db_path=str(demo_db), memory_id="pending",
+        )
+        models = [MemoryWireFixtureModel(mode="source-task"), tamper_model]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-wire-tamper.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+        with TestClient(app) as client:
+            _, memory, support = _create_approved_semantic_memory(
+                client, ORIGIN, PASSWORDS, _login(client, ORIGIN, PASSWORDS, "support-a"),
+                suffix="wire-tamper",
+            )
+            tamper_model.memory_id = str(memory["memory_id"])
+            session_id = client.post("/api/sessions", headers=support).json()["session_id"]
+            response = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**support, "Idempotency-Key": "ar04b-wire-tamper-target"},
+                json={"order_id": "ar02-order", "initial_message": "Check the current callback receiver."},
+            )
+            assert response.status_code == 202, response.text
+            target = response.json()
+            run = _wait_for_run(client, str(target["run_id"]))
+    
+        assert tamper_model.seen
+        assert run["status"] != "SUCCEEDED"
+        with connect(demo_db) as connection:
+            answers = connection.execute(
+                "SELECT COUNT(*) FROM chat_run_answers WHERE run_id=?", (target["run_id"],),
+            ).fetchone()[0]
+            request = connection.execute(
+                "SELECT request_json FROM assistant_calls WHERE run_id=? AND kind='MODEL' ORDER BY created_at DESC LIMIT 1",
+                (target["run_id"],),
+            ).fetchone()
+            manifest = connection.execute(
+                "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                (target["run_id"],),
+            ).fetchone()
+        assert answers == 0
+        assert request is not None and manifest is not None
+        assert run["status"] == "FAILED"
+>       assert run.get("blocked_reason") == "ASSISTANT_STOP:TaskControlError:CHAT_MEMORY_WIRE_SOURCE_MISMATCH"
+E       AssertionError: assert None == 'ASSISTANT_STOP:TaskControlError:CHAT_MEMORY_WIRE_SOURCE_MISMATCH'
+E        +  where None = <built-in method get of dict object at 0x000002270844D380>('blocked_reason')
+E        +    where <built-in method get of dict object at 0x000002270844D380> = {'run_id': 'run-4c355b79-f211-44aa-97f7-f51d73b50996', 'task_id': 'task-5de916aa-b9e7-4329-a5b6-f4bb9435c38e', 'session_id': 'session-a790a802-9396-479a-9147-37bd990f0bdb', 'source_message_id': 'message-f7dea9b9-be42-4d4e-b213-df0bd6f959ad', 'kind': 'CHAT_READONLY', 'status': 'FAILED', 'waiting_reason': 'ASSISTANT_STOP:TaskControlError:CHAT_MEMORY_WIRE_SOURCE_MISMATCH', 'created_at': '2026-11-05T03:48:57.738+00:00', 'started_at': '2026-11-05T03:48:57.824+00:00', 'ended_at': '2026-11-05T03:48:58.725+00:00', 'answer_status': 'FAILED'}.get
+
+tests\test_ar04b_memory_journey_01.py:396: AssertionError
+_ test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-ar04b-full-02/test_ar04b_confirmed_episodic_0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-ar04b-full-02/test_ar04b_confirmed_episodic_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002270851E450>
+
+    def test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact(
+        demo_db: Path, tmp_path: Path, monkeypatch,
+    ) -> None:
+        """Pair an approved S3 Episodic Memory ON/OFF; current same-Event MCP wins."""
+        from opspilot.domain.database import connect, reset_fixture
+        from opspilot.domain.s3 import persist_s3_diagnosis, prepare_s3_fixture
+        from opspilot.domain.task_control import apply_pending_critical_inputs, claim_task_run, finish_task_run
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+        from test_ar02_journey_p0 import JourneyFixtureModel
+        from test_m4_03_s3 import _evidence, _facts, _task
+    
+        reset_fixture(demo_db, "S1_POS")
+        prepare_s3_fixture(
+            demo_db, "DELIVERY_FAILED", order_id="ar04b-episodic-source",
+            attempt_count=3, retry_state="EXHAUSTED",
+        )
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order")
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-processed-order")
+        # This is a deterministic fixture update to a schema-valid receiver state.
+        # It creates the current fact variant; no application business action runs.
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET status='PROCESSED', version=version+1 "
+                "WHERE tenant_id='tenant-a' AND service_id='orders-async-demo' AND order_id='ar02-processed-order'"
+            )
+        _seed_async_project_approver(demo_db)
+        source_identity, source = _task(
+            demo_db, "ar04b-episodic-source",
+            text="A prior callback delivery failed. Record only the verified method, not a current customer state.",
+        )
+        claim_task_run(demo_db, source_identity, str(source["run_id"]))
+        apply_pending_critical_inputs(demo_db, source_identity, str(source["run_id"]))
+        order, delivery, receiver = _facts(demo_db, source)
+        source_evidence = [
+            _evidence(demo_db, source, "get_order_status", order),
+            _evidence(demo_db, source, "get_callback_delivery", delivery),
+            _evidence(demo_db, source, "get_receiver_processing", receiver),
+        ]
+        diagnosis = persist_s3_diagnosis(
+            demo_db, str(source["task_id"]), str(source["run_id"]), source_evidence,
+        )
+        assert diagnosis["outcome"] == "CALLBACK_DELIVERY_FAILED"
+        finish_task_run(demo_db, source_identity, str(source["run_id"]), "SUCCEEDED")
+    
+        on_model = JourneyFixtureModel(mode="receiver")
+        off_model = JourneyFixtureModel(mode="receiver")
+        processed_on_model = JourneyFixtureModel(mode="receiver")
+        processed_off_model = JourneyFixtureModel(mode="receiver")
+        models = [on_model, off_model, processed_on_model, processed_off_model]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-episodic.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+        with TestClient(app) as client:
+            support = _login(client, ORIGIN, PASSWORDS, "support-a")
+            candidate = client.post(
+                f"/api/tasks/{source['task_id']}/memories/candidates",
+                headers={**support, "Idempotency-Key": "ar04b-episodic-candidate"}, json={},
+            )
+            assert candidate.status_code == 201, candidate.text
+            candidate_item = candidate.json()
+            approver = _login(client, ORIGIN, PASSWORDS, "approver-a")
+            confirmed = client.post(
+                f"/api/memories/{candidate_item['memory_id']}/confirm",
+                headers={**approver, "Idempotency-Key": "ar04b-episodic-confirm"}, json={},
+            )
+            assert confirmed.status_code == 200, confirmed.text
+            assert confirmed.json()["state"] == "ACTIVE"
+            support = _login(client, ORIGIN, PASSWORDS, "support-a")
+    
+            def run_target(key: str, order_id: str = "ar02-order") -> tuple[dict[str, object], str]:
+                session_response = client.post("/api/sessions", headers=support)
+                assert session_response.status_code == 201, session_response.text
+                session_id = session_response.json()["session_id"]
+                accepted = client.post(
+                    f"/api/sessions/{session_id}/assistant/order",
+                    headers={**support, "Idempotency-Key": key},
+                    json={
+                        "order_id": order_id,
+                        "initial_message": "This callback resembles an earlier failure. What is its current state?",
+                    },
+                )
+                assert accepted.status_code == 202, accepted.text
+                item = accepted.json()
+                assert _wait_for_run(client, str(item["run_id"]))["status"] == "SUCCEEDED"
+                answer = next(
+                    message for message in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+                    if message["role"] == "ASSISTANT"
+                )["body"]
+                if order_id == "ar02-order":
+                    assert "QUEUED" in answer and "�в��ܳ�Ϊ�������" in answer
+                else:
+                    assert "PROCESSED" in answer
+                return item, answer
+    
+            on_item, on_answer = run_target("ar04b-episodic-on")
+            import opspilot.domain.chat as chat_domain
+            original_current_memories = chat_domain._current_memories
+            monkeypatch.setattr(
+                chat_domain, "_current_memories",
+                lambda connection, task_id, state, evidence, excluded_sources=None: [],
+            )
+            off_item, off_answer = run_target("ar04b-episodic-off")
+            monkeypatch.setattr(chat_domain, "_current_memories", original_current_memories)
+            processed_on_item, processed_on_answer = run_target(
+                "ar04b-episodic-processed-on", "ar02-processed-order",
+            )
+            monkeypatch.setattr(
+                chat_domain, "_current_memories",
+                lambda connection, task_id, state, evidence, excluded_sources=None: [],
+            )
+            processed_off_item, processed_off_answer = run_target(
+                "ar04b-episodic-processed-off", "ar02-processed-order",
+            )
+            monkeypatch.setattr(chat_domain, "_current_memories", original_current_memories)
+    
+        with connect(demo_db) as connection:
+            on_manifest = connection.execute(
+                "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                (on_item["run_id"],),
+            ).fetchone()
+            off_manifest = connection.execute(
+                "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                (off_item["run_id"],),
+            ).fetchone()
+            processed_on_manifest = connection.execute(
+                "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                (processed_on_item["run_id"],),
+            ).fetchone()
+            processed_off_manifest = connection.execute(
+                "SELECT memory_refs_json FROM chat_context_manifests WHERE run_id=? ORDER BY created_at DESC LIMIT 1",
+                (processed_off_item["run_id"],),
+            ).fetchone()
+            calls = [dict(row) for row in connection.execute(
+                "SELECT run_id,kind,request_json,result_json,evidence_id,observation_id FROM assistant_calls WHERE run_id IN (?,?,?,?)",
+                (on_item["run_id"], off_item["run_id"], processed_on_item["run_id"], processed_off_item["run_id"]),
+            )]
+            protected_writes = {
+                table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("s3_diagnoses", "d3_action_intents", "d3_action_ledgers", "s3_handoff_receipts")
+            }
+        on_refs = json.loads(str(on_manifest["memory_refs_json"]))
+        assert [item["memory_id"] for item in on_refs] == [candidate_item["memory_id"]]
+        assert on_refs[0]["memory_type"] == "EPISODIC"
+        assert on_refs[0]["source_task_id"] == source["task_id"]
+        assert json.loads(str(off_manifest["memory_refs_json"])) == []
+        assert [item["memory_id"] for item in json.loads(str(processed_on_manifest["memory_refs_json"]))] == [candidate_item["memory_id"]]
+        assert json.loads(str(processed_off_manifest["memory_refs_json"])) == []
+        on_model_calls = [item for item in calls if item["run_id"] == on_item["run_id"] and item["kind"] == "MODEL"]
+        off_model_calls = [item for item in calls if item["run_id"] == off_item["run_id"] and item["kind"] == "MODEL"]
+        processed_on_calls = [item for item in calls if item["run_id"] == processed_on_item["run_id"]]
+        processed_off_calls = [item for item in calls if item["run_id"] == processed_off_item["run_id"]]
+        on_mcp_calls = [item for item in calls if item["run_id"] == on_item["run_id"] and item["kind"] == "MCP"]
+        off_mcp_calls = [item for item in calls if item["run_id"] == off_item["run_id"] and item["kind"] == "MCP"]
+        assert on_answer == off_answer
+        assert processed_on_answer == processed_off_answer
+        assert "PROCESSED" in processed_on_answer
+        assert {json.loads(item["request_json"])["name"] for item in on_mcp_calls} == {
+            json.loads(item["request_json"])["name"] for item in off_mcp_calls
+        }
+        on_wire_texts = [json.dumps(json.loads(item["request_json"])["messages"], ensure_ascii=False) for item in on_model_calls]
+        assert all(candidate_item["memory_id"] in text for text in on_wire_texts)
+        assert all("HISTORICAL_METHOD_HINT_ONLY" in text for text in on_wire_texts)
+        assert all(candidate_item["memory_id"] not in json.dumps(json.loads(item["request_json"])["messages"])
+                   for item in off_model_calls)
+        processed_on_mcp = [item for item in processed_on_calls if item["kind"] == "MCP"]
+        processed_off_mcp = [item for item in processed_off_calls if item["kind"] == "MCP"]
+        processed_results = {
+            json.loads(item["request_json"])["name"]: json.loads(item["result_json"])["facts"]
+            for item in processed_on_mcp
+        }
+        assert processed_results["get_callback_delivery"]["status"] == "ACKNOWLEDGED"
+        assert processed_results["get_callback_delivery"]["receiver_http_status"] == 202
+        assert processed_results["get_receiver_processing"]["status"] == "PROCESSED"
+        assert processed_results["get_callback_delivery"]["event_id"] == processed_results["get_receiver_processing"]["event_id"]
+        assert {json.loads(item["request_json"])["name"] for item in processed_on_mcp} == {
+            json.loads(item["request_json"])["name"] for item in processed_off_mcp
+        }
+        assert all(candidate_item["memory_id"] in json.dumps(json.loads(item["request_json"])["messages"], ensure_ascii=False)
+                   for item in processed_on_calls if item["kind"] == "MODEL")
+        current_wire = " ".join(on_wire_texts)
+        assert "QUEUED" in current_wire
+        assert "202" in current_wire
+        on_result_by_tool = {
+            json.loads(item["request_json"])["name"]: json.loads(item["result_json"])
+            for item in on_mcp_calls
+        }
+        delivery_facts = on_result_by_tool["get_callback_delivery"]["facts"]
+        receiver_facts = on_result_by_tool["get_receiver_processing"]["facts"]
+        assert delivery_facts["status"] == "ACKNOWLEDGED"
+        assert delivery_facts["receiver_http_status"] == 202
+        assert receiver_facts["status"] == "QUEUED"
+        assert delivery_facts["event_id"] == receiver_facts["event_id"]
+>       assert protected_writes == {key: 0 for key in protected_writes}
+E       AssertionError: assert {'s3_diagnoses': 1, 'd3_action_intents': 0, 'd3_action_ledgers': 0, 's3_handoff_receipts': 0} == {'s3_diagnoses': 0, 'd3_action_intents': 0, 'd3_action_ledgers': 0, 's3_handoff_receipts': 0}
+E         
+E         Common items:
+E         {'d3_action_intents': 0, 'd3_action_ledgers': 0, 's3_handoff_receipts': 0}
+E         Differing items:
+E         {'s3_diagnoses': 1} != {'s3_diagnoses': 0}
+E         
+E         Full diff:
+E           {
+E         -     's3_diagnoses': 0,
+E         ?                     ^
+E         +     's3_diagnoses': 1,
+E         ?                     ^
+E               'd3_action_intents': 0,
+E               'd3_action_ledgers': 0,
+E               's3_handoff_receipts': 0,
+E           }
+
+tests\test_ar04b_memory_journey_01.py:735: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_answer_commit_rejects_memory_manifest_when_wire_guidance_was_tampered - AssertionError: assert None == 'ASSISTANT_STOP:TaskControlError:CHAT_MEMORY_WIRE_SOURCE_MISMATCH'
+ +  where None = <built-in method get of dict object at 0x000002270844D380>('blocked_reason')
+ +    where <built-in method get of dict object at 0x000002270844D380> = {'run_id': 'run-4c355b79-f211-44aa-97f7-f51d73b50996', 'task_id': 'task-5de916aa-b9e7-4329-a5b6-f4bb9435c38e', 'session_id': 'session-a790a802-9396-479a-9147-37bd990f0bdb', 'source_message_id': 'message-f7dea9b9-be42-4d4e-b213-df0bd6f959ad', 'kind': 'CHAT_READONLY', 'status': 'FAILED', 'waiting_reason': 'ASSISTANT_STOP:TaskControlError:CHAT_MEMORY_WIRE_SOURCE_MISMATCH', 'created_at': '2026-11-05T03:48:57.738+00:00', 'started_at': '2026-11-05T03:48:57.824+00:00', 'ended_at': '2026-11-05T03:48:58.725+00:00', 'answer_status': 'FAILED'}.get
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_confirmed_episodic_memory_is_method_only_against_current_queued_fact - AssertionError: assert {'s3_diagnoses': 1, 'd3_action_intents': 0, 'd3_action_ledgers': 0, 's3_handoff_receipts': 0} == {'s3_diagnoses': 0, 'd3_action_intents': 0, 'd3_action_ledgers': 0, 's3_handoff_receipts': 0}
+  
+  Common items:
+  {'d3_action_intents': 0, 'd3_action_ledgers': 0, 's3_handoff_receipts': 0}
+  Differing items:
+  {'s3_diagnoses': 1} != {'s3_diagnoses': 0}
+  
+  Full diff:
+    {
+  -     's3_diagnoses': 0,
+  ?                     ^
+  +     's3_diagnoses': 1,
+  ?                     ^
+        'd3_action_intents': 0,
+        'd3_action_ledgers': 0,
+        's3_handoff_receipts': 0,
+    }
+======================== 2 failed, 5 passed in 39.37s =========================

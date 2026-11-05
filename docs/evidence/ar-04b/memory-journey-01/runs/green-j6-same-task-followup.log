@@ -1,0 +1,87 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04b-memory-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_ar04b_memory_journey_01.py::test_ar04b_same_task_followup_keeps_memory_non_authoritative_and_rechecks_current_fact FAILED
+
+================================== FAILURES ===================================
+_ test_ar04b_same_task_followup_keeps_memory_non_authoritative_and_rechecks_current_fact _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-j6-followup/test_ar04b_same_task_followup_0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04b-memory-journey-01/docs/evidence/ar-04b/memory-journey-01/runs/pytest-tmp-j6-followup/test_ar04b_same_task_followup_0')
+
+    def test_ar04b_same_task_followup_keeps_memory_non_authoritative_and_rechecks_current_fact(
+        demo_db: Path, tmp_path: Path,
+    ) -> None:
+        """J6: continue the same bound task while rechecking facts in the new Run."""
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_journey_p0 import JourneyFixtureModel
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+    
+        prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar02-order", contract_version=2)
+        _seed_async_project_approver(demo_db)
+        models = [
+            MemoryWireFixtureModel(mode="source-task"),
+            JourneyFixtureModel(mode="receiver"),
+            JourneyFixtureModel(mode="draft"),
+        ]
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "ar04b-same-task-followup.sqlite3",
+            start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: models.pop(0),
+        )
+        with TestClient(app) as client:
+            _, memory, support = _create_approved_semantic_memory(
+                client, ORIGIN, PASSWORDS, _login(client, ORIGIN, PASSWORDS, "support-a"),
+                suffix="same-task-followup",
+            )
+            session_id = client.post("/api/sessions", headers=support).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**support, "Idempotency-Key": "ar04b-same-task-initial"},
+                json={
+                    "order_id": "ar02-order",
+                    "initial_message": "What is the current callback state for the bound order?",
+                },
+            )
+            assert accepted.status_code == 202, accepted.text
+            initial = accepted.json()
+            initial_run = _wait_for_run(client, str(initial["run_id"]))
+            assert initial_run["status"] == "SUCCEEDED"
+            initial_answer = next(
+                message["body"] for message in client.get(
+                    f"/api/sessions/{session_id}/messages"
+                ).json()["items"] if message["role"] == "ASSISTANT"
+            )
+            assert "QUEUED" in initial_answer
+    
+            accepted_followup = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**support, "Idempotency-Key": "ar04b-same-task-followup"},
+                json={
+                    "task_id": initial["task_id"],
+                    "body": "Now what should I do? Has it already been fixed?",
+                },
+            )
+            assert accepted_followup.status_code == 202, accepted_followup.text
+            followup = accepted_followup.json()
+            followup_run = _wait_for_run(client, str(followup["run_id"]))
+            assert followup_run["status"] == "SUCCEEDED"
+            final_messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+>           final_answer = next(
+                message["body"] for message in final_messages
+                if message["role"] == "ASSISTANT"
+                and message.get("source_message_id") == followup["message_id"]
+            )
+E           StopIteration
+
+tests\test_ar04b_memory_journey_01.py:1254: StopIteration
+=========================== short test summary info ===========================
+FAILED tests/test_ar04b_memory_journey_01.py::test_ar04b_same_task_followup_keeps_memory_non_authoritative_and_rechecks_current_fact - StopIteration
+============================== 1 failed in 6.79s ==============================
