@@ -1,0 +1,76 @@
+diff --git a/opspilot/assistant.py b/opspilot/assistant.py
+index c9427c3..4bb11ab 100644
+--- a/opspilot/assistant.py
++++ b/opspilot/assistant.py
+@@ -1084,0 +1085,15 @@ class Loop(AgentMiddleware):
++            current = {'run_id': self.run_id, 'completed_tools': [], 'business_observations': []}
++            for call in c.execute(
++                "SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' AND status='OK' ORDER BY created_at",
++                (self.run_id,),
++            ):
++                request, result = json.loads(call['request_json']), json.loads(call['result_json'])
++                current['completed_tools'].append({
++                    'tool': request['name'], 'call_id': call['call_id'], 'completed_at': call['completed_at'],
++                })
++                if call['evidence_id'] and call['observation_id']:
++                    current['business_observations'].append({
++                        'tool': request['name'], 'evidence_id': call['evidence_id'],
++                        'observation_id': call['observation_id'], 'observed_at': result.get('observed_at'),
++                        'observed_versions': result.get('observed_versions'), 'result_digest': digest_json(result),
++                    })
+@@ -1112 +1127 @@ class Loop(AgentMiddleware):
+-        payload={'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
++        payload={'current_run':current,'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
+@@ -1158 +1173 @@ class Loop(AgentMiddleware):
+-        system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(payload)
++        system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(domain.source_context_for_model(payload))
+@@ -1819 +1834 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
+-        reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(probe_payload))+4
++        reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(domain.source_context_for_model(probe_payload)))+4
+diff --git a/opspilot/domain/assistant.py b/opspilot/domain/assistant.py
+index 3bfeb90..bd179a4 100644
+--- a/opspilot/domain/assistant.py
++++ b/opspilot/domain/assistant.py
+@@ -443,0 +444,42 @@ def history_sources(connection,run):
++
++
++def source_context_for_model(payload):
++    """Present source time clearly; retain the full source ledger in audit metadata."""
++    context = dict(payload)
++    current = dict(payload['current_run'])
++    count = len(current['business_observations'])
++    current['description'] = (
++        f'以下 {count} 条业务观察由本轮工具取得，只能对其实际覆盖的状态说本轮已查询。'
++        if count else
++        '本轮尚未重新查询业务状态。可以解释历史快照，或自主选择合法补查；当前状态仍待核实。'
++    )
++    context['current_run'] = current
++    context['source_time_guide'] = (
++        '通过来源检查的历史快照可引用；引用资格有效不表示业务状态刚被查询。'
++        '历史快照用于说明过去；current_run.business_observations 才是本轮新取得的业务观察。'
++        '没有新观察时，可以解释旧结果或说明当前未知，不能声称本轮已重读。'
++    )
++    history = []
++    for prior in payload.get('history_sources', []):
++        valid = prior['current_source_valid']
++        snapshots = []
++        for source in prior['sources'] if valid else []:
++            snapshots.append({
++                'summary': source['summary'],
++                'reference': {
++                    'source_run_id': prior['run_id'],
++                    **{key: source.get(key) for key in (
++                        'call_id', 'observation_id', 'evidence_id', 'result_digest',
++                        'observed_at', 'completed_at',
++                    )},
++                },
++            })
++        history.append({
++            'source_run_id': prior['run_id'],
++            'reference_scope': 'HISTORICAL_SNAPSHOT_NOT_REQUERIED' if valid else 'EXCLUDED_HISTORY',
++            'exclusion_reason': prior['exclusion_reason'],
++            'snapshots': snapshots,
++            'omitted_source_count': prior.get('omitted_source_count', 0),
++        })
++    context['history_sources'] = history
++    return context

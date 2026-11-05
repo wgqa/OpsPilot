@@ -1082,6 +1082,21 @@ class Loop(AgentMiddleware):
             prior=domain.history_sources(c,run)
             own_valid,reason=domain.sources_current(c,self.run_id)
             if not own_valid: raise TaskControlError(reason)
+            current = {'run_id': self.run_id, 'completed_tools': [], 'business_observations': []}
+            for call in c.execute(
+                "SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' AND status='OK' ORDER BY created_at",
+                (self.run_id,),
+            ):
+                request, result = json.loads(call['request_json']), json.loads(call['result_json'])
+                current['completed_tools'].append({
+                    'tool': request['name'], 'call_id': call['call_id'], 'completed_at': call['completed_at'],
+                })
+                if call['evidence_id'] and call['observation_id']:
+                    current['business_observations'].append({
+                        'tool': request['name'], 'evidence_id': call['evidence_id'],
+                        'observation_id': call['observation_id'], 'observed_at': result.get('observed_at'),
+                        'observed_versions': result.get('observed_versions'), 'result_digest': digest_json(result),
+                    })
             previous=[]
             selected_ids=set(prepared.get('selected_message_ids',[]))
             for row in c.execute("SELECT m.message_id,m.body,m.body_digest,m.created_at,m.sequence,a.run_id,r.source_message_id,r.task_id AS answer_task_id FROM chat_run_answers a JOIN messages m ON m.message_id=a.message_id JOIN task_runs r ON r.run_id=a.run_id WHERE m.session_id=? AND m.tenant_id=? AND m.sequence<? AND (r.task_id IS NULL OR r.task_id IS ?) ORDER BY m.sequence DESC LIMIT 6",(run['session_id'],run['tenant_id'],run['consumed_message_seq'],run['task_id'])):
@@ -1109,7 +1124,7 @@ class Loop(AgentMiddleware):
             )
         ]
         prepared['memory_guidance_messages'] = memory_guidance_messages
-        payload={'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
+        payload={'current_run':current,'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
                  'authority':'EXPLANATION_ONLY_NO_BUSINESS_RECEIPT','source_message_id':run['source_message_id'],
                  'summary_refs':prepared.get('summary_refs',[])}
         if run['task_id']:
@@ -1155,7 +1170,7 @@ class Loop(AgentMiddleware):
         # every dispatch, and stop rather than send invalidated source content.
         messages=list(request.messages)
         memory_guidance = list(prepared.get('memory_guidance_messages', []))
-        system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(payload)
+        system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(domain.source_context_for_model(payload))
         if memory_guidance:
             system_content += '\n\n' + '\n\n'.join(memory_guidance)
         system=SystemMessage(content=system_content)
@@ -1816,7 +1831,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         base_reserved=tools_tokens+estimate_text_tokens(SYSTEM)+4
         probe=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=base_reserved)
         _,probe_payload=probe.context()
-        reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(probe_payload))+4
+        reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(domain.source_context_for_model(probe_payload)))+4
         if specs:
             reserved_tokens+=ASSISTANT_TOOL_RESULT_RESERVE
         if delivery is None:

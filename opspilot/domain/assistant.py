@@ -441,3 +441,45 @@ def history_sources(connection,run):
             remaining=max(0,remaining-len(refs))
         output.append({'run_id':old['run_id'],'task_id':old['task_id'],'authority':'HISTORICAL_LEAD_NOT_CURRENT_OBSERVATION','current_source_valid':valid,'exclusion_reason':reason,'sources':refs,'omitted_source_count':omitted})
     return output
+
+
+def source_context_for_model(payload):
+    """Present source time clearly; retain the full source ledger in audit metadata."""
+    context = dict(payload)
+    current = dict(payload['current_run'])
+    count = len(current['business_observations'])
+    current['description'] = (
+        f'以下 {count} 条业务观察由本轮工具取得，只能对其实际覆盖的状态说本轮已查询。'
+        if count else
+        '本轮尚未重新查询业务状态。可以解释历史快照，或自主选择合法补查；当前状态仍待核实。'
+    )
+    context['current_run'] = current
+    context['source_time_guide'] = (
+        '通过来源检查的历史快照可引用；引用资格有效不表示业务状态刚被查询。'
+        '历史快照用于说明过去；current_run.business_observations 才是本轮新取得的业务观察。'
+        '没有新观察时，可以解释旧结果或说明当前未知，不能声称本轮已重读。'
+    )
+    history = []
+    for prior in payload.get('history_sources', []):
+        valid = prior['current_source_valid']
+        snapshots = []
+        for source in prior['sources'] if valid else []:
+            snapshots.append({
+                'summary': source['summary'],
+                'reference': {
+                    'source_run_id': prior['run_id'],
+                    **{key: source.get(key) for key in (
+                        'call_id', 'observation_id', 'evidence_id', 'result_digest',
+                        'observed_at', 'completed_at',
+                    )},
+                },
+            })
+        history.append({
+            'source_run_id': prior['run_id'],
+            'reference_scope': 'HISTORICAL_SNAPSHOT_NOT_REQUERIED' if valid else 'EXCLUDED_HISTORY',
+            'exclusion_reason': prior['exclusion_reason'],
+            'snapshots': snapshots,
+            'omitted_source_count': prior.get('omitted_source_count', 0),
+        })
+    context['history_sources'] = history
+    return context
