@@ -71,7 +71,25 @@
 
 此前 7/8 的历史候选回归日志和原始结果均保留，没有覆盖。此次没有运行全量 pytest；没有真实 Provider、浏览器或外部业务写入。全部测试使用隔离 SQLite、确定性 Fixture Model 和本地应用路径。G9 的专门大 Memory 超预算用例仍未覆盖。
 
-Python `3.14.0`、pytest `9.1.1`。原始命令记录在各 `.log` 中。最终候选 SHA 由远端分支 HEAD 和交付消息核对，避免在报告中写入自指提交哈希。
+Python `3.14.0`、pytest `9.1.1`；以下命令使用该解释器。`PYTHONDONTWRITEBYTECODE=1`，并以 PowerShell `Tee-Object` 保存 stdout/stderr，日志末尾追加 `HARNESS_EXIT_CODE`。原始日志保留测试输出；完整启动命令在此列出：
+
+```powershell
+# main baseline working directory: D:\学习\agent新项目\.worktrees\arch-ref-ragent-pi-integration-01
+D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -vv -s -p no:cacheprovider 'tests/test_ar04a_context_journey_01.py::test_ar04a_invalidated_summary_is_not_sent_to_the_model' --basetemp='D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01\docs\evidence\ar-04b\memory-journey-01\runs\pytest-tmp-ar04a-main-baseline-hf01'
+
+# candidate working directory: D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01
+D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -vv -s -p no:cacheprovider 'tests/test_ar04a_context_journey_01.py::test_ar04a_invalidated_summary_is_not_sent_to_the_model' --basetemp='D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01\docs\evidence\ar-04b\memory-journey-01\runs\pytest-tmp-ar04a-candidate-before-fix-hf01'
+D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -vv -s -p no:cacheprovider 'tests/test_ar04a_context_journey_01.py::test_ar04a_invalidated_summary_is_not_sent_to_the_model' --basetemp='D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01\docs\evidence\ar-04b\memory-journey-01\runs\pytest-tmp-ar04a-candidate-green-02-hf01'
+# Exploratory over-strict source-text probe, retained as a failed test assertion:
+D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -vv -s -p no:cacheprovider 'tests/test_ar04a_context_journey_01.py::test_ar04a_invalidated_summary_is_not_sent_to_the_model' --basetemp='D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01\docs\evidence\ar-04b\memory-journey-01\runs\pytest-tmp-ar04a-candidate-green-hf01'
+
+D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -vv -s -p no:cacheprovider tests/test_ar04a_context_journey_01.py tests/test_ar04a_compression_cancel_hf_01.py --basetemp='D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01\docs\evidence\ar-04b\memory-journey-01\runs\pytest-tmp-ar04a-context-cancel-hf01-final'
+D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -vv -s -p no:cacheprovider tests/test_ar04b_memory_journey_01.py --basetemp='D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01\docs\evidence\ar-04b\memory-journey-01\runs\pytest-tmp-ar04b-hf01-final'
+D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -vv -s -p no:cacheprovider tests/test_m301_memory.py tests/test_m303_semantic_memory.py tests/test_d5_context.py --basetemp='D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01\docs\evidence\ar-04b\memory-journey-01\runs\pytest-tmp-memory-d5-hf01-final'
+D:\学习\agent新项目\.venv\Scripts\python.exe -m pytest -vv -s -p no:cacheprovider tests/test_ar02_assistant.py tests/test_m1_task_control.py --basetemp='D:\学习\agent新项目\.worktrees\ar04b-memory-journey-01\docs\evidence\ar-04b\memory-journey-01\runs\pytest-tmp-assistant-taskcontrol-hf01-final'
+```
+
+最终候选 SHA 由远端分支 HEAD 和交付消息核对，避免在报告中写入自指提交哈希。
 
 ## 六维收尾
 
