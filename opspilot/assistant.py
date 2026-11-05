@@ -580,6 +580,14 @@ class Loop(AgentMiddleware):
                     if not selected:
                         item['answer_excerpt']=domain.history_excerpt(row['body'],220)
                     previous.append(item)
+        memory_guidance_messages = [
+            str(item.get('content', '')) for item in prepared.get('messages', [])
+            if item.get('role') == 'system'
+            and str(item.get('content', '')).startswith(
+                'CONFIRMED PROJECT MEMORY GUIDANCE (non-authoritative; not current evidence): '
+            )
+        ]
+        prepared['memory_guidance_messages'] = memory_guidance_messages
         payload={'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
                  'authority':'EXPLANATION_ONLY_NO_BUSINESS_RECEIPT','source_message_id':run['source_message_id'],
                  'summary_refs':prepared.get('summary_refs',[])}
@@ -590,33 +598,82 @@ class Loop(AgentMiddleware):
                 payload['trusted_binding']={k:binding[k] for k in ('service_id','order_id','contract_version')}
         return prepared,payload
 
+    def _assert_memories_current(self, selected_memories):
+        if not selected_memories:
+            return
+        task_id = self.run.get('task_id')
+        if not task_id:
+            raise TaskControlError('ASSISTANT_MEMORY_TASK_SCOPE_REQUIRED')
+        from opspilot.domain.episodic_memory import assert_selected_memories_current
+
+        assert_selected_memories_current(self.path, str(task_id), selected_memories)
+
+    def assert_manifest_memories_current(self):
+        task_id = self.run.get('task_id')
+        if not task_id:
+            return
+        with connect(self.path) as connection:
+            row = connection.execute(
+                """SELECT memory_refs_json FROM chat_context_manifests WHERE run_id = ?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (self.run_id,),
+            ).fetchone()
+        if row is None:
+            return
+        try:
+            selected_memories = json.loads(str(row['memory_refs_json']))
+        except (TypeError, json.JSONDecodeError) as error:
+            raise TaskControlError('ASSISTANT_MEMORY_MANIFEST_INVALID') from error
+        if not isinstance(selected_memories, list):
+            raise TaskControlError('ASSISTANT_MEMORY_MANIFEST_INVALID')
+        self._assert_memories_current(selected_memories)
+
     async def awrap_model_call(self,request,handler):
         prepared,payload=self.context()
         # The native tool messages are retained; refresh trusted context before
         # every dispatch, and stop rather than send invalidated source content.
         messages=list(request.messages)
-        system=SystemMessage(content=SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(payload))
+        memory_guidance = list(prepared.get('memory_guidance_messages', []))
+        system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(payload)
+        if memory_guidance:
+            system_content += '\n\n' + '\n\n'.join(memory_guidance)
+        system=SystemMessage(content=system_content)
         sent=[system]+messages
         summary_messages=[
             item for item in prepared.get('messages',[])
             if item.get('role')=='system' and str(item.get('content','')).startswith('HISTORICAL SESSION SUMMARY')
         ]
-        provenance=investigator_context_budget(sent,self.model_id,self.specs,{
+        memory_refs = prepared.get('memory_refs', [])
+        excluded_sources = prepared.get('excluded_sources', [])
+        provenance_metadata={
             'source_message_id':self.run['source_message_id'],
             'summary_refs':prepared.get('summary_refs',[]),
+            'selected_memories': memory_refs,
+            'excluded_sources': excluded_sources,
             'reserved_tokens':self.reserved_tokens,
             'context_component_estimates':{
                 'historical_summary':sum(
                     estimate_text_tokens(str(item.get('content','')))+4 for item in summary_messages
                 ),
+                'external_guidance':sum(estimate_text_tokens(item)+4 for item in memory_guidance),
             },
-        })
+        }
+        provenance=investigator_context_budget(sent,self.model_id,self.specs,provenance_metadata)
+        wire_source_refs = {
+            **payload,
+            'selected_memory_refs': memory_refs,
+            'selected_memory_guidance': memory_guidance,
+            'excluded_sources': excluded_sources,
+        }
         wire={'messages':messages_to_dict(sent),'tools':self.specs,'context_budget':provenance,
-              'source_refs':payload,'selected_message_ids':prepared['selected_message_ids'],'model_id':self.model_id}
+              'context_blocks':provenance_metadata.get('context_blocks',[]),
+              'excluded_sources':provenance_metadata.get('excluded_sources',[]),
+              'source_refs':wire_source_refs,'selected_message_ids':prepared['selected_message_ids'],'model_id':self.model_id}
         step=get_config().get('metadata',{}).get('langgraph_step',0)
         call,fresh=domain.reserve(self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',wire,self.worker_id,experiment_id=self.experiment_id)
         self.trace('model_request',call_id=call['call_id'],replay=not fresh,**wire)
         if not fresh:
+            self._assert_memories_current(memory_refs)
             self._settle_cached_campaign_dispatch(
                 'MODEL', call['logical_key'], self._campaign_usage_for_cached_call(call)
             )
@@ -635,7 +692,12 @@ class Loop(AgentMiddleware):
             if not campaign.get('dispatch'):
                 domain.finish(self.path,call['call_id'],'FAILED',{'error':'AR02_LIVE_CAMPAIGN_REPLAY_CONFLICT'})
                 raise TaskControlError('AR02_LIVE_CAMPAIGN_REPLAY_CONFLICT')
+        send_started = False
         try:
+            # This reuses the Memory Domain validator after durable reservations
+            # and immediately before entering the Provider handler.
+            self._assert_memories_current(memory_refs)
+            send_started = True
             # The factory pins the output cap using the configured provider's
             # wire parameter. Re-injecting `max_tokens` here would make the
             # pinned ChatOpenAI emit DeepSeek's unsupported alias.
@@ -669,6 +731,34 @@ class Loop(AgentMiddleware):
             domain.finish(self.path,call['call_id'],'OK',messages_result,usage_result)
             self.trace('model_response',call_id=call['call_id'],messages=messages_to_dict(result.result))
             return result
+        except Exception as error:
+            from opspilot.domain.episodic_memory import ContextAssetInvalidated
+            if isinstance(error, ContextAssetInvalidated) and not send_started:
+                domain.finish(
+                    self.path, call['call_id'], 'FAILED',
+                    {'error': 'ASSISTANT_MEMORY_INVALIDATED_BEFORE_SEND'},
+                )
+                if self.experiment_id:
+                    from opspilot.domain.assistant_experiment import mark_not_dispatched
+                    mark_not_dispatched(
+                        self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                        kind='MODEL', logical_key=call['logical_key'],
+                        reason_code='ASSISTANT_MEMORY_INVALIDATED_BEFORE_SEND',
+                    )
+                self.trace(
+                    'model_not_dispatched', call_id=call['call_id'],
+                    reason='ASSISTANT_MEMORY_INVALIDATED_BEFORE_SEND',
+                )
+                raise
+            domain.finish(self.path,call['call_id'],'UNKNOWN')
+            if self.experiment_id:
+                from opspilot.domain.assistant_experiment import mark_unknown
+                mark_unknown(
+                    self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                    kind='MODEL', logical_key=call['logical_key'],
+                    error_code=type(error).__name__,
+                )
+            raise
         except BaseException as error:
             domain.finish(self.path,call['call_id'],'UNKNOWN')
             if self.experiment_id:
@@ -1206,6 +1296,10 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             async with AsyncSqliteSaver.from_conn_string(str(cp)) as saver:
                 graph=create_agent(model=model,tools=tools,system_prompt=SYSTEM,middleware=[loop],checkpointer=saver)
                 saved=await graph.aget_state(config)
+                # A restored checkpoint can contain messages created while a
+                # Memory was active. Do not continue that context after its
+                # manifest source has been revoked, expired, or changed.
+                loop.assert_manifest_memories_current()
                 answer=await asyncio.wait_for(graph.ainvoke(None if saved.values else {'messages':initial},config),60)
                 final=answer['messages'][-1]
                 text=final.content if isinstance(final.content,str) else canonical_json(final.content)

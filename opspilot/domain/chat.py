@@ -2177,7 +2177,8 @@ def complete_chat_attempt(
         if run is None or str(run["status"]) != "RUNNING":
             raise TaskControlError("TASK_RUN_NOT_ACTIVE")
         from opspilot.domain.assistant import selected as assistant_selected, state as assistant_state, sources_current as assistant_sources_current
-        if assistant_selected(connection,str(run['run_id'])):
+        is_assistant_run = assistant_selected(connection, str(run['run_id']))
+        if is_assistant_run:
             assistant_state(connection,str(run['run_id']),worker_id=worker_id)
             valid,reason=assistant_sources_current(connection,str(run['run_id']))
             if not valid:
@@ -2190,6 +2191,79 @@ def complete_chat_attempt(
         ).fetchone()
         if manifest is None:
             raise TaskControlError("CHAT_CONTEXT_MANIFEST_MISSING")
+        if is_assistant_run:
+            manifest_memories = json.loads(str(manifest["memory_refs_json"]))
+            if not isinstance(manifest_memories, list):
+                raise TaskControlError("CHAT_MEMORY_MANIFEST_INVALID")
+            manifest_by_id = {
+                str(item.get("memory_id")): item for item in manifest_memories
+                if isinstance(item, dict) and item.get("memory_id")
+            }
+            wire_by_id: dict[str, dict[str, Any]] = {}
+            for model_call in connection.execute(
+                "SELECT request_json FROM assistant_calls WHERE run_id = ? AND kind = 'MODEL' AND status = 'OK'",
+                (str(run["run_id"]),),
+            ):
+                try:
+                    request = json.loads(str(model_call["request_json"]))
+                except (TypeError, json.JSONDecodeError) as error:
+                    raise TaskControlError("CHAT_MEMORY_MODEL_REQUEST_INVALID") from error
+                source_refs = request.get("source_refs") if isinstance(request, dict) else None
+                sent_refs = source_refs.get("selected_memory_refs", []) if isinstance(source_refs, dict) else []
+                if not isinstance(sent_refs, list):
+                    raise TaskControlError("CHAT_MEMORY_MODEL_SOURCES_INVALID")
+                wire_messages = request.get("messages", [])
+                if not isinstance(wire_messages, list):
+                    raise TaskControlError("CHAT_MEMORY_MODEL_REQUEST_INVALID")
+                wire_text = _canonical(wire_messages)
+                wire_content = "\n".join(
+                    str(
+                        message.get("data", {}).get("content", message.get("content", ""))
+                        if isinstance(message.get("data", {}), dict)
+                        else message.get("content", "")
+                    )
+                    for message in wire_messages if isinstance(message, dict)
+                )
+                for item in sent_refs:
+                    if not isinstance(item, dict) or not item.get("memory_id"):
+                        raise TaskControlError("CHAT_MEMORY_MODEL_SOURCES_INVALID")
+                    memory_id = str(item["memory_id"])
+                    memory_type = str(item.get("memory_type", "EPISODIC"))
+                    source_authority = (
+                        "CONFIRMED_SEMANTIC_PROJECT_CONTEXT_NOT_FACT"
+                        if memory_type == "SEMANTIC" else "HISTORICAL_METHOD_HINT_ONLY"
+                    )
+                    expected_guidance = (
+                        "CONFIRMED PROJECT MEMORY GUIDANCE (non-authoritative; not current evidence): "
+                        + _canonical({
+                            "memory_id": item["memory_id"], "version": item["version"],
+                            "content_digest": item["content_digest"],
+                            "source_task_id": item["source_task_id"],
+                            "source_outcome": item["source_outcome"], "summary": item["summary"],
+                            "experience": item["experience"], "source_authority": source_authority,
+                        })
+                    )
+                    if (
+                        memory_id not in wire_text
+                        or str(item.get("digest", "")) not in wire_text
+                        or expected_guidance not in wire_content
+                    ):
+                        raise TaskControlError("CHAT_MEMORY_WIRE_SOURCE_MISMATCH")
+                    wire_by_id[memory_id] = item
+            if set(manifest_by_id) != set(wire_by_id):
+                raise TaskControlError("CHAT_MEMORY_MANIFEST_WIRE_MISMATCH")
+            if any(
+                int(manifest_by_id[memory_id].get("version", 0)) != int(item.get("version", 0))
+                or str(manifest_by_id[memory_id].get("digest", "")) != str(item.get("digest", ""))
+                for memory_id, item in wire_by_id.items()
+            ):
+                raise TaskControlError("CHAT_MEMORY_MANIFEST_WIRE_MISMATCH")
+            if manifest_memories and run["task_id"] is not None:
+                from opspilot.domain.episodic_memory import assert_selected_memories_current_in_connection
+
+                assert_selected_memories_current_in_connection(
+                    connection, str(run["task_id"]), manifest_memories,
+                )
         now = _now_text()
         assistant_id = f"message-{uuid.uuid4()}"
         body_digest = _digest(answer)

@@ -1461,56 +1461,67 @@ def assert_selected_memories_current(
     if not selected_memories:
         return
     with connect(path) as connection:
-        binding = _trusted_binding(connection, task_id)
-        project_id = project_id_for_service(str(binding["service_id"]))
-        for selected in selected_memories:
-            memory_id = str(selected.get("memory_id", ""))
-            if str(selected.get("memory_type", "EPISODIC")) == "SEMANTIC":
-                from opspilot.domain.semantic_memory import _source_is_current
+        assert_selected_memories_current_in_connection(connection, task_id, selected_memories)
 
-                semantic = connection.execute(
-                    "SELECT * FROM semantic_memories WHERE memory_id = ?", (memory_id,),
-                ).fetchone()
-                if (
-                    semantic is None
-                    or str(semantic["state"]) != "ACTIVE"
-                    or int(semantic["version"]) != int(selected.get("version", 0))
-                    or str(semantic["content_digest"]) != str(selected.get("content_digest", ""))
-                    or str(semantic["content"]) != str(selected.get("summary", ""))
-                    or str(semantic["memory_key"]) != str(selected.get("memory_key", ""))
-                    or str(semantic["memory_kind"]) != str(selected.get("memory_kind", ""))
-                    or str(semantic["source_task_id"]) != str(selected.get("source_task_id", ""))
-                    or str(semantic["tenant_id"]) != str(binding["tenant_id"])
-                    or str(semantic["project_id"]) != project_id
-                    or str(semantic["source_task_id"]) == task_id
-                    or _parse_time(str(semantic["expires_at"])) <= _now()
-                    or not _source_is_current(connection, semantic)
-                ):
-                    raise ContextAssetInvalidated(
-                        "Selected Semantic Memory changed after attempt reservation and before Provider I/O."
-                    )
-                continue
-            row = connection.execute(
-                "SELECT * FROM d5_memories WHERE memory_id = ?", (memory_id,),
+
+def assert_selected_memories_current_in_connection(
+    connection: sqlite3.Connection,
+    task_id: str,
+    selected_memories: list[dict[str, object]],
+) -> None:
+    """Apply the existing Memory source check inside a caller's transaction."""
+    if not selected_memories:
+        return
+    binding = _trusted_binding(connection, task_id)
+    project_id = project_id_for_service(str(binding["service_id"]))
+    for selected in selected_memories:
+        memory_id = str(selected.get("memory_id", ""))
+        if str(selected.get("memory_type", "EPISODIC")) == "SEMANTIC":
+            from opspilot.domain.semantic_memory import _source_is_current
+
+            semantic = connection.execute(
+                "SELECT * FROM semantic_memories WHERE memory_id = ?", (memory_id,),
             ).fetchone()
             if (
-                row is None
-                or str(row["state"]) != "ACTIVE"
-                or int(row["version"]) != int(selected.get("version", 0))
-                or str(row["content_digest"]) != str(selected.get("content_digest", ""))
-                or str(row["summary"]) != str(selected.get("summary", ""))
-                or str(row["schema_version"]) != str(selected.get("schema_version", ""))
-                or str(row["source_task_id"]) != str(selected.get("source_task_id", ""))
-                or str(row["source_outcome"]) != str(selected.get("source_outcome", ""))
-                or str(row["tenant_id"]) != str(binding["tenant_id"])
-                or str(row["project_id"]) != project_id
-                or str(row["source_task_id"]) == task_id
-                or _parse_time(str(row["expires_at"])) <= _now()
-                or not _memory_source_still_valid(connection, row)
+                semantic is None
+                or str(semantic["state"]) != "ACTIVE"
+                or int(semantic["version"]) != int(selected.get("version", 0))
+                or str(semantic["content_digest"]) != str(selected.get("content_digest", ""))
+                or str(semantic["content"]) != str(selected.get("summary", ""))
+                or str(semantic["memory_key"]) != str(selected.get("memory_key", ""))
+                or str(semantic["memory_kind"]) != str(selected.get("memory_kind", ""))
+                or str(semantic["source_task_id"]) != str(selected.get("source_task_id", ""))
+                or str(semantic["tenant_id"]) != str(binding["tenant_id"])
+                or str(semantic["project_id"]) != project_id
+                or str(semantic["source_task_id"]) == task_id
+                or _parse_time(str(semantic["expires_at"])) <= _now()
+                or not _source_is_current(connection, semantic)
             ):
                 raise ContextAssetInvalidated(
-                    "Selected Memory changed after attempt reservation and before Provider I/O."
+                    "Selected Semantic Memory changed after selection; refusing to reuse it."
                 )
+            continue
+        row = connection.execute(
+            "SELECT * FROM d5_memories WHERE memory_id = ?", (memory_id,),
+        ).fetchone()
+        if (
+            row is None
+            or str(row["state"]) != "ACTIVE"
+            or int(row["version"]) != int(selected.get("version", 0))
+            or str(row["content_digest"]) != str(selected.get("content_digest", ""))
+            or str(row["summary"]) != str(selected.get("summary", ""))
+            or str(row["schema_version"]) != str(selected.get("schema_version", ""))
+            or str(row["source_task_id"]) != str(selected.get("source_task_id", ""))
+            or str(row["source_outcome"]) != str(selected.get("source_outcome", ""))
+            or str(row["tenant_id"]) != str(binding["tenant_id"])
+            or str(row["project_id"]) != project_id
+            or str(row["source_task_id"]) == task_id
+            or _parse_time(str(row["expires_at"])) <= _now()
+            or not _memory_source_still_valid(connection, row)
+        ):
+            raise ContextAssetInvalidated(
+                "Selected Episodic Memory changed after selection; refusing to reuse it."
+            )
 
 
 def assert_task_skill_compatible(
