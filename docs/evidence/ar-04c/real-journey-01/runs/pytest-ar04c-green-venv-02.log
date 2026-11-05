@@ -1,0 +1,174 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04c-real-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 6 items
+
+tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_unknown_dispatch_keeps_reservation_and_stops_next_request PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_task_policy_allows_more_than_old_mcp_limit_and_preserves_time PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_paid_factory_fails_closed_without_authorization_and_claim PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_memory_mode_is_explicit_and_scoped PASSED
+
+================================== FAILURES ===================================
+____ test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged ____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-green-02/test_ar04c_campaign_caps_are_s0')
+
+    def test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged(tmp_path: Path):
+        from opspilot.domain.assistant_experiment import (
+            AR04C_CONDITION_BUDGET_USD_MICRO, AR04C_CONDITION_PROVIDER_LIMIT,
+            AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO, AR04C_PRICE_VERSION,
+            BUDGET_USD_MICRO, EXPERIMENT_ID as LEGACY_ID, MAX_PROVIDER_RESERVATION_USD_MICRO,
+            PRICE_VERSION, ExperimentBudgetError, complete_dispatch, initialize_experiment,
+            read_budget, reserve_dispatch,
+        )
+        from opspilot.domain.database import reset_fixture
+    
+        on_db, off_db, old_db = (tmp_path / name for name in ("on.sqlite3", "off.sqlite3", "old.sqlite3"))
+        for db_path in (on_db, off_db, old_db):
+            reset_fixture(db_path, "S1_POS")
+        for db_path in (on_db, off_db):
+            initialize_experiment(db_path, EXPERIMENT_ID)
+            budget = read_budget(db_path, EXPERIMENT_ID)
+            assert budget["provider_limit"] == AR04C_CONDITION_PROVIDER_LIMIT == 8
+            assert budget["mcp_limit"] is None
+            assert budget["budget_usd_micro"] == AR04C_CONDITION_BUDGET_USD_MICRO == 5_250_000
+        initialize_experiment(old_db, LEGACY_ID)
+        old = read_budget(old_db, LEGACY_ID)
+        from opspilot.domain.assistant_experiment import MCP_LIMIT
+        assert old["provider_limit"] == 16 and old["mcp_limit"] == MCP_LIMIT
+        assert old["budget_usd_micro"] == BUDGET_USD_MICRO == 10_500_000
+        assert old["usd_reserved_micro"] == old["usd_settled_micro"] == 0
+        assert PRICE_VERSION == "DEEPSEEK_FLASH_PEAK_2026-11-01"
+        assert MAX_PROVIDER_RESERVATION_USD_MICRO == 645_600
+        assert AR04C_PRICE_VERSION == "DEEPSEEK_FLASH_PEAK_2026-11-05"
+        assert AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO == 691_680
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from test_m4_03_s3 import _task
+        for db_path in (on_db, off_db):
+            prepare_s3_fixture(db_path, "DELIVERED_PENDING", order_id=f"{db_path.stem}-order")
+            _identity, task = _task(db_path, f"{db_path.stem}-order")
+            run_id = str(task["run_id"])
+            for number in range(8):
+                key = f"model-{number}"
+                held = reserve_dispatch(
+                    db_path, experiment_id=EXPERIMENT_ID, run_id=run_id, kind="MODEL",
+                    logical_key=key, request={"message": "offline"},
+                )
+                assert held["reserved_usd_micro"] == 691_680
+                complete_dispatch(
+                    db_path, experiment_id=EXPERIMENT_ID, run_id=run_id, kind="MODEL",
+                    logical_key=key,
+                    usage={"input_tokens": 12_000, "output_tokens": 2_048, "total_tokens": 14_048},
+                )
+            with pytest.raises(ExperimentBudgetError, match="AR02_LIVE_PROVIDER_LIMIT"):
+                reserve_dispatch(
+                    db_path, experiment_id=EXPERIMENT_ID, run_id="over", kind="MODEL",
+                    logical_key="ninth", request={},
+                )
+            budget = read_budget(db_path, EXPERIMENT_ID)
+            assert budget["provider_used"] == 8
+            assert budget["usd_reserved_micro"] == 0
+>           assert budget["usd_settled_micro"] == 8 * 6_304
+E           assert 48464 == (8 * 6304)
+
+tests\test_ar04c_real_journey_01.py:514: AssertionError
+_ test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-green-02/test_ar04c_formal_worker_mock_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E4641CE9E0>
+
+    def test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff(tmp_path: Path, monkeypatch):
+        from opspilot.domain.assistant_experiment import initialize_experiment
+    
+        seed_db = tmp_path / "seed.sqlite3"
+        off_db, on_db = tmp_path / "off.sqlite3", tmp_path / "on.sqlite3"
+        memory = _prepare_memory_seed(seed_db, tmp_path / "seed-checkpoint.sqlite3", off_db, on_db)
+        for db_path in (off_db, on_db):
+            initialize_experiment(db_path, EXPERIMENT_ID)
+        before_off, before_on = _protected_counts(off_db), _protected_counts(on_db)
+>       off = _run_condition(off_db, tmp_path / "off-checkpoint.sqlite3", "OFF", memory["memory"], monkeypatch)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar04c_real_journey_01.py:605: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-green-02/test_ar04c_formal_worker_mock_0/off.sqlite3')
+checkpoint = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-green-02/test_ar04c_formal_worker_mock_0/off-checkpoint.sqlite3')
+condition = 'OFF'
+memory = {'memory_id': 'episodic-d1c9f8b8-4a54-4b42-847f-2dcb745f78ab', 'version': 2, 'content_digest': 'be6e826615b04c67b864b1a4c32147b6dcbee70c93b8eed84279404e4743e042'}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E4641CE9E0>
+
+    def _run_condition(db_path: Path, checkpoint: Path, condition: str, memory: dict, monkeypatch) -> dict:
+        from opspilot.assistant import create_assistant_model
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.d2 import configure_ar04c_memory_budget
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+    
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-only-placeholder")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
+        monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
+        monkeypatch.setenv("OPSPILOT_AR04C_MEMORY_MODE", condition)
+        monkeypatch.setattr("opspilot.assistant._ar04c_one_shot_authorized", lambda _id: True)
+        from opspilot.assistant import AR04C_AUTH_RECORD, AR04C_CLAIM
+        assert not AR04C_AUTH_RECORD.exists()
+        assert not AR04C_CLAIM.exists()
+        assert read_budget(db_path, EXPERIMENT_ID)["provider_used"] == 0
+    
+        # The trusted order API creates one pending formal Run while no Worker is
+        # running. Configure the scoped budget before the official Worker resumes it.
+        intake_app = create_app(
+            db_path=db_path, checkpoint_db_path=checkpoint, start_worker=False,
+            credentials=PASSWORDS, expected_origin=ORIGIN, assistant_experiment_id=EXPERIMENT_ID,
+        )
+        with TestClient(intake_app) as client:
+            support = _login(client)
+            session = client.post("/api/sessions", headers=support)
+            assert session.status_code == 201, session.text
+            session_id = str(session.json()["session_id"])
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**support, "Idempotency-Key": f"ar04c-{condition.lower()}-j2"},
+                json={"order_id": "ar04c-order", "initial_message": J2},
+            )
+            assert accepted.status_code == 202, accepted.text
+            j2 = accepted.json()
+            assert configure_ar04c_memory_budget(db_path, str(j2["task_id"]), EXPERIMENT_ID) == {
+                "MODEL": 8, "MCP": None,
+            }
+    
+        provider = _MockProvider(db_path, condition)
+        def model_factory():
+            return create_assistant_model(
+                transport_async=httpx.MockTransport(provider.handle),
+                transport_sync=httpx.MockTransport(provider.sync_handle),
+            )
+    
+        worker_app = create_app(
+            db_path=db_path, checkpoint_db_path=checkpoint, start_worker=True,
+            credentials=PASSWORDS, expected_origin=ORIGIN, assistant_experiment_id=EXPERIMENT_ID,
+            assistant_model_factory=model_factory,
+        )
+        with TestClient(worker_app) as client:
+            _login(client)
+>           assert _wait_for_run(client, str(j2["run_id"]))["status"] == "SUCCEEDED"
+E           AssertionError: assert 'FAILED' == 'SUCCEEDED'
+E             
+E             - SUCCEEDED
+E             + FAILED
+
+tests\test_ar04c_real_journey_01.py:312: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged - assert 48464 == (8 * 6304)
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff - AssertionError: assert 'FAILED' == 'SUCCEEDED'
+  
+  - SUCCEEDED
+  + FAILED
+======================== 2 failed, 4 passed in 10.80s =========================

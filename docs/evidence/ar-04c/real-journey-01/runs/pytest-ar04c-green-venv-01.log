@@ -1,0 +1,201 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04c-real-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 6 items
+
+tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_unknown_dispatch_keeps_reservation_and_stops_next_request PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_task_policy_allows_more_than_old_mcp_limit_and_preserves_time PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_paid_factory_fails_closed_without_authorization_and_claim PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_memory_mode_is_explicit_and_scoped PASSED
+
+================================== FAILURES ===================================
+____ test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged ____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-green-01/test_ar04c_campaign_caps_are_s0')
+
+    def test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged(tmp_path: Path):
+        from opspilot.domain.assistant_experiment import (
+            AR04C_CONDITION_BUDGET_USD_MICRO, AR04C_CONDITION_PROVIDER_LIMIT,
+            AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO, AR04C_PRICE_VERSION,
+            BUDGET_USD_MICRO, EXPERIMENT_ID as LEGACY_ID, MAX_PROVIDER_RESERVATION_USD_MICRO,
+            PRICE_VERSION, ExperimentBudgetError, complete_dispatch, initialize_experiment,
+            read_budget, reserve_dispatch,
+        )
+        from opspilot.domain.database import reset_fixture
+    
+        on_db, off_db, old_db = (tmp_path / name for name in ("on.sqlite3", "off.sqlite3", "old.sqlite3"))
+        for db_path in (on_db, off_db, old_db):
+            reset_fixture(db_path, "S1_POS")
+        for db_path in (on_db, off_db):
+            initialize_experiment(db_path, EXPERIMENT_ID)
+            budget = read_budget(db_path, EXPERIMENT_ID)
+            assert budget["provider_limit"] == AR04C_CONDITION_PROVIDER_LIMIT == 8
+            assert budget["mcp_limit"] is None
+            assert budget["budget_usd_micro"] == AR04C_CONDITION_BUDGET_USD_MICRO == 5_250_000
+        initialize_experiment(old_db, LEGACY_ID)
+        old = read_budget(old_db, LEGACY_ID)
+        from opspilot.domain.assistant_experiment import MCP_LIMIT
+        assert old["provider_limit"] == 16 and old["mcp_limit"] == MCP_LIMIT
+        assert old["budget_usd_micro"] == BUDGET_USD_MICRO == 10_500_000
+        assert old["usd_reserved_micro"] == old["usd_settled_micro"] == 0
+        assert PRICE_VERSION == "DEEPSEEK_FLASH_PEAK_2026-11-01"
+        assert MAX_PROVIDER_RESERVATION_USD_MICRO == 645_600
+        assert AR04C_PRICE_VERSION == "DEEPSEEK_FLASH_PEAK_2026-11-05"
+        assert AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO == 691_680
+        for db_path in (on_db, off_db):
+            for number in range(8):
+                run_id, key = f"run-{number}", f"model-{number}"
+>               held = reserve_dispatch(
+                    db_path, experiment_id=EXPERIMENT_ID, run_id=run_id, kind="MODEL",
+                    logical_key=key, request={"message": "offline"},
+                )
+
+tests\test_ar04c_real_journey_01.py:490: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-green-01/test_ar04c_campaign_caps_are_s0/on.sqlite3')
+experiment_id = 'AR-04C-REAL-JOURNEY-01', run_id = 'run-0', kind = 'MODEL'
+logical_key = 'model-0', request = {'message': 'offline'}
+
+    def reserve_dispatch(
+        path: str | Path,
+        *,
+        experiment_id: str,
+        run_id: str,
+        kind: str,
+        logical_key: str,
+        request: Any,
+    ) -> dict[str, Any]:
+        """Atomically reserve one campaign dispatch before Provider/MCP I/O."""
+        _validate_experiment_id(experiment_id)
+        if kind not in {"MODEL", "MCP"} or not logical_key:
+            raise ExperimentBudgetError("AR02_LIVE_DISPATCH_IDENTITY_INVALID")
+        request_digest = digest_json(request)
+    
+        # The app initializes this at worker startup. Lazy creation also makes direct
+        # offline callers safe, while remaining limited to this fixed experiment ID.
+        initialize_experiment(path, experiment_id)
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            budget = connection.execute(
+                "SELECT * FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+                (experiment_id,),
+            ).fetchone()
+            if budget is None:
+                raise ExperimentBudgetError("AR02_LIVE_BUDGET_NOT_INITIALIZED")
+    
+            old = connection.execute(
+                """SELECT * FROM ar02_live_dispatches
+                   WHERE experiment_id=? AND run_id=? AND kind=? AND logical_key=?""",
+                (experiment_id, run_id, kind, logical_key),
+            ).fetchone()
+            if old is not None:
+                if str(old["request_digest"]) != request_digest:
+                    raise ExperimentBudgetError("AR02_LIVE_IDEMPOTENCY_CONFLICT")
+                if old["status"] == "OK":
+                    if kind == "MODEL" and old["usage_state"] != "KNOWN":
+                        raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+                    return {"dispatch": False, "replay": True, "dispatch_id": old["dispatch_id"]}
+                if old["status"] == "NOT_DISPATCHED":
+                    raise ExperimentBudgetError("AR02_LIVE_ALREADY_NOT_DISPATCHED")
+                raise ExperimentBudgetError("AR02_LIVE_CALL_OUTCOME_UNKNOWN")
+    
+            if budget["status"] != "OPEN":
+                raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+    
+            # Older ledger rows may contain UNKNOWN/invalid Usage while their
+            # campaign row still says OPEN. Treat those durable dispatch facts as a
+            # stop marker without rewriting historical ledger or budget rows.
+            prior_unknown = connection.execute(
+                """SELECT 1 FROM ar02_live_dispatches
+                   WHERE experiment_id=? AND kind='MODEL'
+                     AND (status='UNKNOWN' OR (status='OK' AND usage_state!='KNOWN'))
+                   LIMIT 1""",
+                (experiment_id,),
+            ).fetchone()
+            if prior_unknown is not None:
+                raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+    
+            count = _used_count(connection, experiment_id, kind)
+            # Enforce the persisted, per-database allocation, not a process
+            # parameter that could differ between the two isolated scenarios.
+            raw_count_limit = budget["provider_limit"] if kind == "MODEL" else budget["mcp_limit"]
+            count_limit = None if raw_count_limit is None else int(raw_count_limit)
+            if count_limit is not None and count >= count_limit:
+                label = "PROVIDER" if kind == "MODEL" else "MCP"
+                raise ExperimentBudgetError(f"AR02_LIVE_{label}_LIMIT")
+    
+            reservation = _reservation_for_experiment(experiment_id) if kind == "MODEL" else 0
+            if kind == "MODEL":
+                reserved, settled = _money_totals(connection, experiment_id)
+                if reserved + settled + reservation > int(budget["budget_usd_micro"]):
+                    raise ExperimentBudgetError("AR02_LIVE_USD_LIMIT")
+    
+            dispatch_id = "ar02-live-dispatch-" + str(uuid.uuid4())
+>           connection.execute(
+                """INSERT INTO ar02_live_dispatches
+                   (dispatch_id, experiment_id, run_id, kind, logical_key, request_digest,
+                    status, reserved_usd_micro, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', ?, ?)""",
+                (
+                    dispatch_id,
+                    experiment_id,
+                    run_id,
+                    kind,
+                    logical_key,
+                    request_digest,
+                    reservation,
+                    utc_now(),
+                ),
+            )
+E           sqlite3.IntegrityError: FOREIGN KEY constraint failed
+
+opspilot\domain\assistant_experiment.py:322: IntegrityError
+_ test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-green-01/test_ar04c_formal_worker_mock_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CE8BF2B360>
+
+    def test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff(tmp_path: Path, monkeypatch):
+        from opspilot.domain.assistant_experiment import initialize_experiment
+    
+        seed_db = tmp_path / "seed.sqlite3"
+        off_db, on_db = tmp_path / "off.sqlite3", tmp_path / "on.sqlite3"
+        memory = _prepare_memory_seed(seed_db, tmp_path / "seed-checkpoint.sqlite3", off_db, on_db)
+        for db_path in (off_db, on_db):
+            initialize_experiment(db_path, EXPERIMENT_ID)
+        before_off, before_on = _protected_counts(off_db), _protected_counts(on_db)
+>       off = _run_condition(off_db, tmp_path / "off-checkpoint.sqlite3", "OFF", memory["memory"], monkeypatch)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar04c_real_journey_01.py:599: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar04c_real_journey_01.py:311: in _run_condition
+    assert _wait_for_run(client, str(j2["run_id"]))["status"] == "SUCCEEDED"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+client = <starlette.testclient.TestClient object at 0x000001CE8F340190>
+run_id = 'run-a85f22d3-587a-409d-bf74-88958f32ff8b'
+
+    def _wait_for_run(client: TestClient, run_id: str) -> dict:
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            response = client.get(f"/api/runs/{run_id}")
+>           assert response.status_code == 200, response.text
+E           AssertionError: {"code":"AUTHENTICATION_REQUIRED"}
+E           assert 401 == 200
+E            +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_ar04c_real_journey_01.py:46: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged - sqlite3.IntegrityError: FOREIGN KEY constraint failed
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff - AssertionError: {"code":"AUTHENTICATION_REQUIRED"}
+assert 401 == 200
+ +  where 401 = <Response [401 Unauthorized]>.status_code
+========================= 2 failed, 4 passed in 7.57s =========================

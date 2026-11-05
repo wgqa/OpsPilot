@@ -1,0 +1,323 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.0, pluggy-1.6.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04c-real-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.14.0
+collecting ... collected 6 items
+
+tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_unknown_dispatch_keeps_reservation_and_stops_next_request FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_task_policy_allows_more_than_old_mcp_limit_and_preserves_time FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_paid_factory_fails_closed_without_authorization_and_claim FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_memory_mode_is_explicit_and_scoped FAILED
+
+================================== FAILURES ===================================
+____ test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged ____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/docs/evidence/ar-04c/real-journey-01/runs/pytest-tmp-02/test_ar04c_campaign_caps_are_s0')
+
+    def test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged(tmp_path: Path):
+        from opspilot.domain.assistant_experiment import (
+            AR04C_CONDITION_BUDGET_USD_MICRO, AR04C_CONDITION_PROVIDER_LIMIT,
+            AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO, AR04C_PRICE_VERSION,
+            BUDGET_USD_MICRO, EXPERIMENT_ID as LEGACY_ID, MAX_PROVIDER_RESERVATION_USD_MICRO,
+            PRICE_VERSION, ExperimentBudgetError, complete_dispatch, initialize_experiment,
+            read_budget, reserve_dispatch,
+        )
+        from opspilot.domain.database import reset_fixture
+    
+        on_db, off_db, old_db = (tmp_path / name for name in ("on.sqlite3", "off.sqlite3", "old.sqlite3"))
+        for db_path in (on_db, off_db, old_db):
+            reset_fixture(db_path, "S1_POS")
+        for db_path in (on_db, off_db):
+            initialize_experiment(db_path, EXPERIMENT_ID)
+            budget = read_budget(db_path, EXPERIMENT_ID)
+            assert budget["provider_limit"] == AR04C_CONDITION_PROVIDER_LIMIT == 8
+            assert budget["mcp_limit"] is None
+            assert budget["budget_usd_micro"] == AR04C_CONDITION_BUDGET_USD_MICRO == 5_250_000
+        initialize_experiment(old_db, LEGACY_ID)
+        old = read_budget(old_db, LEGACY_ID)
+>       assert old["provider_limit"] == 16 and old["mcp_limit"] == 6
+E       assert (16 == 16 and 12 == 6)
+
+tests\test_ar04c_real_journey_01.py:479: AssertionError
+____ test_ar04c_unknown_dispatch_keeps_reservation_and_stops_next_request _____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/docs/evidence/ar-04c/real-journey-01/runs/pytest-tmp-02/test_ar04c_unknown_dispatch_ke0')
+
+    def test_ar04c_unknown_dispatch_keeps_reservation_and_stops_next_request(tmp_path: Path):
+        from opspilot.domain.assistant_experiment import (
+            AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO, ExperimentBudgetError,
+            initialize_experiment, mark_unknown, read_budget, reserve_dispatch,
+        )
+        from opspilot.domain.database import reset_fixture
+    
+        db_path = tmp_path / "unknown.sqlite3"
+        reset_fixture(db_path, "S1_POS")
+        initialize_experiment(db_path, EXPERIMENT_ID)
+>       reserve_dispatch(
+            db_path, experiment_id=EXPERIMENT_ID, run_id="unknown-run", kind="MODEL",
+            logical_key="unknown-call", request={},
+        )
+
+tests\test_ar04c_real_journey_01.py:521: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/docs/evidence/ar-04c/real-journey-01/runs/pytest-tmp-02/test_ar04c_unknown_dispatch_ke0/unknown.sqlite3')
+experiment_id = 'AR-04C-REAL-JOURNEY-01', run_id = 'unknown-run', kind = 'MODEL'
+logical_key = 'unknown-call', request = {}
+
+    def reserve_dispatch(
+        path: str | Path,
+        *,
+        experiment_id: str,
+        run_id: str,
+        kind: str,
+        logical_key: str,
+        request: Any,
+    ) -> dict[str, Any]:
+        """Atomically reserve one campaign dispatch before Provider/MCP I/O."""
+        _validate_experiment_id(experiment_id)
+        if kind not in {"MODEL", "MCP"} or not logical_key:
+            raise ExperimentBudgetError("AR02_LIVE_DISPATCH_IDENTITY_INVALID")
+        request_digest = digest_json(request)
+    
+        # The app initializes this at worker startup. Lazy creation also makes direct
+        # offline callers safe, while remaining limited to this fixed experiment ID.
+        initialize_experiment(path, experiment_id)
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            budget = connection.execute(
+                "SELECT * FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+                (experiment_id,),
+            ).fetchone()
+            if budget is None:
+                raise ExperimentBudgetError("AR02_LIVE_BUDGET_NOT_INITIALIZED")
+    
+            old = connection.execute(
+                """SELECT * FROM ar02_live_dispatches
+                   WHERE experiment_id=? AND run_id=? AND kind=? AND logical_key=?""",
+                (experiment_id, run_id, kind, logical_key),
+            ).fetchone()
+            if old is not None:
+                if str(old["request_digest"]) != request_digest:
+                    raise ExperimentBudgetError("AR02_LIVE_IDEMPOTENCY_CONFLICT")
+                if old["status"] == "OK":
+                    if kind == "MODEL" and old["usage_state"] != "KNOWN":
+                        raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+                    return {"dispatch": False, "replay": True, "dispatch_id": old["dispatch_id"]}
+                if old["status"] == "NOT_DISPATCHED":
+                    raise ExperimentBudgetError("AR02_LIVE_ALREADY_NOT_DISPATCHED")
+                raise ExperimentBudgetError("AR02_LIVE_CALL_OUTCOME_UNKNOWN")
+    
+            if budget["status"] != "OPEN":
+                raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+    
+            # Older ledger rows may contain UNKNOWN/invalid Usage while their
+            # campaign row still says OPEN. Treat those durable dispatch facts as a
+            # stop marker without rewriting historical ledger or budget rows.
+            prior_unknown = connection.execute(
+                """SELECT 1 FROM ar02_live_dispatches
+                   WHERE experiment_id=? AND kind='MODEL'
+                     AND (status='UNKNOWN' OR (status='OK' AND usage_state!='KNOWN'))
+                   LIMIT 1""",
+                (experiment_id,),
+            ).fetchone()
+            if prior_unknown is not None:
+                raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
+    
+            count = _used_count(connection, experiment_id, kind)
+            # Enforce the persisted, per-database allocation, not a process
+            # parameter that could differ between the two isolated scenarios.
+            raw_count_limit = budget["provider_limit"] if kind == "MODEL" else budget["mcp_limit"]
+            count_limit = None if raw_count_limit is None else int(raw_count_limit)
+            if count_limit is not None and count >= count_limit:
+                label = "PROVIDER" if kind == "MODEL" else "MCP"
+                raise ExperimentBudgetError(f"AR02_LIVE_{label}_LIMIT")
+    
+            reservation = _reservation_for_experiment(experiment_id) if kind == "MODEL" else 0
+            if kind == "MODEL":
+                reserved, settled = _money_totals(connection, experiment_id)
+                if reserved + settled + reservation > int(budget["budget_usd_micro"]):
+                    raise ExperimentBudgetError("AR02_LIVE_USD_LIMIT")
+    
+            dispatch_id = "ar02-live-dispatch-" + str(uuid.uuid4())
+>           connection.execute(
+                """INSERT INTO ar02_live_dispatches
+                   (dispatch_id, experiment_id, run_id, kind, logical_key, request_digest,
+                    status, reserved_usd_micro, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'RESERVED', ?, ?)""",
+                (
+                    dispatch_id,
+                    experiment_id,
+                    run_id,
+                    kind,
+                    logical_key,
+                    request_digest,
+                    reservation,
+                    utc_now(),
+                ),
+            )
+E           sqlite3.IntegrityError: FOREIGN KEY constraint failed
+
+opspilot\domain\assistant_experiment.py:322: IntegrityError
+__ test_ar04c_task_policy_allows_more_than_old_mcp_limit_and_preserves_time ___
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/docs/evidence/ar-04c/real-journey-01/runs/pytest-tmp-02/test_ar04c_task_policy_allows_0')
+
+    def test_ar04c_task_policy_allows_more_than_old_mcp_limit_and_preserves_time(tmp_path: Path):
+        from opspilot.domain.assistant import run_limits_for_experiment
+        from opspilot.domain.database import connect, reset_fixture
+        from opspilot.domain.d2 import (
+            BudgetExhausted, configure_ar04c_memory_budget, finish_attempt, reserve_attempt,
+            task_attempt_limits,
+        )
+        from opspilot.domain.assistant_experiment import initialize_experiment
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.domain.task_control import apply_pending_critical_inputs, claim_task_run
+        from test_m4_03_s3 import _task
+    
+        db_path = tmp_path / "policy.sqlite3"
+        reset_fixture(db_path, "S1_POS")
+        prepare_s3_fixture(db_path, "DELIVERED_PENDING", order_id="ar04c-order", contract_version=2)
+        identity, task = _task(db_path, "ar04c-order")
+        initialize_experiment(db_path, EXPERIMENT_ID)
+        with pytest.raises(ValueError, match="AR04C_EXPERIMENT_SCOPE_INVALID"):
+            configure_ar04c_memory_budget(db_path, str(task["task_id"]), "OTHER-EXPERIMENT")
+        assert configure_ar04c_memory_budget(db_path, str(task["task_id"]), EXPERIMENT_ID) == {
+            "MODEL": 8, "MCP": None,
+        }
+        assert task_attempt_limits(db_path, str(task["task_id"])) == {"MODEL": 8, "MCP": None}
+        assert run_limits_for_experiment(EXPERIMENT_ID) == (8, None)
+        with connect(db_path) as connection:
+            row = connection.execute(
+                "SELECT policy_version,model_limit,mcp_limit,deadline_ms,active_elapsed_ms "
+                "FROM task_execution_budgets WHERE task_id=?", (task["task_id"],),
+            ).fetchone()
+            assert row["policy_version"] == "AR04C_MEMORY_ON_OFF_V1"
+            assert int(row["model_limit"]) == 8 and int(row["mcp_limit"]) == 0
+            assert int(row["deadline_ms"]) == 300_000 and int(row["active_elapsed_ms"]) == 0
+        claim_task_run(db_path, identity, str(task["run_id"]))
+>       apply_pending_critical_inputs(db_path, str(task["task_id"]), str(task["run_id"]))
+
+tests\test_ar04c_real_journey_01.py:572: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\task_control.py:1787: in apply_pending_critical_inputs
+    _verify_identity(connection, identity)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x00000202CADB7790>
+identity = 'task-049388c2-9c4c-4923-ad49-f93fb6ea2709'
+
+    def _verify_identity(connection: sqlite3.Connection, identity: TrustedIdentity) -> sqlite3.Row:
+        if not isinstance(identity, TrustedIdentity):
+>           raise TaskControlError("TRUSTED_IDENTITY_REQUIRED")
+E           opspilot.domain.task_control.TaskControlError: TRUSTED_IDENTITY_REQUIRED
+
+opspilot\domain\task_control.py:72: TaskControlError
+_ test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/docs/evidence/ar-04c/real-journey-01/runs/pytest-tmp-02/test_ar04c_formal_worker_mock_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000202CAED2D70>
+
+    def test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff(tmp_path: Path, monkeypatch):
+        from opspilot.domain.assistant_experiment import initialize_experiment
+    
+        seed_db = tmp_path / "seed.sqlite3"
+        off_db, on_db = tmp_path / "off.sqlite3", tmp_path / "on.sqlite3"
+>       memory = _prepare_memory_seed(seed_db, tmp_path / "seed-checkpoint.sqlite3", off_db, on_db)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar04c_real_journey_01.py:589: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar04c_real_journey_01.py:68: in _prepare_memory_seed
+    from test_ar04b_memory_journey_01 import _seed_async_project_approver
+D:\python\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module
+    exec(co, module.__dict__)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    from __future__ import annotations
+    
+    import json
+    import time
+    from pathlib import Path
+    
+    from fastapi.testclient import TestClient
+>   from langchain_core.language_models.chat_models import BaseChatModel
+E   ModuleNotFoundError: No module named 'langchain_core'
+
+tests\test_ar04b_memory_journey_01.py:8: ModuleNotFoundError
+____ test_ar04c_paid_factory_fails_closed_without_authorization_and_claim _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000202CAD316E0>
+
+    def test_ar04c_paid_factory_fails_closed_without_authorization_and_claim(monkeypatch):
+>       from opspilot.assistant import AR04C_AUTH_RECORD, AR04C_CLAIM, create_assistant_model
+
+tests\test_ar04c_real_journey_01.py:628: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Single professional create_agent loop; trusted execution uses existing Domain.
+    
+    No business Outcome writer. Provider construction requires explicit opt-in; the
+    material resume campaign additionally requires its exact one-shot authorization.
+    """
+    from __future__ import annotations
+    import asyncio
+    import hashlib
+    import hmac
+    import json
+    import os
+    import subprocess
+    import sys
+    from urllib.parse import urlparse
+    from pathlib import Path
+>   from langchain.agents import create_agent
+E   ModuleNotFoundError: No module named 'langchain'
+
+opspilot\assistant.py:16: ModuleNotFoundError
+________________ test_ar04c_memory_mode_is_explicit_and_scoped ________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000202CAD731D0>
+
+    def test_ar04c_memory_mode_is_explicit_and_scoped(monkeypatch):
+>       from opspilot.assistant import assistant_memory_enabled_for_experiment
+
+tests\test_ar04c_real_journey_01.py:645: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    """Single professional create_agent loop; trusted execution uses existing Domain.
+    
+    No business Outcome writer. Provider construction requires explicit opt-in; the
+    material resume campaign additionally requires its exact one-shot authorization.
+    """
+    from __future__ import annotations
+    import asyncio
+    import hashlib
+    import hmac
+    import json
+    import os
+    import subprocess
+    import sys
+    from urllib.parse import urlparse
+    from pathlib import Path
+>   from langchain.agents import create_agent
+E   ModuleNotFoundError: No module named 'langchain'
+
+opspilot\assistant.py:16: ModuleNotFoundError
+============================== warnings summary ===============================
+..\..\..\..\python\Lib\site-packages\fastapi\testclient.py:1
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged - assert (16 == 16 and 12 == 6)
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_unknown_dispatch_keeps_reservation_and_stops_next_request - sqlite3.IntegrityError: FOREIGN KEY constraint failed
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_task_policy_allows_more_than_old_mcp_limit_and_preserves_time - opspilot.domain.task_control.TaskControlError: TRUSTED_IDENTITY_REQUIRED
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff - ModuleNotFoundError: No module named 'langchain_core'
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_paid_factory_fails_closed_without_authorization_and_claim - ModuleNotFoundError: No module named 'langchain'
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_memory_mode_is_explicit_and_scoped - ModuleNotFoundError: No module named 'langchain'
+======================== 6 failed, 1 warning in 2.51s =========================
