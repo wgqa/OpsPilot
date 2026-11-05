@@ -48,3 +48,9 @@ G1/G3/G4/G6/G7/G8/G10 有离线正反证据。G2 仅通过 Fixture Model handler
 ## 停止线
 
 离线候选和必要回归已完成；不运行真实 DeepSeek，不合并 main，不进入 AR-05/R2。由主 Agent 独立检查 Diff、Gold、Trace 和日志后裁决。
+
+## AR-04B-REGRESSION-HF-01 补充
+
+原 AR-04A 候选回归记录的 7/8 失败已按定向任务复核。未修改的 `main@134df49` 上同一测试 1/1 通过；候选原断言 1/1 失败，但失败来自全量 `request_json` 中应保留的 `excluded_sources` ID。SQLite 实证显示摘要 ID、Digest、完整摘要正文和摘要标记均未进入模型 `messages`，`summary_refs=[]`，历史摘要 Context block 为 0 Token；后续 Run 仍为 `SUCCEEDED` 并持久化非空答案。
+
+仅将测试改为检查实际 `request_json["messages"]`、摘要引用和排除元数据，并补足非空答案断言。AR-04A Context/取消回归现为 8/8；AR-04B 9/9、Memory/D5 28/28、Assistant/TaskControl 14/14 均通过。完整对照、摘要与普通 `human` 历史消息的区别、中间失败和限制见 [REGRESSION-HF-01.md](REGRESSION-HF-01.md)。没有生产代码改动；未运行全量 pytest、真实 Provider 或浏览器。

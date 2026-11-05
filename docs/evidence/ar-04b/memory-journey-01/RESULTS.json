@@ -99,7 +99,103 @@
   "limitations": [
     "No real Provider Completion, Provider Usage, or charged token count.",
     "Fixture ON/OFF answers and tool paths were equal; no quality improvement demonstrated.",
-    "AR-04A regression has one unresolved assertion failure described above.",
+    "The initial AR-04A regression was 7/8; HF-01 isolated the test assertion mismatch and fresh Context/cancel rerun passed 8/8. Historical failing log is retained.",
     "No full pytest run in this slice."
-  ]
+  ],
+  "regression_hf01": {
+    "status": "ACCEPTANCE_CANDIDATE",
+    "baseline_main": {
+      "sha": "134df49f792dfdf8d4b9a3b846d218af5c34ec6d",
+      "test_blob": "8ac8f90c5bad30aa94d47f0787e028b1cdedb6ac",
+      "passed": 1,
+      "failed": 0,
+      "duration_seconds": 12.04,
+      "log": "runs/regression-ar04a-main-baseline-hf01.log"
+    },
+    "candidate_before_assertion_fix": {
+      "sha": "6dc71e91b83203b07647fd12caf777239c2b153b",
+      "passed": 0,
+      "failed": 1,
+      "duration_seconds": 11.75,
+      "failure": "The old assertion searched the whole request_json; the summary ID was present in excluded_sources audit metadata.",
+      "log": "runs/regression-ar04a-candidate-before-fix-hf01.log",
+      "run_id": "run-98fc879f-de53-4b30-b83d-f046314cd585"
+    },
+    "wire_inspection": {
+      "run_id": "run-98fc879f-de53-4b30-b83d-f046314cd585",
+      "summary_id": "context-summary-96150a3a-7b21-4154-9257-72ec8810af96",
+      "summary_state": "INVALID",
+      "summary_invalidation_reason": "SUMMARY_MESSAGE_SOURCE_INVALID",
+      "summary_id_in_model_messages": false,
+      "summary_digest_in_model_messages": false,
+      "serialized_summary_body_in_model_messages": false,
+      "summary_heading_in_model_messages": false,
+      "original_source_as_untrusted_human_history_present": true,
+      "selected_summary_refs": [],
+      "historical_summary_context_block": {
+        "status": "NOT_APPLICABLE",
+        "estimated_tokens": 0
+      },
+      "summary_id_audit_paths": [
+        "$.excluded_sources[1].source_id",
+        "$.source_refs.excluded_sources[1].source_id"
+      ],
+      "exclusion_reason": "SUMMARY_SCOPE_OR_DIGEST_INVALID",
+      "run_status": "SUCCEEDED",
+      "persisted_answer_nonempty": true,
+      "persisted_answer_chars": 238,
+      "action_intents": 0,
+      "action_ledgers": 0,
+      "approvals": 0,
+      "handoff_receipts": 0
+    },
+    "candidate_after_assertion_fix": {
+      "passed": 1,
+      "failed": 0,
+      "duration_seconds": 11.08,
+      "log": "runs/regression-ar04a-candidate-green-02-hf01.log",
+      "run_id": "run-96285a07-e565-4e1c-b058-60557f844870",
+      "persisted_answer_message_id": "message-9020f684-36f3-4c04-b2da-ad34dc3a47ef"
+    },
+    "related_regressions": [
+      {
+        "suite": "AR-04A Context + compression/cancel",
+        "passed": 8,
+        "failed": 0,
+        "duration_seconds": 75.11,
+        "log": "runs/regression-ar04a-context-cancel-hf01-final.log"
+      },
+      {
+        "suite": "AR-04B",
+        "passed": 9,
+        "failed": 0,
+        "duration_seconds": 49.28,
+        "log": "runs/regression-ar04b-hf01-final.log"
+      },
+      {
+        "suite": "Memory/D5",
+        "passed": 28,
+        "failed": 0,
+        "duration_seconds": 15.18,
+        "log": "runs/regression-memory-d5-hf01-final.log"
+      },
+      {
+        "suite": "Assistant/TaskControl",
+        "passed": 14,
+        "failed": 0,
+        "duration_seconds": 10.27,
+        "log": "runs/regression-assistant-taskcontrol-hf01-final.log"
+      }
+    ],
+    "preserved_diagnostic_failure": {
+      "log": "runs/regression-ar04a-candidate-source-history-diagnostic-hf01.log",
+      "classification": "An exploratory over-strict test assertion treated the original user message retained as ordinary human history as if it were injected summary content; the persisted message structure showed that distinction."
+    },
+    "real_provider_http_requests": 0,
+    "browser_runs": 0,
+    "external_business_writes": 0,
+    "full_pytest": "NOT_RUN",
+    "gold_modified": false,
+    "production_source_modified": false
+  }
 }

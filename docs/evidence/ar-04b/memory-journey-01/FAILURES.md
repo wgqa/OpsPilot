@@ -20,3 +20,11 @@
 - Provider Usage、真实 Token/费用和 HTTP wire。
 - 专门构造大 Memory 并逼近 12,000 Token 上限的 AR-04B 边界样本。
 - 全量 pytest 与 AR-04A 唯一失败断言的定义调整。
+
+## HF-01 定向复核补充（2026-11-05）
+
+- 在未修改的 `origin/main@134df49` 上，同一测试（测试 Blob `8ac8f90c5bad30aa94d47f0787e028b1cdedb6ac`）通过 1/1；在 AR-04B 原候选上原断言失败 1/1。原始两份日志分别保存在 `runs/regression-ar04a-main-baseline-hf01.log` 与 `runs/regression-ar04a-candidate-before-fix-hf01.log`。
+- 读候选 RED SQLite 的真实 `assistant_calls.request_json` 后，确认失败断言序列化了整个 wire：摘要 ID 出现在两个内部 `excluded_sources` 路径，原因是 `SUMMARY_SCOPE_OR_DIGEST_INVALID`。ID、Digest、完整 `summary_json` 与摘要标记均不在 `messages`，`summary_refs=[]`，Context block 估算 0 Token；摘要行是 `INVALID / SUMMARY_MESSAGE_SOURCE_INVALID`。Run 已成功，且有非空持久 Answer。
+- 原始来源文字仍作为普通 `human` 历史消息进入输入；它不是失效摘要对象或可信 Evidence。一次先行诊断曾将“source user text 不得在任何消息出现”作为更强断言，失败日志保留在 `runs/regression-ar04a-candidate-source-history-diagnostic-hf01.log`；检查消息类型后收窄断言至摘要负载与 `messages`，不改变合法原话历史语义。
+- 该冻结测试只改断言范围并加上持久/可见非空答案正例，生产代码、Gold 和摘要校验逻辑未改。修正后 AR-04A Context/取消 8/8、AR-04B 9/9、Memory/D5 28/28、Assistant/TaskControl 14/14 均通过，分别见新 `regression-*-hf01-final.log`。
+- 原来的 7/8 记录和本次所有 RED/中间失败均未覆盖。没有全量 pytest、真实 Provider、浏览器或外部业务写入；G9 大 Memory 超预算专项仍未覆盖。

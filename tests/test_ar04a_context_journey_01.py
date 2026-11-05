@@ -446,18 +446,21 @@ def test_ar04a_invalidated_summary_is_not_sent_to_the_model(demo_db, tmp_path):
 
         with connect(demo_db) as connection:
             summary = connection.execute(
-                "SELECT summary_id, covered_to_seq FROM context_summaries WHERE state='CURRENT'"
+                "SELECT summary_id, summary_json, summary_digest, covered_to_seq "
+                "FROM context_summaries WHERE state='CURRENT'"
             ).fetchone()
             assert summary is not None, "long session must have produced a summary"
             source = connection.execute(
-                "SELECT message_id FROM messages WHERE session_id=? AND role='USER' AND sequence<=? "
+                "SELECT message_id, body FROM messages WHERE session_id=? AND role='USER' AND sequence<=? "
                 "ORDER BY sequence LIMIT 1",
                 (session_id, int(summary["covered_to_seq"])),
             ).fetchone()
             assert source is not None
+            source_message_id = str(source["message_id"])
+            source_body = str(source["body"])
             connection.execute(
                 "UPDATE messages SET body_digest=? WHERE message_id=?",
-                ("0" * 64, str(source["message_id"])),
+                ("0" * 64, source_message_id),
             )
 
         response = client.post(
@@ -468,16 +471,58 @@ def test_ar04a_invalidated_summary_is_not_sent_to_the_model(demo_db, tmp_path):
         assert response.status_code == 202, response.text
         run = _wait_run(client, response.json()["run_id"])
         assert run["status"] == "SUCCEEDED", run
-        wires_text = json.dumps(_model_wires(demo_db, response.json()["run_id"]), ensure_ascii=False)
-        assert str(summary["summary_id"]) not in wires_text
+        wires = _model_wires(demo_db, response.json()["run_id"])
+        assert wires, "the completed Run must have a persisted model request"
+        wire = wires[-1]
+        model_messages = wire["messages"]
+        model_messages_text = json.dumps(model_messages, ensure_ascii=False)
+        summary_body = json.dumps(
+            json.loads(str(summary["summary_json"])), ensure_ascii=False, sort_keys=True
+        )
+
+        # The original USER turn remains ordinary untrusted chat history. The
+        # derived summary envelope itself must not be sent after invalidation.
+        human_history = [
+            str(item.get("data", {}).get("content", ""))
+            for item in model_messages
+            if item.get("type") == "human"
+        ]
+        assert source_body in human_history
+        assert str(summary["summary_id"]) not in model_messages_text
+        assert str(summary["summary_digest"]) not in model_messages_text
+        assert summary_body not in model_messages_text
+        assert "HISTORICAL SESSION SUMMARY" not in model_messages_text
+        assert wire["source_refs"]["summary_refs"] == []
+        summary_blocks = [
+            block for block in wire["context_blocks"]
+            if block["category"] == "HISTORICAL_SUMMARY"
+        ]
+        assert len(summary_blocks) == 1
+        assert summary_blocks[0]["status"] == "NOT_APPLICABLE"
+        assert summary_blocks[0]["estimated_tokens"] == 0
+
+        # The excluded source remains traceable in internal audit metadata;
+        # it is expected here and must not be mistaken for provider input.
+        assert any(
+            item.get("source_id") == str(summary["summary_id"])
+            and str(item.get("reason", "")).startswith("SUMMARY_")
+            for item in wire["excluded_sources"]
+        )
+        assert _last_notice(client, session_id)
 
     with connect(demo_db) as connection:
         state = connection.execute(
             "SELECT state, invalidation_reason FROM context_summaries WHERE summary_id=?",
             (str(summary["summary_id"]),),
         ).fetchone()
+        answer = connection.execute(
+            "SELECT m.body FROM chat_run_answers a JOIN messages m ON m.message_id=a.message_id "
+            "WHERE a.run_id=?",
+            (str(run["run_id"]),),
+        ).fetchone()
     assert str(state["state"]) == "INVALID"
     assert str(state["invalidation_reason"]).startswith("SUMMARY_")
+    assert answer is not None and str(answer["body"]).strip()
 
 
 def test_ar04a_over_budget_still_fails_closed_without_provider_call(

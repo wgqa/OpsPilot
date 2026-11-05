@@ -1,0 +1,30 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04b-memory-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 14 items
+
+tests/test_ar02_assistant.py::test_no_task_professional_message_is_idempotent_without_fake_binding PASSED
+tests/test_ar02_assistant.py::test_no_task_document_scope_is_server_owned_and_session_isolated PASSED
+tests/test_ar02_assistant.py::test_no_task_has_no_business_tool_or_privileged_authority PASSED
+tests/test_m1_task_control.py::test_n1_01_02_admission_is_atomic_and_idempotent M1_EVIDENCE {"accepted_command_id": "command-2301b28a-5a0b-4895-b8b9-67a2f48258a8", "accepted_message_id": "message-662974a7-fe77-4aa7-a104-4f9965f81c92", "accepted_run_id": "run-faa490fc-832e-4da8-84ce-883bfcec6916", "case": "N1-01/02", "conflicting_digest": "IDEMPOTENCY_CONFLICT", "control_revision": 1, "failed_insert_rollback": "PASS", "retry_same_ids": true}
+PASSED
+tests/test_m1_task_control.py::test_n1_05_one_worker_claims_the_durable_run M1_EVIDENCE {"case": "N1-05", "claims": [["REJECTED", "TASK_RUN_NOT_QUEUED"], ["CLAIMED", "RUNNING"]], "running_count": 1}
+PASSED
+tests/test_m1_task_control.py::test_revision_zero_run_can_be_claimed_applied_and_resumed PASSED
+tests/test_m1_task_control.py::test_chat_readonly_run_does_not_change_business_task_lifecycle PASSED
+tests/test_m1_task_control.py::test_abort_is_owner_scoped_idempotent_and_does_not_overwrite_completion PASSED
+tests/test_m1_task_control.py::test_n1_09_abort_before_old_checkpoint_resume_is_enforced_in_another_process M1_EVIDENCE {"abort_command_id": "command-c0d6b363-6f35-4f6e-bc74-4708faf75639", "abort_control_revision": 1, "approval_count": 0, "case": "N1-09", "checkpoint_exists_before_resume": true, "child_process": {"event": "old_checkpoint_resume_blocked", "pid": 25936, "reason": "TASK_ABORTED", "thread_id": "opspilot-4d25e17a-0f2c-4eb0-b436-15c28d4e7313"}, "intent_count": 0, "ledger_count": 0, "parent_pid": 33292, "plan_count": 0}
+PASSED
+tests/test_m1_task_control.py::test_n1_10_correction_invalidates_old_run_and_new_run_binds_fresh_plan M1_EVIDENCE {"case": "N1-10", "config_version_after": 8, "consumed_control_revision": 2, "correction_message_id": "message-49a95d1c-9804-41ef-9e55-b84ef25cd70b", "correction_run_id": "run-2ab3a55d-daa5-4f5d-ad65-79a58472c989", "fresh_approval_id": "approval-d7fd3619-e254-49fc-b05a-f036dc096fe4", "fresh_plan_hash": "4ede37b772bdec98a80bfe3a0eb150fc5b38917c0bdf82d5289587e0f1a25cdd", "fresh_repair_ledger_id": "ledger-f97af275-8ac6-4f8b-a7b9-5894bd6afb2b", "old_approval_id": "approval-9503b843-d928-4dc6-9090-e88da11a995f", "old_plan_hash": "66a263dfcda1269178347da40b299ed4501442fb5609d05ae032d8b016cc0d39", "old_repair_intent_id": "action-45651780-3776-4ff8-ba3c-4051183d14ee", "pending_error": "TASK_INPUT_PENDING", "post_apply_error": "TASK_CONTROL_STALE", "repair_ledger_count": 1}
+PASSED
+tests/test_m1_task_control.py::test_plan_approval_cannot_be_created_after_correction_is_pending PASSED
+tests/test_m1_task_control.py::test_abort_after_real_delivery_cannot_overwrite_completed_business_task PASSED
+tests/test_m1_task_control.py::test_n1_11_repair_commit_survives_abort_and_old_checkpoint_cannot_deliver M1_EVIDENCE {"abort_command_id": "command-f59a9e84-4366-4037-9b25-83d0a52f62d0", "case": "N1-11", "child_process": {"event": "old_checkpoint_resume_blocked", "pid": 35796, "reason": "TASK_ABORTED", "thread_id": "opspilot-8b2fa1ce-3788-4353-8f58-a72d61e1508c"}, "config_version_after": 8, "control_revision": 1, "deliver_ledger_count": 0, "delivery_record_count": 0, "parent_pid": 33292, "repair_history_read_after_abort": "PASS", "repair_ledger_count": 1, "repair_ledger_id": "ledger-fc8325d8-d291-45f5-b3a0-61e6b63910fd", "ticket_entry_count": 0}
+PASSED
+tests/test_m1_task_control.py::test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash M1_EVIDENCE {"case": "migration", "idempotent_replays": 2, "migrated_control": ["ACTIVE", 0], "plan_control_binding_count": 1, "plan_hash_preserved": "bba4a106653636a24fdb80af975391f13b7202d27719436b8d95fb5e65b9d7cb", "task_id": "task-5af66fe1-4398-49fd-afda-a7fafb5f5c19", "user_version": 18}
+PASSED
+
+============================= 14 passed in 10.27s =============================
+HARNESS_EXIT_CODE=0
