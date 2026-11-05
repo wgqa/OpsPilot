@@ -1,8 +1,10 @@
 """AR-04C offline preparation through explicit HTTPX MockTransport only."""
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -303,6 +305,10 @@ class _MockProvider:
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
         body = json.loads((await request.aread()).decode("utf-8"))
+        from opspilot.assistant import _ar04c_claim_state_path
+        state = json.loads(_ar04c_claim_state_path().read_text(encoding="utf-8"))
+        assert state["status"] == "CONSUMED", "claim must be durably consumed before HTTPX transport"
+        assert self.condition in state["database_ids"]
         from opspilot.domain.database import connect
         with connect(self.db_path) as connection:
             reserved = connection.execute(
@@ -352,6 +358,44 @@ def _run_condition(db_path: Path, checkpoint: Path, condition: str, memory: dict
     from opspilot.domain.d2 import configure_ar04c_memory_budget
     from opspilot.domain.database import connect
     from opspilot.web.app import create_app
+    from opspilot.web import worker as worker_module
+
+    # A terminal Domain Run may be committed before the Assistant's MCP client
+    # context has closed and before the Worker dispatch has returned. Observe
+    # those existing lifecycle boundaries so TestClient is not closed while
+    # the test's own request is still unwinding.
+    last_expected_run_id: list[str | None] = [None]
+    completed_run_ids: set[str] = set()
+    completion_lock = threading.Lock()
+    dispatch_finished = threading.Event()
+    worker_idle = threading.Event()
+    original_dispatch_run = worker_module._dispatch_run
+    original_next_worker_run = worker_module.next_worker_run
+
+    async def tracked_dispatch_run(*args, **kwargs):
+        run = kwargs.get("run") if "run" in kwargs else args[4]
+        run_id = str(run["run_id"])
+        try:
+            return await original_dispatch_run(*args, **kwargs)
+        finally:
+            with completion_lock:
+                completed_run_ids.add(run_id)
+                if run_id == last_expected_run_id[0]:
+                    dispatch_finished.set()
+
+    def tracked_next_worker_run(*args, **kwargs):
+        run = original_next_worker_run(*args, **kwargs)
+        if run is None:
+            with completion_lock:
+                if (
+                    last_expected_run_id[0] is not None
+                    and last_expected_run_id[0] in completed_run_ids
+                ):
+                    worker_idle.set()
+        return run
+
+    monkeypatch.setattr(worker_module, "_dispatch_run", tracked_dispatch_run)
+    monkeypatch.setattr(worker_module, "next_worker_run", tracked_next_worker_run)
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
@@ -359,10 +403,8 @@ def _run_condition(db_path: Path, checkpoint: Path, condition: str, memory: dict
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("OPSPILOT_AR04C_MEMORY_MODE", condition)
-    monkeypatch.setattr("opspilot.assistant._ar04c_one_shot_authorized", lambda _id: True)
-    from opspilot.assistant import AR04C_AUTH_RECORD, AR04C_CLAIM
-    assert not AR04C_AUTH_RECORD.exists()
-    assert not AR04C_CLAIM.exists()
+    from opspilot.assistant import _ar04c_one_shot_authorized
+    assert _ar04c_one_shot_authorized(EXPERIMENT_ID) is True
     assert read_budget(db_path, EXPERIMENT_ID)["provider_used"] == 0
 
     # The trusted order API creates one pending formal Run while no Worker is
@@ -414,6 +456,7 @@ def _run_condition(db_path: Path, checkpoint: Path, condition: str, memory: dict
         )
         assert followup.status_code == 202, followup.text
         j4 = followup.json()
+        last_expected_run_id[0] = str(j4["run_id"])
         assert _wait_for_run(client, str(j4["run_id"]))["status"] == "SUCCEEDED"
         messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
         answers = [item for item in messages if item["role"] == "ASSISTANT"]
@@ -427,6 +470,9 @@ def _run_condition(db_path: Path, checkpoint: Path, condition: str, memory: dict
         else:
             assert "本轮没有向模型提供历史 Memory" in j4_answer
             assert "历史 Memory 仅作为方法提示" not in j4_answer
+
+        assert dispatch_finished.wait(30), "final Assistant dispatch did not finish before TestClient shutdown"
+        assert worker_idle.wait(30), "Worker did not observe an empty queue before TestClient shutdown"
 
     from opspilot.domain.s3 import get_s3_binding
     with connect(db_path) as connection:
@@ -695,7 +741,19 @@ def test_ar04c_task_policy_allows_more_than_old_mcp_limit_and_preserves_time(tmp
 
 
 def test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff(tmp_path: Path, monkeypatch):
+    import json
+    from opspilot.assistant import (
+        AR04C_AUTH_RECORD, AR04C_CLAIM, _ar04c_create_one_shot_claim,
+        _ar04c_claim_state_path,
+    )
     from opspilot.domain.assistant_experiment import initialize_experiment
+
+    real_auth_record, real_claim = AR04C_AUTH_RECORD, AR04C_CLAIM
+    assert not real_auth_record.exists()
+    assert not real_claim.exists()
+    from test_ar04c_prelive_hf01 import _write_authorization
+    _write_authorization(tmp_path / "paid-auth-fixture", monkeypatch)
+    _ar04c_create_one_shot_claim()
 
     seed_db = tmp_path / "seed.sqlite3"
     off_db, on_db = tmp_path / "off.sqlite3", tmp_path / "on.sqlite3"
@@ -714,6 +772,15 @@ def test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_onl
     assert off["protected_table_counts"] == before_off
     assert on["protected_table_counts"] == before_on
     assert len(off["provider_http_mock_requests"]) == len(on["provider_http_mock_requests"]) == 6
+    claim_state = json.loads(_ar04c_claim_state_path().read_text(encoding="utf-8"))
+    assert claim_state["status"] == "CONSUMED"
+    assert set(claim_state["database_ids"]) == {"OFF", "ON"}
+    from opspilot.assistant import AR04C_CLAIM, _ar04c_contract_digest
+    claim = json.loads(AR04C_CLAIM.read_text(encoding="utf-8"))
+    assert claim_state["execution_head_sha"] == claim["execution_head_sha"]
+    assert claim_state["claim_sha256"] == hashlib.sha256(AR04C_CLAIM.read_bytes()).hexdigest()
+    assert claim_state["frozen_contract_sha256"] == _ar04c_contract_digest()
+    assert not real_auth_record.exists() and not real_claim.exists()
     for off_request, on_request in zip(
         off["provider_http_mock_requests"], on["provider_http_mock_requests"], strict=True,
     ):
@@ -747,7 +814,7 @@ def test_ar04c_paid_factory_fails_closed_without_authorization_and_claim(monkeyp
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
     monkeypatch.delenv("OPSPILOT_AR04C_REAL_JOURNEY_01_ONE_SHOT_TOKEN", raising=False)
-    with pytest.raises(RuntimeError, match="AR03_MATERIAL_LIVE_PAID_AUTHORIZATION_REQUIRED"):
+    with pytest.raises(RuntimeError, match="AR04C_ONE_SHOT_AUTHORIZATION_REQUIRED"):
         create_assistant_model(
             transport_async=httpx.MockTransport(lambda _request: httpx.Response(500)),
             transport_sync=httpx.MockTransport(lambda _request: httpx.Response(500)),
