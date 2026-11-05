@@ -27,7 +27,7 @@
 
 ## 预算与停止
 
-每个隔离条件最多 8 Provider dispatch、每条件应用预算 USD 5.25；两条件合计最多 16 dispatch、USD 10.50。MCP 有持久计数与时间/任务边界，不设固定低次数 Gate。使用当前官方价格计算的单次最坏保守预留 USD 0.691680；Usage 已知后结算实际值，剩余预留释放。两个独立数据库各自封顶 USD 5.25，故合计不能超过 USD 10.50。MCP、Provider、费用、UNKNOWN、撤权、时间和并发保护见 [BUDGET.md](BUDGET.md)。
+每个隔离条件最多 8 Provider dispatch、每条件应用预算 USD 5.25；两条件合计最多 16 dispatch、USD 10.50。MCP 有持久计数与时间/任务边界，不设固定低次数 Gate。按 DeepSeek 官方 Flash 峰值价格更正后的单次最坏保守预留为 USD 0.645600；Usage 有效后结算并释放未用预留。两个独立数据库分别拥有 USD 5.25 额度，16 次完整最坏预留合计 USD 10.329600，仍低于 USD 10.50。MCP、Provider、费用、UNKNOWN、撤权、时间和并发保护见 [BUDGET.md](BUDGET.md)。
 
 不自动重试。Provider UNKNOWN、Usage 缺失/违规、费用越界、来源失效或权限异常时停止实验，保留预留。正式付费 one-shot claim 不在无用户授权阶段生成。
 

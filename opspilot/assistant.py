@@ -50,6 +50,145 @@ MATERIAL_REMAINDER_LIVE_TOKEN_ENV = "OPSPILOT_AR03_MATERIAL_REMAINDER_LIVE_ONE_S
 MATERIAL_REMAINDER_LIVE_AUTH_RECORD = ROOT / "docs" / "evidence" / "ar-03" / "material-remainder-live-01" / "PAID_AUTHORIZATION.json"
 MATERIAL_REMAINDER_LIVE_CLAIM = ROOT.parent.parent / ".runtime" / "ar03-material-remainder-live-01-live" / "claim.json"
 
+AR04C_EXPERIMENT_ID = "AR-04C-REAL-JOURNEY-01"
+AR04C_AUTHORIZATION_ID = "AR04C-REAL-JOURNEY-01-USER-AUTH"
+AR04C_TOKEN_ENV = "OPSPILOT_AR04C_REAL_JOURNEY_01_ONE_SHOT_TOKEN"
+AR04C_MEMORY_MODE_ENV = "OPSPILOT_AR04C_MEMORY_MODE"
+AR04C_AUTH_RECORD = ROOT / "docs" / "evidence" / "ar-04c" / "real-journey-01" / "PAID_AUTHORIZATION.json"
+AR04C_CLAIM = ROOT.parent.parent / ".runtime" / "ar04c-real-journey-01" / "claim.json"
+
+
+def _ar04c_contract_digest() -> str | None:
+    """Hash the frozen, non-secret A-C contract files for the later one-shot."""
+    paths = (
+        ROOT / "docs/evidence/ar-04c/real-journey-01/PLAN.md",
+        ROOT / "docs/evidence/ar-04c/real-journey-01/GOLD.md",
+        ROOT / "docs/evidence/ar-04c/real-journey-01/CASES.json",
+        ROOT / "docs/evidence/ar-04c/real-journey-01/BUDGET.md",
+        ROOT / "docs/evidence/ar-04c/real-journey-01/PAID_EXECUTION_CONTRACT.md",
+    )
+    digest = hashlib.sha256()
+    try:
+        for path in paths:
+            content = path.read_bytes()
+            name = path.name.encode("utf-8")
+            digest.update(len(name).to_bytes(4, "big"))
+            digest.update(name)
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _ar04c_one_shot_authorized(experiment_id: str) -> bool:
+    """Fail closed until the exact future user grant and one-shot claim exist."""
+    from opspilot.domain.assistant_experiment import (
+        AR04C_PRICE_VERSION,
+        AR04C_CONDITION_BUDGET_USD_MICRO,
+        AR04C_CONDITION_PROVIDER_LIMIT,
+        AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO,
+        BUDGET_USD_MICRO,
+    )
+
+    if (
+        experiment_id != AR04C_EXPERIMENT_ID
+        or os.environ.get("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "").strip() != experiment_id
+        or os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "").strip() != "1"
+    ):
+        return False
+    token = os.environ.get(AR04C_TOKEN_ENV, "")
+    contract_digest = _ar04c_contract_digest()
+    if not token or contract_digest is None:
+        return False
+    try:
+        authorization_bytes = AR04C_AUTH_RECORD.read_bytes()
+        authorization = json.loads(authorization_bytes.decode("utf-8"))
+        claim = json.loads(AR04C_CLAIM.read_text(encoding="utf-8"))
+        branch_result = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=ROOT,
+            capture_output=True, text=True, check=False,
+        )
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT,
+            capture_output=True, text=True, check=False,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if branch_result.returncode or head_result.returncode:
+        return False
+    branch, head = branch_result.stdout.strip(), head_result.stdout.strip()
+    if branch != "codex/ar04c-real-journey-01":
+        return False
+    if type(authorization) is not dict or type(claim) is not dict:
+        return False
+    auth_expected = {
+        "authorization_id": AR04C_AUTHORIZATION_ID,
+        "experiment_id": AR04C_EXPERIMENT_ID,
+        "status": "AUTHORIZED_ONE_SHOT",
+        "authorization_source": "Explicit user authorization for AR-04C-REAL-JOURNEY-01",
+        "branch": branch,
+        "base_sha": "60eee87bfe3cca522011316cb4cd2c0064ad291b",
+        "frozen_contract_sha256": contract_digest,
+        "provider": "DeepSeek",
+        "model": "deepseek-flash",
+        "thinking": {"type": "disabled"},
+        "provider_limit": 16,
+        "providers_per_condition": AR04C_CONDITION_PROVIDER_LIMIT,
+        "mcp_limit": None,
+        "application_budget_usd_micro": BUDGET_USD_MICRO,
+        "condition_budget_usd_micro": AR04C_CONDITION_BUDGET_USD_MICRO,
+        "provider_reservation_usd_micro": AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO,
+        "price_version": AR04C_PRICE_VERSION,
+        "max_tokens": 2048,
+        "tool_choice": "auto when tools are supplied",
+        "parallel_tool_calls": False,
+        "stream": False,
+        "context_input_limit_tokens": 12000,
+        "request_timeout_seconds": 30,
+        "provider_concurrency": 1,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "business_writes_allowed": False,
+    }
+    if any(authorization.get(key) != value for key, value in auth_expected.items()):
+        return False
+    if not isinstance(authorization.get("authorized_on"), str) or not authorization["authorized_on"]:
+        return False
+    auth_card_digest = authorization.get("authorization_card_sha256")
+    if not isinstance(auth_card_digest, str) or len(auth_card_digest) != 64:
+        return False
+    expected = {
+        "claim_id": f"{AR04C_EXPERIMENT_ID}:one-shot:{AR04C_AUTHORIZATION_ID}",
+        "authorization_id": AR04C_AUTHORIZATION_ID,
+        "experiment_id": AR04C_EXPERIMENT_ID,
+        "branch": branch,
+        "execution_head_sha": head,
+        "base_sha": "60eee87bfe3cca522011316cb4cd2c0064ad291b",
+        "status": "CLAIMED_ONE_SHOT_NO_RETRY",
+        "provider_limit": 16,
+        "providers_per_condition": AR04C_CONDITION_PROVIDER_LIMIT,
+        "mcp_limit": None,
+        "application_budget_usd_micro": BUDGET_USD_MICRO,
+        "condition_budget_usd_micro": AR04C_CONDITION_BUDGET_USD_MICRO,
+        "provider_reservation_usd_micro": AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO,
+        "price_version": AR04C_PRICE_VERSION,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "authorization_record_sha256": hashlib.sha256(authorization_bytes).hexdigest(),
+        "frozen_contract_sha256": contract_digest,
+    }
+    if set(claim) != set(expected) | {"claimed_at", "token_sha256"}:
+        return False
+    if any(type(claim.get(key)) is not type(value) or claim.get(key) != value for key, value in expected.items()):
+        return False
+    if not isinstance(claim.get("claimed_at"), str) or not claim["claimed_at"]:
+        return False
+    token_digest = claim.get("token_sha256")
+    if not isinstance(token_digest, str) or len(token_digest) != 64:
+        return False
+    return hmac.compare_digest(token_digest, hashlib.sha256(token.encode("utf-8")).hexdigest())
+
 
 def _material_remainder_live_expected_authorization() -> dict[str, object]:
     """Freeze only the user's exact three-case paid authorization."""
@@ -361,6 +500,7 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
         EXPERIMENT_ENV,
         EXPERIMENTS_AWAITING_PAID_AUTHORIZATION,
         AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
+        AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
         SUPPORTED_EXPERIMENT_IDS,
     )
 
@@ -368,6 +508,8 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     if experiment_id in EXPERIMENTS_AWAITING_PAID_AUTHORIZATION:
         if experiment_id == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
             authorized = _material_remainder_live_one_shot_authorized(experiment_id)
+        elif experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+            authorized = _ar04c_one_shot_authorized(experiment_id)
         elif experiment_id == MATERIAL_RESUME_02_EXPERIMENT_ID:
             authorized = _material_resume_02_one_shot_authorized(experiment_id)
         else:
@@ -474,6 +616,18 @@ def assistant_tool_hidden_for_experiment(tool_name, experiment_id):
         raise RuntimeError("AR03_MATERIAL_SKILL_MODE_INVALID")
     return mode == "OFF"
 
+
+def assistant_memory_enabled_for_experiment(experiment_id):
+    """Return the frozen AR-04C Memory condition; ordinary runs stay unchanged."""
+    from opspilot.domain.assistant_experiment import AR04C_REAL_JOURNEY_01_EXPERIMENT_ID
+
+    if experiment_id != AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+        return True
+    mode = os.environ.get(AR04C_MEMORY_MODE_ENV, "").strip().upper()
+    if mode not in {"ON", "OFF"}:
+        raise RuntimeError("AR04C_MEMORY_MODE_REQUIRED")
+    return mode == "ON"
+
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,reserved_tokens=0):
         self.path,self.run_id,self.worker_id,self.client,self.specs,self.trace=path,run_id,worker_id,client,specs,trace
@@ -555,9 +709,10 @@ class Loop(AgentMiddleware):
             )
 
     def context(self):
+        include_memories = assistant_memory_enabled_for_experiment(self.experiment_id)
         with connect(self.path) as c:
             run,_=domain.state(c,self.run_id,worker_id=self.worker_id)
-            prepared=_prepare_context(c,c.execute('SELECT * FROM task_runs WHERE run_id=?',(self.run_id,)).fetchone(),self.model_id,self.path,reserved_tokens=self.reserved_tokens)
+            prepared=_prepare_context(c,c.execute('SELECT * FROM task_runs WHERE run_id=?',(self.run_id,)).fetchone(),self.model_id,self.path,reserved_tokens=self.reserved_tokens,include_memories=include_memories)
             prior=domain.history_sources(c,run)
             own_valid,reason=domain.sources_current(c,self.run_id)
             if not own_valid: raise TaskControlError(reason)
@@ -1062,6 +1217,8 @@ async def _prepare_assistant_context_impl(
     )
     from opspilot.domain.context_engineering import ContextBudgetExceeded
 
+    include_memories = assistant_memory_enabled_for_experiment(experiment_id)
+
     def stop(code: str) -> dict[str, object]:
         with connect(path) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1072,13 +1229,14 @@ async def _prepare_assistant_context_impl(
         try:
             compression = prepare_chat_compression_attempt(
                 path, run_id, worker_id, model_id, reserved_tokens=reserved_tokens,
+                include_memories=include_memories,
             )
         except ContextBudgetExceeded as error:
             return stop(error.code)
         if compression is None:
             return await asyncio.to_thread(
                 prepare_chat_attempt, path, run_id, worker_id, model_id,
-                reserved_tokens=reserved_tokens,
+                reserved_tokens=reserved_tokens, include_memories=include_memories,
             )
         if compression.get("error"):
             return compression
@@ -1239,7 +1397,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         with connect(path) as c:
             c.execute("UPDATE chat_attempts SET status='STREAMING' WHERE attempt_id=? AND status='INTERRUPTED'",(delivery,))
     model_id=getattr(model,'model_name',model._llm_type)
-    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV}})
+    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV,AR04C_TOKEN_ENV}})
     async with Client(params) as client:
         listed=await client.list_tools()
         specs=[];tools=[]

@@ -24,10 +24,12 @@ AR03_MATERIAL_LIVE_01_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01"
 AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01-RESUME-01"
 AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01-RESUME-02"
 AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID = "AR-03-MATERIAL-REMAINDER-01"
+AR04C_REAL_JOURNEY_01_EXPERIMENT_ID = "AR-04C-REAL-JOURNEY-01"
 EXPERIMENTS_AWAITING_PAID_AUTHORIZATION = frozenset({
     AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
     AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
+    AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
 })
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPERIMENT_ID,
@@ -40,6 +42,7 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
     AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
+    AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
 })
 EXPERIMENT_ENV = "OPSPILOT_ASSISTANT_EXPERIMENT_ID"
 PROVIDER_LIMIT = 16
@@ -49,13 +52,18 @@ AR03_MATERIAL_REMAINDER_MCP_LIMIT = None
 BUDGET_USD_MICRO = 10_500_000
 AR03_SCENARIO_PROVIDER_LIMIT = 8
 AR03_SCENARIO_MCP_LIMIT = 6
+AR04C_CONDITION_PROVIDER_LIMIT = 8
+AR04C_CONDITION_BUDGET_USD_MICRO = 5_250_000
+AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 
 # DeepSeek Flash peak cache-miss input/output rates checked 2026-11-01.
 # The reservation uses the documented maximum output/context envelope rather
 # than trusting the request's 2048-token cap: (616K * $0.30 + 384K * $1.20)/1M.
 PRICE_VERSION = "DEEPSEEK_FLASH_PEAK_2026-11-01"
+AR04C_PRICE_VERSION = "DEEPSEEK_FLASH_PEAK_2026-11-05"
 INPUT_USD_PER_MILLION = Decimal("0.30")
 OUTPUT_USD_PER_MILLION = Decimal("1.20")
+AR04C_OUTPUT_USD_PER_MILLION = Decimal("1.20")
 MODEL_CONTEXT_TOKENS = 1_000_000
 MODEL_MAX_OUTPUT_TOKENS = 384_000
 REQUEST_MAX_OUTPUT_TOKENS = 2_048
@@ -64,7 +72,7 @@ MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ar02_live_experiment_budgets (
     experiment_id TEXT PRIMARY KEY CHECK (
-        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02', 'AR-03-MATERIAL-LIVE-01', 'AR-03-MATERIAL-LIVE-01-RESUME-01', 'AR-03-MATERIAL-LIVE-01-RESUME-02', 'AR-03-MATERIAL-REMAINDER-01')
+        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02', 'AR-03-MATERIAL-LIVE-01', 'AR-03-MATERIAL-LIVE-01-RESUME-01', 'AR-03-MATERIAL-LIVE-01-RESUME-02', 'AR-03-MATERIAL-REMAINDER-01', 'AR-04C-REAL-JOURNEY-01')
     ),
     provider_limit INTEGER NOT NULL,
     mcp_limit INTEGER,
@@ -130,7 +138,29 @@ def _limits_for_experiment(experiment_id: str) -> tuple[int, int | None]:
         # Provider spend, Task/Run timeouts and LangGraph recursion remain hard
         # stops; this policy is scoped to the new isolated experiment only.
         return PROVIDER_LIMIT, AR03_MATERIAL_REMAINDER_MCP_LIMIT
+    if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+        # Each isolated Memory condition receives half of the frozen campaign
+        # ceiling. Together, OFF and ON can reserve at most 16 calls and $10.50.
+        return AR04C_CONDITION_PROVIDER_LIMIT, None
     return PROVIDER_LIMIT, MCP_LIMIT
+
+
+def _budget_for_experiment(experiment_id: str) -> int:
+    if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+        return AR04C_CONDITION_BUDGET_USD_MICRO
+    return BUDGET_USD_MICRO
+
+
+def _price_version_for_experiment(experiment_id: str) -> str:
+    if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+        return AR04C_PRICE_VERSION
+    return PRICE_VERSION
+
+
+def _reservation_for_experiment(experiment_id: str) -> int:
+    if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+        return AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO
+    return MAX_PROVIDER_RESERVATION_USD_MICRO
 
 
 def _require_schema_experiment_id(connection, experiment_id: str) -> None:
@@ -151,6 +181,8 @@ def _table_exists(connection, table: str) -> bool:
 
 def _ensure_row(connection, experiment_id: str) -> None:
     provider_limit, mcp_limit = _limits_for_experiment(experiment_id)
+    budget_usd_micro = _budget_for_experiment(experiment_id)
+    price_version = _price_version_for_experiment(experiment_id)
     row = connection.execute(
         "SELECT * FROM ar02_live_experiment_budgets WHERE experiment_id=?",
         (experiment_id,),
@@ -166,8 +198,8 @@ def _ensure_row(connection, experiment_id: str) -> None:
                 experiment_id,
                 provider_limit,
                 mcp_limit,
-                BUDGET_USD_MICRO,
-                PRICE_VERSION,
+                budget_usd_micro,
+                price_version,
                 now,
                 now,
             ),
@@ -177,8 +209,8 @@ def _ensure_row(connection, experiment_id: str) -> None:
     if (
         int(row["provider_limit"]) != provider_limit
         or stored_mcp_limit != mcp_limit
-        or int(row["budget_usd_micro"]) != BUDGET_USD_MICRO
-        or str(row["price_version"]) != PRICE_VERSION
+        or int(row["budget_usd_micro"]) != budget_usd_micro
+        or str(row["price_version"]) != price_version
     ):
         raise ExperimentBudgetError("AR02_LIVE_BUDGET_CONFIGURATION_MISMATCH")
 
@@ -281,10 +313,10 @@ def reserve_dispatch(
             label = "PROVIDER" if kind == "MODEL" else "MCP"
             raise ExperimentBudgetError(f"AR02_LIVE_{label}_LIMIT")
 
-        reservation = MAX_PROVIDER_RESERVATION_USD_MICRO if kind == "MODEL" else 0
+        reservation = _reservation_for_experiment(experiment_id) if kind == "MODEL" else 0
         if kind == "MODEL":
             reserved, settled = _money_totals(connection, experiment_id)
-            if reserved + settled + reservation > BUDGET_USD_MICRO:
+            if reserved + settled + reservation > int(budget["budget_usd_micro"]):
                 raise ExperimentBudgetError("AR02_LIVE_USD_LIMIT")
 
         dispatch_id = "ar02-live-dispatch-" + str(uuid.uuid4())
@@ -336,10 +368,19 @@ def _usage_tokens(usage: Any) -> tuple[int, int, int | None] | None:
     return input_tokens, output_tokens, total_tokens
 
 
-def _actual_cost_micro(input_tokens: int, output_tokens: int) -> int:
+def _actual_cost_micro(
+    input_tokens: int,
+    output_tokens: int,
+    experiment_id: str = EXPERIMENT_ID,
+) -> int:
+    output_rate = (
+        AR04C_OUTPUT_USD_PER_MILLION
+        if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID
+        else OUTPUT_USD_PER_MILLION
+    )
     cost = (
         Decimal(input_tokens) * INPUT_USD_PER_MILLION
-        + Decimal(output_tokens) * OUTPUT_USD_PER_MILLION
+        + Decimal(output_tokens) * output_rate
     )
     return int(cost.to_integral_value(rounding=ROUND_CEILING))
 
@@ -404,18 +445,18 @@ def complete_dispatch(
             }
 
         input_tokens, output_tokens, total_tokens = normalized
-        actual_micro = _actual_cost_micro(input_tokens, output_tokens)
+        actual_micro = _actual_cost_micro(input_tokens, output_tokens, experiment_id)
         violation = (
             output_tokens > REQUEST_MAX_OUTPUT_TOKENS
             or output_tokens > MODEL_MAX_OUTPUT_TOKENS
             or input_tokens + output_tokens > MODEL_CONTEXT_TOKENS
-            or actual_micro > MAX_PROVIDER_RESERVATION_USD_MICRO
+            or actual_micro > _reservation_for_experiment(experiment_id)
         )
         usage_payload = {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": total_tokens,
-            "price_version": PRICE_VERSION,
+            "price_version": _price_version_for_experiment(experiment_id),
         }
         connection.execute(
             """UPDATE ar02_live_dispatches
@@ -432,8 +473,12 @@ def complete_dispatch(
                 row["dispatch_id"],
             ),
         )
+        budget = connection.execute(
+            "SELECT budget_usd_micro FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+            (experiment_id,),
+        ).fetchone()
         reserved, settled = _money_totals(connection, experiment_id)
-        if violation or reserved + settled > BUDGET_USD_MICRO:
+        if violation or budget is None or reserved + settled > int(budget["budget_usd_micro"]):
             connection.execute(
                 """UPDATE ar02_live_experiment_budgets
                    SET status='BUDGET_BREACH', updated_at=? WHERE experiment_id=?""",

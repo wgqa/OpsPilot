@@ -627,7 +627,9 @@ def reserve_attempt(
         from opspilot.domain.execution_budget import investigation_budget_in_transaction
 
         budget = investigation_budget_in_transaction(connection, task_id, run_id)
-        if limit is None and budget["policy_version"] != "AR03_MATERIAL_REMAINDER_01_V1":
+        if limit is None and budget["policy_version"] not in {
+            "AR03_MATERIAL_REMAINDER_01_V1", "AR04C_MEMORY_ON_OFF_V1",
+        }:
             raise ScopeDenied("UNBOUNDED_MCP_ATTEMPT_POLICY_NOT_AUTHORIZED")
         if budget["policy_version"] == "CONTUX_S3_V1":
             from opspilot.domain.task_control import assert_task_control_in_transaction
@@ -638,7 +640,7 @@ def reserve_attempt(
             assert_task_control_in_transaction(connection,str(owner["tenant_id"]),task_id,run_id=run_id)
         used = budget["task_used"][kind]
         reason = budget["limit_reasons"][kind]
-        if reason and budget["policy_version"] in {"CONTUX_S3_V1", "AR03_MATERIAL_REMAINDER_01_V1"}:
+        if reason and budget["policy_version"] in {"CONTUX_S3_V1", "AR03_MATERIAL_REMAINDER_01_V1", "AR04C_MEMORY_ON_OFF_V1"}:
             run_limit = budget["run_limits"][kind] if budget["run_limits"] else budget["task_limits"][kind]
             raise BudgetExhausted(kind, budget["run_used"][kind] if reason.startswith("RUN_") else used,
                                   run_limit if reason.startswith("RUN_") else budget["task_limits"][kind], reason_code=reason)
@@ -819,6 +821,70 @@ def configure_material_remainder_budget(path, task_id, experiment_id):
         )
         if changed.rowcount != 1:
             raise ValueError("MATERIAL_REMAINDER_TASK_BUDGET_UPDATE_FAILED")
+    return expected
+
+
+def configure_ar04c_memory_budget(path, task_id, experiment_id):
+    """Apply the isolated 8-provider/no-low-MCP policy to one bound AR-04C Task."""
+    from opspilot.domain.assistant_experiment import (
+        AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
+        AR04C_CONDITION_BUDGET_USD_MICRO,
+        AR04C_CONDITION_PROVIDER_LIMIT,
+        AR04C_PRICE_VERSION,
+    )
+    if experiment_id != AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+        raise ValueError("AR04C_EXPERIMENT_SCOPE_INVALID")
+    from opspilot.domain.s3 import get_s3_binding
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        campaign = connection.execute(
+            "SELECT provider_limit,mcp_limit,budget_usd_micro,price_version,status "
+            "FROM ar02_live_experiment_budgets WHERE experiment_id=?", (experiment_id,),
+        ).fetchone()
+        if (
+            campaign is None
+            or int(campaign["provider_limit"]) != AR04C_CONDITION_PROVIDER_LIMIT
+            or campaign["mcp_limit"] is not None
+            or int(campaign["budget_usd_micro"]) != AR04C_CONDITION_BUDGET_USD_MICRO
+            or str(campaign["price_version"]) != AR04C_PRICE_VERSION
+            or campaign["status"] != "OPEN"
+        ):
+            raise ScopeDenied("AR04C_CAMPAIGN_SCOPE_INVALID")
+        binding = get_s3_binding(connection, task_id)
+        if binding.get("service_id") != "orders-async-demo":
+            raise ScopeDenied("AR04C_TASK_SCOPE_INVALID")
+        row = connection.execute(
+            "SELECT * FROM task_execution_budgets WHERE task_id=?", (task_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("AR04C_TASK_BUDGET_MISSING")
+        if row["active_started_at"] is not None or int(row["active_elapsed_ms"]) != 0:
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+        current = _task_attempt_limits(connection, task_id)
+        expected = {"MODEL": 8, "MCP": None}
+        if current == expected and row["policy_version"] == "AR04C_MEMORY_ON_OFF_V1":
+            return expected
+        allowed_initial_policy = (
+            current == {"MODEL": 8, "MCP": 6} and row["policy_version"] == "LEGACY_V1"
+        ) or (
+            current == {"MODEL": 24, "MCP": 18} and row["policy_version"] == "CONTUX_S3_V1"
+        )
+        if not allowed_initial_policy:
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_CONFIGURED")
+        if connection.execute(
+            "SELECT 1 FROM d2_attempts WHERE task_id=? LIMIT 1", (task_id,),
+        ).fetchone():
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+        from opspilot.domain.execution_budget import auxiliary_attempt_counts_in_transaction
+        if sum(auxiliary_attempt_counts_in_transaction(connection, task_id).values()):
+            raise ValueError("TASK_ATTEMPT_POLICY_ALREADY_IN_USE")
+        changed = connection.execute(
+            "UPDATE task_execution_budgets SET model_limit=8,mcp_limit=0,"
+            "policy_version='AR04C_MEMORY_ON_OFF_V1',aux_provider_limit=NULL WHERE task_id=?",
+            (task_id,),
+        )
+        if changed.rowcount != 1:
+            raise ValueError("AR04C_TASK_BUDGET_UPDATE_FAILED")
     return expected
 
 

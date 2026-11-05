@@ -1049,7 +1049,7 @@ def _validate_summary_document(value: str, source_sequence_map: dict[str, str]) 
 
 def _prepare_context(
     connection: sqlite3.Connection, run: sqlite3.Row, model_id: str, db_path: str | Path,
-    *, reserved_tokens: int = 0,
+    *, reserved_tokens: int = 0, include_memories: bool = True,
 ) -> dict[str, Any]:
     tenant_id, session_id = str(run["tenant_id"]), str(run["session_id"])
     task_id = str(run["task_id"]) if run["task_id"] is not None else None
@@ -1120,13 +1120,22 @@ def _prepare_context(
         _current_evidence(connection, task_id, state, excluded_sources=excluded)
         if task_id and state else []
     )
-    memories = _current_memories(connection, task_id, state, evidence, excluded_sources=excluded)
+    available_memories = _current_memories(connection, task_id, state, evidence, excluded_sources=excluded)
+    memories = available_memories if include_memories else []
+    if not include_memories:
+        excluded.extend({
+            "source_id": str(item["memory_id"]),
+            "reason": "EXPERIMENT_MEMORY_CONDITION_OFF",
+            "category": "EXTERNAL_GUIDANCE",
+        } for item in available_memories)
     evidence_by_id = {str(item["evidence_id"]): item for item in evidence}
     evidence_exclusion_reasons = {
         str(item["source_id"]): str(item["reason"])
         for item in excluded if item.get("source_id") is not None
     }
-    memories_by_id = {str(item["memory_id"]): item for item in memories}
+    # Keep active Memory available to source validation even when this exact
+    # experiment condition intentionally withholds it from model input.
+    memories_by_id = {str(item["memory_id"]): item for item in available_memories}
 
     user_rows = connection.execute(
         """SELECT * FROM messages WHERE session_id = ? AND tenant_id = ? AND role = 'USER'
@@ -1715,7 +1724,7 @@ def _fail_exhausted_chat_run(connection: sqlite3.Connection, run: sqlite3.Row, r
 
 def prepare_chat_compression_attempt(
     path: str | Path, run_id: str, worker_id: str, model_id: str, *,
-    reserved_tokens: int = 0,
+    reserved_tokens: int = 0, include_memories: bool = True,
 ) -> dict[str, Any] | None:
     """Persist a bounded summary request before provider I/O; return None when no compression is needed."""
     with connect(path) as connection:
@@ -1747,7 +1756,10 @@ def prepare_chat_compression_attempt(
         stopped = _stop_at_auxiliary_limit(connection,run)
         if stopped:
             return stopped
-        prepared = _prepare_context(connection, run, model_id, path, reserved_tokens=reserved_tokens)
+        prepared = _prepare_context(
+            connection, run, model_id, path, reserved_tokens=reserved_tokens,
+            include_memories=include_memories,
+        )
         if not prepared.get("needs_compression"):
             return None
         budget = context_budget_for_model(model_id)
@@ -1774,6 +1786,7 @@ def prepare_chat_compression_attempt(
             "covered_to_seq": work["covered_to_seq"],
             "parent_summary_id": work["parent_summary_id"],
             "reserved_tokens": max(0, int(reserved_tokens)),
+            "include_memories": bool(include_memories),
         }
         connection.execute(
             """INSERT INTO context_compression_attempts
@@ -1795,10 +1808,11 @@ def prepare_chat_compression_attempt(
 
 def _current_compression_work(
     connection: sqlite3.Connection, run: sqlite3.Row, model_id: str, db_path: str | Path,
-    *, reserved_tokens: int = 0,
+    *, reserved_tokens: int = 0, include_memories: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     prepared = _prepare_context(
-        connection, run, model_id, db_path, reserved_tokens=reserved_tokens
+        connection, run, model_id, db_path, reserved_tokens=reserved_tokens,
+        include_memories=include_memories,
     )
     work = prepared.get("compression_work")
     if not prepared.get("needs_compression") or not isinstance(work, dict):
@@ -1826,6 +1840,7 @@ def assert_chat_compression_sources_current(
             prepared, work = _current_compression_work(
                 connection, run, str(attempt["model_id"]), path,
                 reserved_tokens=int(saved.get("reserved_tokens", 0) or 0),
+                include_memories=saved.get("include_memories", True) is not False,
             )
             current_digest = _digest(_canonical(work["dependencies"]))
             current_prompt_digest = _digest(_canonical(prepared["compression_messages"]))
@@ -1984,7 +1999,9 @@ def fail_chat_compression_attempt(
         return {"status": status, "run_id": str(attempt["run_id"]), "attempt_count": total, "error_class": error_class[:100]}
 
 
-def assert_chat_context_current(path: str | Path, worker_id: str, attempt_id: str) -> dict[str, Any]:
+def assert_chat_context_current(
+    path: str | Path, worker_id: str, attempt_id: str, *, include_memories: bool = True,
+) -> dict[str, Any]:
     """Rebuild context after reservation and before provider I/O; reject stale prompt assets."""
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -2001,7 +2018,8 @@ def assert_chat_context_current(path: str | Path, worker_id: str, attempt_id: st
         truncation = json.loads(str(manifest["truncation_json"]))
         reserved = int((truncation.get("context_budget") or {}).get("reserved_tokens", 0) or 0)
         prepared = _prepare_context(
-            connection, run, str(attempt["model_id"]), path, reserved_tokens=reserved
+            connection, run, str(attempt["model_id"]), path, reserved_tokens=reserved,
+            include_memories=include_memories,
         )
         current_digest = _digest(_canonical(prepared.get("messages", [])))
         if prepared.get("needs_compression") or current_digest != str(attempt["prompt_digest"]):
@@ -2017,7 +2035,7 @@ def assert_chat_context_current(path: str | Path, worker_id: str, attempt_id: st
 
 def prepare_chat_attempt(
     path: str | Path, run_id: str, worker_id: str, model_id: str, *,
-    reserved_tokens: int = 0,
+    reserved_tokens: int = 0, include_memories: bool = True,
 ) -> dict[str, Any]:
     """Persist model attempt and its authorized context manifest before provider I/O."""
     with connect(path) as connection:
@@ -2048,7 +2066,10 @@ def prepare_chat_attempt(
         stopped = _stop_at_auxiliary_limit(connection,run)
         if stopped:
             return stopped
-        prepared = _prepare_context(connection, run, model_id, path, reserved_tokens=reserved_tokens)
+        prepared = _prepare_context(
+            connection, run, model_id, path, reserved_tokens=reserved_tokens,
+            include_memories=include_memories,
+        )
         if prepared.get("needs_compression"):
             return {"error": "CHAT_CONTEXT_COMPRESSION_REQUIRED", "run_id": run_id}
         prompt_digest = _digest(_canonical(prepared["messages"]))
