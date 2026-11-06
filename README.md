@@ -1,12 +1,14 @@
 # OpsPilot
 
-## 当前方向与能力边界（2026-11-06）
+## 当前方向与能力边界（2026-11-07）
 
 OpsPilot 是面向企业 API 接入与技术支持的持续协作 Agent，也是 Agent Engineering 学习项目。开发优先让用户完成真实工作，让模型在合法范围内自主选择查询、补查、澄清、继续或停止，再根据实际风险补足工程能力。完整方向见 [PROJECT_NORTH_STAR.md](PROJECT_NORTH_STAR.md)，实施入口见 [AGENTS.md](AGENTS.md)，当前计划见 [TASKS.md](TASKS.md)。
 
-当前主要产品工作候选为 **PRODUCT-01 — Assistant 连续技术支持工作**：在同一 Session 中完成协议版本对比、用户材料分析、按需可信只读核查、用户纠错/追问和有来源的处理说明。它是计划候选，不代表代码已经完成或获准启动。
+校招交付与长期产品成长并行推进。**R1** 是简历可投递版本，达成后冻结版本、更新简历并开始投递，不必等待 **R2** 完整展示成品或 **R3** 长期企业 API 能力扩展。R1-ENGINE 与 R1-INTERACTIVE 仍按原定义分别验收；浏览器 STOP 下不得宣称互动体验已验收。详见 [当前路线与里程碑](TASKS.md) 和 [North Star](PROJECT_NORTH_STAR.md)。
 
-已有 S1/S2 离线业务链、TaskControl、审批与交接能力继续受原合同约束。普通聊天不自动取得业务权限；历史对话和 Memory 不替代当前可信事实。冻结的 REPAIR/Handoff 安全边界不因产品优先而放松。AR-05 集成预检报告记录全量 pytest 为 701/741、建议 HOLD，且该轮真实 Provider 与浏览器均未运行；AR-04C 的真实模型结果属于独立历史实验，仍保留其 PARTIAL/G7 ON FAIL 结论。请按各自报告核验状态；本摘要不把确定性替身测试写成真实模型成果。
+PRODUCT-01 已有不同阶段的证据：Slice 02 的真实 DeepSeek 四轮结果为 `PARTIAL`，存在超出证据的配置推断；Final Bridge 有确定性离线 S1/S2 同 Session 接线候选，仍待独立审查，未证明真实模型或浏览器体验。[Slice 02 报告](docs/evidence/vnext/product-01-slice-02-live/REPORT.md) · [Final Bridge 报告](docs/evidence/vnext/product-01-final-bridge-01/REPORT.md)。这些结果不能合并表述为整体 PASS。
+
+已有 S1/S2 离线业务链、TaskControl、审批与交接能力继续受原合同约束。普通聊天不自动取得业务权限；历史对话和 Memory 不替代当前可信事实。冻结的 REPAIR/Handoff 安全边界不因产品优先而放松。AR-04C 的真实模型结果仍保留其历史 PARTIAL/G7 ON FAIL 结论；AR-05 全量回归、浏览器及真实模型状态按各自最新正式报告核对。本文不把确定性替身测试写成真实模型成果，也不自动授权代码、Provider、浏览器、外部业务写入或 main 合并。
 
 ## 历史阶段进度与运行说明（保留旧快照；未在当前基线重新验证）
 
@@ -16,7 +18,7 @@ M4-02 新增订单异步回调只读调查切片（验收候选）：可从 Web 
 
 面向企业 API 接入问题调查与协作处置的对话式 Agent，使用 Python、LangChain 和 LangGraph，同时承载大厂校招 Agent Engineering / AI 应用研发的知识实践。
 
-> **历史指导记录（2026-10-22）：** 当时的规划、开发和评审入口是 [项目北极星](PROJECT_NORTH_STAR.md) 与 [AGENTS.md](AGENTS.md)。当时提出同时实践用户可感知的智能任务推进与 Context Engineering、分层 Memory、Knowledge、Skills、MCP，并以白皮书原理、源码、实验和面试表达形成学习闭环。当前方向以 North Star 的 2026-11-06 修订为准；方向记录本身不代表新阶段已获准启动。
+> **历史指导记录（2026-10-22）：** 当时的规划、开发和评审入口是 [项目北极星](PROJECT_NORTH_STAR.md) 与 [AGENTS.md](AGENTS.md)。当时提出同时实践用户可感知的智能任务推进与 Context Engineering、分层 Memory、Knowledge、Skills、MCP，并以白皮书原理、源码、实验和面试表达形成学习闭环。当前方向以 North Star 的 2026-11-07 修订为准；方向记录本身不代表新阶段已获准启动。
 >
 > **进度说明：** 下方 D1–D7 / M1 状态及运行 SHA 为历史记录，不是当前完整进度；S1/S2 是回归基线，不是长期业务范围上限。请结合当前 Git SHA、阶段任务卡与正式验收核实状态。近期证据入口：[M3 收口报告](docs/evidence/vnext/m3-closeout-01/REPORT.md)、[M3 HF-02 报告](docs/evidence/vnext/m3-hf-02/REPORT.md)；不据此推定 M3 总体验收通过。
 
