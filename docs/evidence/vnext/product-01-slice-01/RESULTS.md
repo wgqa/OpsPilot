@@ -33,11 +33,11 @@ Base：`67459d3928109c244cdbb4dc3c42d0ba57cdd88e`
 
 ## 验证记录
 
-- 新旅程定向测试：`1 passed`（最终用户输入修订后重跑）。此前两条新测试合跑：`2 passed`。
+- 新旅程定向测试（最终代码与输入）：`2 passed in 11.41s`。
 - 适用 AR-02/AR-03 回归：50 项收集，`50 passed`，退出码 0；包含 Worker/API/MCP、Context、来源撤权、OS 恢复、预算停止、越权拒绝和 Assistant 持久会话。
 - 回归命令：`python -m pytest -vv -s --basetemp D:\tmp\product-01-slice-01-regression-tmp tests/test_ar02_ar03_integration_01.py tests/test_ar02_context_continuity_01.py tests/test_ar02_runtime.py tests/test_ar02_journey_p0.py`
 - `git diff --check`：通过。
 - 回归日志保留于本机 `D:\tmp\product-01-slice-01-regression-final.log`，SHA-256 `5fddeebd7f706821f009ece38833e14eab70a9e3c3b601a4a8770ec3a17684c0`。
-- 定向旅程原始 JSONL 保留于本机 `D:\tmp\product-01-slice-01-focused-final2-trace.jsonl`，SHA-256 `c267f0f236588db4f62196245c3e347742473240169ef350d6c07099144e7954`。
+- 定向旅程原始 JSONL 保留于本机 `D:\tmp\product-01-slice-01-focused-final3-trace.jsonl`，SHA-256 `3758c63c744dcf5cc7527a87e27a12a0cca1eeefb34dd6cccc9ab3d8a13e71dc`。
 
 本轮真实 Provider 请求 0、浏览器 0、外部业务写入 0。只改动现有集成测试与确定性 FixtureModel，不修改生产代码、预算、Gold 或执行策略。真实 DeepSeek 自主性、浏览器呈现及后续交互仍未验证。
