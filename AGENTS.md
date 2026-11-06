@@ -22,6 +22,10 @@
 >
 > 不得擅自进入下一阶段、修改冻结 Gold、绕过 Gate/TaskControl/Approval/ActionIntent/Ledger，或扩建多 Agent、通用 Agent 平台。
 
+> **2026-11-06 开发优先级：** 普通产品任务先写清用户要完成的工作、模型可作的合法决定、实际可信观察和用户最终得到的成果；优先复用现有 Assistant/Session/Knowledge/Skill/Memory/MCP/Domain。实施 Agent 可自主选择局部代码和测试做法，但未经范围批准不得新增通用平台、第二状态权威、恢复协议或全仓架构改造。工程机制须对应当前合同、可复现缺陷或高风险动作的必要保护。
+>
+> **按风险验收、分开阻断：** 普通只读改动验证相关功能、来源和租户边界；受控写入保留原审批、当前性、事务、幂等和回执合同。开发阻断限于受影响能力；发布/合并阻断不自动阻止无关隔离只读开发。记录历史失败及重启触发条件，不删除或伪造 PASS。主 Agent 负责正式裁决；真实 Provider、浏览器、生产写入和 main 合并仍需各自授权。
+
 ---
 
 
@@ -73,7 +77,9 @@
 - 在 D1 中只完成 D1 范围；不以常规实现选择为由引入额外审批，也不扩展到 D2 及后续阶段。
 - 归档文件中的旧方案和任务卡仅供溯源。实施时只按根目录本文件、`TASKS.md`、当前阶段任务书及唯一有效的 v1.0 基线执行。
 
-## vNext M1-03 的范围衔接
+## 历史范围衔接：vNext M1-03（当时任务约束）
+
+> 以下内容记录 M1-03 当时的实现范围和授权，不是当前全局分支工作流或新任务授权。当前工作范围、分支和是否允许合并以本轮用户任务卡和最新主 Agent 裁决为准；D1–D7 历史合同继续保留。
 
 - v1.0 基线继续约束 D1–D7 历史能力及其回归；vNext 任务不得覆盖或重写这些冻结合同。
 - vNext/M1-03 的范围依据 `docs/handoff/vnext/OpsPilot-vNext-v0.3-product-architecture-contract.md`、`docs/baseline/{API_CONTRACT,STATE_TRANSITIONS,ACCESS_MATRIX,EVENT_RECOVERY,MEMORY_LINEAGE}.md` 与用户本轮提供的 M1-03 任务卡。`docs/baseline/vNext-product-baseline-candidate.md` 是待审实现快照，不表示第三方签字或 M1 总体验收。若合同冲突，停止相关变更并提交变更说明，由主 Agent 裁决。

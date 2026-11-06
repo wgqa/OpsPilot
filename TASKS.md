@@ -1,6 +1,30 @@
 # TASKS.md — OpsPilot 相对 D1 的实施追踪
 
-> **当前规划约束（2026-10-22 更新）：** 先读 [PROJECT_NORTH_STAR.md](PROJECT_NORTH_STAR.md) 和 [AGENTS.md](AGENTS.md)。后续任务须同时写明用户旅程/智能决策与学习目标，并沿“白皮书原理 → 实现取舍 → 实验与失败 → 面试表达”留下证据。Context/Memory 等核心知识不能因当前业务狭窄而被长期排除；能力实验、业务接入、效果验证分别记录。业务切片优先补齐连续对话到实际调查和业务推进的差距，安全不变量始终有效。
+## 当前方向与唯一产品主线（2026-11-06）
+
+> **状态快照，不替代开工时核对 Git。** 本次文档修订 Base 为 `codex/ar05-recovery-revalidation-hf01@5b494fdaf20ae8eaf8fb5ec946319b2cb36fb2d0`；当时远端 `main@60eee87bfe3cca522011316cb4cd2c0064ad291b`，未合并。此处记录方向和已知验收边界，不代表当前 HEAD 或后续候选状态。
+>
+> 已有 S1/S2 确定性模型替身与正式 API/Worker/MCP/HTTP/SQLite 离线链路证据；AR-05 HF01 原 27 项恢复用例与相关 129 项回归有主 Agent 核验记录。它们不等于最新集成候选的全仓测试、真实模型或浏览器验收。此基线下最新候选全仓 pytest 未重跑；前次报告为 701/741，AR-04C 12 项实验身份测试及 C1 旧合同 RED 尚待按适用范围收口。AR-05 整体 Web 与真实模型用户旅程尚未通过完整验收。
+
+**研发排序：用户可见工作成果 → 模型在合法范围内的自主决策 → 最小可运行实现 → 实际使用与有界验证 → 根据明确风险和已观察缺陷补强工程。** 安全、授权及副作用合同始终是底线；发布 HOLD 不自动禁止无关的隔离只读产品开发。
+
+### 产品主线候选：PRODUCT-01 — Assistant 连续技术支持工作
+
+在同一 Session 中完成：协议版本对比 → 用户配置/日志等材料分析 → 按需可信只读核查 → 用户纠错或追问 → 有证据、区分历史与当前事实的处理说明。材料足够时可以直接答复；材料不足时由 Agent 在合法工具与资料范围内决定补查、澄清、继续或停止，不规定固定工具顺序。
+
+优先复用现有 `assistant.py`、`assistant_mcp.py`、Session、Context、Knowledge、Skill、Memory、MCP 和合法 S3 只读工具。普通问答不自动创建 Task，不产生业务写入；可信绑定、授权和当前服务器事实仍由现有程序裁决。
+
+首轮验收关注：材料足够时直接交付；材料不足时不猜当前服务器状态；同一 Event 的关键事实变化能改变结论；跨轮纠错保留目标和来源；真实 Observation 能被准确引用；预算停止时诚实交付已确认发现和缺口；整个只读旅程不增加 Task 权限、Intent/Ledger、Scope/Policy 或 Handoff 写入。
+
+**授权状态：产品候选，尚未授权代码实施。** 本方向文档不授权真实 Provider、浏览器、受控写入或 main 合并；这些继续遵守原有单独授权与 STOP 条件。
+
+### 有界发布收口：AR-05-RELEASE-REGRESSION-BOUNDARY-01
+
+仅处理 AR-04C 12 项历史实验测试和 C1 `READONLY_FOLLOWUP` 旧 RED 的适用性、隔离和当前合同证明。原始 Claim、Gold、RED 与日志保留；不把有意排除算作通过。该收口影响对应候选的正式发布/合并判断，不自动阻断 PRODUCT-01 的无关隔离只读开发。
+
+## 历史执行跟踪（D1–D7 / M1 / R1 原记录保留）
+
+> **历史规划约束快照（2026-10-22）：** 先读 [PROJECT_NORTH_STAR.md](PROJECT_NORTH_STAR.md) 和 [AGENTS.md](AGENTS.md)。后续任务须同时写明用户旅程/智能决策与学习目标，并沿“白皮书原理 → 实现取舍 → 实验与失败 → 面试表达”留下证据。当前优先级以 North Star 最新变更记录与本轮授权为准。
 >
 > **历史追踪说明：** 下方 D1–D7 / M1 勾选和待审说明保留其原阶段语境，不表示当前开发停留在这些阶段。当前范围须结合 Git SHA、已授权任务卡和主 Agent 正式验收核对；近期证据见 [M3 收口](docs/evidence/vnext/m3-closeout-01/REPORT.md) 与 [M3 HF-02](docs/evidence/vnext/m3-hf-02/REPORT.md)。本次仅同步指导，不新增开发任务、不改变历史验收结论。
 
@@ -156,9 +180,11 @@
 - [x] 源码、原始日志、机器结果、全部补充尝试、截图及学习材料见 [M4-02 REPORT](docs/evidence/vnext/m4-02/REPORT.md)。
 - [ ] 主 Agent 独立验收。未授权进入下一阶段；不自签 M4 总体 PASS，不重发回调，不新增业务写能力。
 
-## R1 主线集成门禁与当前成品路线（2026-11-04）
+## 历史快照：R1 主线集成门禁与当时路线（截至 2026-11-04）
 
-- AR-02/AR-03：本候选集成既有代码与历史证据；本门禁未调用 Provider、未做业务写入，也不提升历史 PARTIAL/UNKNOWN/HOLD 结果。
+> 以下 main SHA、门禁状态和路线只描述 2026-11-04 的记录，不代表本次开工时远端状态；请在每轮重新核对 Git 和适用裁决。
+
+- AR-02/AR-03：当时的候选集成既有代码与历史证据；该门禁未调用 Provider、未做业务写入，也不提升历史 PARTIAL/UNKNOWN/HOLD 结果。
 - R1-ENGINE：候选 `91a067aa083c2d4446d88a09d84164ea4c3bb956` 已完成代码/离线回归审查；主线放行仍 HOLD，原因与测试证据见 [`R1 主线集成门禁报告`](docs/evidence/r1-main-integration-gate-01/REPORT.md)。
 - R1-INTERACTIVE：`HOLD / NOT_RUN / BROWSER_STOP_ACTIVE`；前端类型、构建和投影测试不能替代真实浏览器验收。
 - `main` 仍为 `ec8c3582f6d145eec9979c43607302731411ead8`，尚未合并；门禁评审分支不代表主线正式版本。
