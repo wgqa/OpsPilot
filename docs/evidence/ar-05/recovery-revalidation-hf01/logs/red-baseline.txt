@@ -1,0 +1,118 @@
+COMMAND=python -m pytest -vv -s --tb=short -o faulthandler_timeout=75 --basetemp D:\tmp\opspilot-ar05-recovery-hf01-red-6079643f98dd44bfbfa3afeb173b27df tests/test_d4_recovery.py::test_d4_repair_committed_receipt_replays_after_plan_cancel tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[REPAIR-repair_after_commit_before_response] tests/test_d4_recovery.py::test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death tests/test_m4_01_dialogue_update_safety.py::test_pending_update_cannot_restart_a_really_delivered_s1_task
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 6 items
+
+tests/test_d4_recovery.py::test_d4_repair_committed_receipt_replays_after_plan_cancel FAILED
+tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[REPAIR-repair_after_commit_before_response] FAILED
+tests/test_d4_recovery.py::test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint FAILED
+tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer FAILED
+tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death FAILED
+tests/test_m4_01_dialogue_update_safety.py::test_pending_update_cannot_restart_a_really_delivered_s1_task FAILED
+
+================================== FAILURES ===================================
+_________ test_d4_repair_committed_receipt_replays_after_plan_cancel __________
+tests\test_d4_recovery.py:117: in test_d4_repair_committed_receipt_replays_after_plan_cancel
+    binding, plan, _, intent, ledger = _commit_repair(demo_db, live_api)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\test_d4_recovery.py:90: in _commit_repair
+    intent = get_or_create_action_intent(db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\domain\d3.py:965: in get_or_create_action_intent
+    _require_current_revalidation(
+opspilot\domain\d3.py:1382: in _require_current_revalidation
+    raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E   opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+_ test_d4_os_process_crash_and_lost_action_response[REPAIR-repair_after_commit_before_response] _
+tests\test_d4_recovery.py:479: in test_d4_os_process_crash_and_lost_action_response
+    intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\domain\d3.py:965: in get_or_create_action_intent
+    _require_current_revalidation(
+opspilot\domain\d3.py:1382: in _require_current_revalidation
+    raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E   opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+_ test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint _
+tests\test_d4_recovery.py:696: in test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint
+    assert crash.returncode == 77
+E   assert 1 == 77
+E    +  where 1 = CompletedProcess(args=['D:\\python\\python.exe', 'D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\d4_crash_worker.py', 'graph', 'D:\\tmp\\opspilot-ar05-recovery-hf01-red-6079643f98dd44bfbfa3afeb173b27df\\test_d4_langgraph_replays_repa0\\domain.sqlite3', 'D:\\tmp\\opspilot-ar05-recovery-hf01-red-6079643f98dd44bfbfa3afeb173b27df\\test_d4_langgraph_replays_repa0\\d4-repair-intent-checkpoint.sqlite3', 'opspilot-f3fca23e-4453-468c-ab1a-1771db50a0f0', 'task-0222818b-6120-47b4-a517-ba838681fbb1', 'repair_intent_after_commit_before_checkpoint'], returncode=1, stdout='{"event": "checkpoint_before_replay", "next_nodes": ["d3_revalidate_approved_plan"], "pid": 35184, "stage": "d3_approval_recorded"}\n', stderr='Traceback (most recent call last):\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\d4_crash_worker.py", line 193, in <module>\n    raise SystemExit(main())\n                     ~~~~^^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\d4_crash_worker.py", line 188, in main\n    return asyncio.run(_run_graph(*sys.argv[2:]))\n           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "D:\\python\\Lib\\asyncio\\runners.py", line 204, in run\n    return runner.run(main)\n           ~~~~~~~~~~^^^^^^\n  File "D:\\python\\Lib\\asyncio\\runners.py", line 127, in run\n    return self._loop.run_until_complete(task)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^\n  File "D:\\python\\Lib\\asyncio\\base_events.py", line 719, in run_until_complete\n    return future.result()\n           ~~~~~~~~~~~~~^^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\d4_crash_worker.py", line 161, in _run_graph\n    await graph.ainvoke(None, config)\n  File "D:\\python\\Lib\\site-packages\\langgraph\\pregel\\main.py", line 4178, in ainvoke\n    async for chunk in self.astream(\n    ...<30 lines>...\n            chunks.append(chunk)\n  File "D:\\python\\Lib\\site-packages\\langgraph\\pregel\\main.py", line 3529, in astream\n    async for _ in runner.atick(\n    ...<16 lines>...\n            yield o\n  File "D:\\python\\Lib\\site-packages\\langgraph\\pregel\\_runner.py", line 397, in atick\n    await arun_with_retry(\n    ...<15 lines>...\n    )\n  File "D:\\python\\Lib\\site-packages\\langgraph\\pregel\\_retry.py", line 737, in arun_with_retry\n    return await task.proc.ainvoke(task.input, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "D:\\python\\Lib\\site-packages\\langgraph\\_internal\\_runnable.py", line 756, in ainvoke\n    input = await asyncio.create_task(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^\n        step.ainvoke(input, config, **kwargs), context=context\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File "D:\\python\\Lib\\site-packages\\langgraph\\_internal\\_runnable.py", line 522, in ainvoke\n    ret = await self.afunc(*args, **kwargs)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\opspilot\\investigator.py", line 2039, in d3_revalidate_approved_plan\n    raise RuntimeError("D3 approval revalidation requires the trusted executor, active Run, and loopback API.")\nRuntimeError: D3 approval revalidation requires the trusted executor, active Run, and loopback API.\nDuring task with name \'d3_revalidate_approved_plan\' and id \'b27a3bed-b929-d358-6e77-dca201cb24f1\'\n').returncode
+__ test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer __
+tests\test_m1_chat.py:283: in test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer
+    intent = get_or_create_action_intent(
+opspilot\domain\d3.py:965: in get_or_create_action_intent
+    _require_current_revalidation(
+opspilot\domain\d3.py:1382: in _require_current_revalidation
+    raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E   opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+____ test_n2_01_committed_repair_event_replays_after_commit_process_death _____
+tests\test_m1_event_process_recovery.py:47: in test_n2_01_committed_repair_event_replays_after_commit_process_death
+    assert committed.returncode == 0, committed.stderr
+E   AssertionError: Traceback (most recent call last):
+E       File "D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01\tests\m1_repair_commit_process.py", line 80, in <module>
+E         raise SystemExit(main())
+E                          ~~~~^^
+E       File "D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01\tests\m1_repair_commit_process.py", line 57, in main
+E         intent = get_or_create_action_intent(db_path, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+E       File "D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01\opspilot\domain\d3.py", line 965, in get_or_create_action_intent
+E         _require_current_revalidation(
+E         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+E             connection,
+E             ^^^^^^^^^^^
+E             intent={"tenant_id": binding["tenant_id"], "task_id": task_id, "plan_hash": plan_hash},
+E             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E             binding=binding, plan=plan, approval=approval,
+E             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E         )
+E         ^
+E       File "D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01\opspilot\domain\d3.py", line 1382, in _require_current_revalidation
+E         raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E     opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+E     
+E   assert 1 == 0
+E    +  where 1 = CompletedProcess(args=['D:\\python\\python.exe', '-X', 'utf8', 'D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\m1_repair_commit_process.py', 'D:\\tmp\\opspilot-ar05-recovery-hf01-red-6079643f98dd44bfbfa3afeb173b27df\\test_n2_01_committed_repair_ev0\\domain.sqlite3'], returncode=1, stdout='', stderr='Traceback (most recent call last):\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\m1_repair_commit_process.py", line 80, in <module>\n    raise SystemExit(main())\n                     ~~~~^^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\m1_repair_commit_process.py", line 57, in main\n    intent = get_or_create_action_intent(db_path, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\opspilot\\domain\\d3.py", line 965, in get_or_create_action_intent\n    _require_current_revalidation(\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^\n        connection,\n        ^^^^^^^^^^^\n        intent={"tenant_id": binding["tenant_id"], "task_id": task_id, "plan_hash": plan_hash},\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        binding=binding, plan=plan, approval=approval,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\opspilot\\domain\\d3.py", line 1382, in _require_current_revalidation\n    raise D3PreconditionRejected("REVALIDATION_REQUIRED")\nopspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED\n').returncode
+________ test_pending_update_cannot_restart_a_really_delivered_s1_task ________
+tests\test_m4_01_dialogue_update_safety.py:207: in test_pending_update_cannot_restart_a_really_delivered_s1_task
+    repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\domain\d3.py:965: in get_or_create_action_intent
+    _require_current_revalidation(
+opspilot\domain\d3.py:1382: in _require_current_revalidation
+    raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E   opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+=========================== short test summary info ===========================
+FAILED tests/test_d4_recovery.py::test_d4_repair_committed_receipt_replays_after_plan_cancel - opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+FAILED tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[REPAIR-repair_after_commit_before_response] - opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+FAILED tests/test_d4_recovery.py::test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint - assert 1 == 77
+ +  where 1 = CompletedProcess(args=['D:\\python\\python.exe', 'D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\d4_crash_worker.py', 'graph', 'D:\\tmp\\opspilot-ar05-recovery-hf01-red-6079643f98dd44bfbfa3afeb173b27df\\test_d4_langgraph_replays_repa0\\domain.sqlite3', 'D:\\tmp\\opspilot-ar05-recovery-hf01-red-6079643f98dd44bfbfa3afeb173b27df\\test_d4_langgraph_replays_repa0\\d4-repair-intent-checkpoint.sqlite3', 'opspilot-f3fca23e-4453-468c-ab1a-1771db50a0f0', 'task-0222818b-6120-47b4-a517-ba838681fbb1', 'repair_intent_after_commit_before_checkpoint'], returncode=1, stdout='{"event": "checkpoint_before_replay", "next_nodes": ["d3_revalidate_approved_plan"], "pid": 35184, "stage": "d3_approval_recorded"}\n', stderr='Traceback (most recent call last):\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\d4_crash_worker.py", line 193, in <module>\n    raise SystemExit(main())\n                     ~~~~^^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\d4_crash_worker.py", line 188, in main\n    return asyncio.run(_run_graph(*sys.argv[2:]))\n           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "D:\\python\\Lib\\asyncio\\runners.py", line 204, in run\n    return runner.run(main)\n           ~~~~~~~~~~^^^^^^\n  File "D:\\python\\Lib\\asyncio\\runners.py", line 127, in run\n    return self._loop.run_until_complete(task)\n           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^\n  File "D:\\python\\Lib\\asyncio\\base_events.py", line 719, in run_until_complete\n    return future.result()\n           ~~~~~~~~~~~~~^^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\d4_crash_worker.py", line 161, in _run_graph\n    await graph.ainvoke(None, config)\n  File "D:\\python\\Lib\\site-packages\\langgraph\\pregel\\main.py", line 4178, in ainvoke\n    async for chunk in self.astream(\n    ...<30 lines>...\n            chunks.append(chunk)\n  File "D:\\python\\Lib\\site-packages\\langgraph\\pregel\\main.py", line 3529, in astream\n    async for _ in runner.atick(\n    ...<16 lines>...\n            yield o\n  File "D:\\python\\Lib\\site-packages\\langgraph\\pregel\\_runner.py", line 397, in atick\n    await arun_with_retry(\n    ...<15 lines>...\n    )\n  File "D:\\python\\Lib\\site-packages\\langgraph\\pregel\\_retry.py", line 737, in arun_with_retry\n    return await task.proc.ainvoke(task.input, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "D:\\python\\Lib\\site-packages\\langgraph\\_internal\\_runnable.py", line 756, in ainvoke\n    input = await asyncio.create_task(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^\n        step.ainvoke(input, config, **kwargs), context=context\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File "D:\\python\\Lib\\site-packages\\langgraph\\_internal\\_runnable.py", line 522, in ainvoke\n    ret = await self.afunc(*args, **kwargs)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\opspilot\\investigator.py", line 2039, in d3_revalidate_approved_plan\n    raise RuntimeError("D3 approval revalidation requires the trusted executor, active Run, and loopback API.")\nRuntimeError: D3 approval revalidation requires the trusted executor, active Run, and loopback API.\nDuring task with name \'d3_revalidate_approved_plan\' and id \'b27a3bed-b929-d358-6e77-dca201cb24f1\'\n').returncode
+FAILED tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer - opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+FAILED tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death - AssertionError: Traceback (most recent call last):
+    File "D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01\tests\m1_repair_commit_process.py", line 80, in <module>
+      raise SystemExit(main())
+                       ~~~~^^
+    File "D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01\tests\m1_repair_commit_process.py", line 57, in main
+      intent = get_or_create_action_intent(db_path, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+    File "D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01\opspilot\domain\d3.py", line 965, in get_or_create_action_intent
+      _require_current_revalidation(
+      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+          connection,
+          ^^^^^^^^^^^
+          intent={"tenant_id": binding["tenant_id"], "task_id": task_id, "plan_hash": plan_hash},
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          binding=binding, plan=plan, approval=approval,
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      )
+      ^
+    File "D:\学习\agent新项目\.worktrees\ar05-recovery-revalidation-hf01\opspilot\domain\d3.py", line 1382, in _require_current_revalidation
+      raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+  opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+  
+assert 1 == 0
+ +  where 1 = CompletedProcess(args=['D:\\python\\python.exe', '-X', 'utf8', 'D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\m1_repair_commit_process.py', 'D:\\tmp\\opspilot-ar05-recovery-hf01-red-6079643f98dd44bfbfa3afeb173b27df\\test_n2_01_committed_repair_ev0\\domain.sqlite3'], returncode=1, stdout='', stderr='Traceback (most recent call last):\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\m1_repair_commit_process.py", line 80, in <module>\n    raise SystemExit(main())\n                     ~~~~^^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\tests\\m1_repair_commit_process.py", line 57, in main\n    intent = get_or_create_action_intent(db_path, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\opspilot\\domain\\d3.py", line 965, in get_or_create_action_intent\n    _require_current_revalidation(\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^\n        connection,\n        ^^^^^^^^^^^\n        intent={"tenant_id": binding["tenant_id"], "task_id": task_id, "plan_hash": plan_hash},\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        binding=binding, plan=plan, approval=approval,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File "D:\\\u5b66\u4e60\\agent\u65b0\u9879\u76ee\\.worktrees\\ar05-recovery-revalidation-hf01\\opspilot\\domain\\d3.py", line 1382, in _require_current_revalidation\n    raise D3PreconditionRejected("REVALIDATION_REQUIRED")\nopspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED\n').returncode
+FAILED tests/test_m4_01_dialogue_update_safety.py::test_pending_update_cannot_restart_a_really_delivered_s1_task - opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+============================== 6 failed in 7.36s ==============================
+EXIT_CODE=1

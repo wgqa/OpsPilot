@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
-import asyncio
 import os
 import sqlite3
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
 
@@ -16,6 +17,7 @@ from mcp import Client, StdioServerParameters
 
 from opspilot.config import ROOT
 from opspilot.domain.d2 import (
+    EVIDENCE_MAX_AGE_SECONDS,
     create_task_binding,
     evaluate_evidence_gate,
     get_auth_policy_fact,
@@ -37,27 +39,42 @@ from opspilot.domain.d3 import (
     get_action_intent,
     get_or_create_action_intent,
     get_or_create_report,
-    get_action_intent,
     get_plan_approval,
     get_plan_for_task,
     get_task_action_state,
+    get_task_outcome,
     get_task_ticket_entries,
     get_verification_receipt,
+    revalidate_approved_plan,
     submit_plan_approval,
     verify_repair_online,
 )
 from opspilot.domain.database import connect, get_integration_info
+from opspilot.domain.task_control import claim_task_run, finish_task_run, trusted_identity
+from tests.d3_recovery_setup import (
+    NoRecoveryModel,
+    approve_s1_repair,
+    claim_and_revalidate_s1_repair,
+    plan_s1_repair,
+    recovery_snapshot,
+    start_s1_investigation,
+)
 
 
-def _ready(db: Path, api_url: str):
-    binding = create_task_binding(db, "support-a", "orders-demo", "integration-a", "INC-A-001")
+def _waiting_plan(db: Path, api_url: str):
+    binding, source_run_id = start_s1_investigation(db, "d4-recovery")
     task_id = str(binding["task_id"])
     evidence_ids = _append_evidence(db, api_url, task_id)
     gate = evaluate_evidence_gate(db, task_id, evidence_ids)
     assert gate["decision"] == "READY"
-    plan = create_plan_from_gate(db, task_id, "support-a", gate)
-    approval = submit_plan_approval(db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
+    return binding, plan_s1_repair(db, task_id, source_run_id, gate), source_run_id
+
+
+def _ready(db: Path, api_url: str):
+    binding, plan, _ = _waiting_plan(db, api_url)
+    approval = approve_s1_repair(db, str(binding["task_id"]), str(plan["plan_hash"]))
     assert approval["decision"] == "APPROVED"
+    claim_and_revalidate_s1_repair(db, approval, api_url)
     return binding, plan, approval
 
 
@@ -113,6 +130,52 @@ def _record_d4_event(event: str, **fields: object) -> None:
     print(json.dumps({"event": event, "process_id": os.getpid(), **fields}, sort_keys=True, default=str))
 
 
+@pytest.mark.parametrize(
+    ("condition", "expected_status", "reason"),
+    [
+        ("no-receipt", None, None),
+        ("source-unknown", "UNKNOWN", "REVALIDATION_SOURCE_UNKNOWN:ConnectionError"),
+        ("principal-disabled", "BLOCKED", "PRINCIPAL_DISABLED"),
+    ],
+)
+def test_d4_linked_approval_cannot_repair_without_valid_current_facts(
+    demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch,
+    condition: str, expected_status: str | None, reason: str | None,
+) -> None:
+    binding, plan, _ = _waiting_plan(demo_db, live_api)
+    task_id, plan_hash = str(binding["task_id"]), str(plan["plan_hash"])
+    approval = approve_s1_repair(demo_db, task_id, plan_hash)
+    run_id = str(approval["resume_run_id"])
+    claim_task_run(demo_db, trusted_identity(demo_db, "support-a"), run_id)
+    if condition == "source-unknown":
+        def probe_unavailable(*_args: object, **_kwargs: object) -> None:
+            raise ConnectionError("injected loopback observation failure")
+
+        monkeypatch.setattr("opspilot.domain.d2.probe_endpoint_fact", probe_unavailable)
+    elif condition == "principal-disabled":
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE principals SET status='DISABLED', principal_version=principal_version+1 "
+                "WHERE tenant_id='tenant-a' AND principal_id='principal-a'"
+            )
+    if expected_status is not None:
+        receipt = revalidate_approved_plan(
+            demo_db, task_id, plan_hash, str(approval["approval_id"]), "executor-a", live_api, run_id=run_id,
+        )
+        assert (receipt["status"], receipt["reason_code"], receipt["run_id"]) == (expected_status, reason, run_id)
+    with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED") as rejected:
+        get_or_create_action_intent(demo_db, task_id, plan_hash, "REPAIR", "executor-a")
+    domain = recovery_snapshot(demo_db, task_id)
+    assert domain["credential_ref"] == "cred-v1" and domain["config_version"] == 7
+    assert domain["intents"] == domain["ledgers"] == [] and domain["ticket_entries"] == 0
+    if expected_status is None:
+        assert domain["revalidation"] is None
+    elif expected_status == "BLOCKED":
+        assert domain["plan"]["eligibility"] == "CANCELLED"
+        assert domain["permissions"] == {"REPAIR": "REVOKED", "DELIVER": "REVOKED"}
+    _record_d4_event("invalid_revalidation_blocked_repair", condition=condition, error=str(rejected.value), domain=domain)
+
+
 def test_d4_repair_committed_receipt_replays_after_plan_cancel(demo_db: Path, live_api: str) -> None:
     binding, plan, _, intent, ledger = _commit_repair(demo_db, live_api)
     cancel_plan(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "support-a", "cancel after committed repair")
@@ -129,6 +192,11 @@ def test_d4_repair_committed_receipt_replays_after_plan_cancel(demo_db: Path, li
     assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v2"
     assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 8
     assert _count(demo_db, "d3_action_ledgers", "action_id = ?", (intent["action_id"],)) == 1
+    _record_d4_event(
+        "committed_receipt_replayed_after_cancel", action_kind="REPAIR",
+        original_ledger_id=ledger["ledger_id"], replayed_ledger_id=replay["ledger_id"],
+        domain=recovery_snapshot(demo_db, str(binding["task_id"])),
+    )
 
 
 def test_d4_deliver_committed_receipt_replays_after_plan_cancel(demo_db: Path, live_api: str) -> None:
@@ -148,6 +216,11 @@ def test_d4_deliver_committed_receipt_replays_after_plan_cancel(demo_db: Path, l
     assert len(get_task_ticket_entries(demo_db, str(binding["task_id"]), "support-a")) == 1
     assert _count(demo_db, "d3_action_ledgers", "action_id = ?", (intent["action_id"],)) == 1
     assert _count(demo_db, "d3_delivery_records", "delivery_action_id = ?", (intent["action_id"],)) == 1
+    _record_d4_event(
+        "committed_receipt_replayed_after_cancel", action_kind="DELIVER",
+        original_ledger_id=ledger["ledger_id"], replayed_ledger_id=replay["ledger_id"],
+        domain=recovery_snapshot(demo_db, str(binding["task_id"])),
+    )
 
 
 def test_d4_cancelled_uncommitted_intent_cannot_become_an_action(demo_db: Path, live_api: str) -> None:
@@ -162,7 +235,14 @@ def test_d4_cancelled_uncommitted_intent_cannot_become_an_action(demo_db: Path, 
     assert current["credential_ref"] == "cred-v1" and current["config_version"] == 7
     assert _count(demo_db, "d3_action_ledgers", "action_id = ?", (intent["action_id"],)) == 0
     state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
-    assert state["permissions"][0]["state"] == "AVAILABLE"
+    assert {row["action_kind"]: row["state"] for row in state["permissions"]} == {
+        "REPAIR": "REVOKED", "DELIVER": "REVOKED",
+    }
+    assert get_task_outcome(demo_db, str(binding["task_id"]), "support-a")["resume_run"]["blocked_reason"] == "PLAN_CANCELLED"
+    _record_d4_event(
+        "uncommitted_intent_blocked_after_cancel", action_kind="REPAIR",
+        domain=recovery_snapshot(demo_db, str(binding["task_id"])),
+    )
 
 
 def test_d4_cancel_before_deliver_blocks_ticket_write_but_preserves_repair(demo_db: Path, live_api: str) -> None:
@@ -184,15 +264,21 @@ def test_d4_cancel_before_deliver_blocks_ticket_write_but_preserves_repair(demo_
     assert state["verification_receipts"][0]["verification_id"] == verification["verification_id"]
     assert state["report_artifacts"][0]["report_ref"] == report["report_ref"]
     assert state["ticket_entries"] == [] and state["delivery_records"] == []
-    assert {item["action_kind"]: item["state"] for item in state["permissions"]} == {"REPAIR": "CONSUMED", "DELIVER": "AVAILABLE"}
+    assert {item["action_kind"]: item["state"] for item in state["permissions"]} == {"REPAIR": "CONSUMED", "DELIVER": "REVOKED"}
+    _record_d4_event(
+        "uncommitted_intent_blocked_after_cancel", action_kind="DELIVER",
+        domain=recovery_snapshot(demo_db, str(binding["task_id"])),
+    )
 
 
 def test_d4_superseded_plan_blocks_old_uncommitted_intent(demo_db: Path, live_api: str) -> None:
-    binding, old_plan, _ = _ready(demo_db, live_api)
+    binding, old_plan, approval = _ready(demo_db, live_api)
     old_intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(old_plan["plan_hash"]), "REPAIR", "executor-a")
     next_evidence = _append_evidence(demo_db, live_api, str(binding["task_id"]), "replacement")
     next_gate = evaluate_evidence_gate(demo_db, str(binding["task_id"]), next_evidence)
-    new_plan = create_plan_from_gate(demo_db, str(binding["task_id"]), "support-a", next_gate)
+    new_plan = create_plan_from_gate(
+        demo_db, str(binding["task_id"]), "support-a", next_gate, run_id=str(approval["resume_run_id"]),
+    )
     assert new_plan["plan_hash"] != old_plan["plan_hash"]
 
     with pytest.raises(D3PreconditionRejected, match="PLAN_NOT_ACTIVE"):
@@ -204,7 +290,15 @@ def test_d4_superseded_plan_blocks_old_uncommitted_intent(demo_db: Path, live_ap
     eligibilities = {row["plan_hash"]: row["eligibility"] for row in state["plan_authorizations"]}
     assert current["credential_ref"] == "cred-v1" and current["config_version"] == 7
     assert eligibilities[old_plan["plan_hash"]] == "SUPERSEDED" and eligibilities[new_plan["plan_hash"]] == "ACTIVE"
+    assert {
+        row["action_kind"]: row["state"] for row in state["permissions"] if row["plan_hash"] == old_plan["plan_hash"]
+    } == {"REPAIR": "REVOKED", "DELIVER": "REVOKED"}
     assert state["action_ledgers"] == [] and state["ticket_entries"] == []
+    _record_d4_event(
+        "uncommitted_intent_blocked_after_supersede",
+        old_plan_hash=old_plan["plan_hash"], new_plan_hash=new_plan["plan_hash"],
+        domain=recovery_snapshot(demo_db, str(binding["task_id"])),
+    )
 
 
 def test_d4_plan_and_approval_reads_require_current_actor_scope(demo_db: Path, live_api: str) -> None:
@@ -276,6 +370,7 @@ def test_d4_cancel_and_repair_are_serializable(demo_db: Path, live_api: str) -> 
     state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
     assert state["plan_authorizations"][0]["eligibility"] == "CANCELLED"
     permissions = {row["action_kind"]: row["state"] for row in state["permissions"]}
+    assert permissions["DELIVER"] == "REVOKED"
     if repair_result[0] == "committed":
         assert current["credential_ref"] == "cred-v2" and current["config_version"] == 8
         assert len(state["action_ledgers"]) == 1
@@ -284,7 +379,7 @@ def test_d4_cancel_and_repair_are_serializable(demo_db: Path, live_api: str) -> 
         assert "PLAN_NOT_ACTIVE" in repair_result[1]
         assert current["credential_ref"] == "cred-v1" and current["config_version"] == 7
         assert state["action_ledgers"] == []
-        assert permissions["REPAIR"] == "AVAILABLE"
+        assert permissions["REPAIR"] == "REVOKED"
     _record_d4_event(
         "cancel_repair_race_pass",
         repair_outcome=repair_result[0],
@@ -336,7 +431,7 @@ def test_d4_cancel_and_deliver_are_serializable(demo_db: Path, live_api: str) ->
         assert "PLAN_NOT_ACTIVE" in deliver_result[1]
         assert not [row for row in state["action_ledgers"] if row["action_kind"] == "DELIVER"]
         assert state["delivery_records"] == state["ticket_entries"] == []
-        assert permissions["DELIVER"] == "AVAILABLE"
+        assert permissions["DELIVER"] == "REVOKED"
     _record_d4_event(
         "cancel_deliver_race_pass",
         deliver_outcome=deliver_result[0],
@@ -350,7 +445,7 @@ def test_d4_cancel_and_deliver_are_serializable(demo_db: Path, live_api: str) ->
 
 
 def test_d4_plan_replacement_races_repair_and_historical_receipt_replays(demo_db: Path, live_api: str) -> None:
-    binding, old_plan, _ = _ready(demo_db, live_api)
+    binding, old_plan, approval = _ready(demo_db, live_api)
     old_intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(old_plan["plan_hash"]), "REPAIR", "executor-a")
     replacement_evidence = _append_evidence(demo_db, live_api, str(binding["task_id"]), "replacement-race")
     replacement_gate = evaluate_evidence_gate(demo_db, str(binding["task_id"]), replacement_evidence)
@@ -366,7 +461,10 @@ def test_d4_plan_replacement_races_repair_and_historical_receipt_replays(demo_db
 
     def replace_plan():
         barrier.wait()
-        return create_plan_from_gate(demo_db, str(binding["task_id"]), "support-a", replacement_gate)
+        return create_plan_from_gate(
+            demo_db, str(binding["task_id"]), "support-a", replacement_gate,
+            run_id=str(approval["resume_run_id"]),
+        )
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         repair_future = pool.submit(repair)
@@ -381,16 +479,22 @@ def test_d4_plan_replacement_races_repair_and_historical_receipt_replays(demo_db
     eligibility = {row["plan_hash"]: row["eligibility"] for row in state["plan_authorizations"]}
     assert eligibility[old_plan["plan_hash"]] == "SUPERSEDED"
     assert eligibility[replacement_plan["plan_hash"]] == "ACTIVE"
+    old_permissions = {
+        row["action_kind"]: row["state"] for row in state["permissions"] if row["plan_hash"] == old_plan["plan_hash"]
+    }
+    assert old_permissions["DELIVER"] == "REVOKED"
     current = get_integration_info(demo_db, "tenant-a", "integration-a")
     if repair_result[0] == "committed":
         historical = execute_repair(demo_db, str(old_intent["action_id"]), "executor-a", "d4-superseded-receipt-replay")
         assert historical["ledger_id"] == repair_result[1]["ledger_id"]
         assert current["credential_ref"] == "cred-v2" and current["config_version"] == 8
         assert len(state["action_ledgers"]) == 1
+        assert old_permissions["REPAIR"] == "CONSUMED"
     else:
         assert "PLAN_NOT_ACTIVE" in repair_result[1]
         assert current["credential_ref"] == "cred-v1" and current["config_version"] == 7
         assert state["action_ledgers"] == []
+        assert old_permissions["REPAIR"] == "REVOKED"
     _record_d4_event(
         "plan_replacement_repair_race_pass",
         repair_outcome=repair_result[0],
@@ -446,20 +550,61 @@ def _deliver_setup(db: Path, api_url: str):
 
 def _run_crash_worker(*args: object) -> subprocess.CompletedProcess[str]:
     worker = ROOT / "tests" / "d4_crash_worker.py"
-    return subprocess.run(
-        [sys.executable, str(worker), *(str(arg) for arg in args)],
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8", str(worker), *(str(arg) for arg in args)],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=30,
         check=False,
     )
+    print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+    _record_d4_event("crash_worker_exited", mode=args[0], exit_code=result.returncode)
+    return result
+
+
+def _run_graph_worker(
+    db: Path, checkpoint_db: Path, approval: dict[str, object], failpoint: str,
+) -> subprocess.CompletedProcess[str]:
+    result = _run_crash_worker(
+        "graph", db, checkpoint_db, approval["task_id"], approval["resume_run_id"], failpoint,
+    )
+    _record_d4_event(
+        "graph_parent_readback", failpoint=failpoint, child_exit_code=result.returncode,
+        domain=recovery_snapshot(db, str(approval["task_id"])),
+    )
+    return result
 
 
 def _worker_event(result: subprocess.CompletedProcess[str]) -> dict[str, object]:
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     assert lines, f"crash worker emitted no event; stderr={result.stderr}"
     return json.loads(lines[-1])
+
+
+def _graph_replay_event(
+    result: subprocess.CompletedProcess[str], approval: dict[str, object], crash_event: dict[str, object],
+) -> dict[str, object]:
+    assert result.returncode == 0, result.stderr
+    start = next(
+        json.loads(line) for line in result.stdout.splitlines()
+        if line.startswith("{") and '"event": "graph_process_start"' in line
+    )
+    replay = _worker_event(result)
+    assert start["recovered_run_ids"] == [approval["resume_run_id"]]
+    assert start["domain"]["resume_run"]["status"] == "INTERRUPTED_RECOVERABLE"
+    assert replay["pid"] != crash_event["pid"] and replay["run_id"] == approval["resume_run_id"]
+    assert replay["domain"]["resume_run"]["status"] == "SUCCEEDED"
+    assert replay["domain"]["revalidation"]["status"] == "VALID"
+    assert replay["domain"]["revalidation"]["run_id"] == approval["resume_run_id"]
+    assert replay["domain"]["revalidation"]["probe"]["http_status"] == 401
+    assert replay["domain"]["business_outcome"] == "DELIVERED"
+    assert replay["domain"]["verification_http_status"] == 200
+    assert replay["domain"]["config_version"] == 8 and replay["domain"]["ticket_entries"] == 1
+    return replay
 
 
 @pytest.mark.parametrize(
@@ -479,6 +624,8 @@ def test_d4_os_process_crash_and_lost_action_response(
         intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     else:
         binding, plan, _, intent = _deliver_setup(demo_db, live_api)
+    task_id = str(binding["task_id"])
+    before_child = recovery_snapshot(demo_db, task_id)
     worker = _run_crash_worker("action", demo_db, str(intent["action_id"]), "executor-a", action_kind, failpoint)
     event = _worker_event(worker)
     assert worker.returncode == 75
@@ -486,6 +633,7 @@ def test_d4_os_process_crash_and_lost_action_response(
     assert event["failpoint"] == failpoint
     committed_before_crash = failpoint.endswith("after_commit_before_response")
     assert event["in_transaction"] is False if committed_before_crash else event["in_transaction"] is True
+    after_exit = recovery_snapshot(demo_db, task_id)
 
     if action_kind == "REPAIR":
         before_retry = get_integration_info(demo_db, "tenant-a", "integration-a")
@@ -510,6 +658,7 @@ def test_d4_os_process_crash_and_lost_action_response(
         after_retry = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
         assert len(after_retry["delivery_records"]) == len(after_retry["ticket_entries"]) == 1
     assert original["status"] == "COMMITTED"
+    assert original["action_id"] == intent["action_id"]
     final_state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
     _record_d4_event(
         "action_crash_recovery_pass",
@@ -518,17 +667,23 @@ def test_d4_os_process_crash_and_lost_action_response(
         child_pid=event["pid"],
         child_exit_code=worker.returncode,
         transaction_open_at_crash=event["in_transaction"],
+        action_id=intent["action_id"],
+        child_ledger_id=event["ledger_id"] if committed_before_crash else None,
         retry_ledger_id=original["ledger_id"],
         config_version=get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"],
         repair_ledger_count=sum(row["action_kind"] == "REPAIR" for row in final_state["action_ledgers"]),
         deliver_ledger_count=sum(row["action_kind"] == "DELIVER" for row in final_state["action_ledgers"]),
         delivery_count=len(final_state["delivery_records"]),
         ticket_entry_count=len(final_state["ticket_entries"]),
+        domain_before_child=before_child, domain_after_exit=after_exit,
+        domain_after_retry=recovery_snapshot(demo_db, task_id),
     )
 
 
 def test_d4_action_intent_survives_process_exit_before_checkpoint(demo_db: Path, live_api: str) -> None:
     binding, plan, _ = _ready(demo_db, live_api)
+    task_id = str(binding["task_id"])
+    before_child = recovery_snapshot(demo_db, task_id)
     worker = _run_crash_worker("intent", demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     event = _worker_event(worker)
     assert worker.returncode == 76 and int(event["pid"]) != os.getpid()
@@ -544,6 +699,60 @@ def test_d4_action_intent_survives_process_exit_before_checkpoint(demo_db: Path,
         action_id=event["action_id"],
         idempotency_key_replayed=replay["idempotency_key"],
         request_digest_replayed=replay["request_digest"],
+        domain_before_child=before_child, domain_after_replay=recovery_snapshot(demo_db, task_id),
+    )
+
+
+@pytest.mark.parametrize(
+    ("change", "expected_error"),
+    [
+        ("cancelled", "PLAN_NOT_ACTIVE"),
+        ("expired", "REVALIDATION_RECEIPT_EXPIRED"),
+        ("version-conflict", "RESOURCE_VERSION_OR_CREDENTIAL_PRECONDITION_FAILED"),
+    ],
+)
+def test_d4_precommit_crash_replay_cannot_use_invalidated_authority(
+    demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch, change: str, expected_error: str,
+) -> None:
+    binding, plan, _, intent, _ = _commit_repair_setup(demo_db, live_api)
+    task_id, action_id = str(binding["task_id"]), str(intent["action_id"])
+    crash = _run_crash_worker("action", demo_db, action_id, "executor-a", "REPAIR", "repair_before_commit")
+    event = _worker_event(crash)
+    assert crash.returncode == 75 and int(event["pid"]) != os.getpid()
+    assert event["failpoint"] == "repair_before_commit" and event["in_transaction"] is True
+    after_exit = recovery_snapshot(demo_db, task_id)
+    assert after_exit["config_version"] == 7 and after_exit["ledgers"] == []
+    assert [row["action_id"] for row in after_exit["intents"]] == [action_id]
+
+    if change == "cancelled":
+        cancel_plan(demo_db, task_id, str(plan["plan_hash"]), "support-a", "cancel while crash recovery waits")
+    elif change == "expired":
+        class AfterReceiptTTL(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return super().now(tz) + timedelta(seconds=EVIDENCE_MAX_AGE_SECONDS + 1)
+
+        # Advance only the read-side clock. The real receipt and its digest stay intact.
+        monkeypatch.setattr("opspilot.domain.d3.datetime", AfterReceiptTTL)
+    else:
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE integrations SET config_version=config_version+1 "
+                "WHERE tenant_id='tenant-a' AND integration_id='integration-a'"
+            )
+    before_retry = recovery_snapshot(demo_db, task_id)
+    with pytest.raises(D3PreconditionRejected, match=expected_error) as rejected:
+        execute_repair(demo_db, action_id, "executor-a", "d4-invalidated-precommit-retry")
+    after_retry = recovery_snapshot(demo_db, task_id)
+    assert after_retry == before_retry
+    assert after_retry["credential_ref"] == "cred-v1"
+    assert after_retry["ledgers"] == [] and after_retry["ticket_entries"] == 0
+    if change == "cancelled":
+        assert after_retry["permissions"] == {"REPAIR": "REVOKED", "DELIVER": "REVOKED"}
+    _record_d4_event(
+        "precommit_crash_retry_rejected", change=change, error=str(rejected.value),
+        child_pid=event["pid"], child_exit_code=crash.returncode, action_id=action_id,
+        domain_after_exit=after_exit, domain_before_retry=before_retry, domain_after_retry=after_retry,
     )
 
 
@@ -649,7 +858,10 @@ def test_d4_verification_and_frozen_report_replay_keep_original_receipts(demo_db
     )
 
 
-def _seed_graph_checkpoint(db: Path, checkpoint_db: Path, binding: dict[str, object], state: dict[str, object], as_node: str) -> None:
+def _seed_graph_checkpoint(
+    db: Path, checkpoint_db: Path, binding: dict[str, object], source_run_id: str,
+    state: dict[str, object], as_node: str,
+) -> None:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     from opspilot.investigator import build_investigation_graph
@@ -660,37 +872,102 @@ def _seed_graph_checkpoint(db: Path, checkpoint_db: Path, binding: dict[str, obj
             graph = build_investigation_graph(
                 db, str(binding["task_id"]), "d4-model-not-called", None, [], [], None,
                 checkpointer, checkpoint_db, d3_mode=True, submitter_id=str(binding["actor_id"]),
-                executor_id="executor-a", business_api_url="http://127.0.0.1:1",
+                executor_id="executor-a", run_id=source_run_id,
             )
-            await graph.aupdate_state({"configurable": {"thread_id": str(binding["thread_id"])}}, state, as_node=as_node)
+            thread = f"{binding['thread_id']}::{source_run_id}"
+            config = {"configurable": {"thread_id": thread}}
+            await graph.aupdate_state(config, state, as_node=as_node)
+            seeded = await graph.aget_state(config)
+            _record_d4_event(
+                "graph_checkpoint_seeded", checkpoint_thread_id=thread, stage=seeded.values["stage"],
+                as_node=as_node, next_nodes=list(seeded.next),
+            )
 
     asyncio.run(seed())
+
+
+def _handoff_graph_checkpoint(
+    db: Path, checkpoint_db: Path, binding: dict[str, object], approval: dict[str, object],
+    state: dict[str, object], as_node: str,
+) -> None:
+    _seed_graph_checkpoint(db, checkpoint_db, binding, str(approval["source_run_id"]), state, as_node)
+    finish_task_run(
+        db, trusted_identity(db, "support-a"), str(approval["resume_run_id"]), "INTERRUPTED_RECOVERABLE",
+        blocked_reason="D4_FIXTURE_CHECKPOINT_HANDOFF",
+    )
 
 
 def _checkpoint_state(binding: dict[str, object], plan: dict[str, object], approval: dict[str, object]) -> dict[str, object]:
     return {
         "task_binding_id": str(binding["task_id"]), "stage": "d3_repair_intent_persisted",
-        "budget": {"MODEL": 0, "MCP": 0}, "diagnosis_draft": {}, "evidence_ids": [],
-        "tool_observations": [], "pending_call_refs": [], "gate_decision": {},
+        "budget": {"MODEL": 0, "MCP": 0}, "diagnosis_draft": {},
+        "evidence_ids": list(plan["required_evidence_ids"]),
+        "tool_observations": [], "pending_call_refs": [], "gate_decision": {"decision": "READY"},
         "plan_id": str(plan["plan_id"]), "plan_hash": str(plan["plan_hash"]),
         "approval_id": str(approval["approval_id"]), "approval_decision": "APPROVED",
     }
 
 
+@pytest.mark.parametrize("missing", ["run", "executor", "http", "unclaimed-run"])
+def test_d4_approval_checkpoint_cannot_replace_trusted_revalidation_context(
+    demo_db: Path, live_api: str, tmp_path: Path, missing: str,
+) -> None:
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    from opspilot.investigator import build_investigation_graph
+
+    binding, plan, source_run_id = _waiting_plan(demo_db, live_api)
+    task_id = str(binding["task_id"])
+    approval = approve_s1_repair(demo_db, task_id, str(plan["plan_hash"]))
+    resume_run_id = str(approval["resume_run_id"])
+    if missing != "unclaimed-run":
+        claim_task_run(demo_db, trusted_identity(demo_db, "support-a"), resume_run_id)
+    checkpoint_db = tmp_path / "d4-missing-context.sqlite3"
+    _seed_graph_checkpoint(
+        demo_db, checkpoint_db, binding, source_run_id,
+        {**_checkpoint_state(binding, plan, approval), "stage": "d3_approval_recorded"},
+        "d3_human_approval",
+    )
+    if missing == "unclaimed-run":
+        error_type, reason = D3PreconditionRejected, "APPROVAL_REVALIDATION_RUN_INVALID"
+    else:
+        error_type, reason = RuntimeError, "requires the trusted executor, active Run, and loopback API"
+
+    async def replay() -> str:
+        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_db)) as checkpointer:
+            graph = build_investigation_graph(
+                demo_db, task_id, "d4-model-not-called", None, [], [], None,
+                checkpointer, checkpoint_db, d3_mode=True, submitter_id="support-a",
+                executor_id=None if missing == "executor" else "executor-a",
+                business_api_url=None if missing == "http" else live_api,
+                run_id=None if missing == "run" else resume_run_id,
+            )
+            config = {"configurable": {"thread_id": f"{binding['thread_id']}::{source_run_id}"}}
+            with pytest.raises(error_type, match=reason) as rejected:
+                await graph.ainvoke(None, config)
+            return str(rejected.value)
+
+    error = asyncio.run(replay())
+    domain = recovery_snapshot(demo_db, task_id)
+    assert domain["revalidation"] is None and domain["intents"] == domain["ledgers"] == []
+    assert domain["config_version"] == 7 and domain["ticket_entries"] == 0
+    _record_d4_event("approval_checkpoint_context_rejected", missing=missing, error=error, domain=domain)
+
+
 def test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint(
     demo_db: Path, live_api: str, tmp_path: Path
 ) -> None:
-    binding, plan, approval = _ready(demo_db, live_api)
+    binding, plan, source_run_id = _waiting_plan(demo_db, live_api)
+    approval = approve_s1_repair(demo_db, str(binding["task_id"]), str(plan["plan_hash"]))
     checkpoint_db = tmp_path / "d4-repair-intent-checkpoint.sqlite3"
     state = {
         **_checkpoint_state(binding, plan, approval),
         "stage": "d3_approval_recorded",
         "approver_id": "approver-a",
     }
-    _seed_graph_checkpoint(demo_db, checkpoint_db, binding, state, "d3_human_approval")
-    crash = _run_crash_worker(
-        "graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]),
-        "repair_intent_after_commit_before_checkpoint",
+    _seed_graph_checkpoint(demo_db, checkpoint_db, binding, source_run_id, state, "d3_human_approval")
+    crash = _run_graph_worker(
+        demo_db, checkpoint_db, approval, "repair_intent_after_commit_before_checkpoint",
     )
     crash_event = _worker_event(crash)
     assert crash.returncode == 77
@@ -698,8 +975,9 @@ def test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint
     assert crash_event["action_intent_count"] == 1 and crash_event["ledger_count"] == 0
     assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 7
 
-    replay = _run_crash_worker("graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]), "-")
-    replay_event = _worker_event(replay)
+    replay = _run_graph_worker(demo_db, checkpoint_db, approval, "-")
+    replay_event = _graph_replay_event(replay, approval, crash_event)
+    assert replay_event["repair_action_id"] == crash_event["latest_action_id"]
     action_state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
     assert replay.returncode == 0 and replay_event["stage"] == "complete"
     assert len(action_state["action_intents"]) == 2
@@ -733,10 +1011,9 @@ def test_d4_langgraph_replays_frozen_report_after_process_exit_before_checkpoint
         "repair_ledger_ref": str(repair_ledger["ledger_id"]),
         "verification_id": str(verification["verification_id"]),
     }
-    _seed_graph_checkpoint(demo_db, checkpoint_db, binding, state, "d3_verify_repair")
-    crash = _run_crash_worker(
-        "graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]),
-        "report_after_commit_before_checkpoint",
+    _handoff_graph_checkpoint(demo_db, checkpoint_db, binding, approval, state, "d3_verify_repair")
+    crash = _run_graph_worker(
+        demo_db, checkpoint_db, approval, "report_after_commit_before_checkpoint",
     )
     crash_event = _worker_event(crash)
     assert crash.returncode == 77
@@ -744,11 +1021,13 @@ def test_d4_langgraph_replays_frozen_report_after_process_exit_before_checkpoint
     assert crash_event["report_count"] == 1 and crash_event["latest_report_ref"]
     assert crash_event["delivery_count"] == 0 and crash_event["ticket_entry_count"] == 0
 
-    replay = _run_crash_worker("graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]), "-")
-    replay_event = _worker_event(replay)
+    replay = _run_graph_worker(demo_db, checkpoint_db, approval, "-")
+    replay_event = _graph_replay_event(replay, approval, crash_event)
+    assert replay_event["frozen_report_ref"] == crash_event["latest_report_ref"]
     action_state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
     assert replay.returncode == 0 and replay_event["stage"] == "complete"
     assert len(action_state["report_artifacts"]) == 1
+    assert action_state["report_artifacts"][0]["content_digest"] == crash_event["latest_report_digest"]
     assert len(action_state["delivery_records"]) == len(action_state["ticket_entries"]) == 1
     _record_d4_event(
         "langgraph_frozen_report_checkpoint_lag_pass",
@@ -781,10 +1060,9 @@ def test_d4_langgraph_replays_delivery_intent_after_process_exit_before_checkpoi
         "verification_id": str(verification["verification_id"]),
         "frozen_report_ref": str(report["report_ref"]),
     }
-    _seed_graph_checkpoint(demo_db, checkpoint_db, binding, state, "d3_freeze_report")
-    crash = _run_crash_worker(
-        "graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]),
-        "deliver_intent_after_commit_before_checkpoint",
+    _handoff_graph_checkpoint(demo_db, checkpoint_db, binding, approval, state, "d3_freeze_report")
+    crash = _run_graph_worker(
+        demo_db, checkpoint_db, approval, "deliver_intent_after_commit_before_checkpoint",
     )
     crash_event = _worker_event(crash)
     assert crash.returncode == 77
@@ -792,8 +1070,9 @@ def test_d4_langgraph_replays_delivery_intent_after_process_exit_before_checkpoi
     assert crash_event["action_intent_count"] == 2 and crash_event["ledger_count"] == 1
     assert crash_event["delivery_count"] == crash_event["ticket_entry_count"] == 0
 
-    replay = _run_crash_worker("graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]), "-")
-    replay_event = _worker_event(replay)
+    replay = _run_graph_worker(demo_db, checkpoint_db, approval, "-")
+    replay_event = _graph_replay_event(replay, approval, crash_event)
+    assert replay_event["deliver_action_id"] == crash_event["latest_action_id"]
     action_state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
     assert replay.returncode == 0 and replay_event["stage"] == "complete"
     assert len(action_state["action_intents"]) == 2
@@ -817,18 +1096,20 @@ def test_d4_langgraph_replays_committed_repair_after_os_process_crash(demo_db: P
     binding, plan, approval = _ready(demo_db, live_api)
     intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     checkpoint_db = tmp_path / "d4-repair-checkpoint.sqlite3"
-    _seed_graph_checkpoint(demo_db, checkpoint_db, binding, {
+    _handoff_graph_checkpoint(demo_db, checkpoint_db, binding, approval, {
         **_checkpoint_state(binding, plan, approval),
         "stage": "d3_repair_intent_persisted", "repair_action_id": str(intent["action_id"]),
     }, "d3_repair_intent")
-    crash = _run_crash_worker("graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]), "repair_after_commit_before_response")
+    crash = _run_graph_worker(demo_db, checkpoint_db, approval, "repair_after_commit_before_response")
     crash_event = _worker_event(crash)
     assert crash.returncode == 75 and crash_event["failpoint"] == "repair_after_commit_before_response"
     assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 8
     assert _count(demo_db, "d3_action_ledgers", "task_id = ? AND action_kind = 'REPAIR'", (binding["task_id"],)) == 1
 
-    replay = _run_crash_worker("graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]), "-")
-    replay_event = _worker_event(replay)
+    replay = _run_graph_worker(demo_db, checkpoint_db, approval, "-")
+    replay_event = _graph_replay_event(replay, approval, crash_event)
+    assert replay_event["repair_action_id"] == crash_event["ledger_action_id"]
+    assert replay_event["repair_ledger_ref"] == crash_event["ledger_id"]
     assert replay.returncode == 0
     assert replay_event["stage"] == "complete"
     state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
@@ -866,16 +1147,18 @@ def test_d4_langgraph_replays_committed_delivery_after_lost_response(demo_db: Pa
         "frozen_report_ref": str(report["report_ref"]),
         "deliver_action_id": str(deliver_intent["action_id"]),
     }
-    _seed_graph_checkpoint(demo_db, checkpoint_db, binding, checkpoint_state, "d3_deliver_intent")
+    _handoff_graph_checkpoint(demo_db, checkpoint_db, binding, approval, checkpoint_state, "d3_deliver_intent")
 
-    crash = _run_crash_worker("graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]), "deliver_after_commit_before_response")
+    crash = _run_graph_worker(demo_db, checkpoint_db, approval, "deliver_after_commit_before_response")
     crash_event = _worker_event(crash)
     assert crash.returncode == 75 and crash_event["failpoint"] == "deliver_after_commit_before_response"
     state_after_crash = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
     assert len(state_after_crash["delivery_records"]) == len(state_after_crash["ticket_entries"]) == 1
 
-    replay = _run_crash_worker("graph", demo_db, checkpoint_db, str(binding["thread_id"]), str(binding["task_id"]), "-")
-    replay_event = _worker_event(replay)
+    replay = _run_graph_worker(demo_db, checkpoint_db, approval, "-")
+    replay_event = _graph_replay_event(replay, approval, crash_event)
+    assert replay_event["deliver_action_id"] == crash_event["ledger_action_id"]
+    assert replay_event["deliver_ledger_ref"] == crash_event["ledger_id"]
     assert replay.returncode == 0 and replay_event["stage"] == "complete"
     state_after_replay = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
     assert len([row for row in state_after_replay["action_ledgers"] if row["action_kind"] == "REPAIR"]) == 1
@@ -898,42 +1181,42 @@ def test_d4_langgraph_replays_committed_delivery_after_lost_response(demo_db: Pa
 def test_d4_approval_interrupt_waits_then_resumes_from_persisted_receipt(
     demo_db: Path, live_api: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from opspilot import investigator
     from opspilot.config import MODEL_API_KEY, MODEL_NAME
-    from opspilot.domain.d3 import submit_plan_approval
-    from opspilot.investigator import run_investigation
 
     monkeypatch.setenv(MODEL_API_KEY, "d4-test-key")
     monkeypatch.setenv(MODEL_NAME, "d4-model-not-called")
-    binding = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a", "INC-A-001")
-    evidence_ids = _append_evidence(demo_db, live_api, str(binding["task_id"]), "approval-interrupt")
-    gate = evaluate_evidence_gate(demo_db, str(binding["task_id"]), evidence_ids)
-    plan = create_plan_from_gate(demo_db, str(binding["task_id"]), "support-a", gate)
+    monkeypatch.setattr(investigator, "ChatOpenAI", NoRecoveryModel)
+    binding, plan, source_run_id = _waiting_plan(demo_db, live_api)
+    task_id = str(binding["task_id"])
     checkpoint_db = tmp_path / "d4-approval-checkpoint.sqlite3"
     _seed_graph_checkpoint(
         demo_db,
         checkpoint_db,
         binding,
+        source_run_id,
         {**_checkpoint_state(binding, plan, {"approval_id": "pending"}), "stage": "d3_plan_created"},
         "d3_create_plan",
     )
 
-    first = asyncio.run(run_investigation(
+    first = asyncio.run(investigator.run_investigation(
         str(binding["thread_id"]), "support-a", db_path=demo_db, checkpoint_db_path=checkpoint_db,
-        resume=True, d3_mode=True, executor_id="executor-a",
+        resume=True, d3_mode=True, executor_id="executor-a", run_id=source_run_id,
     ))
     assert first["graph_state"]["stage"] == "d3_plan_created"
-    waiting = asyncio.run(run_investigation(
+    waiting = asyncio.run(investigator.run_investigation(
         str(binding["thread_id"]), "support-a", db_path=demo_db, checkpoint_db_path=checkpoint_db,
-        resume=True, d3_mode=True, executor_id="executor-a",
+        resume=True, d3_mode=True, executor_id="executor-a", run_id=source_run_id,
     ))
     assert waiting["graph_state"]["stage"] == "d3_plan_created"
     assert waiting["next_nodes"] == ["d3_human_approval"]
     assert waiting["action_state"]["action_intents"] == []
 
-    approval = submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
-    resumed = asyncio.run(run_investigation(
+    approval = approve_s1_repair(demo_db, task_id, str(plan["plan_hash"]))
+    resume_run_id = str(approval["resume_run_id"])
+    resumed = asyncio.run(investigator.run_investigation(
         str(binding["thread_id"]), "support-a", db_path=demo_db, checkpoint_db_path=checkpoint_db,
-        resume=True, d3_mode=True, executor_id="executor-a",
+        resume=True, d3_mode=True, executor_id="executor-a", run_id=resume_run_id,
         resume_command={"approval_id": approval["approval_id"], "plan_hash": approval["plan_hash"]},
     ))
     assert resumed["graph_state"]["stage"] == "complete"
@@ -941,6 +1224,10 @@ def test_d4_approval_interrupt_waits_then_resumes_from_persisted_receipt(
     assert len([row for row in resumed["action_state"]["action_ledgers"] if row["action_kind"] == "REPAIR"]) == 1
     assert len([row for row in resumed["action_state"]["action_ledgers"] if row["action_kind"] == "DELIVER"]) == 1
     assert len(resumed["action_state"]["ticket_entries"]) == 1
+    domain = recovery_snapshot(demo_db, task_id)
+    assert domain["resume_run"]["status"] == "SUCCEEDED"
+    assert domain["revalidation"]["run_id"] == resume_run_id and domain["revalidation"]["status"] == "VALID"
+    assert domain["business_outcome"] == "DELIVERED" and domain["verification_http_status"] == 200
     _record_d4_event(
         "approval_interrupt_recovery_pass",
         task_id=binding["task_id"],
@@ -950,55 +1237,52 @@ def test_d4_approval_interrupt_waits_then_resumes_from_persisted_receipt(
         repair_ledgers=1,
         deliver_ledgers=1,
         ticket_entries=len(resumed["action_state"]["ticket_entries"]),
+        domain=domain,
     )
 
 
 def test_d4_terminal_checkpoint_without_domain_receipt_blocks_unknown_outcome(
-    demo_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    demo_db: Path, live_api: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from opspilot import investigator
     from opspilot.config import MODEL_API_KEY, MODEL_NAME
-    from opspilot.domain.d2 import create_task_binding
-    from opspilot.investigator import build_investigation_graph, run_investigation
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     monkeypatch.setenv(MODEL_API_KEY, "d4-test-key")
     monkeypatch.setenv(MODEL_NAME, "d4-model-not-called")
-    binding = create_task_binding(demo_db, "support-a", "orders-demo", "integration-a", "INC-UNKNOWN-D4")
+    monkeypatch.setattr(investigator, "ChatOpenAI", NoRecoveryModel)
+    binding, plan, source_run_id = _waiting_plan(demo_db, live_api)
+    task_id = str(binding["task_id"])
+    approval = approve_s1_repair(demo_db, task_id, str(plan["plan_hash"]))
     checkpoint_db = tmp_path / "d4-unknown-checkpoint.sqlite3"
 
-    async def seed() -> None:
-        async with AsyncSqliteSaver.from_conn_string(str(checkpoint_db)) as checkpointer:
-            await checkpointer.setup()
-            graph = build_investigation_graph(
-                demo_db, str(binding["task_id"]), "d4-model-not-called", None, [], [], None,
-                checkpointer, checkpoint_db, d3_mode=True, submitter_id="support-a",
-                executor_id="executor-a", business_api_url="http://127.0.0.1:1",
-            )
-            await graph.aupdate_state(
-                {"configurable": {"thread_id": str(binding["thread_id"])}},
-                {
-                    "task_binding_id": str(binding["task_id"]),
-                    "stage": "complete",
-                    "deliver_action_id": "missing-deliver-action",
-                    "deliver_ledger_ref": "missing-deliver-ledger",
-                },
-                as_node="d3_execute_deliver",
-            )
-
-    asyncio.run(seed())
-    result = asyncio.run(run_investigation(
+    _seed_graph_checkpoint(
+        demo_db, checkpoint_db, binding, source_run_id,
+        {
+            **_checkpoint_state(binding, plan, approval),
+            "stage": "complete",
+            "deliver_action_id": "missing-deliver-action",
+            "deliver_ledger_ref": "missing-deliver-ledger",
+        },
+        "d3_execute_deliver",
+    )
+    result = asyncio.run(investigator.run_investigation(
         str(binding["thread_id"]), "support-a", db_path=demo_db, checkpoint_db_path=checkpoint_db,
-        resume=True, d3_mode=True, executor_id="executor-a",
+        resume=True, d3_mode=True, executor_id="executor-a", run_id=str(approval["resume_run_id"]),
     ))
     assert result["graph_state"]["stage"] == "waiting_input"
     assert result["graph_state"]["blocked_reason"] == "ACTION_OUTCOME_UNKNOWN"
     assert result["action_state"]["action_ledgers"] == []
     assert result["action_state"]["delivery_records"] == []
     assert result["action_state"]["ticket_entries"] == []
+    domain = recovery_snapshot(demo_db, task_id)
+    assert domain["resume_run"]["status"] == "WAITING_INPUT"
+    assert domain["resume_run"]["blocked_reason"] == "ACTION_OUTCOME_UNKNOWN"
+    assert domain["intents"] == [] and domain["config_version"] == 7
     _record_d4_event(
         "unknown_terminal_checkpoint_blocks_pass",
         blocked_reason=result["graph_state"]["blocked_reason"],
         action_ledgers=len(result["action_state"]["action_ledgers"]),
         delivery_records=len(result["action_state"]["delivery_records"]),
         ticket_entries=len(result["action_state"]["ticket_entries"]),
+        domain=domain,
     )

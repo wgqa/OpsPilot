@@ -1,0 +1,1201 @@
+{
+  "task": "AR-05-RECOVERY-REVALIDATION-HF01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repository": "wgqa/OpsPilot",
+  "branch": "codex/ar05-recovery-revalidation-hf01",
+  "base": "6cf71f161ca42759daacb928fb45302c55aa60f6",
+  "observed_remote_main": "60eee87bfe3cca522011316cb4cd2c0064ad291b",
+  "source_blobs_under_test": {
+    "tests/d3_recovery_setup.py": "18a264e117a051960076b7a656cbf0af28e6b9ee",
+    "tests/d4_crash_worker.py": "45651e9577301a089d60ac9505707434bb51803c",
+    "tests/m1_repair_commit_process.py": "4ee4d9f82d37e67c663d98cc38e007de76585f7f",
+    "tests/test_d4_recovery.py": "76f99d278eaeb1617bfa825820d983f07058da1f",
+    "tests/test_m1_chat.py": "b2bc5a2607ee0e383db9691359e0182bc347dbd3",
+    "tests/test_m1_event_process_recovery.py": "ddb65f6d8114925950d2a276341b5b24527b50f1",
+    "tests/test_m4_01_dialogue_update_safety.py": "22f452891fe74479c366e9191905640fa13236f9"
+  },
+  "runs": {
+    "red-baseline": {
+      "log": "logs/red-baseline.txt",
+      "command": "python -m pytest -vv -s --tb=short -o faulthandler_timeout=75 --basetemp D:\\tmp\\opspilot-ar05-recovery-hf01-red-6079643f98dd44bfbfa3afeb173b27df tests/test_d4_recovery.py::test_d4_repair_committed_receipt_replays_after_plan_cancel tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[REPAIR-repair_after_commit_before_response] tests/test_d4_recovery.py::test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death tests/test_m4_01_dialogue_update_safety.py::test_pending_update_cannot_restart_a_really_delivered_s1_task",
+      "exit_code": 1,
+      "summary": "6 failed in 7.36s"
+    },
+    "fixture-direct": {
+      "log": "logs/fixture-direct.txt",
+      "command": "python -m pytest -vv -s --tb=short -o faulthandler_timeout=75 --basetemp D:\\tmp\\opspilot-ar05-recovery-hf01-direct-d40991aec11846a0b3b45006d8982225 tests/test_d4_recovery.py::test_d4_repair_committed_receipt_replays_after_plan_cancel tests/test_d4_recovery.py::test_d4_cancelled_uncommitted_intent_cannot_become_an_action tests/test_d4_recovery.py::test_d4_plan_replacement_races_repair_and_historical_receipt_replays tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death tests/test_m4_01_dialogue_update_safety.py::test_pending_update_cannot_restart_a_really_delivered_s1_task",
+      "exit_code": 1,
+      "summary": "3 failed, 3 passed in 3.72s"
+    },
+    "fixture-focus": {
+      "log": "logs/fixture-focus.txt",
+      "command": "python -m pytest -vv -s --tb=short -o faulthandler_timeout=75 --basetemp D:\\tmp\\opspilot-ar05-recovery-hf01-fixture-focus-ef88d57230254ebebdbfe4e6d1403826 tests/test_d4_recovery.py::test_d4_repair_committed_receipt_replays_after_plan_cancel tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[REPAIR-repair_after_commit_before_response] tests/test_d4_recovery.py::test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint tests/test_d4_recovery.py::test_d4_approval_interrupt_waits_then_resumes_from_persisted_receipt tests/test_d4_recovery.py::test_d4_terminal_checkpoint_without_domain_receipt_blocks_unknown_outcome tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death tests/test_m4_01_dialogue_update_safety.py::test_pending_update_cannot_restart_a_really_delivered_s1_task",
+      "exit_code": 0,
+      "summary": "8 passed in 19.97s"
+    },
+    "paired-boundaries": {
+      "log": "logs/paired-boundaries.txt",
+      "command": "python -m pytest -vv -s --tb=short -o faulthandler_timeout=75 --basetemp D:\\tmp\\opspilot-ar05-recovery-hf01-paired-boundaries-1a5ed830bacf475084b8ed5822d6e764 tests/test_d4_recovery.py::test_d4_linked_approval_cannot_repair_without_valid_current_facts tests/test_d4_recovery.py::test_d4_precommit_crash_replay_cannot_use_invalidated_authority tests/test_d4_recovery.py::test_d4_approval_checkpoint_cannot_replace_trusted_revalidation_context",
+      "exit_code": 0,
+      "summary": "10 passed in 6.96s"
+    },
+    "related-regression": {
+      "log": "logs/related-regression.txt",
+      "command": "python -m pytest -vv -s --tb=short -o faulthandler_timeout=75 --basetemp D:\\tmp\\opspilot-ar05-recovery-hf01-related-regression-8e720ec5e1284d92829e334cb27de2ea --junitxml=docs/evidence/ar-05/recovery-revalidation-hf01/logs/related-junit.xml tests/test_d4_recovery.py tests/test_m1_chat.py tests/test_m1_event_process_recovery.py tests/test_m4_01_dialogue_update_safety.py tests/test_d3_actions.py tests/test_m1_task_control.py tests/test_m1_web_approval.py tests/test_m1_worker_recovery.py tests/test_m4_01_dialogue_updates.py tests/test_ar05_s1_session_bridge_01.py tests/test_ar05_s2_assistant_handoff_01.py",
+      "exit_code": 0,
+      "summary": "129 passed in 166.54s (0:02:46)"
+    }
+  },
+  "related_regression": {
+    "total": 129,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 166.54,
+    "by_module": {
+      "tests/test_d4_recovery.py": {
+        "PASS": 36
+      },
+      "tests/test_m1_chat.py": {
+        "PASS": 9
+      },
+      "tests/test_m1_event_process_recovery.py": {
+        "PASS": 1
+      },
+      "tests/test_m4_01_dialogue_update_safety.py": {
+        "PASS": 6
+      },
+      "tests/test_d3_actions.py": {
+        "PASS": 18
+      },
+      "tests/test_m1_task_control.py": {
+        "PASS": 11
+      },
+      "tests/test_m1_web_approval.py": {
+        "PASS": 28
+      },
+      "tests/test_m1_worker_recovery.py": {
+        "PASS": 6
+      },
+      "tests/test_m4_01_dialogue_updates.py": {
+        "PASS": 9
+      },
+      "tests/test_ar05_s1_session_bridge_01.py": {
+        "PASS": 4
+      },
+      "tests/test_ar05_s2_assistant_handoff_01.py": {
+        "PASS": 1
+      }
+    },
+    "junit": "logs/related-junit.xml"
+  },
+  "original_cases": {
+    "count": 27,
+    "pass_current_contract": 27,
+    "blocked": 0,
+    "cases": [
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_repair_committed_receipt_replays_after_plan_cancel",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1274,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.545,
+        "target_assertion": "取消后回查原 REPAIR Intent、幂等键、摘要及 Ledger，版本仍为 8。",
+        "current_log_line": 16,
+        "trace_records": [
+          {
+            "trace_line": 4,
+            "log_line": 16,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 5,
+            "log_line": 17,
+            "event": "committed_receipt_replayed_after_cancel"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_deliver_committed_receipt_replays_after_plan_cancel",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1275,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.591,
+        "target_assertion": "取消后回查原 DELIVER Ledger、验证与报告引用，工单与交付记录各一条。",
+        "current_log_line": 19,
+        "trace_records": [
+          {
+            "trace_line": 6,
+            "log_line": 19,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 7,
+            "log_line": 20,
+            "event": "committed_receipt_replayed_after_cancel"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_cancelled_uncommitted_intent_cannot_become_an_action",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1276,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.545,
+        "target_assertion": "取消先发生时，旧 REPAIR Intent 拒绝执行，两项许可均 REVOKED。",
+        "current_log_line": 22,
+        "trace_records": [
+          {
+            "trace_line": 8,
+            "log_line": 22,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 9,
+            "log_line": 23,
+            "event": "uncommitted_intent_blocked_after_cancel"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_cancel_before_deliver_blocks_ticket_write_but_preserves_repair",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1277,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.606,
+        "target_assertion": "取消阻断未提交 DELIVER，原 REPAIR、验证与冻结报告可回查，DELIVER 许可 REVOKED。",
+        "current_log_line": 25,
+        "trace_records": [
+          {
+            "trace_line": 10,
+            "log_line": 25,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 11,
+            "log_line": 26,
+            "event": "uncommitted_intent_blocked_after_cancel"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_superseded_plan_blocks_old_uncommitted_intent",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1278,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.666,
+        "target_assertion": "替代后旧 Intent 不得执行或激活旧 Plan，两项旧许可均 REVOKED。",
+        "current_log_line": 28,
+        "trace_records": [
+          {
+            "trace_line": 12,
+            "log_line": 28,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 13,
+            "log_line": 29,
+            "event": "uncommitted_intent_blocked_after_supersede"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_plan_and_approval_reads_require_current_actor_scope",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1279,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.574,
+        "target_assertion": "同租户所有者可读；跨租户 Plan、Approval、恢复、Intent 与动作状态读取被拒。",
+        "current_log_line": 31,
+        "trace_records": [
+          {
+            "trace_line": 14,
+            "log_line": 31,
+            "event": "approval_resume_revalidated"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_repeated_approval_does_not_restore_consumed_repair_permission",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1280,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.478,
+        "target_assertion": "重复批准复用 Approval，REPAIR 仍 CONSUMED，ACTIVE Plan 下 DELIVER 仍 AVAILABLE。",
+        "current_log_line": 33,
+        "trace_records": [
+          {
+            "trace_line": 15,
+            "log_line": 33,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 16,
+            "log_line": 34,
+            "event": "repeated_approval_does_not_restore_permission_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_cancel_and_repair_are_serializable",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1281,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.543,
+        "target_assertion": "两个线程竞争 REPAIR 与取消。实际 REPAIR 先提交，REPAIR CONSUMED，未消费 DELIVER REVOKED。",
+        "current_log_line": 36,
+        "trace_records": [
+          {
+            "trace_line": 17,
+            "log_line": 36,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 18,
+            "log_line": 37,
+            "event": "cancel_repair_race_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_cancel_and_deliver_are_serializable",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1282,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.577,
+        "target_assertion": "两个线程竞争 DELIVER 与取消。实际 DELIVER 先提交，原 Ledger 可回查，工单仅一条。",
+        "current_log_line": 39,
+        "trace_records": [
+          {
+            "trace_line": 19,
+            "log_line": 39,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 20,
+            "log_line": 40,
+            "event": "cancel_deliver_race_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_plan_replacement_races_repair_and_historical_receipt_replays",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1283,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.638,
+        "target_assertion": "两个线程竞争替代与 REPAIR。实际 REPAIR 先提交，旧 Plan SUPERSEDED，旧 Ledger 可回查。",
+        "current_log_line": 42,
+        "trace_records": [
+          {
+            "trace_line": 21,
+            "log_line": 42,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 22,
+            "log_line": 43,
+            "event": "plan_replacement_repair_race_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_concurrent_duplicate_actions_commit_once[REPAIR]",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1284,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.526,
+        "target_assertion": "两个并发执行返回同一 Ledger，动作副作用仅提交一次。",
+        "current_log_line": 45,
+        "trace_records": [
+          {
+            "trace_line": 23,
+            "log_line": 45,
+            "event": "approval_resume_revalidated"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_concurrent_duplicate_actions_commit_once[DELIVER]",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1285,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.577,
+        "target_assertion": "两个并发执行返回同一 Ledger，动作副作用仅提交一次。",
+        "current_log_line": 47,
+        "trace_records": [
+          {
+            "trace_line": 24,
+            "log_line": 47,
+            "event": "approval_resume_revalidated"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[REPAIR-repair_before_commit]",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1286,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.649,
+        "target_assertion": "子进程退出码 75，独立连接核对退出后的 SQLite 状态，恢复沿用同一 ActionIntent，最终只有一次提交。",
+        "current_log_line": 49,
+        "trace_records": [
+          {
+            "trace_line": 25,
+            "log_line": 49,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 26,
+            "log_line": 50,
+            "event": "process_crash_injected"
+          },
+          {
+            "trace_line": 27,
+            "log_line": 51,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 28,
+            "log_line": 52,
+            "event": "action_crash_recovery_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[REPAIR-repair_after_commit_before_response]",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1287,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.73,
+        "target_assertion": "子进程退出码 75，独立连接核对退出后的 SQLite 状态，恢复沿用同一 ActionIntent，最终只有一次提交。",
+        "current_log_line": 54,
+        "trace_records": [
+          {
+            "trace_line": 29,
+            "log_line": 54,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 30,
+            "log_line": 55,
+            "event": "process_crash_injected"
+          },
+          {
+            "trace_line": 31,
+            "log_line": 56,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 32,
+            "log_line": 57,
+            "event": "action_crash_recovery_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[DELIVER-deliver_before_commit]",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1288,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.788,
+        "target_assertion": "子进程退出码 75，独立连接核对退出后的 SQLite 状态，恢复沿用同一 ActionIntent，最终只有一次提交。",
+        "current_log_line": 59,
+        "trace_records": [
+          {
+            "trace_line": 33,
+            "log_line": 59,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 34,
+            "log_line": 60,
+            "event": "process_crash_injected"
+          },
+          {
+            "trace_line": 35,
+            "log_line": 61,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 36,
+            "log_line": 62,
+            "event": "action_crash_recovery_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_os_process_crash_and_lost_action_response[DELIVER-deliver_after_commit_before_response]",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1289,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.798,
+        "target_assertion": "子进程退出码 75，独立连接核对退出后的 SQLite 状态，恢复沿用同一 ActionIntent，最终只有一次提交。",
+        "current_log_line": 64,
+        "trace_records": [
+          {
+            "trace_line": 37,
+            "log_line": 64,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 38,
+            "log_line": 65,
+            "event": "process_crash_injected"
+          },
+          {
+            "trace_line": 39,
+            "log_line": 66,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 40,
+            "log_line": 67,
+            "event": "action_crash_recovery_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_action_intent_survives_process_exit_before_checkpoint",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1290,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.652,
+        "target_assertion": "子进程退出码 76。重查原 Action ID、幂等键、请求摘要，CAS 尚未发生。",
+        "current_log_line": 69,
+        "trace_records": [
+          {
+            "trace_line": 41,
+            "log_line": 69,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 42,
+            "log_line": 70,
+            "event": "action_intent_persisted_before_checkpoint"
+          },
+          {
+            "trace_line": 43,
+            "log_line": 71,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 44,
+            "log_line": 72,
+            "event": "action_intent_process_exit_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_verification_and_frozen_report_replay_keep_original_receipts",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1314,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.573,
+        "target_assertion": "重复验证与冻结读取相同 Verification ID、Report ref 和内容摘要。",
+        "current_log_line": 91,
+        "trace_records": [
+          {
+            "trace_line": 58,
+            "log_line": 91,
+            "event": "approval_resume_revalidated"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_langgraph_replays_repair_intent_after_process_exit_before_checkpoint",
+        "baseline": "MISSING_TRUSTED_GRAPH_REVALIDATION_CONTEXT",
+        "baseline_log_line": 1315,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 7.316,
+        "target_assertion": "退出码 77，REPAIR Intent 已落库而 Ledger 未写。重启恢复同一审批 Run 和 Intent，最终 DELIVERED。",
+        "current_log_line": 105,
+        "trace_records": [
+          {
+            "trace_line": 67,
+            "log_line": 105,
+            "event": "graph_checkpoint_seeded"
+          },
+          {
+            "trace_line": 68,
+            "log_line": 106,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 69,
+            "log_line": 107,
+            "event": "graph_process_crash_injected"
+          },
+          {
+            "trace_line": 70,
+            "log_line": 108,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 71,
+            "log_line": 109,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 72,
+            "log_line": 110,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 73,
+            "log_line": 111,
+            "event": "graph_replay_completed"
+          },
+          {
+            "trace_line": 74,
+            "log_line": 112,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 75,
+            "log_line": 113,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 76,
+            "log_line": 114,
+            "event": "langgraph_repair_intent_checkpoint_lag_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_langgraph_replays_frozen_report_after_process_exit_before_checkpoint",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1317,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 7.052,
+        "target_assertion": "退出码 77，报告已冻结但 Checkpoint 未推进。重启复用原报告和摘要，仅交付一次。",
+        "current_log_line": 116,
+        "trace_records": [
+          {
+            "trace_line": 77,
+            "log_line": 116,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 78,
+            "log_line": 117,
+            "event": "graph_checkpoint_seeded"
+          },
+          {
+            "trace_line": 79,
+            "log_line": 118,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 80,
+            "log_line": 119,
+            "event": "graph_process_crash_injected"
+          },
+          {
+            "trace_line": 81,
+            "log_line": 120,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 82,
+            "log_line": 121,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 83,
+            "log_line": 122,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 84,
+            "log_line": 123,
+            "event": "graph_replay_completed"
+          },
+          {
+            "trace_line": 85,
+            "log_line": 124,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 86,
+            "log_line": 125,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 87,
+            "log_line": 126,
+            "event": "langgraph_frozen_report_checkpoint_lag_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_langgraph_replays_delivery_intent_after_process_exit_before_checkpoint",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1318,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 7.09,
+        "target_assertion": "退出码 77，DELIVER Intent 已落库，工单尚未写。重启使用同一 Intent 交付一次。",
+        "current_log_line": 128,
+        "trace_records": [
+          {
+            "trace_line": 88,
+            "log_line": 128,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 89,
+            "log_line": 129,
+            "event": "graph_checkpoint_seeded"
+          },
+          {
+            "trace_line": 90,
+            "log_line": 130,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 91,
+            "log_line": 131,
+            "event": "graph_process_crash_injected"
+          },
+          {
+            "trace_line": 92,
+            "log_line": 132,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 93,
+            "log_line": 133,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 94,
+            "log_line": 134,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 95,
+            "log_line": 135,
+            "event": "graph_replay_completed"
+          },
+          {
+            "trace_line": 96,
+            "log_line": 136,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 97,
+            "log_line": 137,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 98,
+            "log_line": 138,
+            "event": "langgraph_deliver_intent_checkpoint_lag_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_langgraph_replays_committed_repair_after_os_process_crash",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1319,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 7.147,
+        "target_assertion": "退出码 75，REPAIR 已提交、Graph 回执未返回。重启复用原 REPAIR Ledger 并验证、交付。",
+        "current_log_line": 140,
+        "trace_records": [
+          {
+            "trace_line": 99,
+            "log_line": 140,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 100,
+            "log_line": 141,
+            "event": "graph_checkpoint_seeded"
+          },
+          {
+            "trace_line": 101,
+            "log_line": 142,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 102,
+            "log_line": 143,
+            "event": "process_crash_injected"
+          },
+          {
+            "trace_line": 103,
+            "log_line": 144,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 104,
+            "log_line": 145,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 105,
+            "log_line": 146,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 106,
+            "log_line": 147,
+            "event": "graph_replay_completed"
+          },
+          {
+            "trace_line": 107,
+            "log_line": 148,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 108,
+            "log_line": 149,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 109,
+            "log_line": 150,
+            "event": "langgraph_repair_checkpoint_lag_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_langgraph_replays_committed_delivery_after_lost_response",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1320,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 7.125,
+        "target_assertion": "退出码 75，DELIVER 已提交、Graph 回执未返回。重启复用原 DELIVER Ledger，工单仍一条。",
+        "current_log_line": 152,
+        "trace_records": [
+          {
+            "trace_line": 110,
+            "log_line": 152,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 111,
+            "log_line": 153,
+            "event": "graph_checkpoint_seeded"
+          },
+          {
+            "trace_line": 112,
+            "log_line": 154,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 113,
+            "log_line": 155,
+            "event": "process_crash_injected"
+          },
+          {
+            "trace_line": 114,
+            "log_line": 156,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 115,
+            "log_line": 157,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 116,
+            "log_line": 158,
+            "event": "graph_process_start"
+          },
+          {
+            "trace_line": 117,
+            "log_line": 159,
+            "event": "graph_replay_completed"
+          },
+          {
+            "trace_line": 118,
+            "log_line": 160,
+            "event": "crash_worker_exited"
+          },
+          {
+            "trace_line": 119,
+            "log_line": 161,
+            "event": "graph_parent_readback"
+          },
+          {
+            "trace_line": 120,
+            "log_line": 162,
+            "event": "langgraph_deliver_checkpoint_lag_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_d4_recovery.py::test_d4_approval_interrupt_waits_then_resumes_from_persisted_receipt",
+        "baseline": "MISSING_TRUSTED_GRAPH_REVALIDATION_CONTEXT",
+        "baseline_log_line": 1321,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 3.642,
+        "target_assertion": "无 Approval 时持久挂起且零 Intent；独立批准产生真实恢复 Run，从同 Checkpoint 新取证、验证、交付。",
+        "current_log_line": 164,
+        "trace_records": [
+          {
+            "trace_line": 121,
+            "log_line": 164,
+            "event": "graph_checkpoint_seeded"
+          },
+          {
+            "trace_line": 122,
+            "log_line": 165,
+            "event": "approval_interrupt_recovery_pass"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_m1_chat.py::test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1322,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.607,
+        "target_assertion": "合法 CAS 后，旧 cred-v1/401 证据及依赖回答被聊天上下文排除，原证据仍存。",
+        "current_log_line": 175,
+        "trace_records": [
+          {
+            "trace_line": 125,
+            "log_line": 175,
+            "event": "approval_resume_revalidated"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_m1_event_process_recovery.py::test_n2_01_committed_repair_event_replays_after_commit_process_death",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1323,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 2.941,
+        "target_assertion": "提交进程退出码 0，另一 OS 进程的 HTTP event history 只重放一个 REPAIR_COMMITTED，Intent/Ledger/事件各一。",
+        "current_log_line": 180,
+        "trace_records": [
+          {
+            "trace_line": 126,
+            "log_line": 180,
+            "event": "approval_resume_revalidated"
+          },
+          {
+            "trace_line": 127,
+            "log_line": 181,
+            "event": "N2-01"
+          },
+          {
+            "trace_line": 128,
+            "log_line": 182,
+            "event": "N2-01"
+          }
+        ]
+      },
+      {
+        "nodeid": "tests/test_m4_01_dialogue_update_safety.py::test_pending_update_cannot_restart_a_really_delivered_s1_task",
+        "baseline": "REVALIDATION_REQUIRED_BEFORE_TARGET_ASSERTIONS",
+        "baseline_log_line": 1346,
+        "current": "PASS_CURRENT_CONTRACT",
+        "duration_seconds": 0.686,
+        "target_assertion": "真实隔离 REPAIR→VERIFY→DELIVER 后确认旧纠错，返回 409 TASK_ALREADY_TERMINAL 且写入计数不变。",
+        "current_log_line": 189,
+        "trace_records": [
+          {
+            "trace_line": 129,
+            "log_line": 189,
+            "event": "approval_resume_revalidated"
+          }
+        ]
+      }
+    ]
+  },
+  "new_boundary_cases": [
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_linked_approval_cannot_repair_without_valid_current_facts[no-receipt-None-None]",
+      "status": "PASS",
+      "seconds": 0.403,
+      "current_log_line": 10,
+      "trace_records": [
+        {
+          "trace_line": 1,
+          "log_line": 10,
+          "event": "invalid_revalidation_blocked_repair"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_linked_approval_cannot_repair_without_valid_current_facts[source-unknown-UNKNOWN-REVALIDATION_SOURCE_UNKNOWN:ConnectionError]",
+      "status": "PASS",
+      "seconds": 0.387,
+      "current_log_line": 12,
+      "trace_records": [
+        {
+          "trace_line": 2,
+          "log_line": 12,
+          "event": "invalid_revalidation_blocked_repair"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_linked_approval_cannot_repair_without_valid_current_facts[principal-disabled-BLOCKED-PRINCIPAL_DISABLED]",
+      "status": "PASS",
+      "seconds": 0.484,
+      "current_log_line": 14,
+      "trace_records": [
+        {
+          "trace_line": 3,
+          "log_line": 14,
+          "event": "invalid_revalidation_blocked_repair"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_precommit_crash_replay_cannot_use_invalidated_authority[cancelled-PLAN_NOT_ACTIVE]",
+      "status": "PASS",
+      "seconds": 0.681,
+      "current_log_line": 74,
+      "trace_records": [
+        {
+          "trace_line": 45,
+          "log_line": 74,
+          "event": "approval_resume_revalidated"
+        },
+        {
+          "trace_line": 46,
+          "log_line": 75,
+          "event": "process_crash_injected"
+        },
+        {
+          "trace_line": 47,
+          "log_line": 76,
+          "event": "crash_worker_exited"
+        },
+        {
+          "trace_line": 48,
+          "log_line": 77,
+          "event": "precommit_crash_retry_rejected"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_precommit_crash_replay_cannot_use_invalidated_authority[expired-REVALIDATION_RECEIPT_EXPIRED]",
+      "status": "PASS",
+      "seconds": 0.665,
+      "current_log_line": 79,
+      "trace_records": [
+        {
+          "trace_line": 49,
+          "log_line": 79,
+          "event": "approval_resume_revalidated"
+        },
+        {
+          "trace_line": 50,
+          "log_line": 80,
+          "event": "process_crash_injected"
+        },
+        {
+          "trace_line": 51,
+          "log_line": 81,
+          "event": "crash_worker_exited"
+        },
+        {
+          "trace_line": 52,
+          "log_line": 82,
+          "event": "precommit_crash_retry_rejected"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_precommit_crash_replay_cannot_use_invalidated_authority[version-conflict-RESOURCE_VERSION_OR_CREDENTIAL_PRECONDITION_FAILED]",
+      "status": "PASS",
+      "seconds": 0.67,
+      "current_log_line": 84,
+      "trace_records": [
+        {
+          "trace_line": 53,
+          "log_line": 84,
+          "event": "approval_resume_revalidated"
+        },
+        {
+          "trace_line": 54,
+          "log_line": 85,
+          "event": "process_crash_injected"
+        },
+        {
+          "trace_line": 55,
+          "log_line": 86,
+          "event": "crash_worker_exited"
+        },
+        {
+          "trace_line": 56,
+          "log_line": 87,
+          "event": "precommit_crash_retry_rejected"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_approval_checkpoint_cannot_replace_trusted_revalidation_context[run]",
+      "status": "PASS",
+      "seconds": 1.355,
+      "current_log_line": 93,
+      "trace_records": [
+        {
+          "trace_line": 59,
+          "log_line": 93,
+          "event": "graph_checkpoint_seeded"
+        },
+        {
+          "trace_line": 60,
+          "log_line": 94,
+          "event": "approval_checkpoint_context_rejected"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_approval_checkpoint_cannot_replace_trusted_revalidation_context[executor]",
+      "status": "PASS",
+      "seconds": 0.464,
+      "current_log_line": 96,
+      "trace_records": [
+        {
+          "trace_line": 61,
+          "log_line": 96,
+          "event": "graph_checkpoint_seeded"
+        },
+        {
+          "trace_line": 62,
+          "log_line": 97,
+          "event": "approval_checkpoint_context_rejected"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_approval_checkpoint_cannot_replace_trusted_revalidation_context[http]",
+      "status": "PASS",
+      "seconds": 0.466,
+      "current_log_line": 99,
+      "trace_records": [
+        {
+          "trace_line": 63,
+          "log_line": 99,
+          "event": "graph_checkpoint_seeded"
+        },
+        {
+          "trace_line": 64,
+          "log_line": 100,
+          "event": "approval_checkpoint_context_rejected"
+        }
+      ]
+    },
+    {
+      "nodeid": "tests/test_d4_recovery.py::test_d4_approval_checkpoint_cannot_replace_trusted_revalidation_context[unclaimed-run]",
+      "status": "PASS",
+      "seconds": 0.481,
+      "current_log_line": 102,
+      "trace_records": [
+        {
+          "trace_line": 65,
+          "log_line": 102,
+          "event": "graph_checkpoint_seeded"
+        },
+        {
+          "trace_line": 66,
+          "log_line": 103,
+          "event": "approval_checkpoint_context_rejected"
+        }
+      ]
+    }
+  ],
+  "structured_trace": {
+    "file": "OS_CRASH_REPLAY_TRACE.jsonl",
+    "record_count": 129,
+    "source": "logs/related-regression.txt",
+    "format": "verbatim structured payloads, with pytest node-id and M1_EVIDENCE prefixes removed"
+  },
+  "previous_failures_not_rerun": [
+    {
+      "nodeid": "tests/test_ar04c_f01_recheck_preflight.py::test_recheck_authorization_claim_and_mock_send_are_scoped",
+      "historical_status": "FAILED",
+      "historical_log_line": 1247,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_f01_recheck_preflight.py::test_formal_worker_uses_scoped_mock_transport_and_mcp",
+      "historical_status": "FAILED",
+      "historical_log_line": 1248,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_prelive_hf01.py::test_ar04c_authorization_positive_claim_is_atomic_and_head_bound",
+      "historical_status": "FAILED",
+      "historical_log_line": 1249,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_prelive_hf01.py::test_ar04c_claim_tamper_is_rejected_before_model_construction",
+      "historical_status": "FAILED",
+      "historical_log_line": 1261,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_prelive_hf01.py::test_ar04c_authorization_change_after_claim_is_rejected",
+      "historical_status": "FAILED",
+      "historical_log_line": 1262,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_prelive_hf01.py::test_ar04c_unknown_stop_is_persisted_and_cannot_be_reclaimed",
+      "historical_status": "FAILED",
+      "historical_log_line": 1263,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_prelive_hf01.py::test_ar04c_consumed_claim_cannot_be_replayed_by_new_worker_process",
+      "historical_status": "FAILED",
+      "historical_log_line": 1264,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_prelive_hf01.py::test_ar04c_mock_provider_transport_requires_formal_dispatch_context",
+      "historical_status": "FAILED",
+      "historical_log_line": 1265,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_prelive_hf01.py::test_ar04c_mock_provider_success_consumes_claim_before_http_and_pins_database",
+      "historical_status": "FAILED",
+      "historical_log_line": 1266,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_prelive_hf01.py::test_ar04c_mock_provider_unknown_persists_stop_and_blocks_followup",
+      "historical_status": "FAILED",
+      "historical_log_line": 1267,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff",
+      "historical_status": "FAILED",
+      "historical_log_line": 1268,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_ar04c_real_journey_01.py::test_ar04c_paid_factory_fails_closed_without_authorization_and_claim",
+      "historical_status": "FAILED",
+      "historical_log_line": 1271,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    },
+    {
+      "nodeid": "tests/test_m4_autonomy_c1_red.py::test_explicit_protocol_followup_is_accepted_as_same_task_readonly_run_before_ttl_fix",
+      "historical_status": "FAILED",
+      "historical_log_line": 1347,
+      "current_status": "NOT_RUN_OUT_OF_SCOPE"
+    }
+  ],
+  "production_source_changes": [],
+  "production_defects_reproduced": [],
+  "whole_repository_pytest": "NOT_RUN_IN_THIS_SLICE",
+  "paid_provider_requests": 0,
+  "external_business_writes": 0,
+  "browser": "NOT_RUN_EXISTING_STOP",
+  "main_merge": "NOT_RUN"
+}

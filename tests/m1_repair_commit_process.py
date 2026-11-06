@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from opspilot.domain.api import make_server
 from opspilot.domain.d2 import (
-    create_task_binding,
     evaluate_evidence_gate,
     get_auth_policy_fact,
     get_integration_config_fact,
@@ -19,12 +18,17 @@ from opspilot.domain.d2 import (
     record_tool_observation,
 )
 from opspilot.domain.d3 import (
-    create_plan_from_gate,
     execute_repair,
     get_or_create_action_intent,
-    submit_plan_approval,
 )
 from opspilot.domain.database import connect
+from tests.d3_recovery_setup import (
+    approve_s1_repair,
+    claim_and_revalidate_s1_repair,
+    plan_s1_repair,
+    recovery_snapshot,
+    start_s1_investigation,
+)
 
 
 def main() -> int:
@@ -33,13 +37,14 @@ def main() -> int:
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
     thread.start()
     host, port = server.server_address
-    binding = create_task_binding(db_path, "support-a", "orders-demo", "integration-a", "INC-A-001")
+    api_url = f"http://{host}:{port}"
+    binding, source_run_id = start_s1_investigation(db_path, "m1-process-recovery")
     task_id = str(binding["task_id"])
     observations = (
         ("get_integration_config", get_integration_config_fact(db_path, task_id, "integration-a")),
         ("get_principal_status", get_principal_status_fact(db_path, task_id, "principal-a")),
         ("get_auth_policy", get_auth_policy_fact(db_path, task_id, "orders-demo")),
-        ("probe_endpoint", probe_endpoint_fact(db_path, task_id, "orders-demo", "integration-a", f"http://{host}:{port}")),
+        ("probe_endpoint", probe_endpoint_fact(db_path, task_id, "orders-demo", "integration-a", api_url)),
     )
     evidence_ids = []
     for index, (tool_name, result) in enumerate(observations, 1):
@@ -52,9 +57,11 @@ def main() -> int:
     gate = evaluate_evidence_gate(db_path, task_id, evidence_ids)
     if gate["decision"] != "READY":
         raise RuntimeError("N2-01 precondition did not produce a READY evidence gate.")
-    plan = create_plan_from_gate(db_path, task_id, "support-a", gate)
-    submit_plan_approval(db_path, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
+    plan = plan_s1_repair(db_path, task_id, source_run_id, gate)
+    approval = approve_s1_repair(db_path, task_id, str(plan["plan_hash"]))
+    claim_and_revalidate_s1_repair(db_path, approval, api_url)
     intent = get_or_create_action_intent(db_path, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+    before_commit = recovery_snapshot(db_path, task_id)
     ledger = execute_repair(db_path, str(intent["action_id"]), "executor-a", "n2-01-process-commit")
     with connect(db_path) as connection:
         version = connection.execute(
@@ -70,6 +77,7 @@ def main() -> int:
         "ledger_id": ledger["ledger_id"], "status": ledger["status"],
         "before_version": ledger["before_version"], "after_version": ledger["after_version"],
         "config_version": version, "durable_repair_event_count_before_process_exit": events,
+        "before_commit": before_commit, "after_commit": recovery_snapshot(db_path, task_id),
         "pid": os.getpid(), "process_exits_without_sse_delivery": True,
     }, sort_keys=True), flush=True)
     # Exit without a normal API/SSE shutdown after the Domain transaction commits.

@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 
 from opspilot.domain.database import connect
+from tests.d3_recovery_setup import recovery_snapshot
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +45,7 @@ def test_n2_01_committed_repair_event_replays_after_commit_process_death(
         [sys.executable, "-X", "utf8", str(commit_script), str(demo_db)],
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
+    print(committed.stdout, end="")
     assert committed.returncode == 0, committed.stderr
     commit_event = json.loads(committed.stdout.strip().splitlines()[-1])
     assert commit_event["status"] == "COMMITTED"
@@ -125,9 +127,12 @@ def test_n2_01_committed_repair_event_replays_after_commit_process_death(
             assert action_counts == {"intent": 1, "ledger": 1, "repair_event": 1, "config_version": 8}
             print("M1_EVIDENCE " + json.dumps({
                 "case": "N2-01", "commit_process_pid": commit_event["pid"],
+                "commit_process_exit_code": committed.returncode,
                 "new_api_process_pid": server.pid, "repair_action_id": commit_event["action_id"],
+                "repair_ledger_id": commit_event["ledger_id"],
                 "http_status": history.status_code, "replayed_event_count": len(repair_events),
                 "action_counts_after_restart": action_counts,
+                "domain_after_restart": recovery_snapshot(demo_db, commit_event["task_id"]),
                 "repair_event_payload": repair_events[0]["payload"],
             }, sort_keys=True))
     finally:

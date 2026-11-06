@@ -16,7 +16,6 @@ from opspilot.domain.chat import (
 )
 from opspilot.domain.database import connect
 from opspilot.domain.d2 import (
-    create_task_binding,
     evaluate_evidence_gate,
     get_auth_policy_fact,
     get_integration_config_fact,
@@ -26,10 +25,8 @@ from opspilot.domain.d2 import (
 )
 from opspilot.domain.d3 import (
     activate_plan,
-    create_plan_from_gate,
     execute_repair,
     get_or_create_action_intent,
-    submit_plan_approval,
 )
 from opspilot.domain.task_control import (
     admit_task_message,
@@ -42,6 +39,12 @@ from opspilot.domain.task_control import (
 )
 from opspilot.web.app import create_app
 from opspilot.web.worker import _provider_response_identifier
+from tests.d3_recovery_setup import (
+    approve_s1_repair,
+    claim_and_revalidate_s1_repair,
+    plan_s1_repair,
+    start_s1_investigation,
+)
 
 
 ORIGIN = "http://127.0.0.1:5173"
@@ -238,9 +241,7 @@ def test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer(
     demo_db: Path, live_api: str,
 ) -> None:
     identity = trusted_identity(demo_db, "support-a")
-    binding = create_task_binding(
-        demo_db, "support-a", "orders-demo", "integration-a",
-    )
+    binding, source_run_id = start_s1_investigation(demo_db, "chat-evidence-versions")
     task_id, session_id = str(binding["task_id"]), str(binding["session_id"])
     facts = [
         ("get_integration_config", get_integration_config_fact(demo_db, task_id, "integration-a")),
@@ -275,11 +276,10 @@ def test_chat_evidence_versions_exclude_pre_repair_probe_and_dependent_answer(
 
     gate = evaluate_evidence_gate(demo_db, task_id, evidence_ids)
     assert gate["decision"] == "READY"
-    plan = create_plan_from_gate(demo_db, task_id, "support-a", gate)
+    plan = plan_s1_repair(demo_db, task_id, source_run_id, gate)
     activate_plan(demo_db, task_id, str(plan["plan_hash"]), "support-a")
-    submit_plan_approval(
-        demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED",
-    )
+    approval = approve_s1_repair(demo_db, task_id, str(plan["plan_hash"]))
+    claim_and_revalidate_s1_repair(demo_db, approval, live_api)
     intent = get_or_create_action_intent(
         demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a",
     )
