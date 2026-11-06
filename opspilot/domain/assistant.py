@@ -1,6 +1,7 @@
 """Professional assistant execution metadata. Session/Run/Task remain authoritative."""
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -277,6 +278,285 @@ def state(connection, run_id, *, active=True, worker_id=None):
 def read_run(path,run_id,*,active=True,worker_id=None):
     with connect(path) as c: return state(c,run_id,active=active,worker_id=worker_id)
 
+
+MAX_SESSION_PROFESSIONAL_OUTCOMES = 4
+
+
+def _assistant_source_message(connection, run):
+    message_id = run.get('source_message_id')
+    if not message_id:
+        raise TaskControlError('ASSISTANT_SOURCE_MESSAGE_REQUIRED')
+    row = connection.execute(
+        """SELECT message_id, tenant_id, session_id, task_id, sequence, role, input_kind,
+                  body, body_digest, created_at
+           FROM messages WHERE message_id = ?""",
+        (message_id,),
+    ).fetchone()
+    if (
+        row is None or row['tenant_id'] != run['tenant_id']
+        or row['session_id'] != run['session_id'] or row['task_id'] is not None
+        or row['role'] != 'USER' or row['input_kind'] != 'CHAT_READONLY'
+        or int(row['sequence']) != int(run['consumed_message_seq'])
+    ):
+        raise TaskControlError('ASSISTANT_SOURCE_MESSAGE_SCOPE_INVALID')
+    actual_digest = hashlib.sha256(str(row['body']).encode('utf-8')).hexdigest()
+    if actual_digest != str(row['body_digest']):
+        raise TaskControlError('ASSISTANT_SOURCE_MESSAGE_DIGEST_INVALID')
+    return row, actual_digest
+
+
+def propose_controlled_auth_investigation(path, run_id, rationale):
+    """Persist an advisory-only proposal as an ordinary MCP call result.
+
+    The existing Assistant call ledger stores the proposal. It creates no Task,
+    permission, approval, or business state; the UI must use the existing
+    explicit-confirmation Task API with the trusted source message ID.
+    """
+    if not isinstance(rationale, str) or not rationale.strip() or len(rationale.strip()) > 240:
+        raise TaskControlError('ASSISTANT_INVESTIGATION_PROPOSAL_INVALID')
+    with connect(path) as connection:
+        run, identity = state(connection, run_id, active=False)
+        if run['kind'] != 'CHAT_READONLY' or run['task_id'] is not None:
+            raise TaskControlError('ASSISTANT_INVESTIGATION_PROPOSAL_REQUIRES_UNBOUND_CHAT')
+        operator = _verify_identity(connection, identity)
+        if operator['role'] != 'SUPPORT':
+            raise TaskControlError('ASSISTANT_INVESTIGATION_PROPOSAL_SUPPORT_ONLY')
+        message, source_digest = _assistant_source_message(connection, run)
+        return {
+            'success': True,
+            'proposal_type': 'CONTROLLED_AUTH_INVESTIGATION',
+            'authority': 'MODEL_SUGGESTION_ONLY_UNTRUSTED',
+            'rationale': rationale.strip(),
+            'source_message_id': str(message['message_id']),
+            'source_message_digest': source_digest,
+            'source_created_at': str(message['created_at']),
+            'task_created': False,
+            'authorization_created': False,
+            'requires_explicit_user_confirmation': True,
+        }
+
+
+def _session_professional_outcomes(connection, run, identity):
+    _verify_identity(connection, identity)
+    if run['kind'] != 'CHAT_READONLY' or run['task_id'] is not None or identity.role != 'SUPPORT':
+        raise TaskControlError('ASSISTANT_PROFESSIONAL_OUTCOME_READ_SCOPE_DENIED')
+    session = connection.execute(
+        """SELECT session_id FROM sessions
+           WHERE session_id = ? AND tenant_id = ? AND owner_id = ?""",
+        (run['session_id'], identity.tenant_id, identity.actor_id),
+    ).fetchone()
+    if session is None:
+        raise TaskControlError('SESSION_SCOPE_DENIED')
+
+    rows = connection.execute(
+        """SELECT b.task_id, b.status AS task_status, b.created_at, c.control_revision,
+                  (SELECT COUNT(*) FROM d3_plans p
+                   WHERE p.tenant_id = b.tenant_id AND p.task_id = b.task_id) AS s1_plan_count,
+                  (SELECT COUNT(*) FROM s2_diagnosis_receipts d
+                   WHERE d.tenant_id = b.tenant_id AND d.task_id = b.task_id) AS s2_receipt_count
+           FROM session_task_links l
+           JOIN task_bindings b ON b.task_id = l.task_id AND b.tenant_id = l.tenant_id
+           JOIN task_controls c ON c.task_id = b.task_id AND c.tenant_id = b.tenant_id
+           WHERE l.session_id = ? AND l.tenant_id = ? AND b.actor_id = ?
+             AND c.terminal_state = 'ACTIVE'
+             AND (EXISTS (SELECT 1 FROM d3_plans p WHERE p.tenant_id = b.tenant_id AND p.task_id = b.task_id)
+                  OR EXISTS (SELECT 1 FROM s2_diagnosis_receipts d WHERE d.tenant_id = b.tenant_id AND d.task_id = b.task_id))
+           ORDER BY l.linked_at DESC, b.task_id DESC LIMIT ?""",
+        (run['session_id'], identity.tenant_id, identity.actor_id, MAX_SESSION_PROFESSIONAL_OUTCOMES + 1),
+    ).fetchall()
+    database_path = str(connection.execute('PRAGMA database_list').fetchone()[2])
+    items: list[dict[str, object]] = []
+    for row in rows[:MAX_SESSION_PROFESSIONAL_OUTCOMES]:
+        task_id = str(row['task_id'])
+        latest_runs = connection.execute(
+            """SELECT run_id, kind, status, created_at, ended_at
+               FROM task_runs WHERE tenant_id = ? AND task_id = ? AND kind != 'CHAT_READONLY'
+               ORDER BY created_at DESC, run_id DESC LIMIT 3""",
+            (identity.tenant_id, task_id),
+        ).fetchall()
+        run_refs = [{key: item[key] for key in ('run_id', 'kind', 'status', 'created_at', 'ended_at')}
+                    for item in latest_runs]
+
+        if int(row['s2_receipt_count']) > 0:
+            from opspilot.domain.s2_handoff import get_s2_handoff
+
+            outcome = get_s2_handoff(database_path, identity, task_id)
+            if outcome.get('business_outcome') == 'NO_S2_DIAGNOSIS':
+                continue
+            diagnosis = outcome.get('diagnosis_receipt')
+            receipt = outcome.get('handoff_receipt')
+            draft = outcome.get('draft')
+            diagnosis_view = None
+            if isinstance(diagnosis, dict):
+                diagnosis_view = {key: diagnosis.get(key) for key in (
+                    'receipt_id', 'task_id', 'outcome', 'run_id', 'request_id', 'decision_id',
+                    'gate_policy_version', 'predicate', 'evidence_ids', 'evidence_digests',
+                    'observed_versions', 'created_at',
+                )}
+            draft_view = None
+            if isinstance(draft, dict):
+                content = draft.get('content') if isinstance(draft.get('content'), dict) else {}
+                draft_view = {
+                    **{key: draft.get(key) for key in ('draft_id', 'task_id', 'receipt_id', 'version', 'content_digest', 'created_at', 'status')},
+                    'content': {key: content.get(key) for key in (
+                        'service_id', 'integration_id', 'principal_id', 'route', 'required_scopes',
+                        'granted_scopes', 'missing_scopes', 'reason', 'evidence_ids', 'knowledge_refs',
+                        'state', 'authorization_changed', 'handoff_receipt_created',
+                    ) if key in content},
+                    'current': draft.get('current'),
+                }
+            receipt_view = None
+            if isinstance(receipt, dict):
+                receipt_view = {key: receipt.get(key) for key in (
+                    'receipt_id', 'task_id', 'queue_entry_id', 'handoff_kind', 'draft_id',
+                    'draft_digest', 'accepted_by_actor_id', 'accepted_at', 'request_id', 'decision_id',
+                    'credential_policy_version', 'scope_policy_version', 'grant_version',
+                )}
+            queue = outcome.get('queue_entry')
+            queue_view = ({key: queue.get(key) for key in (
+                'entry_id', 'queue_id', 'receiver_label', 'received_at', 'review_due_at', 'status',
+            )} if isinstance(queue, dict) else None)
+            source_refs: dict[str, object] = {}
+            if isinstance(diagnosis, dict):
+                source_refs = {
+                    'diagnosis_receipt_id': diagnosis.get('receipt_id'),
+                    'run_id': diagnosis.get('run_id'),
+                    'evidence_ids': diagnosis.get('evidence_ids', []),
+                    'created_at': diagnosis.get('created_at'),
+                }
+            items.append({
+                'task_id': task_id,
+                'professional_type': 'S2_SCOPE_HANDOFF',
+                'execution_core': 'PROFESSIONAL_INVESTIGATOR',
+                'task_status': outcome.get('task_status', str(row['task_status'])),
+                'task_control_revision': int(row['control_revision']),
+                'latest_runs': run_refs,
+                'business_outcome': outcome.get('business_outcome'),
+                'currentness': outcome.get('currentness'),
+                'reason_code': outcome.get('reason_code'),
+                'diagnosis_receipt': diagnosis_view,
+                'draft': draft_view,
+                'handoff_receipt': receipt_view,
+                'queue_entry': queue_view,
+                'handoff_status': outcome.get('handoff_status'),
+                'submitted': outcome.get('submitted') is True,
+                'scope_authorized': outcome.get('scope_authorized') is True,
+                'recovered': outcome.get('recovered') is True,
+                'source_refs': source_refs,
+            })
+            continue
+
+        from opspilot.domain.d3 import get_task_outcome
+
+        outcome = get_task_outcome(database_path, task_id, identity.actor_id)
+        plan_ref = outcome.get('plan') if isinstance(outcome.get('plan'), dict) else None
+        if not plan_ref:
+            continue
+        plan_row = connection.execute(
+            """SELECT p.canonical_plan_json, p.created_at, pcb.task_run_id
+               FROM d3_plans p LEFT JOIN d3_plan_control_bindings pcb
+                 ON pcb.tenant_id = p.tenant_id AND pcb.task_id = p.task_id AND pcb.plan_hash = p.plan_hash
+               WHERE p.tenant_id = ? AND p.task_id = ? AND p.plan_hash = ?""",
+            (identity.tenant_id, task_id, plan_ref['plan_hash']),
+        ).fetchone()
+        canonical_plan = json.loads(str(plan_row['canonical_plan_json'])) if plan_row else {}
+        evidence_ids = canonical_plan.get('required_evidence_ids', [])
+        evidence_ids = [str(value) for value in evidence_ids if isinstance(value, str)] if isinstance(evidence_ids, list) else []
+        verification = outcome.get('verification') if isinstance(outcome.get('verification'), dict) else None
+        verification_time = None
+        if verification:
+            verification_row = connection.execute(
+                """SELECT observed_at FROM d3_verification_receipts
+                   WHERE tenant_id = ? AND task_id = ? AND verification_id = ?""",
+                (identity.tenant_id, task_id, verification.get('verification_id')),
+            ).fetchone()
+            verification_time = str(verification_row['observed_at']) if verification_row else None
+        items.append({
+            'task_id': task_id,
+            'professional_type': 'S1_CONTROLLED_REPAIR',
+            'execution_core': 'PROFESSIONAL_INVESTIGATOR_D3',
+            'task_status': outcome.get('task_status', str(row['task_status'])),
+            'task_control_revision': int(row['control_revision']),
+            'latest_runs': run_refs,
+            'business_outcome': outcome.get('business_outcome'),
+            'currentness': 'PERSISTED_OUTCOME_NOT_CURRENT_PROBE',
+            'outcome_time': verification_time or (str(plan_row['created_at']) if plan_row else str(row['created_at'])),
+            'plan': plan_ref,
+            'approval': outcome.get('approval'),
+            'revalidation': outcome.get('revalidation'),
+            'repair': outcome.get('repair'),
+            'verification': verification,
+            'frozen_report': outcome.get('frozen_report'),
+            'delivery': outcome.get('delivery'),
+            'local_report': outcome.get('local_report'),
+            'source_refs': {
+                'plan_hash': plan_ref.get('plan_hash'),
+                'plan_task_run_id': str(plan_row['task_run_id']) if plan_row and plan_row['task_run_id'] else None,
+                'evidence_ids': evidence_ids,
+                'verification_id': verification.get('verification_id') if verification else None,
+                'verification_observed_at': verification_time,
+            },
+        })
+    return {
+        'success': True,
+        'session_id': str(run['session_id']),
+        'authority': 'TRUSTED_SAME_SESSION_PROFESSIONAL_OUTCOMES',
+        'currentness_semantics': 'REVALIDATED_BEFORE_EACH_MODEL_DISPATCH; S1 persisted verification is historical, S2 diagnosis currentness is Domain-derived',
+        'items': items,
+        'omitted_count': max(0, len(rows) - MAX_SESSION_PROFESSIONAL_OUTCOMES),
+        'snapshot_digest': digest_json({
+            'session_id': str(run['session_id']), 'tenant_id': identity.tenant_id,
+            'actor_id': identity.actor_id, 'items': items,
+            'omitted_count': max(0, len(rows) - MAX_SESSION_PROFESSIONAL_OUTCOMES),
+        }),
+    }
+
+
+def read_session_professional_outcomes(path, run_id):
+    """Read only S1/S2 outcomes linked to the current trusted Assistant Session."""
+    run, identity = read_run(path, run_id, active=False)
+    with connect(path) as connection:
+        return _session_professional_outcomes(connection, run, identity)
+
+
+def _proposal_source_is_current(connection, run, identity, result, request):
+    try:
+        if (
+            run['kind'] != 'CHAT_READONLY' or run['task_id'] is not None
+            or identity.role != 'SUPPORT' or result.get('success') is not True
+            or result.get('proposal_type') != 'CONTROLLED_AUTH_INVESTIGATION'
+            or result.get('authority') != 'MODEL_SUGGESTION_ONLY_UNTRUSTED'
+            or result.get('task_created') is not False
+            or result.get('authorization_created') is not False
+            or result.get('requires_explicit_user_confirmation') is not True
+        ):
+            return False
+        message, source_digest = _assistant_source_message(connection, run)
+        args = request.get('args') if isinstance(request, dict) else None
+        rationale = args.get('rationale') if isinstance(args, dict) else None
+        return bool(
+            result.get('source_message_id') == message['message_id']
+            and result.get('source_message_digest') == source_digest
+            and isinstance(rationale, str)
+            and result.get('rationale') == rationale.strip()
+        )
+    except Exception:
+        return False
+
+
+def _professional_outcome_source_is_current(connection, run_id, result):
+    try:
+        run, identity = state(connection, run_id, active=False)
+        expected = _session_professional_outcomes(connection, run, identity)
+        return bool(
+            result.get('success') is True
+            and result.get('session_id') == expected['session_id']
+            and result.get('authority') == expected['authority']
+            and result.get('snapshot_digest') == expected['snapshot_digest']
+        )
+    except Exception:
+        return False
+
 def run_limits_for_experiment(experiment_id):
     """Keep ordinary Runs at 8/6; only explicitly scoped experiments vary."""
     from opspilot.domain.assistant_experiment import (
@@ -361,7 +641,13 @@ def sources_current(connection, run_id):
             except (TypeError, json.JSONDecodeError):
                 return False, 'ASSISTANT_SOURCE_REQUEST_INVALID'
             tool_name = request.get('name') if isinstance(request, dict) else None
-            if row['evidence_id']:
+            if tool_name == 'propose_controlled_auth_investigation':
+                if not _proposal_source_is_current(connection, run, identity, value, request):
+                    return False, 'ASSISTANT_INVESTIGATION_PROPOSAL_SOURCE_INVALID'
+            elif tool_name == 'read_session_professional_outcomes':
+                if not _professional_outcome_source_is_current(connection, run_id, value):
+                    return False, 'ASSISTANT_PROFESSIONAL_OUTCOME_SOURCE_INVALID'
+            elif row['evidence_id']:
                 facts,excluded=current_s3_evidence(connection,run['task_id'],[row['evidence_id']],run_id=run_id,observation_ids={row['evidence_id']:row['observation_id']})
                 if excluded or not facts: return False,'BUSINESS_SOURCE_INVALIDATED'
             elif 'protocol_documents' in value:

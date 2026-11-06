@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
-import { acknowledgeAssistantOperation, beginAssistantOperation } from './assistant-entry';
+import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
 import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
 
@@ -139,9 +139,9 @@ function dateLabel(value: unknown): string {
 
 function statusTone(value: unknown): string {
   const status = String(value ?? '').toUpperCase();
-  if (['SUCCEEDED', 'COMPLETED', 'ENABLED', 'ACTIVE', 'APPROVED', 'READY', 'DELIVERED'].includes(status)) return 'good';
+  if (['SUCCEEDED', 'COMPLETED', 'ENABLED', 'ACTIVE', 'APPROVED', 'READY', 'DELIVERED', 'REPAIRED_VERIFIED'].includes(status)) return 'good';
   if (['FAILED', 'BLOCKED', 'ABORTED', 'REJECTED', 'DISABLED', 'INCONCLUSIVE'].includes(status)) return 'bad';
-  if (['WAITING_APPROVAL', 'WAITING_INPUT', 'QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE', 'RECOVERED_NOT_DELIVERED', 'APPROVAL_ACCEPTED', 'SCOPE_ESCALATED', 'PENDING_REVIEW', 'OVERDUE'].includes(status)) return 'warm';
+  if (['WAITING_APPROVAL', 'WAITING_INPUT', 'QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE', 'RECOVERED_NOT_DELIVERED', 'APPROVAL_ACCEPTED', 'HANDOFF_READY', 'DIAGNOSED', 'REPAIR_COMMITTED', 'REAPPROVAL_REQUIRED', 'REVALIDATION_BLOCKED', 'SCOPE_ESCALATED', 'PENDING_REVIEW', 'OVERDUE'].includes(status)) return 'warm';
   return 'neutral';
 }
 
@@ -153,7 +153,10 @@ function readableStatus(value: unknown): string {
     FAILED: '失败', BLOCKED: '已阻止', INCONCLUSIVE: '结论不足', ENABLED: '已启用',
     DISABLED: '已停用', ACTIVE: '生效中', APPROVED: '已批准', REJECTED: '已拒绝',
     CHAT_READONLY: '只读聊天', INVESTIGATE: '调查', APPROVAL_RESUME: '审批恢复',
-    SCOPE_ESCALATED: '已交本地队列', PENDING_REVIEW: '等待人工处理', OVERDUE: '超过处理目标',
+    HANDOFF_READY: '交接草稿待确认', DIAGNOSED: '已形成可信诊断', SCOPE_ESCALATED: '已交受控队列',
+    PENDING_REVIEW: '等待人工处理', OVERDUE: '超过处理目标', REPAIRED_VERIFIED: '修复已验证',
+    REPAIR_COMMITTED: '配置已提交，待验证', RECOVERED_NOT_DELIVERED: '已验证恢复，待交付',
+    REAPPROVAL_REQUIRED: '需要重新审批', REVALIDATION_BLOCKED: '复核阻止执行',
   };
   return names[status] ?? status;
 }
@@ -454,6 +457,10 @@ async function changeAssistantScope(event: Event): Promise<void> {
 
 async function loadAssistantSources(event: Event, runId: string | null | undefined, sourceTaskId: string | null): Promise<void> {
   if (!runId || !(event.target as HTMLElement).hasAttribute('open')) return;
+  await refreshAssistantSource(runId, sourceTaskId);
+}
+
+async function refreshAssistantSource(runId: string, sourceTaskId: string | null): Promise<void> {
   const requestedSession = sessionId.value;
   const generation = ++assistantSourceGeneration;
   assistantSourceRequests.set(runId, generation);
@@ -474,6 +481,12 @@ async function loadAssistantSources(event: Event, runId: string | null | undefin
       ...assistantSourceDetails.value, [runId]: { taskId: sourceTaskId, data: null, message: `此来源读取未获确认：${explainError(error)}` },
     };
   }
+}
+
+function assistantInvestigationProposal(runId: string | null | undefined, sourceMessageId: string) {
+  return runId
+    ? controlledInvestigationProposal(assistantSourceDetails.value[runId]?.data, sourceMessageId)
+    : null;
 }
 
 async function openAssistantOrderForm(): Promise<void> {
@@ -812,6 +825,9 @@ async function sendMessage(): Promise<void> {
       fallbackChatRunId = null;
       await watchRun(accepted.run_id);
       if (taskId.value) await refreshInspector();
+      if (assistantTargetTask === null && accepted.input_kind === 'CHAT_READONLY') {
+        await refreshAssistantSource(accepted.run_id, null);
+      }
     } else if (taskId.value) {
       const assessment = await api.assessTaskUpdate(taskId.value, accepted.message_id, csrf.value);
       investigationUpdates.value = [
@@ -1608,6 +1624,11 @@ onBeforeUnmount(() => {
                 <div class="message-avatar">✳</div><div class="message-content">
                   <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(item.message.created_at) }}</span><span class="message-task">{{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序限制说明 · 非模型答复' : '聊天答复' }}</span></div>
                   <div class="message-bubble">{{ item.message.body }}</div>
+                  <div v-if="item.runId && item.message.answer_kind === 'CHAT_MODEL' && assistantInvestigationProposal(item.runId, thread.anchor.message_id)" class="outcome-message warm-outcome" data-testid="assistant-investigation-proposal">
+                    <p><strong>助手建议进入受控调查</strong> · {{ assistantInvestigationProposal(item.runId, thread.anchor.message_id)?.rationale }}</p>
+                    <small>这是与原问题关联的未验证建议；尚未创建 Task、审批或业务权限。</small>
+                    <button class="primary-button" type="button" :disabled="busy || !csrf" @click="openControlledInvestigation(thread.anchor)">核对原问题并确认进入调查</button>
+                  </div>
                   <details class="followup-sources" @toggle="loadAssistantSources($event, item.runId, item.message.task_id)"><summary>查看答复来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序生成的限制说明，不是模型答复' : '持久化的聊天答复' }}</small>
                     <template v-if="item.runId && assistantSourceDetails[item.runId]">
                       <small v-if="assistantSourceDetails[item.runId].message">{{ assistantSourceDetails[item.runId].message }}</small>
@@ -1755,7 +1776,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="taskOutcome" class="inspector-section outcome-section" data-testid="task-outcome">
-            <div class="section-heading"><h3>Domain 业务回执</h3><span class="status-badge" :class="statusTone(taskOutcome.business_outcome)">{{ String(taskOutcome.business_outcome) }}</span></div>
+            <div class="section-heading"><h3>专业调查结果</h3><span class="status-badge" :class="statusTone(taskOutcome.business_outcome)">{{ readableStatus(taskOutcome.business_outcome) }}</span></div>
             <div v-if="taskOutcome.business_outcome === 'DELIVERED'" class="outcome-message good-outcome">同身份业务调用已恢复，冻结报告和工单交付回执均已核对。</div>
             <div v-else-if="taskOutcome.business_outcome === 'RECOVERED_NOT_DELIVERED'" class="outcome-message warm-outcome">业务已在线验证恢复，但工单尚未完成交付。</div>
             <div v-else-if="taskOutcome.business_outcome === 'REJECTED'" class="outcome-message warm-outcome">审批者已拒绝；拒绝报告来自原调查图，没有执行业务写入。</div>

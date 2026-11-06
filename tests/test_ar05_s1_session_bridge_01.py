@@ -178,6 +178,30 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
         assert ordinary.status_code == 202 and ordinary.json()['execution_core'] == 'ASSISTANT_V1'
         process_queued_run(str(ordinary.json()['run_id']))
         assert client.get(f"/api/runs/{ordinary.json()['run_id']}").json()['execution_core'] == 'ASSISTANT_V1'
+        from opspilot.domain.assistant import read_session_professional_outcomes
+        bridged_outcomes = read_session_professional_outcomes(demo_db, str(ordinary.json()['run_id']))
+        s1_result = next(item for item in bridged_outcomes['items'] if item['task_id'] == task_id)
+        assert s1_result['professional_type'] == 'S1_CONTROLLED_REPAIR'
+        assert s1_result['business_outcome'] == 'WAITING_APPROVAL'
+        assert s1_result['currentness'] == 'PERSISTED_OUTCOME_NOT_CURRENT_PROBE'
+        assert s1_result['plan']['plan_hash'] == outcome['plan']['plan_hash']
+        assert s1_result['source_refs']['plan_task_run_id'] == run_id
+        assert len(s1_result['source_refs']['evidence_ids']) >= 4
+        result_trace = {
+            'evidence_level': 'DETERMINISTIC_MODEL_FORMAL_S1_WORKER_DOMAIN_PROJECTION',
+            'provider_http_requests': 0,
+            'task_id': task_id,
+            'assistant_read_run_id': str(ordinary.json()['run_id']),
+            'investigation_run_id': run_id,
+            'business_outcome': s1_result['business_outcome'],
+            'currentness': s1_result['currentness'],
+            'plan': s1_result['plan'],
+            'source_refs': s1_result['source_refs'],
+        }
+        result_trace_path = os.environ.get('PRODUCT_01_FINAL_BRIDGE_S1_TRACE_PATH')
+        if result_trace_path:
+            Path(result_trace_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(result_trace_path).write_text(json.dumps(result_trace, ensure_ascii=False, indent=2), encoding='utf-8')
         with connect(demo_db) as db:
             assert db.execute('SELECT COUNT(*) FROM d3_approvals').fetchone()[0] == 0
             assert db.execute('SELECT COUNT(*) FROM d3_action_ledgers').fetchone()[0] == 0

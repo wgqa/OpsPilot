@@ -10,6 +10,34 @@ export interface AssistantOperation {
   requestDigest: string;
 }
 
+export interface ControlledInvestigationProposal {
+  rationale: string;
+  sourceMessageId: string;
+}
+
+/** Use only the currently revalidated MCP result for this exact visible question. */
+export function controlledInvestigationProposal(
+  sources: {
+    current: boolean;
+    items: Array<{ tool_name: string; status: string; result: Record<string, unknown> | null }>;
+  } | null | undefined,
+  sourceMessageId: string,
+): ControlledInvestigationProposal | null {
+  if (!sources?.current || !sourceMessageId) return null;
+  const item = sources.items.find((candidate) => candidate.tool_name === 'propose_controlled_auth_investigation');
+  const result = item?.result;
+  if (
+    !item || item.status !== 'OK' || !result || result.success !== true
+    || result.proposal_type !== 'CONTROLLED_AUTH_INVESTIGATION'
+    || result.authority !== 'MODEL_SUGGESTION_ONLY_UNTRUSTED'
+    || result.source_message_id !== sourceMessageId
+    || result.task_created !== false || result.authorization_created !== false
+    || result.requires_explicit_user_confirmation !== true
+    || typeof result.rationale !== 'string' || !result.rationale.trim()
+  ) return null;
+  return { rationale: result.rationale, sourceMessageId };
+}
+
 export async function beginAssistantOperation(
   store: OperationStore, key: string, payload: object,
   newId: () => string = () => crypto.randomUUID(),

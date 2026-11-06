@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acknowledgeAssistantOperation, beginAssistantOperation, type OperationStore } from '../src/assistant-entry.ts';
+import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, type OperationStore } from '../src/assistant-entry.ts';
 import { api } from '../src/api.ts';
 import { projectConversation } from '../src/conversation.ts';
 
@@ -12,6 +12,32 @@ function store(): OperationStore {
     removeItem: (key) => { values.delete(key); },
   };
 }
+
+test('controlled-investigation CTA requires a current proposal tied to the exact original user message', () => {
+  const result = {
+    success: true,
+    proposal_type: 'CONTROLLED_AUTH_INVESTIGATION',
+    authority: 'MODEL_SUGGESTION_ONLY_UNTRUSTED',
+    rationale: '需要检查可信资源范围。',
+    source_message_id: 'message-original',
+    task_created: false,
+    authorization_created: false,
+    requires_explicit_user_confirmation: true,
+  };
+  const sources = {
+    current: true,
+    items: [{ tool_name: 'propose_controlled_auth_investigation', status: 'OK', result }],
+  };
+  assert.deepEqual(controlledInvestigationProposal(sources, 'message-original'), {
+    rationale: '需要检查可信资源范围。', sourceMessageId: 'message-original',
+  });
+  assert.equal(controlledInvestigationProposal(sources, 'adjacent-message'), null);
+  assert.equal(controlledInvestigationProposal({ ...sources, current: false }, 'message-original'), null);
+  assert.equal(controlledInvestigationProposal({
+    current: true,
+    items: [{ tool_name: 'propose_controlled_auth_investigation', status: 'OK', result: { ...result, task_created: true } }],
+  }, 'message-original'), null);
+});
 
 test('unknown HTTP result reuses operation after reconstruction without storing pasted text', async () => {
   const storage = store();
