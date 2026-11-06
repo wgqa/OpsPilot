@@ -52,6 +52,10 @@ test('Run success and unverified approval cannot claim recovery; trusted rejecti
   assert.match(s1OutcomeText({ ...base, business_outcome: 'WAITING_APPROVAL', plan: { plan_hash: 'p', eligibility: 'ACTIVE' } }, 'WAITING_APPROVAL', 'WAITING_APPROVAL'), /等待独立审批；尚未修复/);
   assert.match(s1OutcomeText({ ...base, business_outcome: 'WAITING_APPROVAL', plan: { plan_hash: 'p', eligibility: 'EXPIRED' } }, 'WAITING_APPROVAL', 'WAITING_APPROVAL'), /无法与可信方案核对/);
   assert.match(s1OutcomeText({ ...base, business_outcome: 'REJECTED' }, 'REJECTED', 'SUCCEEDED'), /审批已拒绝/);
+  assert.match(s1OutcomeText({ ...base, business_outcome: 'REPAIR_COMMITTED' }, 'VERIFYING', 'SUCCEEDED'), /配置变更已提交；在线业务恢复尚未验证/);
+  assert.match(s1OutcomeText({ ...base, business_outcome: 'REAPPROVAL_REQUIRED' }, 'WAITING_APPROVAL', 'WAITING_APPROVAL'), /已形成新方案并等待独立审批/);
+  assert.match(s1OutcomeText({ ...base, business_outcome: 'REVALIDATION_BLOCKED' }, 'WAITING_INPUT', 'WAITING_INPUT'), /没有执行修复/);
+  assert.match(s1OutcomeText({ ...base, business_outcome: 'UNKNOWN' }, 'WAITING_INPUT', 'WAITING_INPUT'), /无法确认审批后的当前事实/);
   assert.doesNotMatch(s1OutcomeText({ ...base, business_outcome: 'DELIVERED' }, 'SUCCEEDED', 'SUCCEEDED'), /已通过在线业务验证/);
   assert.match(s1OutcomeText({ ...base, business_outcome: 'DELIVERED', verification: { recovery_verified: true } }, 'SUCCEEDED', 'SUCCEEDED'), /已通过在线业务验证/);
   assert.match(s1OutcomeText(base, 'EXPIRED', 'FAILED'), /未能完成或已失效/);

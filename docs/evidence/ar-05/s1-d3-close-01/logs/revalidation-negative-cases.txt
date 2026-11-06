@@ -1,0 +1,188 @@
+..F                                                                      [100%]
+================================== FAILURES ===================================
+___________ test_d3_expired_source_evidence_cannot_authorize_repair ___________
+
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-revalidation-negative/test_d3_expired_source_evidenc0/domain.sqlite3')
+live_api = 'http://127.0.0.1:52741'
+
+    def test_d3_expired_source_evidence_cannot_authorize_repair(demo_db: Path, live_api: str) -> None:
+        binding, _, plan = _ready(demo_db, live_api)
+        approval = _approve(demo_db, binding, plan)
+        task_id = str(binding["task_id"])
+        evidence_ids = list(plan["required_evidence_ids"])
+        placeholders = ",".join("?" for _ in evidence_ids)
+        with connect(demo_db) as connection:
+            connection.execute(
+                f"UPDATE d2_evidence SET fetched_at='2020-01-01T00:00:00+00:00' "
+                f"WHERE task_id=? AND evidence_id IN ({placeholders})",
+                (task_id, *evidence_ids),
+            )
+>       receipt = revalidate_approved_plan(
+            demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]), "executor-a", live_api,
+        )
+
+tests\test_d3_actions.py:218: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-revalidation-negative/test_d3_expired_source_evidenc0/domain.sqlite3')
+task_id = 'task-16e89d72-0278-489a-9ef1-beedf83b683a'
+plan_hash = 'c1e529852a18d0a0cfc03b2a0181c3edb32b3184ac750abc4f8e249ff633db6f'
+approval_id = 'approval-dea95261-7910-4098-91db-640823e9c496'
+executor_id = 'executor-a', business_api_url = 'http://127.0.0.1:52741'
+run_id = None
+
+    def revalidate_approved_plan(
+        path: str | Path,
+        task_id: str,
+        plan_hash: str,
+        approval_id: str,
+        executor_id: str,
+        business_api_url: str,
+        *,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        """Re-read TaskBinding facts and prove an approved S1 Plan is still current before REPAIR."""
+        binding = get_task_binding(path, task_id)
+        with connect(path) as connection:
+            _require_executor(connection, executor_id, str(binding["tenant_id"]))
+            plan = _load_plan(connection, str(binding["tenant_id"]), task_id, plan_hash)
+            approval = _approval_for(connection, str(binding["tenant_id"]), task_id, plan_hash)
+            auth = _authorization(connection, str(binding["tenant_id"]), task_id, plan_hash)
+            if (
+                str(approval["approval_id"]) != approval_id
+                or str(approval["decision"]) != "APPROVED"
+                or auth is None or str(auth["eligibility"]) != "ACTIVE"
+            ):
+                raise D3PreconditionRejected("APPROVAL_OR_PLAN_NOT_CURRENT")
+            if run_id is not None:
+                run = connection.execute(
+                    "SELECT kind, status, task_id FROM task_runs WHERE run_id = ? AND tenant_id = ?",
+                    (run_id, binding["tenant_id"]),
+                ).fetchone()
+                link = connection.execute(
+                    """SELECT 1 FROM approval_resume_links WHERE tenant_id = ? AND task_id = ?
+                       AND plan_hash = ? AND approval_id = ? AND resume_run_id = ?""",
+                    (binding["tenant_id"], task_id, plan_hash, approval_id, run_id),
+                ).fetchone()
+                if (
+                    run is None or run["kind"] != "APPROVAL_RESUME" or run["status"] != "RUNNING"
+                    or str(run["task_id"]) != task_id or link is None
+                ):
+                    raise D3PreconditionRejected("APPROVAL_REVALIDATION_RUN_INVALID")
+            committed_repair = connection.execute(
+                """SELECT i.*, l.result_json, l.result_digest, l.status AS ledger_status
+                   FROM d3_action_intents i JOIN d3_action_ledgers l
+                     ON l.action_id = i.action_id AND l.tenant_id = i.tenant_id
+                   WHERE i.tenant_id = ? AND i.task_id = ? AND i.plan_hash = ?
+                     AND i.action_kind = 'REPAIR' AND i.approval_id = ?
+                     AND l.action_kind = 'REPAIR' AND l.status = 'COMMITTED'""",
+                (binding["tenant_id"], task_id, plan_hash, approval_id),
+            ).fetchone()
+            if committed_repair is not None:
+                intent = _row(committed_repair) or {}
+                _prior_ledger(connection, intent)
+                receipt = connection.execute(
+                    """SELECT r.* FROM d3_revalidation_receipts r JOIN d3_action_ledgers l
+                         ON l.tenant_id = r.tenant_id AND l.task_id = r.task_id AND l.plan_hash = r.plan_hash
+                       WHERE r.tenant_id = ? AND r.task_id = ? AND r.plan_hash = ?
+                         AND r.approval_id = ? AND r.status = 'VALID' AND r.observed_at <= l.committed_at
+                         AND l.action_kind = 'REPAIR' AND l.status = 'COMMITTED'
+                       ORDER BY r.rowid ASC LIMIT 1""",
+                    (binding["tenant_id"], task_id, plan_hash, approval_id),
+                ).fetchone()
+                if receipt is None:
+                    raise D3PreconditionRejected("REVALIDATION_RECEIPT_MISSING_AFTER_REPAIR")
+                # The live probe authorized the now-committed REPAIR. Recovery must
+                # resume that same ActionIntent and continue verification, not probe
+                # the expected post-repair HTTP 200 as if it invalidated the Plan.
+                return _revalidation_receipt_value(receipt)
+            source_ids = [str(value) for value in plan.get("required_evidence_ids", [])]
+    
+        from opspilot.domain.d2 import (
+            get_auth_policy_fact,
+            get_integration_config_fact,
+            get_principal_status_fact,
+            probe_endpoint_fact,
+            record_tool_observation,
+        )
+    
+        facts: dict[str, object] = {}
+        current_evidence_ids: list[str] = []
+        try:
+            fresh_facts = [
+                ("get_integration_config", get_integration_config_fact(
+                    path, task_id, str(binding["integration_id"]),
+                )),
+                ("get_principal_status", get_principal_status_fact(
+                    path, task_id, str(binding["principal_id"]),
+                )),
+                ("get_auth_policy", get_auth_policy_fact(
+                    path, task_id, str(binding["service_id"]),
+                )),
+                ("probe_endpoint", probe_endpoint_fact(
+                    path, task_id, str(binding["service_id"]), str(binding["integration_id"]),
+                    business_api_url,
+                )),
+            ]
+            for index, (tool_name, fact) in enumerate(fresh_facts, start=1):
+                observation = record_tool_observation(
+                    path, task_id=task_id,
+                    call_id=f"d3-revalidation-{run_id or approval_id}-{index}",
+                    attempt_id=None,
+                    tool_call_id=f"d3-revalidation-{run_id or approval_id}-{index}",
+                    tool_name=f"D3_REVALIDATION:{tool_name}",
+                    arguments={"task_id": task_id, "plan_hash": plan_hash, "source": "approval_write_boundary"},
+                    status="OK", result=fact, force_new_evidence=True,
+                )
+                if observation.get("status") != "OK" or not observation.get("evidence_id"):
+                    raise D3PreconditionRejected("REVALIDATION_OBSERVATION_INVALID")
+                evidence_id = str(observation["evidence_id"])
+                current_evidence_ids.append(evidence_id)
+                facts[str(fact["fact_type"])] = fact
+        except Exception as error:
+            receipt = _persist_revalidation_receipt(
+                path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+                run_id=run_id, status="UNKNOWN", reason_code=f"REVALIDATION_SOURCE_UNKNOWN:{type(error).__name__}",
+                evidence_ids=current_evidence_ids, facts=facts,
+            )
+            return receipt
+    
+        fresh_gate = evaluate_evidence_gate(path, task_id, current_evidence_ids)
+        facts["fresh_gate"] = fresh_gate
+        if fresh_gate.get("decision") != "READY":
+            return _persist_revalidation_receipt(
+                path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+                run_id=run_id, status="BLOCKED",
+                reason_code=str(fresh_gate.get("reason_code") or "REVALIDATION_NOT_READY"),
+                evidence_ids=current_evidence_ids, facts=facts,
+            )
+    
+        old_gate = evaluate_evidence_gate(path, task_id, source_ids)
+        candidate = fresh_gate.get("plan_candidate")
+        same_candidate = isinstance(candidate, dict) and all(candidate.get(key) == value for key, value in {
+            "action_type": plan.get("repair_action_type"),
+            "integration_id": plan.get("integration_id"),
+            "expected_config_version": plan.get("expected_config_version"),
+            "expected_principal_version": plan.get("expected_principal_version"),
+            "expected_auth_policy_version": plan.get("expected_auth_policy_version"),
+            "new_credential_ref": plan.get("new_credential_ref"),
+        }.items())
+        if old_gate.get("decision") == "READY" and same_candidate:
+            return _persist_revalidation_receipt(
+                path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+                run_id=run_id, status="VALID", reason_code="APPROVED_PLAN_STILL_CURRENT",
+                evidence_ids=current_evidence_ids, facts=facts,
+            )
+    
+        if run_id is None:
+>           return _persist_revalidation_receipt(
+                path, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+                run_id=None, status="BLOCKED", reason_code="REAPPROVAL_RUN_REQUIRED",
+                evidence_ids=current_evidence_ids, facts=facts,
+            )
+E           TypeError: _persist_revalidation_receipt() missing 1 required keyword-only argument: 'executor_id'
+
+opspilot\domain\d3.py:1277: TypeError
+=========================== short test summary info ===========================
+FAILED tests/test_d3_actions.py::test_d3_expired_source_evidence_cannot_authorize_repair
+1 failed, 2 passed in 1.53s

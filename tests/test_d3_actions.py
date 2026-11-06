@@ -29,8 +29,10 @@ from opspilot.domain.d3 import (
     get_or_create_action_intent,
     get_or_create_report,
     get_task_action_state,
+    get_task_outcome,
     get_task_ticket_entries,
     get_verification_receipt,
+    revalidate_approved_plan,
     save_local_report,
     submit_plan_approval,
     verify_repair_online,
@@ -51,6 +53,11 @@ def _store(db: Path, task_id: str, tool: str, fact: dict[str, object], index: in
         result=fact,
     )
     return str(result["evidence_id"])
+
+
+def _count(db: Path, table: str, where: str, params: tuple[object, ...]) -> int:
+    with connect(db) as connection:
+        return int(connection.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", params).fetchone()[0])
 
 
 def _ready(db: Path, api_url: str, *, actor: str = "support-a", ticket: str = "INC-A-001"):
@@ -76,6 +83,14 @@ def _approve(db: Path, binding: dict[str, object], plan: dict[str, object], deci
     )
 
 
+def _revalidate(db: Path, binding: dict[str, object], plan: dict[str, object], api_url: str):
+    approval = _approve(db, binding, plan)
+    return revalidate_approved_plan(
+        db, str(binding["task_id"]), str(plan["plan_hash"]),
+        str(approval["approval_id"]), "executor-a", api_url,
+    )
+
+
 def test_d3_plan_repair_verify_freeze_and_independent_delivery_are_idempotent(demo_db: Path, live_api: str) -> None:
     binding, gate, plan = _ready(demo_db, live_api)
     assert gate["decision"] == "READY"
@@ -85,6 +100,10 @@ def test_d3_plan_repair_verify_freeze_and_independent_delivery_are_idempotent(de
 
     approval = _approve(demo_db, binding, plan)
     assert approval["decision"] == "APPROVED"
+    assert revalidate_approved_plan(
+        demo_db, str(binding["task_id"]), str(plan["plan_hash"]),
+        str(approval["approval_id"]), "executor-a", live_api,
+    )["status"] == "VALID"
     repair_intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     assert get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")["action_id"] == repair_intent["action_id"]
     assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 7
@@ -135,6 +154,109 @@ def test_d3_rejection_creates_no_action_intents_or_business_writes(demo_db: Path
     assert get_task_action_state(demo_db, str(binding["task_id"]), "support-a")["local_reports"][0]["outcome"] == "REJECTED"
 
 
+def test_d3_repair_without_approval_time_revalidation_is_rejected(
+    demo_db: Path, live_api: str,
+) -> None:
+    binding, _, plan = _ready(demo_db, live_api)
+    _approve(demo_db, binding, plan)
+    with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
+        get_or_create_action_intent(
+            demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a",
+        )
+    current = get_integration_info(demo_db, "tenant-a", "integration-a")
+    assert current["credential_ref"] == "cred-v1" and current["config_version"] == 7
+    assert _count(demo_db, "d3_action_intents", "task_id = ?", (str(binding["task_id"]),)) == 0
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(binding["task_id"]),)) == 0
+
+
+@pytest.mark.parametrize(
+    ("update_sql", "reason_code"),
+    [
+        (
+            "UPDATE integrations SET credential_ref='cred-v2', config_version=config_version+1 "
+            "WHERE tenant_id='tenant-a' AND integration_id='integration-a'",
+            "CURRENT_PROBE_NOT_401",
+        ),
+        (
+            "UPDATE principals SET status='DISABLED', principal_version=principal_version+1 "
+            "WHERE tenant_id='tenant-a' AND principal_id='principal-a'",
+            "PRINCIPAL_DISABLED",
+        ),
+    ],
+)
+def test_d3_revalidation_blocks_changed_current_fact_without_creating_repair(
+    demo_db: Path, live_api: str, update_sql: str, reason_code: str,
+) -> None:
+    binding, _, plan = _ready(demo_db, live_api)
+    _approve(demo_db, binding, plan)
+    with connect(demo_db) as connection:
+        connection.execute(update_sql)
+    receipt = _revalidate(demo_db, binding, plan, live_api)
+    assert receipt["status"] == "BLOCKED"
+    assert receipt["reason_code"] == reason_code
+    with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
+        get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
+    outcome = get_task_outcome(demo_db, str(binding["task_id"]), "support-a")
+    assert outcome["business_outcome"] == "REVALIDATION_BLOCKED"
+    expected_credential = "cred-v2" if "UPDATE integrations" in update_sql else "cred-v1"
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == expected_credential
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(binding["task_id"]),)) == 0
+
+
+def test_d3_expired_source_evidence_cannot_authorize_repair(demo_db: Path, live_api: str) -> None:
+    binding, _, plan = _ready(demo_db, live_api)
+    approval = _approve(demo_db, binding, plan)
+    task_id = str(binding["task_id"])
+    evidence_ids = list(plan["required_evidence_ids"])
+    placeholders = ",".join("?" for _ in evidence_ids)
+    with connect(demo_db) as connection:
+        connection.execute(
+            f"UPDATE d2_evidence SET fetched_at='2020-01-01T00:00:00+00:00' "
+            f"WHERE task_id=? AND evidence_id IN ({placeholders})",
+            (task_id, *evidence_ids),
+        )
+    receipt = revalidate_approved_plan(
+        demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]), "executor-a", live_api,
+    )
+    assert receipt["status"] == "BLOCKED"
+    assert receipt["reason_code"] == "REAPPROVAL_RUN_REQUIRED"
+    assert set(receipt["evidence_ids"]).isdisjoint(evidence_ids)
+    with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
+        get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v1"
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 7
+    assert _count(demo_db, "d3_action_intents", "task_id = ?", (task_id,)) == 0
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (task_id,)) == 0
+
+
+def test_d3_unknown_revalidation_source_cannot_authorize_repair(
+    demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binding, _, plan = _ready(demo_db, live_api)
+    approval = _approve(demo_db, binding, plan)
+
+    def unavailable_probe(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        raise RuntimeError("injected current-source failure")
+
+    monkeypatch.setattr("opspilot.domain.d2.probe_endpoint_fact", unavailable_probe)
+    task_id = str(binding["task_id"])
+    receipt = revalidate_approved_plan(
+        demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]),
+        "executor-a", live_api,
+    )
+
+    assert receipt["status"] == "UNKNOWN"
+    assert str(receipt["reason_code"]).startswith("REVALIDATION_SOURCE_UNKNOWN:")
+    with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
+        get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v1"
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 7
+    assert _count(demo_db, "d3_action_intents", "task_id = ?", (task_id,)) == 0
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (task_id,)) == 0
+    assert get_task_outcome(demo_db, task_id, "support-a")["business_outcome"] == "UNKNOWN"
+
+
 def test_d3_plan_cancellation_blocks_approval_and_action(demo_db: Path, live_api: str) -> None:
     binding, gate, plan = _ready(demo_db, live_api)
     cancelled = cancel_plan(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "support-a", "operator cancelled before approval")
@@ -173,7 +295,7 @@ def test_d3_approval_requires_task_tenant_approver_and_intact_plan_hash(demo_db:
 ])
 def test_d3_resource_version_change_blocks_repair_without_changing_its_new_value(demo_db: Path, live_api: str, update_sql: str) -> None:
     binding, gate, plan = _ready(demo_db, live_api)
-    _approve(demo_db, binding, plan)
+    _revalidate(demo_db, binding, plan, live_api)
     intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     with connect(demo_db) as connection:
         connection.execute(update_sql)
@@ -188,7 +310,7 @@ def test_d3_resource_version_change_blocks_repair_without_changing_its_new_value
 
 def test_d3_failed_online_probe_cannot_freeze_or_deliver_recovered_report(demo_db: Path, live_api: str) -> None:
     binding, gate, plan = _ready(demo_db, live_api)
-    _approve(demo_db, binding, plan)
+    _revalidate(demo_db, binding, plan, live_api)
     repair_intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     execute_repair(demo_db, str(repair_intent["action_id"]), "executor-a", "attempt-repair")
     with connect(demo_db) as connection:
@@ -204,7 +326,7 @@ def test_d3_failed_online_probe_cannot_freeze_or_deliver_recovered_report(demo_d
 
 def test_d3_same_action_key_with_changed_canonical_request_is_rejected(demo_db: Path, live_api: str) -> None:
     binding, gate, plan = _ready(demo_db, live_api)
-    _approve(demo_db, binding, plan)
+    _revalidate(demo_db, binding, plan, live_api)
     intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     request = json.loads(str(intent["canonical_request_json"]))
     request["action_parameters"]["new_credential_ref"] = "cred-other"
@@ -223,7 +345,7 @@ def test_d3_same_action_key_with_changed_canonical_request_is_rejected(demo_db: 
 
 def test_d3_delivery_rejects_wrong_ticket_before_ticket_write(demo_db: Path, live_api: str) -> None:
     binding, gate, plan = _ready(demo_db, live_api)
-    _approve(demo_db, binding, plan)
+    _revalidate(demo_db, binding, plan, live_api)
     repair_intent = get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     execute_repair(demo_db, str(repair_intent["action_id"]), "executor-a", "attempt-repair")
     receipt = verify_repair_online(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), str(repair_intent["action_id"]), "executor-a", live_api)

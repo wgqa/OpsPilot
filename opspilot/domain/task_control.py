@@ -436,7 +436,7 @@ def submit_web_plan_approval(
             (source_run_id, identity.tenant_id, task_id),
         ).fetchone()
         if (
-            source is None or str(source["kind"]) not in {"INVESTIGATE", "RESUME"}
+            source is None or str(source["kind"]) not in {"INVESTIGATE", "RESUME", "APPROVAL_RESUME"}
             or str(source["status"]) != "WAITING_APPROVAL"
             or source["expected_control_revision"] is None
             or int(source["expected_control_revision"]) != int(plan_binding["bound_control_revision"])
@@ -504,6 +504,18 @@ def submit_web_plan_approval(
             raise TaskControlError("APPROVAL_SCOPE_DENIED") from error
         approval_id = str(approval["approval_id"])
         checkpoint_thread_id = f"{binding['thread_id']}::{source_run_id}"
+        if str(source["kind"]) == "APPROVAL_RESUME":
+            prior_link = connection.execute(
+                """SELECT source_checkpoint_thread_id FROM approval_resume_links
+                   WHERE tenant_id = ? AND task_id = ? AND resume_run_id = ?""",
+                (identity.tenant_id, task_id, source_run_id),
+            ).fetchone()
+            if prior_link is None:
+                raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+            # A reapproval generated during a resumed graph continues the same
+            # persisted checkpoint thread; the Plan's originating Run is still
+            # separately recorded in d3_plan_control_bindings.
+            checkpoint_thread_id = str(prior_link["source_checkpoint_thread_id"])
         result = {
             "status": "ACCEPTED", "task_id": task_id, "plan_hash": plan_hash,
             "decision": decision, "approval_id": approval_id,
@@ -597,12 +609,23 @@ def _validate_approval_resume_in_transaction(
     ).fetchone()
     if link is None:
         raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+    expected_checkpoint_thread_id = (
+        f"{link['thread_id']}::{link['source_investigation_run_id']}"
+    )
+    if str(link["source_kind"]) == "APPROVAL_RESUME":
+        prior_link = connection.execute(
+            """SELECT source_checkpoint_thread_id FROM approval_resume_links
+               WHERE tenant_id = ? AND task_id = ? AND resume_run_id = ?""",
+            (str(link["tenant_id"]), str(link["task_id"]), str(link["source_investigation_run_id"])),
+        ).fetchone()
+        if prior_link is None:
+            raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+        expected_checkpoint_thread_id = str(prior_link["source_checkpoint_thread_id"])
     expected_revision = run["expected_control_revision"]
     if (
-        str(link["source_kind"]) not in {"INVESTIGATE", "RESUME"}
+        str(link["source_kind"]) not in {"INVESTIGATE", "RESUME", "APPROVAL_RESUME"}
         or str(link["source_status"]) != "WAITING_APPROVAL"
-        or str(link["thread_id"]) + "::" + str(link["source_investigation_run_id"])
-            != str(link["source_checkpoint_thread_id"])
+            or expected_checkpoint_thread_id != str(link["source_checkpoint_thread_id"])
         or str(link["plan_hash"]) != str(link["approved_plan_digest"])
         or int(link["control_revision"]) != int(link["bound_control_revision"])
         or expected_revision is None
@@ -895,7 +918,7 @@ def _approval_resume_domain_stage_is_consistent(
         ).fetchone()
         config_version = int(plan["expected_config_version"]) + (1 if repair_ledger is not None else 0)
         credential_ref = plan["new_credential_ref"] if repair_ledger is not None else plan["old_credential_ref"]
-        if (
+        current_matches_plan = not (
             current is None
             or str(current["principal_id"]) != str(plan["principal_id"])
             or str(current["principal_status"]) != "ENABLED"
@@ -903,7 +926,18 @@ def _approval_resume_domain_stage_is_consistent(
             or int(current["config_version"]) != config_version
             or int(current["principal_version"]) != int(plan["expected_principal_version"])
             or int(current["policy_version"]) != int(plan["expected_auth_policy_version"])
-        ):
+        )
+        # An approval resume must be allowed to reach the trusted post-approval
+        # revalidation node when the resource has drifted. Before any action
+        # intent or ledger exists, that node can safely block or create a new
+        # Plan requiring fresh approval. Ordinary INVESTIGATE/RESUME links and
+        # any phase with committed action state remain bound to the old Plan.
+        revalidation_only_resume = (
+            str(link["decision"]) == "APPROVED"
+            and task_status in {"APPROVED", "INTERRUPTED_RECOVERABLE"}
+            and not any((intents, ledgers, receipts, reports, deliveries, entries))
+        )
+        if not current_matches_plan and not revalidation_only_resume:
             return False
     if task_status == "COMPLETED":
         return False

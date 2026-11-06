@@ -988,8 +988,11 @@ def record_tool_observation(
     status: str,
     result: dict[str, object] | None,
     error_class: str | None = None,
+    force_new_evidence: bool = False,
 ) -> dict[str, object]:
     binding = _bound_task(path, task_id)
+    if force_new_evidence and attempt_id is not None:
+        raise ValueError("Forced fresh evidence is reserved for non-MCP trusted revalidation reads.")
     observation_id = f"observation-{uuid.uuid4()}"
     argument_digest = digest_json(arguments)
     result_digest = digest_json(result) if result is not None else None
@@ -1034,7 +1037,7 @@ def record_tool_observation(
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         if status == "OK" and result is not None:
-            existing = connection.execute(
+            existing = None if force_new_evidence else connection.execute(
                 """SELECT evidence_id FROM d2_evidence
                    WHERE task_id = ? AND fact_type = ? AND resource_id = ? AND digest = ?
                    ORDER BY fetched_at DESC LIMIT 1""",

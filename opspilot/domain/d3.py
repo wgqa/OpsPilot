@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from opspilot.domain.d2 import (
+    EVIDENCE_MAX_AGE_SECONDS,
     canonical_json,
     digest_json,
     evaluate_evidence_gate,
@@ -925,7 +926,7 @@ def get_or_create_action_intent(
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         _require_executor(connection, executor_id, str(binding["tenant_id"]))
-        request, _, approval = _request_for_action(connection, binding, plan_hash, action_kind)
+        request, plan, approval = _request_for_action(connection, binding, plan_hash, action_kind)
         request_json = canonical_json(request)
         request_digest = hashlib.sha256(request_json.encode("utf-8")).hexdigest()
         existing = connection.execute(
@@ -936,7 +937,20 @@ def get_or_create_action_intent(
         if existing is not None:
             if existing["request_digest"] != request_digest or existing["canonical_request_json"] != request_json:
                 raise KeyReuseConflict("KEY_REUSE_CONFLICT")
-            return _row(existing) or {}
+            existing_value = _row(existing) or {}
+            if action_kind == "REPAIR" and _prior_ledger(connection, existing_value) is None:
+                _require_current_revalidation(
+                    connection,
+                    intent={"tenant_id": binding["tenant_id"], "task_id": task_id, "plan_hash": plan_hash},
+                    binding=binding, plan=plan, approval=approval,
+                )
+            return existing_value
+        if action_kind == "REPAIR":
+            _require_current_revalidation(
+                connection,
+                intent={"tenant_id": binding["tenant_id"], "task_id": task_id, "plan_hash": plan_hash},
+                binding=binding, plan=plan, approval=approval,
+            )
         authorization = _authorization(connection, str(binding["tenant_id"]), task_id, plan_hash)
         if authorization is None or authorization["eligibility"] != "ACTIVE":
             raise D3PreconditionRejected("PLAN_NOT_ACTIVE")
@@ -1054,6 +1068,387 @@ def _validate_action_context(
     return binding, plan, approval
 
 
+def _persist_revalidation_receipt(
+    path: str | Path,
+    *,
+    executor_id: str,
+    task_id: str,
+    plan_hash: str,
+    approval_id: str,
+    run_id: str | None,
+    status: str,
+    reason_code: str,
+    evidence_ids: list[str],
+    facts: dict[str, object],
+    replacement_plan_hash: str | None = None,
+) -> dict[str, object]:
+    if status not in {"VALID", "REAPPROVAL_REQUIRED", "BLOCKED", "UNKNOWN"}:
+        raise ValueError("Invalid D3 revalidation status.")
+    binding = get_task_binding(path, task_id)
+    receipt_id = f"revalidation-{uuid.uuid4()}"
+    observed_at = utc_now()
+    body = {
+        "receipt_id": receipt_id, "tenant_id": binding["tenant_id"], "task_id": task_id,
+        "plan_hash": plan_hash, "approval_id": approval_id, "run_id": run_id,
+        "status": status, "reason_code": reason_code, "evidence_ids": evidence_ids,
+        "facts": facts, "replacement_plan_hash": replacement_plan_hash,
+        "observed_at": observed_at,
+    }
+    serialized = canonical_json(body)
+    result_digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _require_executor(connection, executor_id, str(binding["tenant_id"]))
+        connection.execute(
+            """INSERT INTO d3_revalidation_receipts
+               (receipt_id, tenant_id, task_id, plan_hash, approval_id, run_id, status,
+                reason_code, evidence_ids_json, facts_json, replacement_plan_hash,
+                observed_at, content_digest)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (receipt_id, binding["tenant_id"], task_id, plan_hash, approval_id, run_id,
+             status, reason_code, canonical_json(evidence_ids), canonical_json(facts),
+             replacement_plan_hash, observed_at, result_digest),
+        )
+    return {**body, "content_digest": result_digest}
+
+
+def _revalidation_receipt_value(row: sqlite3.Row) -> dict[str, object]:
+    evidence_ids = json.loads(str(row["evidence_ids_json"]))
+    facts = json.loads(str(row["facts_json"]))
+    body = {
+        "receipt_id": str(row["receipt_id"]), "tenant_id": str(row["tenant_id"]),
+        "task_id": str(row["task_id"]), "plan_hash": str(row["plan_hash"]),
+        "approval_id": str(row["approval_id"]), "run_id": row["run_id"],
+        "status": str(row["status"]), "reason_code": str(row["reason_code"]),
+        "evidence_ids": evidence_ids, "facts": facts,
+        "replacement_plan_hash": row["replacement_plan_hash"],
+        "observed_at": str(row["observed_at"]),
+    }
+    digest = hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()
+    if digest != str(row["content_digest"]):
+        raise D3PreconditionRejected("REVALIDATION_RECEIPT_DIGEST_MISMATCH")
+    return {**body, "content_digest": digest}
+
+
+def revalidate_approved_plan(
+    path: str | Path,
+    task_id: str,
+    plan_hash: str,
+    approval_id: str,
+    executor_id: str,
+    business_api_url: str,
+    *,
+    run_id: str | None = None,
+) -> dict[str, object]:
+    """Re-read TaskBinding facts and prove an approved S1 Plan is still current before REPAIR."""
+    binding = get_task_binding(path, task_id)
+    with connect(path) as connection:
+        _require_executor(connection, executor_id, str(binding["tenant_id"]))
+        plan = _load_plan(connection, str(binding["tenant_id"]), task_id, plan_hash)
+        approval = _approval_for(connection, str(binding["tenant_id"]), task_id, plan_hash)
+        auth = _authorization(connection, str(binding["tenant_id"]), task_id, plan_hash)
+        if (
+            str(approval["approval_id"]) != approval_id
+            or str(approval["decision"]) != "APPROVED"
+            or auth is None or str(auth["eligibility"]) != "ACTIVE"
+        ):
+            raise D3PreconditionRejected("APPROVAL_OR_PLAN_NOT_CURRENT")
+        if run_id is not None:
+            run = connection.execute(
+                "SELECT kind, status, task_id FROM task_runs WHERE run_id = ? AND tenant_id = ?",
+                (run_id, binding["tenant_id"]),
+            ).fetchone()
+            link = connection.execute(
+                """SELECT 1 FROM approval_resume_links WHERE tenant_id = ? AND task_id = ?
+                   AND plan_hash = ? AND approval_id = ? AND resume_run_id = ?""",
+                (binding["tenant_id"], task_id, plan_hash, approval_id, run_id),
+            ).fetchone()
+            if (
+                run is None or run["kind"] != "APPROVAL_RESUME" or run["status"] != "RUNNING"
+                or str(run["task_id"]) != task_id or link is None
+            ):
+                raise D3PreconditionRejected("APPROVAL_REVALIDATION_RUN_INVALID")
+        committed_repair = connection.execute(
+            """SELECT i.*, l.result_json, l.result_digest, l.status AS ledger_status
+               FROM d3_action_intents i JOIN d3_action_ledgers l
+                 ON l.action_id = i.action_id AND l.tenant_id = i.tenant_id
+               WHERE i.tenant_id = ? AND i.task_id = ? AND i.plan_hash = ?
+                 AND i.action_kind = 'REPAIR' AND i.approval_id = ?
+                 AND l.action_kind = 'REPAIR' AND l.status = 'COMMITTED'""",
+            (binding["tenant_id"], task_id, plan_hash, approval_id),
+        ).fetchone()
+        if committed_repair is not None:
+            intent = _row(committed_repair) or {}
+            _prior_ledger(connection, intent)
+            receipt = connection.execute(
+                """SELECT r.* FROM d3_revalidation_receipts r JOIN d3_action_ledgers l
+                     ON l.tenant_id = r.tenant_id AND l.task_id = r.task_id AND l.plan_hash = r.plan_hash
+                   WHERE r.tenant_id = ? AND r.task_id = ? AND r.plan_hash = ?
+                     AND r.approval_id = ? AND r.status = 'VALID' AND r.observed_at <= l.committed_at
+                     AND l.action_kind = 'REPAIR' AND l.status = 'COMMITTED'
+                   ORDER BY r.rowid ASC LIMIT 1""",
+                (binding["tenant_id"], task_id, plan_hash, approval_id),
+            ).fetchone()
+            if receipt is None:
+                raise D3PreconditionRejected("REVALIDATION_RECEIPT_MISSING_AFTER_REPAIR")
+            # The live probe authorized the now-committed REPAIR. Recovery must
+            # resume that same ActionIntent and continue verification, not probe
+            # the expected post-repair HTTP 200 as if it invalidated the Plan.
+            return _revalidation_receipt_value(receipt)
+        source_ids = [str(value) for value in plan.get("required_evidence_ids", [])]
+
+    from opspilot.domain.d2 import (
+        get_auth_policy_fact,
+        get_integration_config_fact,
+        get_principal_status_fact,
+        probe_endpoint_fact,
+        record_tool_observation,
+    )
+
+    facts: dict[str, object] = {}
+    current_evidence_ids: list[str] = []
+    try:
+        fresh_facts = [
+            ("get_integration_config", get_integration_config_fact(
+                path, task_id, str(binding["integration_id"]),
+            )),
+            ("get_principal_status", get_principal_status_fact(
+                path, task_id, str(binding["principal_id"]),
+            )),
+            ("get_auth_policy", get_auth_policy_fact(
+                path, task_id, str(binding["service_id"]),
+            )),
+            ("probe_endpoint", probe_endpoint_fact(
+                path, task_id, str(binding["service_id"]), str(binding["integration_id"]),
+                business_api_url,
+            )),
+        ]
+        for index, (tool_name, fact) in enumerate(fresh_facts, start=1):
+            observation = record_tool_observation(
+                path, task_id=task_id,
+                call_id=f"d3-revalidation-{run_id or approval_id}-{index}",
+                attempt_id=None,
+                tool_call_id=f"d3-revalidation-{run_id or approval_id}-{index}",
+                tool_name=f"D3_REVALIDATION:{tool_name}",
+                arguments={"task_id": task_id, "plan_hash": plan_hash, "source": "approval_write_boundary"},
+                status="OK", result=fact, force_new_evidence=True,
+            )
+            if observation.get("status") != "OK" or not observation.get("evidence_id"):
+                raise D3PreconditionRejected("REVALIDATION_OBSERVATION_INVALID")
+            evidence_id = str(observation["evidence_id"])
+            current_evidence_ids.append(evidence_id)
+            facts[str(fact["fact_type"])] = fact
+    except Exception as error:
+        receipt = _persist_revalidation_receipt(
+            path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+            run_id=run_id, status="UNKNOWN", reason_code=f"REVALIDATION_SOURCE_UNKNOWN:{type(error).__name__}",
+            evidence_ids=current_evidence_ids, facts=facts,
+        )
+        return receipt
+
+    fresh_gate = evaluate_evidence_gate(path, task_id, current_evidence_ids)
+    facts["fresh_gate"] = fresh_gate
+    if fresh_gate.get("decision") != "READY":
+        return _persist_revalidation_receipt(
+            path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+            run_id=run_id, status="BLOCKED",
+            reason_code=str(fresh_gate.get("reason_code") or "REVALIDATION_NOT_READY"),
+            evidence_ids=current_evidence_ids, facts=facts,
+        )
+
+    old_gate = evaluate_evidence_gate(path, task_id, source_ids)
+    candidate = fresh_gate.get("plan_candidate")
+    same_candidate = isinstance(candidate, dict) and all(candidate.get(key) == value for key, value in {
+        "action_type": plan.get("repair_action_type"),
+        "integration_id": plan.get("integration_id"),
+        "expected_config_version": plan.get("expected_config_version"),
+        "expected_principal_version": plan.get("expected_principal_version"),
+        "expected_auth_policy_version": plan.get("expected_auth_policy_version"),
+        "new_credential_ref": plan.get("new_credential_ref"),
+    }.items())
+    if old_gate.get("decision") == "READY" and same_candidate:
+        return _persist_revalidation_receipt(
+            path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+            run_id=run_id, status="VALID", reason_code="APPROVED_PLAN_STILL_CURRENT",
+            evidence_ids=current_evidence_ids, facts=facts,
+        )
+
+    if run_id is None:
+        return _persist_revalidation_receipt(
+            path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+            run_id=None, status="BLOCKED", reason_code="REAPPROVAL_RUN_REQUIRED",
+            evidence_ids=current_evidence_ids, facts=facts,
+        )
+    replacement = create_plan_from_gate(
+        path, task_id, str(binding["actor_id"]), fresh_gate, run_id=run_id,
+    )
+    facts["replacement_plan_hash"] = str(replacement["plan_hash"])
+    return _persist_revalidation_receipt(
+        path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
+        run_id=run_id, status="REAPPROVAL_REQUIRED", reason_code=(
+            "OLD_EVIDENCE_EXPIRED" if old_gate.get("decision") != "READY" else "PLAN_FACTS_CHANGED"
+        ), evidence_ids=current_evidence_ids, facts=facts,
+        replacement_plan_hash=str(replacement["plan_hash"]),
+    )
+
+
+def _require_current_revalidation(
+    connection: sqlite3.Connection,
+    *,
+    intent: dict[str, object],
+    binding: dict[str, object],
+    plan: dict[str, object],
+    approval: dict[str, object],
+) -> dict[str, object]:
+    row = connection.execute(
+        """SELECT * FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ?
+           AND plan_hash = ? AND approval_id = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
+        (intent["tenant_id"], intent["task_id"], intent["plan_hash"], approval["approval_id"]),
+    ).fetchone()
+    if row is None or str(row["status"]) != "VALID":
+        raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+    evidence_ids = json.loads(str(row["evidence_ids_json"]))
+    facts = json.loads(str(row["facts_json"]))
+    body = {
+        "receipt_id": str(row["receipt_id"]), "tenant_id": str(row["tenant_id"]),
+        "task_id": str(row["task_id"]), "plan_hash": str(row["plan_hash"]),
+        "approval_id": str(row["approval_id"]), "run_id": row["run_id"],
+        "status": str(row["status"]), "reason_code": str(row["reason_code"]),
+        "evidence_ids": evidence_ids, "facts": facts,
+        "replacement_plan_hash": row["replacement_plan_hash"],
+        "observed_at": str(row["observed_at"]),
+    }
+    if hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest() != str(row["content_digest"]):
+        raise D3PreconditionRejected("REVALIDATION_RECEIPT_DIGEST_MISMATCH")
+    try:
+        observed_at = datetime.fromisoformat(str(row["observed_at"]).replace("Z", "+00:00"))
+        if observed_at.tzinfo is None:
+            observed_at = observed_at.replace(tzinfo=timezone.utc)
+    except ValueError as error:
+        raise D3PreconditionRejected("REVALIDATION_RECEIPT_TIME_INVALID") from error
+    if (datetime.now(timezone.utc) - observed_at.astimezone(timezone.utc)).total_seconds() > EVIDENCE_MAX_AGE_SECONDS:
+        raise D3PreconditionRejected("REVALIDATION_RECEIPT_EXPIRED")
+
+    fresh_gate = facts.get("fresh_gate") if isinstance(facts, dict) else None
+    if not isinstance(fresh_gate, dict) or fresh_gate.get("decision") != "READY":
+        raise D3PreconditionRejected("REVALIDATION_GATE_INVALID")
+    candidate = fresh_gate.get("plan_candidate")
+    expected_candidate = {
+        "action_type": plan.get("repair_action_type"),
+        "integration_id": plan.get("integration_id"),
+        "new_credential_ref": plan.get("new_credential_ref"),
+        "expected_config_version": plan.get("expected_config_version"),
+        "expected_principal_version": plan.get("expected_principal_version"),
+        "expected_auth_policy_version": plan.get("expected_auth_policy_version"),
+    }
+    if (
+        not isinstance(candidate, dict)
+        or any(candidate.get(key) != value for key, value in expected_candidate.items())
+        or candidate.get("required_evidence_ids") != evidence_ids
+    ):
+        raise D3PreconditionRejected("REVALIDATION_PLAN_MISMATCH")
+    required = {"integration_config", "principal_status", "auth_policy", "endpoint_probe"}
+    if not isinstance(evidence_ids, list) or len(evidence_ids) != 4:
+        raise D3PreconditionRejected("REVALIDATION_EVIDENCE_INCOMPLETE")
+    placeholders = ",".join("?" for _ in evidence_ids)
+    rows = connection.execute(
+        f"SELECT * FROM d2_evidence WHERE tenant_id = ? AND task_id = ? AND evidence_id IN ({placeholders})",
+        (intent["tenant_id"], intent["task_id"], *evidence_ids),
+    ).fetchall()
+    evidence_by_type = {str(item["fact_type"]): item for item in rows}
+    if len(rows) != 4 or set(evidence_by_type) != required:
+        raise D3PreconditionRejected("REVALIDATION_EVIDENCE_INVALID")
+    now = datetime.now(timezone.utc)
+    expected_sources = {
+        "integration_config": "sqlite:integrations",
+        "principal_status": "sqlite:principals",
+        "auth_policy": "sqlite:auth_policies",
+        "endpoint_probe": "http:loopback-demo-business-api",
+    }
+    for fact_type, evidence in evidence_by_type.items():
+        try:
+            fetched = datetime.fromisoformat(str(evidence["fetched_at"]).replace("Z", "+00:00"))
+            if fetched.tzinfo is None:
+                fetched = fetched.replace(tzinfo=timezone.utc)
+        except ValueError as error:
+            raise D3PreconditionRejected("REVALIDATION_EVIDENCE_TIME_INVALID") from error
+        age = (now - fetched.astimezone(timezone.utc)).total_seconds()
+        if (
+            evidence["tenant_id"] != binding["tenant_id"]
+            or evidence["task_id"] != intent["task_id"]
+            or evidence["principal_id"] != binding["principal_id"]
+            or evidence["data_source"] != expected_sources[fact_type]
+            or evidence["trust_class"] != "untrusted_tool_observation"
+            or age < -30 or age > EVIDENCE_MAX_AGE_SECONDS
+        ):
+            raise D3PreconditionRejected("REVALIDATION_EVIDENCE_SCOPE_OR_FRESHNESS_INVALID")
+        envelope = facts.get(fact_type)
+        if not isinstance(envelope, dict):
+            raise D3PreconditionRejected("REVALIDATION_FACTS_INCOMPLETE")
+        expected_digest = digest_json({
+            "tenant_id": envelope.get("tenant_id"), "task_id": envelope.get("task_id"),
+            "fact_type": envelope.get("fact_type"), "resource_id": envelope.get("resource_id"),
+            "principal_id": envelope.get("principal_id"), "data_source": envelope.get("data_source"),
+            "observed_versions": envelope.get("observed_versions"), "facts": envelope.get("facts"),
+            "trust_class": envelope.get("trust_class"),
+        })
+        observation_id = str(evidence["original_result_ref"]).removeprefix("observation://")
+        observation = connection.execute(
+            "SELECT status, evidence_id, result_json FROM d2_tool_observations WHERE observation_id = ? AND task_id = ?",
+            (observation_id, intent["task_id"]),
+        ).fetchone()
+        if (
+            str(evidence["digest"]) != expected_digest
+            or str(evidence["fact_type"]) != fact_type
+            or json.loads(str(evidence["facts_json"])) != envelope.get("facts")
+            or json.loads(str(evidence["observed_versions_json"])) != envelope.get("observed_versions")
+            or not str(evidence["original_result_ref"]).startswith("observation://")
+            or observation is None or observation["status"] != "OK"
+            or observation["evidence_id"] != evidence["evidence_id"]
+            or json.loads(str(observation["result_json"])) != envelope
+        ):
+            raise D3PreconditionRejected("REVALIDATION_EVIDENCE_DIGEST_MISMATCH")
+    config = facts.get("integration_config")
+    principal = facts.get("principal_status")
+    policy = facts.get("auth_policy")
+    probe = facts.get("endpoint_probe")
+    envelopes = (config, principal, policy, probe)
+    if any(not isinstance(item, dict) or not isinstance(item.get("facts"), dict) for item in envelopes):
+        raise D3PreconditionRejected("REVALIDATION_FACTS_INCOMPLETE")
+    for item in envelopes:
+        if (
+            item.get("tenant_id") != binding["tenant_id"]
+            or item.get("task_id") != intent["task_id"]
+            or item.get("principal_id") != binding["principal_id"]
+            or item.get("trust_class") != "untrusted_tool_observation"
+        ):
+            raise D3PreconditionRejected("REVALIDATION_FACT_SCOPE_INVALID")
+    probe_facts = probe["facts"]
+    versions = probe.get("observed_versions")
+    expected_versions = {
+        "config_version": int(plan["expected_config_version"]),
+        "principal_version": int(plan["expected_principal_version"]),
+        "policy_version": int(plan["expected_auth_policy_version"]),
+    }
+    before = versions.get("before") if isinstance(versions, dict) else None
+    after = versions.get("after") if isinstance(versions, dict) else None
+    if (
+        probe_facts.get("http_status") != 401
+        or probe_facts.get("auth_event_result") != "AUTH_REJECTED"
+        or probe_facts.get("auth_event_scope_valid") is not True
+        or probe_facts.get("versions_stable_during_probe") is not True
+        or not probe_facts.get("request_id") or not probe_facts.get("auth_event_id")
+        or before != expected_versions or after != expected_versions
+        or config["facts"].get("credential_ref") != plan.get("old_credential_ref")
+        or config["facts"].get("principal_id") != binding["principal_id"]
+        or principal["facts"].get("status") != "ENABLED"
+        or principal["facts"].get("principal_id") != binding["principal_id"]
+        or policy["facts"].get("accepted_credential_ref") != plan.get("new_credential_ref")
+    ):
+        raise D3PreconditionRejected("REVALIDATION_FACTS_NO_LONGER_MATCH_PLAN")
+    return {key: row[key] for key in row.keys()}
+
+
 def execute_repair(path: str | Path, action_intent_id: str, executor_id: str, attempt_id: str) -> dict[str, object]:
     del attempt_id  # Attempt identity is operational and never changes the business digest.
     with connect(path) as connection:
@@ -1065,6 +1460,9 @@ def execute_repair(path: str | Path, action_intent_id: str, executor_id: str, at
         prior = _prior_ledger(connection, intent)
         if prior is not None:
             return prior
+        _require_current_revalidation(
+            connection, intent=intent, binding=binding, plan=plan, approval=approval,
+        )
         _assert_plan_control(connection, str(intent["tenant_id"]), str(intent["task_id"]), str(intent["plan_hash"]))
         auth = _authorization(connection, str(intent["tenant_id"]), str(intent["task_id"]), str(intent["plan_hash"]))
         if auth is None or auth["eligibility"] != "ACTIVE":
@@ -1624,6 +2022,7 @@ def get_task_action_state(path: str | Path, task_id: str, actor_id: str) -> dict
         permissions = connection.execute("SELECT * FROM d3_action_permissions WHERE tenant_id = ? AND task_id = ?", (binding["tenant_id"], task_id)).fetchall()
         intents = connection.execute("SELECT * FROM d3_action_intents WHERE tenant_id = ? AND task_id = ?", (binding["tenant_id"], task_id)).fetchall()
         ledgers = connection.execute("SELECT * FROM d3_action_ledgers WHERE tenant_id = ? AND task_id = ?", (binding["tenant_id"], task_id)).fetchall()
+        revalidations = connection.execute("SELECT * FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ? ORDER BY observed_at, rowid", (binding["tenant_id"], task_id)).fetchall()
         receipts = connection.execute("SELECT * FROM d3_verification_receipts WHERE tenant_id = ? AND task_id = ?", (binding["tenant_id"], task_id)).fetchall()
         reports = connection.execute("SELECT * FROM d3_report_artifacts WHERE tenant_id = ? AND task_id = ?", (binding["tenant_id"], task_id)).fetchall()
         deliveries = connection.execute("SELECT * FROM d3_delivery_records WHERE tenant_id = ? AND task_id = ?", (binding["tenant_id"], task_id)).fetchall()
@@ -1636,6 +2035,7 @@ def get_task_action_state(path: str | Path, task_id: str, actor_id: str) -> dict
         "permissions": [_row(row) for row in permissions],
         "action_intents": [_row(row) for row in intents],
         "action_ledgers": [_row(row) for row in ledgers],
+        "revalidation_receipts": [_row(row) for row in revalidations],
         "verification_receipts": [_row(row) for row in receipts],
         "report_artifacts": [_row(row) for row in reports],
         "delivery_records": [_row(row) for row in deliveries],
@@ -1682,6 +2082,13 @@ def get_task_outcome(path: str | Path, task_id: str, actor_id: str) -> dict[str,
             """SELECT approval_id, approver_id, decision, decided_at FROM d3_approvals
                WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
             (binding["tenant_id"], task_id, plan_hash),
+        ).fetchone()
+        revalidation = connection.execute(
+            """SELECT receipt_id, plan_hash, approval_id, run_id, status, reason_code,
+                      replacement_plan_hash, observed_at, content_digest
+               FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ?
+               ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
+            (binding["tenant_id"], task_id),
         ).fetchone()
         resume_link = connection.execute(
             """SELECT source_investigation_run_id, source_checkpoint_thread_id, resume_run_id,
@@ -1765,8 +2172,16 @@ def get_task_outcome(path: str | Path, task_id: str, actor_id: str) -> dict[str,
         outcome = "DELIVERED"
     elif repair is not None and verification is not None and bool(verification["recovery_verified"]):
         outcome = "RECOVERED_NOT_DELIVERED"
+    elif repair is not None and str(repair["status"]) == "COMMITTED":
+        outcome = "REPAIR_COMMITTED"
     elif approval is not None and str(approval["decision"]) == "REJECTED":
         outcome = "REJECTED"
+    elif revalidation is not None and str(revalidation["status"]) == "BLOCKED":
+        outcome = "REVALIDATION_BLOCKED"
+    elif revalidation is not None and str(revalidation["status"]) == "UNKNOWN":
+        outcome = "UNKNOWN"
+    elif revalidation is not None and str(revalidation["status"]) == "REAPPROVAL_REQUIRED":
+        outcome = "REAPPROVAL_REQUIRED"
     elif approval is not None and str(approval["decision"]) == "APPROVED":
         outcome = "APPROVAL_ACCEPTED"
     else:
@@ -1783,6 +2198,7 @@ def get_task_outcome(path: str | Path, task_id: str, actor_id: str) -> dict[str,
         "approval": approval_value,
         "resume_link": ({key: resume_link[key] for key in resume_link.keys()} if resume_link else None),
         "resume_run": ({key: resume_run[key] for key in resume_run.keys()} if resume_run else None),
+        "revalidation": ({key: revalidation[key] for key in revalidation.keys()} if revalidation else None),
         "repair": repair_value,
         "verification": verification_value,
         "frozen_report": ({key: report[key] for key in report.keys()} if report else None),

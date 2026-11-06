@@ -230,6 +230,7 @@ export interface TaskOutcome {
   approval?: Record<string, unknown> | null;
   resume_link?: Record<string, unknown> | null;
   resume_run?: Record<string, unknown> | null;
+  revalidation?: Record<string, unknown> | null;
   repair?: Record<string, unknown> | null;
   verification?: Record<string, unknown> | null;
   frozen_report?: Record<string, unknown> | null;

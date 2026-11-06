@@ -679,6 +679,23 @@ CREATE TABLE IF NOT EXISTS d3_verification_receipts (
     result_digest TEXT NOT NULL,
     UNIQUE (tenant_id, task_id, plan_hash, repair_action_id)
 );
+CREATE TABLE IF NOT EXISTS d3_revalidation_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    plan_hash TEXT NOT NULL,
+    approval_id TEXT NOT NULL,
+    run_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('VALID', 'REAPPROVAL_REQUIRED', 'BLOCKED', 'UNKNOWN')),
+    reason_code TEXT NOT NULL,
+    evidence_ids_json TEXT NOT NULL,
+    facts_json TEXT NOT NULL,
+    replacement_plan_hash TEXT,
+    observed_at TEXT NOT NULL,
+    content_digest TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_d3_revalidation_task_plan
+    ON d3_revalidation_receipts(tenant_id, task_id, plan_hash, observed_at);
 CREATE TABLE IF NOT EXISTS d3_report_artifacts (
     report_ref TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -1519,6 +1536,7 @@ def reset_fixture(path: str | Path, scenario: Scenario) -> None:
             "d3_delivery_records",
             "d3_ticket_resolution_entries",
             "d3_report_artifacts",
+            "d3_revalidation_receipts",
             "d3_verification_receipts",
             "d3_action_ledgers",
             "d3_action_intents",

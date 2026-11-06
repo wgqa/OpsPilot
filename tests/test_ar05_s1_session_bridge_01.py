@@ -62,8 +62,12 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
     demo_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import opspilot.investigator as investigator
+    from opspilot.domain.task_control import next_worker_run
     from opspilot.web.app import create_app
+    from opspilot.web.worker import SingleInstanceWorker, _dispatch_run
     from test_m1_web_api import ORIGIN, PASSWORDS
+
+    model_tool_choices: list[dict[str, object]] = []
 
     class OfflineS1Model:
         def __init__(self, *args, **kwargs):
@@ -87,6 +91,7 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
                 return AIMessage(content='依据本次只读取证，凭据引用需要人工审阅。')
             name, arguments = calls[self.index]
             self.index += 1
+            model_tool_choices.append({'name': name, 'arguments': arguments})
             return AIMessage(content='', tool_calls=[{'name': name, 'args': arguments, 'id': f'offline-{self.index}'}])
 
     class OfflineConversationModel(FixtureModel):
@@ -101,8 +106,24 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
     with connect(demo_db) as db:
         before = tuple(db.execute("SELECT credential_ref, config_version FROM integrations WHERE tenant_id='tenant-a' AND integration_id='integration-a'").fetchone())
     app = create_app(db_path=demo_db, checkpoint_db_path=tmp_path / 'bridge-cp.sqlite3',
-        start_worker=True, credentials=PASSWORDS, expected_origin=ORIGIN, heartbeat_seconds=0.05,
+        start_worker=False, credentials=PASSWORDS, expected_origin=ORIGIN, heartbeat_seconds=0.05,
         assistant_model_factory=lambda: OfflineConversationModel())
+
+    def process_queued_run(expected_run_id: str) -> None:
+        worker = SingleInstanceWorker(demo_db)
+        worker.acquire()
+        worker.register()
+        try:
+            selected = next_worker_run(demo_db)
+            assert selected is not None and str(selected['run_id']) == expected_run_id
+            import asyncio
+            asyncio.run(_dispatch_run(
+                demo_db, tmp_path / 'bridge-cp.sqlite3', worker.owner_id, 'executor-a', selected,
+                worker_epoch=worker.epoch, assistant_model_factory=lambda: OfflineConversationModel(),
+            ))
+        finally:
+            worker.release()
+
     with TestClient(app, raise_server_exceptions=False) as client:
         headers = _login(client)[1]
         session = _session(client, headers)
@@ -112,16 +133,15 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
             headers={**headers, 'Idempotency-Key': 'journey-chat'}, json={'body': QUESTION, 'task_id': None})
         assert question.status_code == 202, question.text
         origin = question.json()['message_id']
-        created = client.post(f'/api/sessions/{session}/tasks',
+        process_queued_run(str(question.json()['run_id']))
+        created_response = client.post(f'/api/sessions/{session}/tasks',
             headers={**headers, 'Idempotency-Key': 'journey-confirm'},
-            json={'initial_message': QUESTION, 'source_message_id': origin}).json()
+            json={'initial_message': QUESTION, 'source_message_id': origin})
+        assert created_response.status_code == 202, created_response.text
+        created = created_response.json()
         run_id, task_id = created['run_id'], created['task_id']
-        deadline = time.monotonic() + 45
-        while time.monotonic() < deadline:
-            run = client.get(f'/api/runs/{run_id}').json()
-            if run['status'] not in ('QUEUED', 'RUNNING'):
-                break
-            time.sleep(0.1)
+        process_queued_run(str(run_id))
+        run = client.get(f'/api/runs/{run_id}').json()
         inspector_response = client.get(f'/api/tasks/{task_id}/inspector')
         assert inspector_response.status_code == 200, inspector_response.text
         inspector = inspector_response.json()
@@ -156,6 +176,7 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
             headers={**headers, 'Idempotency-Key': 'same-session-unbound-followup'},
             json={'body': '请继续解释调查结果的含义', 'task_id': None})
         assert ordinary.status_code == 202 and ordinary.json()['execution_core'] == 'ASSISTANT_V1'
+        process_queued_run(str(ordinary.json()['run_id']))
         assert client.get(f"/api/runs/{ordinary.json()['run_id']}").json()['execution_core'] == 'ASSISTANT_V1'
         with connect(demo_db) as db:
             assert db.execute('SELECT COUNT(*) FROM d3_approvals').fetchone()[0] == 0
@@ -165,6 +186,137 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
             assert tuple(db.execute("SELECT credential_ref, config_version FROM integrations WHERE tenant_id='tenant-a' AND integration_id='integration-a'").fetchone()) == before
             assert db.execute('SELECT COUNT(*) FROM assistant_runs WHERE run_id=?', (run_id,)).fetchone()[0] == 0
             assert db.execute('SELECT COUNT(*) FROM assistant_runs WHERE run_id=?', (ordinary.json()['run_id'],)).fetchone()[0] == 1
+
+        first_approval = client.post(
+            f"/api/tasks/{task_id}/plans/{outcome['plan']['plan_hash']}/approval",
+            headers={**_login(client, 'approver-a')[1], 'Idempotency-Key': 'ar05-close-approval-1'},
+            json={'decision': 'APPROVED'},
+        )
+        assert first_approval.status_code == 202, first_approval.text
+        first_resume_id = str(first_approval.json()['resume_run_id'])
+        with connect(demo_db) as db:
+            db.execute(
+                "UPDATE integrations SET config_version = config_version + 1 "
+                "WHERE tenant_id='tenant-a' AND integration_id='integration-a'"
+            )
+        process_queued_run(first_resume_id)
+        first_resume = client.get(f'/api/runs/{first_resume_id}').json()
+        assert first_resume['status'] == 'WAITING_APPROVAL', first_resume
+        headers = _login(client, 'support-a')[1]
+        refreshed = client.get(f'/api/tasks/{task_id}/outcome', headers=headers).json()
+        assert refreshed.get('business_outcome') == 'REAPPROVAL_REQUIRED', refreshed
+        assert refreshed['repair'] is None and refreshed['delivery'] is None
+        with connect(demo_db) as db:
+            assert db.execute('SELECT COUNT(*) FROM d3_action_intents WHERE task_id=?', (task_id,)).fetchone()[0] == 0
+            assert db.execute('SELECT COUNT(*) FROM d3_action_ledgers WHERE task_id=?', (task_id,)).fetchone()[0] == 0
+
+        second_approval = client.post(
+            f"/api/tasks/{task_id}/plans/{refreshed['plan']['plan_hash']}/approval",
+            headers={**_login(client, 'approver-a')[1], 'Idempotency-Key': 'ar05-close-approval-2'},
+            json={'decision': 'APPROVED'},
+        )
+        assert second_approval.status_code == 202, second_approval.text
+        second_resume_id = str(second_approval.json()['resume_run_id'])
+        process_queued_run(second_resume_id)
+        headers = _login(client, 'support-a')[1]
+        second_resume = client.get(f'/api/runs/{second_resume_id}', headers=headers).json()
+        assert second_resume['status'] == 'SUCCEEDED', second_resume
+        final_outcome = client.get(f'/api/tasks/{task_id}/outcome', headers=headers).json()
+        assert final_outcome['business_outcome'] == 'DELIVERED'
+        assert final_outcome['verification']['response_status'] == 200
+        assert final_outcome['verification']['recovery_verified'] is True
+        with connect(demo_db) as db:
+            final_configuration = dict(db.execute(
+                "SELECT credential_ref, config_version FROM integrations "
+                "WHERE tenant_id='tenant-a' AND integration_id='integration-a'"
+            ).fetchone())
+            runs = [dict(row) for row in db.execute(
+                "SELECT run_id, kind, status, source_message_id FROM task_runs "
+                "WHERE task_id=? ORDER BY created_at, rowid", (task_id,),
+            ).fetchall()]
+            observations = [dict(row) for row in db.execute(
+                "SELECT observation_id, tool_name, status, evidence_id, result_digest "
+                "FROM d2_tool_observations WHERE task_id=? ORDER BY created_at, rowid", (task_id,),
+            ).fetchall()]
+            revalidations = [dict(row) for row in db.execute(
+                "SELECT receipt_id, plan_hash, approval_id, run_id, status, reason_code, "
+                "evidence_ids_json, content_digest FROM d3_revalidation_receipts "
+                "WHERE task_id=? ORDER BY observed_at, rowid", (task_id,),
+            ).fetchall()]
+            ledgers = [dict(row) for row in db.execute(
+                "SELECT ledger_id, action_id, action_kind, status, before_version, after_version "
+                "FROM d3_action_ledgers WHERE task_id=? ORDER BY committed_at, rowid", (task_id,),
+            ).fetchall()]
+            verification = dict(db.execute(
+                "SELECT verification_id, response_status, recovery_verified, result_digest "
+                "FROM d3_verification_receipts WHERE task_id=?", (task_id,),
+            ).fetchone())
+            delivery = dict(db.execute(
+                "SELECT delivery_id, report_ref, ticket_entry_id, payload_digest "
+                "FROM d3_delivery_records WHERE task_id=?", (task_id,),
+            ).fetchone())
+            report = dict(db.execute(
+                "SELECT report_ref, content_digest, created_at FROM d3_report_artifacts WHERE task_id=?",
+                (task_id,),
+            ).fetchone())
+            assert final_configuration == {'credential_ref': 'cred-v2', 'config_version': 9}
+            assert len([item for item in ledgers if item['action_kind'] == 'REPAIR']) == 1
+            assert len([item for item in ledgers if item['action_kind'] == 'DELIVER']) == 1
+            assert sum(item['status'] == 'REAPPROVAL_REQUIRED' for item in revalidations) == 1
+            assert sum(item['status'] == 'VALID' for item in revalidations) == 1
+        final_messages = client.get(f'/api/sessions/{session}/messages', headers=headers).json()['items']
+        final_origin = next(item for item in final_messages if item['message_id'] == origin)
+        task_message = next(item for item in final_messages if item['message_id'] == created['message_id'])
+        assert final_origin['role'] == 'USER' and final_origin['body'] == QUESTION
+        assert task_message['investigation_origin_message_id'] == origin
+        final_answer = next(
+            item for item in final_messages
+            if item['role'] == 'ASSISTANT' and item['answer_source_message_id'] == origin
+        )
+        close_trace = {
+            'evidence_level': 'DETERMINISTIC_FORMAL_API_WORKER_REAL_LOCAL_MCP_HTTP_SQLITE',
+            'user_goal': QUESTION,
+            'session_id': session,
+            'origin_message_id': origin,
+            'task_initial_message_id': created['message_id'],
+            'task_id': task_id,
+            'investigation_run_id': run_id,
+            'approval_resume_runs': [first_resume_id, second_resume_id],
+            'model_tool_choices': model_tool_choices,
+            'trusted_observations': observations,
+            'approval_revalidation_receipts': revalidations,
+            'runs': runs,
+            'plan_hashes': [outcome['plan']['plan_hash'], refreshed['plan']['plan_hash']],
+            'repair_and_delivery_ledgers': ledgers,
+            'verification_receipt': verification,
+            'frozen_report': report,
+            'delivery_receipt': delivery,
+            'assistant_answer': {
+                'message_id': final_answer['message_id'],
+                'source_message_id': final_answer['answer_source_message_id'],
+                'body': final_answer['body'],
+                'kind': final_answer['answer_kind'],
+            },
+            'session_message_readback': {
+                'origin_message_id': final_origin['message_id'],
+                'task_message_id': task_message['message_id'],
+                'investigation_origin_message_id': task_message['investigation_origin_message_id'],
+                'task_message_body': task_message['body'],
+            },
+            'final_outcome': final_outcome['business_outcome'],
+            'final_configuration': final_configuration,
+            'provider_http_requests': 0,
+            'provider_note': 'Both model interfaces were deterministic local substitutes; no Provider client was used.',
+            'external_business_writes': 0,
+            'isolated_demo_writes': {'repair_commits': 1, 'ticket_entries': 1},
+            'browser': 'NOT_RUN_HISTORICAL_STOP',
+        }
+        if os.environ.get('AR05_D3_CLOSE_TRACE_PATH'):
+            Path(os.environ['AR05_D3_CLOSE_TRACE_PATH']).write_text(
+                json.dumps(close_trace, ensure_ascii=False, indent=2, default=str), encoding='utf-8',
+            )
+        print('AR05_D3_CLOSE_TRACE=' + json.dumps(close_trace, ensure_ascii=False, default=str), flush=True)
+        with connect(demo_db) as db:
             db.execute("UPDATE d3_plans SET canonical_plan_json=canonical_plan_json || ' ' WHERE task_id=?", (task_id,))
         assert client.get(f'/api/tasks/{task_id}/outcome').status_code >= 400
 def test_bridge_refuses_foreign_session_origin_and_approver(web_client: TestClient, demo_db: Path) -> None:

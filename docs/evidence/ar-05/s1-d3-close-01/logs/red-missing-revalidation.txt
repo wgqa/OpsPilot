@@ -1,0 +1,31 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+________ test_d3_repair_without_approval_time_revalidation_is_rejected ________
+
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-d3-close-basetemp-red/test_d3_repair_without_approva0/domain.sqlite3')
+live_api = 'http://127.0.0.1:62019'
+
+    def test_d3_repair_without_approval_time_revalidation_is_rejected(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        binding, _, plan = _ready(demo_db, live_api)
+        approval = _approve(demo_db, binding, plan)
+        intent = get_or_create_action_intent(
+            demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a",
+        )
+        try:
+            result = execute_repair(demo_db, str(intent["action_id"]), "executor-a", "without-revalidation")
+        except D3PreconditionRejected as error:
+            assert "REVALIDATION_REQUIRED" in str(error)
+        else:
+>           assert result["status"] == "REJECTED_PRECONDITION", "approved REPAIR committed without approval-time current evidence"
+E           AssertionError: approved REPAIR committed without approval-time current evidence
+E           assert 'COMMITTED' == 'REJECTED_PRECONDITION'
+E             
+E             - REJECTED_PRECONDITION
+E             + COMMITTED
+
+tests\test_d3_actions.py:151: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_d3_actions.py::test_d3_repair_without_approval_time_revalidation_is_rejected
+1 failed in 0.56s

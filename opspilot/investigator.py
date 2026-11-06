@@ -134,6 +134,8 @@ class InvestigatorState(TypedDict, total=False):
     approval_id: str
     approval_resume_id: str
     approval_decision: str
+    revalidation_receipt_id: str
+    revalidation_status: str
     diagnosis_receipt_id: str
     handoff_draft_id: str
     s2_gate_trace_id: str
@@ -2026,6 +2028,44 @@ def build_investigation_graph(
         )
         return {"stage": "complete", "local_report_ref": report["report_ref"]}
 
+    async def d3_revalidate_approved_plan(state: InvestigatorState) -> dict[str, object]:
+        from opspilot.domain.d3 import get_plan_for_task, revalidate_approved_plan
+
+        if not executor_id or not business_api_url or not run_id:
+            raise RuntimeError("D3 approval revalidation requires the trusted executor, active Run, and loopback API.")
+        receipt = revalidate_approved_plan(
+            db_path, task_id, str(state["plan_hash"]), str(state["approval_id"]),
+            executor_id, business_api_url, run_id=run_id,
+        )
+        if receipt["status"] == "VALID":
+            return {
+                "stage": "d3_revalidation_complete",
+                "revalidation_receipt_id": receipt["receipt_id"],
+                "revalidation_status": receipt["status"],
+            }
+        if receipt["status"] == "REAPPROVAL_REQUIRED":
+            replacement_hash = str(receipt["replacement_plan_hash"])
+            replacement = get_plan_for_task(db_path, task_id, replacement_hash, str(submitter_id))
+            fresh_gate = receipt.get("facts", {}).get("fresh_gate", {})
+            return {
+                "stage": "d3_plan_created",
+                "plan_id": str(replacement["plan_id"]),
+                "plan_hash": replacement_hash,
+                "gate_decision": fresh_gate if isinstance(fresh_gate, dict) else {},
+                "revalidation_receipt_id": receipt["receipt_id"],
+                "revalidation_status": receipt["status"],
+                "approval_id": "",
+                "approval_decision": "",
+                "approver_id": "",
+                "approval_resume_id": "",
+            }
+        return {
+            "stage": "waiting_input",
+            "blocked_reason": str(receipt["reason_code"]),
+            "revalidation_receipt_id": receipt["receipt_id"],
+            "revalidation_status": receipt["status"],
+        }
+
     async def d3_nonready_report(state: InvestigatorState) -> dict[str, object]:
         from opspilot.domain.d3 import save_local_report
 
@@ -2185,7 +2225,14 @@ def build_investigation_graph(
         return "report"
 
     def after_approval(state: InvestigatorState) -> str:
-        return "d3_repair_intent" if state.get("approval_decision") == "APPROVED" else "d3_unapproved_report"
+        return "d3_revalidate_approved_plan" if state.get("approval_decision") == "APPROVED" else "d3_unapproved_report"
+
+    def after_revalidation(state: InvestigatorState) -> str:
+        if state.get("revalidation_status") == "VALID":
+            return "d3_repair_intent"
+        if state.get("revalidation_status") == "REAPPROVAL_REQUIRED":
+            return "d3_human_approval"
+        return "__end__"
 
     def after_verification(state: InvestigatorState) -> str:
         from opspilot.domain.d3 import get_verification_receipt
@@ -2244,6 +2291,7 @@ def build_investigation_graph(
             ("d3_create_plan", d3_create_plan),
             ("d3_human_approval", d3_human_approval),
             ("d3_unapproved_report", d3_unapproved_report),
+            ("d3_revalidate_approved_plan", d3_revalidate_approved_plan),
             ("d3_nonready_report", d3_nonready_report),
             ("d3_repair_intent", d3_create_repair_intent),
             ("d3_execute_repair", d3_execute_repair),
@@ -2259,7 +2307,11 @@ def build_investigation_graph(
         graph.add_conditional_edges("d3_create_plan", lambda _: "d3_human_approval", {"d3_human_approval": "d3_human_approval"})
         graph.add_conditional_edges(
             "d3_human_approval", after_approval,
-            {"d3_repair_intent": "d3_repair_intent", "d3_unapproved_report": "d3_unapproved_report"},
+            {"d3_revalidate_approved_plan": "d3_revalidate_approved_plan", "d3_unapproved_report": "d3_unapproved_report"},
+        )
+        graph.add_conditional_edges(
+            "d3_revalidate_approved_plan", after_revalidation,
+            {"d3_repair_intent": "d3_repair_intent", "d3_human_approval": "d3_human_approval", "__end__": END},
         )
         graph.add_edge("d3_repair_intent", "d3_execute_repair")
         graph.add_edge("d3_execute_repair", "d3_verify_repair")
@@ -2574,7 +2626,8 @@ async def run_investigation(
                             if state_stage != "d3_plan_created" or "d3_human_approval" not in snapshot.next:
                                 raise TaskControlError("APPROVAL_CHECKPOINT_INTERRUPT_MISMATCH")
                         elif state_stage not in {
-                            "d3_approval_recorded", "d3_repair_intent_persisted",
+                            "d3_approval_recorded", "d3_revalidation_complete", "waiting_input",
+                            "d3_repair_intent_persisted",
                             "d3_repair_committed", "d3_verification_complete", "d3_report_frozen",
                             "d3_deliver_intent_persisted", "complete",
                         }:

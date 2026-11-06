@@ -1,0 +1,55 @@
+..FF.........                                                            [100%]
+================================== FAILURES ===================================
+________ test_d3_repair_without_approval_time_revalidation_is_rejected ________
+
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-d3actions/test_d3_repair_without_approva0/domain.sqlite3')
+live_api = 'http://127.0.0.1:58312'
+
+    def test_d3_repair_without_approval_time_revalidation_is_rejected(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        binding, _, plan = _ready(demo_db, live_api)
+        _approve(demo_db, binding, plan)
+        with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
+            get_or_create_action_intent(
+                demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a",
+            )
+        current = get_integration_info(demo_db, "tenant-a", "integration-a")
+        assert current["credential_ref"] == "cred-v1" and current["config_version"] == 7
+>       assert _count(demo_db, "d3_action_intents", "task_id = ?", (str(binding["task_id"]),)) == 0
+               ^^^^^^
+E       NameError: name '_count' is not defined
+
+tests\test_d3_actions.py:162: NameError
+__ test_d3_revalidation_blocks_changed_current_fact_without_creating_repair ___
+
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-d3actions/test_d3_revalidation_blocks_ch0/domain.sqlite3')
+live_api = 'http://127.0.0.1:58314'
+
+    def test_d3_revalidation_blocks_changed_current_fact_without_creating_repair(demo_db: Path, live_api: str) -> None:
+        binding, _, plan = _ready(demo_db, live_api)
+        _approve(demo_db, binding, plan)
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE integrations SET credential_ref='cred-v2', config_version=config_version+1 "
+                "WHERE tenant_id='tenant-a' AND integration_id='integration-a'"
+            )
+        receipt = _revalidate(demo_db, binding, plan, live_api)
+        assert receipt["status"] == "BLOCKED"
+        assert receipt["reason_code"] == "CURRENT_PROBE_NOT_401"
+        with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
+            get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
+        outcome = __import__("opspilot.domain.d3", fromlist=["get_task_outcome"]).get_task_outcome(
+            demo_db, str(binding["task_id"]), "support-a",
+        )
+        assert outcome["business_outcome"] == "REVALIDATION_BLOCKED"
+        assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v2"
+>       assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(binding["task_id"]),)) == 0
+               ^^^^^^
+E       NameError: name '_count' is not defined
+
+tests\test_d3_actions.py:184: NameError
+=========================== short test summary info ===========================
+FAILED tests/test_d3_actions.py::test_d3_repair_without_approval_time_revalidation_is_rejected
+FAILED tests/test_d3_actions.py::test_d3_revalidation_blocks_changed_current_fact_without_creating_repair
+2 failed, 11 passed in 5.77s
