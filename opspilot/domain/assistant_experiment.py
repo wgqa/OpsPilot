@@ -26,13 +26,17 @@ AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01-RESUME-0
 AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID = "AR-03-MATERIAL-REMAINDER-01"
 AR04C_REAL_JOURNEY_01_EXPERIMENT_ID = "AR-04C-REAL-JOURNEY-01"
 AR04C_RECHECK_EXPERIMENT_ID = "AR04C-F01-RECHECK-01"
+PRODUCT_01_LIVE_EXPERIMENT_ID = "PRODUCT-01-SLICE-02"
 AR04C_CAMPAIGN_IDS = frozenset({AR04C_REAL_JOURNEY_01_EXPERIMENT_ID, AR04C_RECHECK_EXPERIMENT_ID})
+CLAIM_GUARDED_EXPERIMENT_IDS = AR04C_CAMPAIGN_IDS | {PRODUCT_01_LIVE_EXPERIMENT_ID}
+FLASH_BINARY_ENVELOPE_IDS = frozenset({AR04C_RECHECK_EXPERIMENT_ID, PRODUCT_01_LIVE_EXPERIMENT_ID})
 EXPERIMENTS_AWAITING_PAID_AUTHORIZATION = frozenset({
     AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
     AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
     AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
     AR04C_RECHECK_EXPERIMENT_ID,
+    PRODUCT_01_LIVE_EXPERIMENT_ID,
 })
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPERIMENT_ID,
@@ -47,6 +51,7 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
     AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
     AR04C_RECHECK_EXPERIMENT_ID,
+    PRODUCT_01_LIVE_EXPERIMENT_ID,
 })
 EXPERIMENT_ENV = "OPSPILOT_ASSISTANT_EXPERIMENT_ID"
 PROVIDER_LIMIT = 16
@@ -60,12 +65,15 @@ AR04C_CONDITION_PROVIDER_LIMIT = 8
 AR04C_CONDITION_BUDGET_USD_MICRO = 5_250_000
 AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 AR04C_RECHECK_RESERVATION_USD_MICRO = 668_468
+PRODUCT_01_PROVIDER_LIMIT = 24
+PRODUCT_01_BUDGET_USD_MICRO = 2_000_000
 
 # DeepSeek Flash peak cache-miss input/output rates checked 2026-11-01.
 # The reservation uses the documented maximum output/context envelope rather
 # than trusting the request's 2048-token cap: (616K * $0.30 + 384K * $1.20)/1M.
 PRICE_VERSION = "DEEPSEEK_FLASH_PEAK_2026-11-01"
 AR04C_PRICE_VERSION = "DEEPSEEK_FLASH_PEAK_2026-11-05"
+PRODUCT_01_PRICE_VERSION = "DEEPSEEK_FLASH_PEAK_2026-11-07"
 INPUT_USD_PER_MILLION = Decimal("0.30")
 OUTPUT_USD_PER_MILLION = Decimal("1.20")
 AR04C_OUTPUT_USD_PER_MILLION = Decimal("1.20")
@@ -77,7 +85,7 @@ MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ar02_live_experiment_budgets (
     experiment_id TEXT PRIMARY KEY CHECK (
-        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02', 'AR-03-MATERIAL-LIVE-01', 'AR-03-MATERIAL-LIVE-01-RESUME-01', 'AR-03-MATERIAL-LIVE-01-RESUME-02', 'AR-03-MATERIAL-REMAINDER-01', 'AR-04C-REAL-JOURNEY-01', 'AR04C-F01-RECHECK-01')
+        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02', 'AR-03-MATERIAL-LIVE-01', 'AR-03-MATERIAL-LIVE-01-RESUME-01', 'AR-03-MATERIAL-LIVE-01-RESUME-02', 'AR-03-MATERIAL-REMAINDER-01', 'AR-04C-REAL-JOURNEY-01', 'AR04C-F01-RECHECK-01', 'PRODUCT-01-SLICE-02')
     ),
     provider_limit INTEGER NOT NULL,
     mcp_limit INTEGER,
@@ -124,6 +132,8 @@ def _validate_experiment_id(experiment_id: str) -> None:
 
 def _limits_for_experiment(experiment_id: str) -> tuple[int, int | None]:
     """Return count limits; None means counted but bounded by other hard stops."""
+    if experiment_id == PRODUCT_01_LIVE_EXPERIMENT_ID:
+        return PRODUCT_01_PROVIDER_LIMIT, MCP_LIMIT
     if experiment_id in {
         AR03_REAL_LLM_01_EXPERIMENT_ID,
         AR03_REAL_LLM_02_EXPERIMENT_ID,
@@ -151,19 +161,24 @@ def _limits_for_experiment(experiment_id: str) -> tuple[int, int | None]:
 
 
 def _budget_for_experiment(experiment_id: str) -> int:
+    if experiment_id == PRODUCT_01_LIVE_EXPERIMENT_ID:
+        return PRODUCT_01_BUDGET_USD_MICRO
     if experiment_id in AR04C_CAMPAIGN_IDS:
         return AR04C_CONDITION_BUDGET_USD_MICRO
     return BUDGET_USD_MICRO
 
 
 def _price_version_for_experiment(experiment_id: str) -> str:
+    if experiment_id == PRODUCT_01_LIVE_EXPERIMENT_ID:
+        return PRODUCT_01_PRICE_VERSION
     if experiment_id in AR04C_CAMPAIGN_IDS:
         return AR04C_PRICE_VERSION
     return PRICE_VERSION
 
 
 def _reservation_for_experiment(experiment_id: str) -> int:
-    if experiment_id == AR04C_RECHECK_EXPERIMENT_ID:
+    if experiment_id in FLASH_BINARY_ENVELOPE_IDS:
+        # 1,048,576 total tokens, at most 393,216 output, at peak prices.
         return AR04C_RECHECK_RESERVATION_USD_MICRO
     if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
         return AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO
@@ -453,8 +468,8 @@ def complete_dispatch(
 
         input_tokens, output_tokens, total_tokens = normalized
         actual_micro = _actual_cost_micro(input_tokens, output_tokens, experiment_id)
-        context_limit = 1_048_576 if experiment_id == AR04C_RECHECK_EXPERIMENT_ID else MODEL_CONTEXT_TOKENS
-        output_limit = 393_216 if experiment_id == AR04C_RECHECK_EXPERIMENT_ID else MODEL_MAX_OUTPUT_TOKENS
+        context_limit = 1_048_576 if experiment_id in FLASH_BINARY_ENVELOPE_IDS else MODEL_CONTEXT_TOKENS
+        output_limit = 393_216 if experiment_id in FLASH_BINARY_ENVELOPE_IDS else MODEL_MAX_OUTPUT_TOKENS
         violation = (
             output_tokens > REQUEST_MAX_OUTPUT_TOKENS
             or output_tokens > output_limit

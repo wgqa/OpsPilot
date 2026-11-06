@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 from datetime import datetime, timezone
+from contextlib import contextmanager
 from urllib.parse import urlparse
 from pathlib import Path
 from langchain.agents import create_agent
@@ -26,6 +27,10 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.config import get_config
 from mcp import Client, StdioServerParameters
 from opspilot.domain import assistant as domain
+from opspilot.domain.assistant_experiment import (
+    CLAIM_GUARDED_EXPERIMENT_IDS,
+    PRODUCT_01_LIVE_EXPERIMENT_ID,
+)
 from opspilot.domain.database import connect
 from opspilot.domain.d2 import canonical_json, digest_json, reserve_attempt, finish_attempt, record_tool_observation
 from opspilot.domain.chat import (
@@ -66,6 +71,9 @@ AR04C_RECHECK_AUTHORIZATION_ID = "AR04C-F01-RECHECK-01-USER-AUTH"
 AR04C_RECHECK_TOKEN_ENV = "OPSPILOT_AR04C_F01_RECHECK_ONE_SHOT_TOKEN"
 AR04C_RECHECK_AUTH_RECORD = ROOT.parent.parent / ".runtime" / "ar04c-f01-recheck-01" / "PAID_AUTHORIZATION.json"
 AR04C_RECHECK_CLAIM = ROOT.parent.parent / ".runtime" / "ar04c-f01-recheck-01" / "claim.json"
+PRODUCT_01_TOKEN_ENV = "OPSPILOT_PRODUCT_01_SLICE_02_ONE_SHOT_TOKEN"
+PRODUCT_01_RUNTIME = ROOT.parent.parent / ".runtime" / "product-01-slice-02-live"
+PRODUCT_01_CONTRACT = ROOT / "docs/evidence/vnext/product-01-slice-02-live/CASES.json"
 _AR04C_STATE_LOCK = threading.RLock()
 _AR04C_PROVIDER_INFLIGHT_LOCK = threading.Lock()
 _AR04C_PROCESS_CAPABILITIES: dict[str, str] = {}
@@ -75,6 +83,7 @@ _AR04C_DISPATCH_CONTEXT = contextvars.ContextVar("ar04c_dispatch_context", defau
 def _ar04c_scope(experiment_id: str) -> dict[str, object] | None:
     from opspilot.domain.assistant_experiment import (
         AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO, AR04C_RECHECK_RESERVATION_USD_MICRO,
+        _budget_for_experiment, _limits_for_experiment, _reservation_for_experiment,
     )
     if experiment_id == AR04C_EXPERIMENT_ID:
         return {'id': experiment_id, 'authorization_id': AR04C_AUTHORIZATION_ID,
@@ -88,11 +97,30 @@ def _ar04c_scope(experiment_id: str) -> dict[str, object] | None:
                 'branch': 'codex/ar04c-f01-context-currentness-01', 'base_sha': '08b007dda384b03a3b7d1ac6351d8c4ee1dcfb45',
                 'authorization_source': 'Explicit user authorization for AR04C-F01-RECHECK-01',
                 'provider_limit': 8, 'budget': 5_250_000, 'reservation': AR04C_RECHECK_RESERVATION_USD_MICRO}
+    if experiment_id == PRODUCT_01_LIVE_EXPERIMENT_ID:
+        return {
+            'id': experiment_id, 'authorization_id': 'PRODUCT-01-SLICE-02-USER-AUTH',
+            'token_env': PRODUCT_01_TOKEN_ENV,
+            'auth_record': PRODUCT_01_RUNTIME / 'PAID_AUTHORIZATION.json',
+            'claim': PRODUCT_01_RUNTIME / 'claim.json',
+            'branch': 'codex/product-01-slice-02-live',
+            'base_sha': '3ff5678a2f067ad2bef7945095395d26d59b5328',
+            'authorization_source': 'Explicit user authorization for PRODUCT-01-SLICE-02',
+            'provider_limit': _limits_for_experiment(experiment_id)[0],
+            'budget': _budget_for_experiment(experiment_id),
+            'reservation': _reservation_for_experiment(experiment_id),
+        }
     return None
 
 
 def _ar04c_active_scope() -> dict[str, object] | None:
     return _ar04c_scope(os.environ.get('OPSPILOT_ASSISTANT_EXPERIMENT_ID', '').strip())
+
+
+def _claim_database_slot(experiment_id: str) -> str:
+    if experiment_id == PRODUCT_01_LIVE_EXPERIMENT_ID:
+        return "SESSION"
+    return os.environ.get(AR04C_MEMORY_MODE_ENV, "").strip().upper()
 
 
 def _ar04c_claim_state_path() -> Path:
@@ -164,9 +192,7 @@ def _ar04c_replace_json(path: Path, value: dict[str, object]) -> None:
 def _ar04c_authorization_context(experiment_id: str) -> dict[str, object] | None:
     """Validate the user grant against this exact checkout before claim creation."""
     from opspilot.domain.assistant_experiment import (
-        AR04C_PRICE_VERSION,
-        AR04C_CONDITION_BUDGET_USD_MICRO,
-        AR04C_CONDITION_PROVIDER_LIMIT,
+        _budget_for_experiment, _limits_for_experiment, _price_version_for_experiment,
     )
 
     scope = _ar04c_scope(experiment_id)
@@ -201,6 +227,7 @@ def _ar04c_authorization_context(experiment_id: str) -> dict[str, object] | None
         return None
     if type(authorization) is not dict:
         return None
+    condition_provider_limit, mcp_limit = _limits_for_experiment(experiment_id)
     expected_authorization = {
         "authorization_id": scope['authorization_id'],
         "experiment_id": experiment_id,
@@ -214,12 +241,12 @@ def _ar04c_authorization_context(experiment_id: str) -> dict[str, object] | None
         "model": "deepseek-flash",
         "thinking": {"type": "disabled"},
         "provider_limit": scope['provider_limit'],
-        "providers_per_condition": AR04C_CONDITION_PROVIDER_LIMIT,
-        "mcp_limit": None,
+        "providers_per_condition": condition_provider_limit,
+        "mcp_limit": mcp_limit,
         "application_budget_usd_micro": scope['budget'],
-        "condition_budget_usd_micro": AR04C_CONDITION_BUDGET_USD_MICRO,
+        "condition_budget_usd_micro": _budget_for_experiment(experiment_id),
         "provider_reservation_usd_micro": scope['reservation'],
-        "price_version": AR04C_PRICE_VERSION,
+        "price_version": _price_version_for_experiment(experiment_id),
         "max_tokens": 2048,
         "tool_choice": "auto when tools are supplied",
         "parallel_tool_calls": False,
@@ -255,12 +282,8 @@ def _ar04c_authorization_context(experiment_id: str) -> dict[str, object] | None
 
 
 def _ar04c_expected_claim(context: dict[str, object], nonce: str) -> dict[str, object]:
-    from opspilot.domain.assistant_experiment import (
-        AR04C_PRICE_VERSION,
-        AR04C_CONDITION_BUDGET_USD_MICRO,
-        AR04C_CONDITION_PROVIDER_LIMIT,
-    )
     scope = context['scope']
+    authorization = context["authorization"]
     return {
         "claim_id": f"{scope['id']}:one-shot:{scope['authorization_id']}",
         "authorization_id": scope['authorization_id'],
@@ -270,12 +293,12 @@ def _ar04c_expected_claim(context: dict[str, object], nonce: str) -> dict[str, o
         "base_sha": scope['base_sha'],
         "status": "CLAIMED_ONE_SHOT_NO_RETRY",
         "provider_limit": scope['provider_limit'],
-        "providers_per_condition": AR04C_CONDITION_PROVIDER_LIMIT,
-        "mcp_limit": None,
+        "providers_per_condition": authorization["providers_per_condition"],
+        "mcp_limit": authorization["mcp_limit"],
         "application_budget_usd_micro": scope['budget'],
-        "condition_budget_usd_micro": AR04C_CONDITION_BUDGET_USD_MICRO,
+        "condition_budget_usd_micro": authorization["condition_budget_usd_micro"],
         "provider_reservation_usd_micro": scope['reservation'],
-        "price_version": AR04C_PRICE_VERSION,
+        "price_version": authorization["price_version"],
         "automatic_retries": 0,
         "manual_retries": 0,
         "authorization_record_sha256": context["authorization_sha256"],
@@ -400,37 +423,37 @@ def _ar04c_store_state(context: dict[str, object], state: dict[str, object]) -> 
 
 
 def _ar04c_bind_campaign_database(path: str | Path, memory_mode: str) -> None:
-    """Pin one persistent budget DB per OFF/ON condition for this claim."""
+    """Pin a persistent budget DB for each allowed slot of this claim."""
     mode = str(memory_mode).strip().upper()
-    if mode not in {"OFF", "ON"}:
+    scope = _ar04c_active_scope()
+    product = scope is not None and scope['id'] == PRODUCT_01_LIVE_EXPERIMENT_ID
+    if product and mode != "SESSION":
+        raise RuntimeError("PRODUCT_01_CAMPAIGN_SLOT_REQUIRED")
+    if not product and mode not in {"OFF", "ON"}:
         raise RuntimeError("AR04C_MEMORY_MODE_REQUIRED")
     context = _ar04c_verified_claim_context()
     if context is None:
         raise RuntimeError("AR04C_ONE_SHOT_AUTHORIZATION_REQUIRED")
     if context['scope']['id'] == AR04C_RECHECK_ID and mode != 'ON':
         raise RuntimeError("AR04C_MEMORY_MODE_REQUIRED")
-    from opspilot.domain.assistant_experiment import (
-        AR04C_CONDITION_BUDGET_USD_MICRO,
-        AR04C_CONDITION_PROVIDER_LIMIT,
-        AR04C_PRICE_VERSION,
-    )
-    from opspilot.domain.database import connect
+    authorization = context["authorization"]
 
     database_path = Path(path).resolve()
     try:
         stat = database_path.stat()
         with connect(database_path) as connection:
             row = connection.execute(
-                "SELECT provider_limit,budget_usd_micro,price_version,created_at,status "
+                "SELECT provider_limit,mcp_limit,budget_usd_micro,price_version,created_at,status "
                 "FROM ar02_live_experiment_budgets WHERE experiment_id=?",
                 (context['scope']['id'],),
             ).fetchone()
     except (OSError, sqlite3.Error) as error:
         raise RuntimeError("AR04C_CAMPAIGN_DATABASE_INVALID") from error
     if row is None or (
-        int(row["provider_limit"]) != AR04C_CONDITION_PROVIDER_LIMIT
-        or int(row["budget_usd_micro"]) != AR04C_CONDITION_BUDGET_USD_MICRO
-        or str(row["price_version"]) != AR04C_PRICE_VERSION
+        int(row["provider_limit"]) != authorization["providers_per_condition"]
+        or int(row["budget_usd_micro"]) != authorization["condition_budget_usd_micro"]
+        or str(row["price_version"]) != authorization["price_version"]
+        or (product and row["mcp_limit"] != authorization["mcp_limit"])
         or str(row["status"]) != "OPEN"
     ):
         raise RuntimeError("AR04C_CAMPAIGN_DATABASE_INVALID")
@@ -471,12 +494,27 @@ def _ar04c_consume_claim_before_provider_send() -> None:
         if state is None:
             raise RuntimeError("AR04C_CAMPAIGN_DATABASE_NOT_BOUND")
         database_ids = state["database_ids"]
-        if mode not in {"OFF", "ON"} or mode not in database_ids:
+        if mode not in database_ids:
             raise RuntimeError("AR04C_CAMPAIGN_DATABASE_NOT_BOUND")
         _ar04c_bind_campaign_database(dispatch["db_path"], mode)
         state = _ar04c_read_state(context)
         if state is None:
             raise RuntimeError("AR04C_ONE_SHOT_STATE_INVALID")
+        if scope['id'] == PRODUCT_01_LIVE_EXPERIMENT_ID:
+            from opspilot.domain.assistant_experiment import read_dispatch
+
+            if dispatch.get("send_claimed"):
+                raise RuntimeError("PRODUCT_01_DISPATCH_ALREADY_SENT")
+            reservation = read_dispatch(
+                dispatch["db_path"], experiment_id=scope['id'], run_id=dispatch["run_id"],
+                kind="MODEL", logical_key=dispatch["logical_key"],
+            )
+            if not reservation or (
+                reservation["status"] != "RESERVED"
+                or reservation["reserved_usd_micro"] != scope['reservation']
+            ):
+                raise RuntimeError("PRODUCT_01_DISPATCH_RESERVATION_REQUIRED")
+            dispatch["send_claimed"] = True
         if state["status"] == "PREPARED":
             state["status"] = "CONSUMED"
             state["consumed_at"] = _ar04c_now()
@@ -508,7 +546,10 @@ def _ar04c_contract_digest(experiment_id: str | None = None) -> str | None:
         ROOT / "docs/evidence/ar-04c/real-journey-01/BUDGET.md",
         ROOT / "docs/evidence/ar-04c/real-journey-01/PAID_EXECUTION_CONTRACT.md",
     )
-    if (experiment_id or os.environ.get('OPSPILOT_ASSISTANT_EXPERIMENT_ID')) == AR04C_RECHECK_ID:
+    selected_experiment = experiment_id or os.environ.get('OPSPILOT_ASSISTANT_EXPERIMENT_ID')
+    if selected_experiment == PRODUCT_01_LIVE_EXPERIMENT_ID:
+        paths = (PRODUCT_01_CONTRACT,)
+    elif selected_experiment == AR04C_RECHECK_ID:
         paths += (ROOT / "docs/evidence/ar-04c/f01-recheck-01/CONTRACT.md",)
     digest = hashlib.sha256()
     try:
@@ -535,6 +576,24 @@ def _ar04c_one_shot_authorized(experiment_id: str) -> bool:
     except RuntimeError:
         return False
     return state is None or state["status"] in {"PREPARED", "CONSUMED"}
+
+
+@contextmanager
+def _provider_dispatch_context(experiment_id, path, run_id, logical_key):
+    if experiment_id not in CLAIM_GUARDED_EXPERIMENT_IDS:
+        yield
+        return
+    token = _AR04C_DISPATCH_CONTEXT.set({
+        "experiment_id": experiment_id,
+        "db_path": str(Path(path).resolve()),
+        "memory_mode": _claim_database_slot(experiment_id),
+        "run_id": run_id,
+        "logical_key": logical_key,
+    })
+    try:
+        yield
+    finally:
+        _AR04C_DISPATCH_CONTEXT.reset(token)
 
 
 def _material_remainder_live_expected_authorization() -> dict[str, object]:
@@ -855,13 +914,15 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     if experiment_id in EXPERIMENTS_AWAITING_PAID_AUTHORIZATION:
         if experiment_id == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
             authorized = _material_remainder_live_one_shot_authorized(experiment_id)
-        elif experiment_id in AR04C_CAMPAIGN_IDS:
+        elif experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS:
             authorized = _ar04c_one_shot_authorized(experiment_id)
         elif experiment_id == MATERIAL_RESUME_02_EXPERIMENT_ID:
             authorized = _material_resume_02_one_shot_authorized(experiment_id)
         else:
             authorized = _material_resume_one_shot_authorized(experiment_id)
         if not authorized:
+            if experiment_id == PRODUCT_01_LIVE_EXPERIMENT_ID:
+                raise RuntimeError("PRODUCT_01_ONE_SHOT_AUTHORIZATION_REQUIRED")
             code = (
                 "AR04C_ONE_SHOT_AUTHORIZATION_REQUIRED"
                 if experiment_id in AR04C_CAMPAIGN_IDS
@@ -904,7 +965,7 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
 
     async_transport = transport_async or httpx.AsyncHTTPTransport(retries=0)
     sync_transport = transport_sync or httpx.HTTPTransport(retries=0)
-    if experiment_id in AR04C_CAMPAIGN_IDS:
+    if experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS:
         class AR04CGuardedAsyncTransport(httpx.AsyncBaseTransport):
             def __init__(self, inner):
                 self.inner = inner
@@ -1244,10 +1305,9 @@ class Loop(AgentMiddleware):
               'excluded_sources':provenance_metadata.get('excluded_sources',[]),
               'source_refs':wire_source_refs,'selected_message_ids':prepared['selected_message_ids'],'model_id':self.model_id}
         step=get_config().get('metadata',{}).get('langgraph_step',0)
-        from opspilot.domain.assistant_experiment import AR04C_CAMPAIGN_IDS
-        if self.experiment_id in AR04C_CAMPAIGN_IDS:
+        if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS:
             _ar04c_bind_campaign_database(
-                self.path, os.environ.get(AR04C_MEMORY_MODE_ENV, ""),
+                self.path, _claim_database_slot(self.experiment_id),
             )
         call,fresh=domain.reserve(self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',wire,self.worker_id,experiment_id=self.experiment_id)
         self.trace('model_request',call_id=call['call_id'],replay=not fresh,**wire)
@@ -1282,22 +1342,10 @@ class Loop(AgentMiddleware):
             # pinned ChatOpenAI emit DeepSeek's unsupported alias.
             model_settings={**request.model_settings,'parallel_tool_calls':False}
             tool_choice='auto' if request.tools else request.tool_choice
-            dispatch_token = None
-            if self.experiment_id in AR04C_CAMPAIGN_IDS:
-                dispatch_token = _AR04C_DISPATCH_CONTEXT.set({
-                    "experiment_id": self.experiment_id,
-                    "db_path": str(Path(self.path).resolve()),
-                    "memory_mode": os.environ.get(AR04C_MEMORY_MODE_ENV, "").strip().upper(),
-                    "run_id": self.run_id,
-                    "logical_key": call["logical_key"],
-                })
-            try:
+            with _provider_dispatch_context(self.experiment_id, self.path, self.run_id, call["logical_key"]):
                 result=await asyncio.wait_for(handler(request.override(
                     system_message=system,tool_choice=tool_choice,model_settings=model_settings,
                 )),30)
-            finally:
-                if dispatch_token is not None:
-                    _AR04C_DISPATCH_CONTEXT.reset(dispatch_token)
             messages_result = messages_to_dict(result.result)
             usage_result = [getattr(m,'usage_metadata',None) for m in result.result]
             if self.experiment_id:
@@ -1342,7 +1390,7 @@ class Loop(AgentMiddleware):
                     reason='ASSISTANT_MEMORY_INVALIDATED_BEFORE_SEND',
                 )
                 raise
-            if self.experiment_id in AR04C_CAMPAIGN_IDS and send_started:
+            if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS and send_started:
                 _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
             domain.finish(self.path,call['call_id'],'UNKNOWN')
             if self.experiment_id:
@@ -1354,7 +1402,7 @@ class Loop(AgentMiddleware):
                 )
             raise
         except BaseException as error:
-            if self.experiment_id in AR04C_CAMPAIGN_IDS and send_started:
+            if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS and send_started:
                 _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
             domain.finish(self.path,call['call_id'],'UNKNOWN')
             if self.experiment_id:
@@ -1659,6 +1707,7 @@ async def _prepare_assistant_context_impl(
     from opspilot.domain.context_engineering import ContextBudgetExceeded
 
     include_memories = assistant_memory_enabled_for_experiment(experiment_id)
+    product_claim = experiment_id if experiment_id == PRODUCT_01_LIVE_EXPERIMENT_ID else None
 
     def stop(code: str) -> dict[str, object]:
         with connect(path) as connection:
@@ -1710,6 +1759,8 @@ async def _prepare_assistant_context_impl(
             }
             logical_key = "context-compression:" + digest_json(compression["messages"])
             state["logical_key"] = logical_key
+            if product_claim:
+                _ar04c_bind_campaign_database(path, _claim_database_slot(product_claim))
             try:
                 call, fresh = domain.reserve(
                     path, run_id, "MODEL", logical_key, wire, worker_id,
@@ -1743,7 +1794,8 @@ async def _prepare_assistant_context_impl(
                         return stop(code)
                 try:
                     state["dispatch_started"] = True
-                    response = await _compression_model(model).ainvoke(messages)
+                    with _provider_dispatch_context(product_claim, path, run_id, logical_key):
+                        response = await _compression_model(model).ainvoke(messages)
                     text = str(getattr(response, "content", "") or "")
                     metadata = getattr(response, "response_metadata", None)
                     metadata = metadata if isinstance(metadata, dict) else {}
@@ -1838,7 +1890,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         with connect(path) as c:
             c.execute("UPDATE chat_attempts SET status='STREAMING' WHERE attempt_id=? AND status='INTERRUPTED'",(delivery,))
     model_id=getattr(model,'model_name',model._llm_type)
-    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV,AR04C_TOKEN_ENV,AR04C_RECHECK_TOKEN_ENV}})
+    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV,AR04C_TOKEN_ENV,AR04C_RECHECK_TOKEN_ENV,PRODUCT_01_TOKEN_ENV}})
     async with Client(params) as client:
         listed=await client.list_tools()
         specs=[];tools=[]
