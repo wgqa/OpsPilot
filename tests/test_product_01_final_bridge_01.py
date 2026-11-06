@@ -48,7 +48,7 @@ class _BridgeAssistantModel(BaseChatModel):
                 "args": {"rationale": "用户希望核实接口权限；可先用已确认的 Demo 资源进行只读调查。"},
                 "id": "p01-proposal-1",
             }])
-        elif self.mode == "outcome" and not tool_messages:
+        elif self.mode in {"outcome", "outcome_ready"} and not tool_messages:
             assert "read_session_professional_outcomes" in self.offered_tools
             self.selected_tools.append("read_session_professional_outcomes")
             response = AIMessage(content="", tool_calls=[{
@@ -76,6 +76,22 @@ class _BridgeAssistantModel(BaseChatModel):
                     ))
                 else:
                     response = AIMessage(content="本会话没有可读取的专业调查结果；当前不能声称已交接或已恢复。")
+            elif self.mode == "outcome_ready":
+                items = value.get("items", []) if tool_messages else []
+                assert isinstance(items, list)
+                if items:
+                    item = items[0]
+                    assert isinstance(item, dict)
+                    assert item.get("business_outcome") == "HANDOFF_READY"
+                    assert item.get("handoff_receipt") is None
+                    assert item.get("submitted") is False
+                    assert item.get("scope_authorized") is False
+                    assert item.get("recovered") is False
+                    response = AIMessage(content=(
+                        "已形成当前诊断和交接草稿，但尚未提交到人工队列；没有新增权限，也没有证明 403 已恢复。"
+                    ))
+                else:
+                    response = AIMessage(content="本会话尚无可读取的专业诊断或交接草稿。")
             else:
                 response = AIMessage(content="目前没有可引用的专业调查结果。")
         response.usage_metadata = {"input_tokens": 120, "output_tokens": 38, "total_tokens": 158}
@@ -166,6 +182,47 @@ def test_assistant_proposes_s2_then_reads_same_session_handoff_without_writing(
         assert investigator_result["execution_core"] == "PROFESSIONAL_INVESTIGATOR"
         handoff_ready = client.get(f"/api/tasks/{task_id}/handoff", headers=headers).json()
         assert handoff_ready["business_outcome"] == "HANDOFF_READY"
+        assert handoff_ready["currentness"] == "CURRENT"
+        assert handoff_ready["submitted"] is False
+        assert handoff_ready["handoff_receipt"] is None
+        assert handoff_ready.get("scope_authorized") is not True
+        assert handoff_ready.get("recovered") is not True
+
+        # An Assistant read before explicit submission can explain the frozen
+        # diagnosis/draft, but cannot claim a queue, receipt, permission, or recovery.
+        draft_question = client.post(
+            f"/api/sessions/{session_id}/assistant/messages",
+            headers={**headers, "Idempotency-Key": "p01-final-bridge-draft-readback"},
+            json={"body": "目前已有处理结果吗？", "task_id": None},
+        )
+        assert draft_question.status_code == 202, draft_question.text
+        draft_model = _BridgeAssistantModel(mode="outcome_ready")
+        _dispatch(demo_db, checkpoint, str(draft_question.json()["run_id"]), lambda: draft_model)
+        draft_readback = draft_model.seen_tool_results[-1]["items"][0]
+        assert draft_readback["business_outcome"] == "HANDOFF_READY"
+        assert draft_readback["handoff_receipt"] is None
+        assert draft_readback["submitted"] is False
+        assert draft_readback["scope_authorized"] is False
+        assert draft_readback["recovered"] is False
+        draft_answer = next(
+            item for item in client.get(f"/api/sessions/{session_id}/messages", headers=headers).json()["items"]
+            if item["role"] == "ASSISTANT"
+            and item["answer_source_message_id"] == draft_question.json()["message_id"]
+        )
+        assert "尚未提交" in draft_answer["body"] and "没有证明 403 已恢复" in draft_answer["body"]
+        draft_sources = client.get(
+            f"/api/runs/{draft_question.json()['run_id']}/assistant-sources", headers=headers,
+        )
+        assert draft_sources.status_code == 200 and draft_sources.json()["current"] is True
+        draft_source_result = next(
+            item["result"] for item in draft_sources.json()["items"]
+            if item["tool_name"] == "read_session_professional_outcomes"
+        )
+        assert draft_source_result["items"][0]["business_outcome"] == "HANDOFF_READY"
+        assert draft_source_result["items"][0]["handoff_receipt"] is None
+        with connect(demo_db) as db:
+            assert db.execute("SELECT COUNT(*) FROM s2_handoff_queue_entries WHERE task_id=?", (task_id,)).fetchone()[0] == 0
+            assert db.execute("SELECT COUNT(*) FROM s2_handoff_receipts WHERE task_id=?", (task_id,)).fetchone()[0] == 0
 
         submit_id = "p01-final-bridge-handoff"
         submit = client.post(
@@ -286,8 +343,18 @@ def test_assistant_proposes_s2_then_reads_same_session_handoff_without_writing(
             "origin_message_id": source_message_id,
             "assistant_proposal_run_id": assistant_run_id,
             "professional_investigation_run_id": investigator_run_id,
+            "draft_readback_run_id": str(draft_question.json()["run_id"]),
             "followup_assistant_run_id": followup_run_id,
             "task_id": task_id,
+            "pre_submit_assistant_readback": {
+                "tool_choices": draft_model.selected_tools,
+                "business_outcome": draft_source_result["items"][0]["business_outcome"],
+                "handoff_receipt": draft_source_result["items"][0]["handoff_receipt"],
+                "submitted": draft_source_result["items"][0]["submitted"],
+                "scope_authorized": draft_source_result["items"][0]["scope_authorized"],
+                "recovered": draft_source_result["items"][0]["recovered"],
+                "answer": draft_answer["body"],
+            },
             "handoff_receipt_id": receipt["receipt_id"],
             "queue_status": receipt["handoff_status"],
             "assistant_tool_choices": proposal_model.selected_tools + outcome_model.selected_tools,

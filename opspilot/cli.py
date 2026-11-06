@@ -244,7 +244,7 @@ def main() -> int:
             create_task_binding,
             inject_read_tool_failure_for_test,
         )
-        from opspilot.domain.database import get_integration_info as read_integration, reset_fixture
+        from opspilot.domain.database import get_integration_info as read_integration
         from opspilot.investigator import run_investigation
 
         fixture_scenario = "S1_DISABLED" if args.scenario == "DISABLED" else "S1_POS"

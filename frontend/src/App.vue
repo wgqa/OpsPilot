@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
-import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal } from './assistant-entry';
+import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
 import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
 
@@ -71,6 +71,8 @@ const assistantSourceRequests = new Map<string, number>();
 let assistantSourceGeneration = 0;
 let seenEventSeq = new Set<number>();
 const s3ReadResponseFence = createS3ReadResponseFence();
+const RESTORED_ASSISTANT_SOURCE_LIMIT = 8;
+const RESTORED_ASSISTANT_SOURCE_CONCURRENCY = 3;
 
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const isApprover = computed(() => user.value?.role === 'APPROVER');
@@ -483,6 +485,15 @@ async function refreshAssistantSource(runId: string, sourceTaskId: string | null
   }
 }
 
+async function restoreRecentAssistantSources(items: MessageItem[], requestedSessionId: string): Promise<void> {
+  const requests = recentAssistantSourceRequests(items, RESTORED_ASSISTANT_SOURCE_LIMIT);
+  for (let index = 0; index < requests.length; index += RESTORED_ASSISTANT_SOURCE_CONCURRENCY) {
+    if (sessionId.value !== requestedSessionId) return;
+    const batch = requests.slice(index, index + RESTORED_ASSISTANT_SOURCE_CONCURRENCY);
+    await Promise.all(batch.map((source) => refreshAssistantSource(source.runId, source.taskId)));
+  }
+}
+
 function assistantInvestigationProposal(runId: string | null | undefined, sourceMessageId: string) {
   return runId
     ? controlledInvestigationProposal(assistantSourceDetails.value[runId]?.data, sourceMessageId)
@@ -529,6 +540,10 @@ async function bindAssistantOrder(): Promise<void> {
 async function refreshSession(): Promise<void> {
   if (!sessionId.value) return;
   const requestedSessionId = sessionId.value;
+  // Source results are authorization-sensitive. Drop page memory before the
+  // server revalidates a bounded set of recent persisted model answers.
+  assistantSourceDetails.value = {};
+  assistantSourceRequests.clear();
   const messageTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
   const isCurrentSession = (): boolean => sessionId.value === requestedSessionId;
   loading.value = true;
@@ -540,6 +555,7 @@ async function refreshSession(): Promise<void> {
     // explicit source IDs make the conversation safe to project before the
     // parallel Task Inspector refresh finishes.
     sessionHistoryReady.value = true;
+    void restoreRecentAssistantSources(response.items, requestedSessionId);
     let linkedTask = [...response.items].reverse().find((item) => item.task_id)?.task_id ?? null;
     const linkedTasks = await api.session(requestedSessionId);
     if (!isCurrentSession()) return;

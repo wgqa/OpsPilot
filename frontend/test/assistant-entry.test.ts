@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, type OperationStore } from '../src/assistant-entry.ts';
+import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests, type OperationStore } from '../src/assistant-entry.ts';
 import { api } from '../src/api.ts';
 import { projectConversation } from '../src/conversation.ts';
 
@@ -37,6 +37,24 @@ test('controlled-investigation CTA requires a current proposal tied to the exact
     current: true,
     items: [{ tool_name: 'propose_controlled_auth_investigation', status: 'OK', result: { ...result, task_created: true } }],
   }, 'message-original'), null);
+});
+
+test('restored Assistant sources use exact persisted question links and a small bounded recent set', () => {
+  const items = [
+    { role: 'USER' as const, message_id: 'u1', task_id: null, answer_run_id: null, answer_source_message_id: null, answer_kind: null },
+    { role: 'ASSISTANT' as const, message_id: 'a1', task_id: null, answer_run_id: 'run-1', answer_source_message_id: 'u1', answer_kind: 'CHAT_MODEL' as const },
+    { role: 'USER' as const, message_id: 'u2', task_id: null, answer_run_id: null, answer_source_message_id: null, answer_kind: null },
+    { role: 'ASSISTANT' as const, message_id: 'a2', task_id: null, answer_run_id: 'run-2', answer_source_message_id: 'u2', answer_kind: 'CHAT_MODEL' as const },
+    { role: 'ASSISTANT' as const, message_id: 'program', task_id: null, answer_run_id: 'run-program', answer_source_message_id: 'u2', answer_kind: 'PROGRAM_LIMIT' as const },
+    { role: 'ASSISTANT' as const, message_id: 'wrong-link', task_id: null, answer_run_id: 'run-wrong', answer_source_message_id: 'absent-user', answer_kind: 'CHAT_MODEL' as const },
+  ];
+  assert.deepEqual(recentAssistantSourceRequests(items, 1), [
+    { runId: 'run-2', sourceMessageId: 'u2', taskId: null },
+  ]);
+  assert.deepEqual(recentAssistantSourceRequests(items, 8), [
+    { runId: 'run-2', sourceMessageId: 'u2', taskId: null },
+    { runId: 'run-1', sourceMessageId: 'u1', taskId: null },
+  ]);
 });
 
 test('unknown HTTP result reuses operation after reconstruction without storing pasted text', async () => {

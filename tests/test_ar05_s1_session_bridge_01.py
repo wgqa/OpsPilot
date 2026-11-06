@@ -6,7 +6,7 @@ import os
 import time
 
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 import pytest
 
@@ -16,6 +16,56 @@ from test_ar02_runtime import FixtureModel
 
 
 QUESTION = '我们轮换了 API 凭据以后订单接口一直返回 401。你帮我调查一下，如果需要修复，告诉我后续怎么操作。'
+
+
+class _ProfessionalOutcomeAssistantModel(FixtureModel):
+    expected_outcome: str
+    offered_tool_names: list[str] = []
+    selected_tools: list[str] = []
+
+    def __init__(self, expected_outcome: str):
+        super().__init__(expected_outcome=expected_outcome)
+
+    def bind_tools(self, tools, **kwargs):
+        self.offered_tool_names = [str(tool.name) for tool in tools]
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        from langchain_core.outputs import ChatGeneration, ChatResult
+
+        assert 'read_session_professional_outcomes' in self.offered_tool_names
+        tool_messages = [message for message in messages if isinstance(message, ToolMessage)]
+        if not tool_messages:
+            self.selected_tools.append('read_session_professional_outcomes')
+            answer = AIMessage(content='', tool_calls=[{
+                'name': 'read_session_professional_outcomes', 'args': {}, 'id': 's1-outcome-read',
+            }])
+        else:
+            import json
+
+            result = json.loads(str(tool_messages[-1].content))
+            items = result.get('items', []) if isinstance(result, dict) else []
+            assert len(items) == 1
+            item = items[0]
+            assert item.get('professional_type') == 'S1_CONTROLLED_REPAIR'
+            assert item.get('business_outcome') == self.expected_outcome
+            assert item.get('currentness') == 'PERSISTED_OUTCOME_NOT_CURRENT_PROBE'
+            assert item.get('source_refs', {}).get('plan_task_run_id')
+            if self.expected_outcome == 'WAITING_APPROVAL':
+                assert item.get('approval') is None
+                assert item.get('repair') is None and item.get('verification') is None
+                answer = AIMessage(content=(
+                    '調查已形成方案並等待獨立審批；目前尚未批准、修改配置或完成恢復驗證。'
+                ))
+            else:
+                verification = item.get('verification')
+                assert isinstance(verification, dict) and verification.get('verification_id')
+                answer_time = str(item.get('outcome_time'))
+                answer = AIMessage(content=(
+                    f'歷史記錄顯示曾於 {answer_time} 完成線上驗證與正式交付；這不是本輪新探測結果。'
+                ))
+        answer.usage_metadata = {'input_tokens': 120, 'output_tokens': 30, 'total_tokens': 150}
+        return ChatResult(generations=[ChatGeneration(message=answer)])
 
 
 def _ask(client: TestClient, session_id: str, headers: dict[str, str], key: str) -> str:
@@ -109,7 +159,7 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
         start_worker=False, credentials=PASSWORDS, expected_origin=ORIGIN, heartbeat_seconds=0.05,
         assistant_model_factory=lambda: OfflineConversationModel())
 
-    def process_queued_run(expected_run_id: str) -> None:
+    def process_queued_run(expected_run_id: str, assistant_factory=None) -> None:
         worker = SingleInstanceWorker(demo_db)
         worker.acquire()
         worker.register()
@@ -119,7 +169,8 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
             import asyncio
             asyncio.run(_dispatch_run(
                 demo_db, tmp_path / 'bridge-cp.sqlite3', worker.owner_id, 'executor-a', selected,
-                worker_epoch=worker.epoch, assistant_model_factory=lambda: OfflineConversationModel(),
+                worker_epoch=worker.epoch,
+                assistant_model_factory=assistant_factory or (lambda: OfflineConversationModel()),
             ))
         finally:
             worker.release()
@@ -211,6 +262,34 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
             assert db.execute('SELECT COUNT(*) FROM assistant_runs WHERE run_id=?', (run_id,)).fetchone()[0] == 0
             assert db.execute('SELECT COUNT(*) FROM assistant_runs WHERE run_id=?', (ordinary.json()['run_id'],)).fetchone()[0] == 1
 
+        waiting_question = client.post(
+            f'/api/sessions/{session}/assistant/messages',
+            headers={**headers, 'Idempotency-Key': 's1-outcome-waiting-approval'},
+            json={'body': '方案现在已经批准并修复了吗？', 'task_id': None},
+        )
+        assert waiting_question.status_code == 202, waiting_question.text
+        waiting_model = _ProfessionalOutcomeAssistantModel('WAITING_APPROVAL')
+        process_queued_run(str(waiting_question.json()['run_id']), lambda: waiting_model)
+        waiting_sources = client.get(
+            f"/api/runs/{waiting_question.json()['run_id']}/assistant-sources",
+            headers=_login(client, 'support-a')[1],
+        )
+        assert waiting_sources.status_code == 200 and waiting_sources.json()['current'] is True
+        waiting_result = next(
+            item['result'] for item in waiting_sources.json()['items']
+            if item['tool_name'] == 'read_session_professional_outcomes'
+        )
+        waiting_s1 = next(item for item in waiting_result['items'] if item['task_id'] == task_id)
+        assert waiting_s1['business_outcome'] == 'WAITING_APPROVAL'
+        assert waiting_s1['currentness'] == 'PERSISTED_OUTCOME_NOT_CURRENT_PROBE'
+        waiting_answer = next(
+            item for item in client.get(f'/api/sessions/{session}/messages', headers=headers).json()['items']
+            if item['role'] == 'ASSISTANT'
+            and item['answer_source_message_id'] == waiting_question.json()['message_id']
+        )
+        assert '等待獨立審批' in waiting_answer['body']
+        assert '尚未批准' in waiting_answer['body'] and '尚未' in waiting_answer['body']
+
         first_approval = client.post(
             f"/api/tasks/{task_id}/plans/{outcome['plan']['plan_hash']}/approval",
             headers={**_login(client, 'approver-a')[1], 'Idempotency-Key': 'ar05-close-approval-1'},
@@ -249,6 +328,43 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
         assert final_outcome['business_outcome'] == 'DELIVERED'
         assert final_outcome['verification']['response_status'] == 200
         assert final_outcome['verification']['recovery_verified'] is True
+
+        delivered_question = client.post(
+            f'/api/sessions/{session}/assistant/messages',
+            headers={**headers, 'Idempotency-Key': 's1-outcome-delivered-history'},
+            json={'body': '剛才的接口現在是我剛剛重新驗證過的嗎？', 'task_id': None},
+        )
+        assert delivered_question.status_code == 202, delivered_question.text
+        delivered_model = _ProfessionalOutcomeAssistantModel('DELIVERED')
+        with connect(demo_db) as db:
+            ledger_count_before_read = int(db.execute(
+                'SELECT COUNT(*) FROM d3_action_ledgers WHERE task_id=?', (task_id,),
+            ).fetchone()[0])
+        process_queued_run(str(delivered_question.json()['run_id']), lambda: delivered_model)
+        delivered_sources = client.get(
+            f"/api/runs/{delivered_question.json()['run_id']}/assistant-sources",
+            headers=_login(client, 'support-a')[1],
+        )
+        assert delivered_sources.status_code == 200 and delivered_sources.json()['current'] is True
+        delivered_result = next(
+            item['result'] for item in delivered_sources.json()['items']
+            if item['tool_name'] == 'read_session_professional_outcomes'
+        )
+        delivered_s1 = next(item for item in delivered_result['items'] if item['task_id'] == task_id)
+        assert delivered_s1['business_outcome'] == 'DELIVERED'
+        assert delivered_s1['currentness'] == 'PERSISTED_OUTCOME_NOT_CURRENT_PROBE'
+        assert delivered_s1['verification']['verification_id'] == final_outcome['verification']['verification_id']
+        delivered_answer = next(
+            item for item in client.get(f'/api/sessions/{session}/messages', headers=headers).json()['items']
+            if item['role'] == 'ASSISTANT'
+            and item['answer_source_message_id'] == delivered_question.json()['message_id']
+        )
+        assert '歷史記錄' in delivered_answer['body']
+        assert '不是本輪新探測結果' in delivered_answer['body']
+        with connect(demo_db) as db:
+            assert int(db.execute(
+                'SELECT COUNT(*) FROM d3_action_ledgers WHERE task_id=?', (task_id,),
+            ).fetchone()[0]) == ledger_count_before_read
         with connect(demo_db) as db:
             final_configuration = dict(db.execute(
                 "SELECT credential_ref, config_version FROM integrations "
@@ -321,6 +437,24 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
                 'body': final_answer['body'],
                 'kind': final_answer['answer_kind'],
             },
+            'assistant_outcome_readbacks': [
+                {
+                    'user_message_id': waiting_question.json()['message_id'],
+                    'run_id': waiting_question.json()['run_id'],
+                    'selected_tools': waiting_model.selected_tools,
+                    'assistant_source_result': waiting_result,
+                    'answer_message_id': waiting_answer['message_id'],
+                    'answer': waiting_answer['body'],
+                },
+                {
+                    'user_message_id': delivered_question.json()['message_id'],
+                    'run_id': delivered_question.json()['run_id'],
+                    'selected_tools': delivered_model.selected_tools,
+                    'assistant_source_result': delivered_result,
+                    'answer_message_id': delivered_answer['message_id'],
+                    'answer': delivered_answer['body'],
+                },
+            ],
             'session_message_readback': {
                 'origin_message_id': final_origin['message_id'],
                 'task_message_id': task_message['message_id'],

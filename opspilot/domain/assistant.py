@@ -348,8 +348,11 @@ def _session_professional_outcomes(connection, run, identity):
     if session is None:
         raise TaskControlError('SESSION_SCOPE_DENIED')
 
+    # The window count and bounded page share one authorization predicate and
+    # one SQLite statement snapshot, so hidden outcomes cannot leak across scope.
     rows = connection.execute(
         """SELECT b.task_id, b.status AS task_status, b.created_at, c.control_revision,
+                  COUNT(*) OVER () AS eligible_count,
                   (SELECT COUNT(*) FROM d3_plans p
                    WHERE p.tenant_id = b.tenant_id AND p.task_id = b.task_id) AS s1_plan_count,
                   (SELECT COUNT(*) FROM s2_diagnosis_receipts d
@@ -362,8 +365,9 @@ def _session_professional_outcomes(connection, run, identity):
              AND (EXISTS (SELECT 1 FROM d3_plans p WHERE p.tenant_id = b.tenant_id AND p.task_id = b.task_id)
                   OR EXISTS (SELECT 1 FROM s2_diagnosis_receipts d WHERE d.tenant_id = b.tenant_id AND d.task_id = b.task_id))
            ORDER BY l.linked_at DESC, b.task_id DESC LIMIT ?""",
-        (run['session_id'], identity.tenant_id, identity.actor_id, MAX_SESSION_PROFESSIONAL_OUTCOMES + 1),
+        (run['session_id'], identity.tenant_id, identity.actor_id, MAX_SESSION_PROFESSIONAL_OUTCOMES),
     ).fetchall()
+    eligible_count = int(rows[0]['eligible_count']) if rows else 0
     database_path = str(connection.execute('PRAGMA database_list').fetchone()[2])
     items: list[dict[str, object]] = []
     for row in rows[:MAX_SESSION_PROFESSIONAL_OUTCOMES]:
@@ -503,11 +507,11 @@ def _session_professional_outcomes(connection, run, identity):
         'authority': 'TRUSTED_SAME_SESSION_PROFESSIONAL_OUTCOMES',
         'currentness_semantics': 'REVALIDATED_BEFORE_EACH_MODEL_DISPATCH; S1 persisted verification is historical, S2 diagnosis currentness is Domain-derived',
         'items': items,
-        'omitted_count': max(0, len(rows) - MAX_SESSION_PROFESSIONAL_OUTCOMES),
+        'omitted_count': max(0, eligible_count - len(items)),
         'snapshot_digest': digest_json({
             'session_id': str(run['session_id']), 'tenant_id': identity.tenant_id,
             'actor_id': identity.actor_id, 'items': items,
-            'omitted_count': max(0, len(rows) - MAX_SESSION_PROFESSIONAL_OUTCOMES),
+            'omitted_count': max(0, eligible_count - len(items)),
         }),
     }
 
