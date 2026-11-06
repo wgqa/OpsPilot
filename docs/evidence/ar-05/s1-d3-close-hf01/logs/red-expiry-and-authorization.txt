@@ -1,0 +1,199 @@
+FFF.F                                                                    [100%]
+================================== FAILURES ===================================
+____ test_d3_expired_source_evidence_with_same_fresh_facts_reuses_approval ____
+
+demo_db = WindowsPath('D:/tmp/ops-pilot-ar05-s1-d3-close-hf01-red/test_d3_expired_source_evidenc0/domain.sqlite3')
+live_api = 'http://127.0.0.1:65444'
+
+    def test_d3_expired_source_evidence_with_same_fresh_facts_reuses_approval(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        binding, _, plan = _ready(demo_db, live_api)
+        approval = _approve(demo_db, binding, plan)
+        task_id = str(binding["task_id"])
+        evidence_ids = list(plan["required_evidence_ids"])
+        placeholders = ",".join("?" for _ in evidence_ids)
+        with connect(demo_db) as connection:
+            connection.execute(
+                f"UPDATE d2_evidence SET fetched_at='2020-01-01T00:00:00+00:00' "
+                f"WHERE task_id=? AND evidence_id IN ({placeholders})",
+                (task_id, *evidence_ids),
+            )
+        receipt = revalidate_approved_plan(
+            demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]), "executor-a", live_api,
+        )
+>       assert receipt["status"] == "VALID"
+E       AssertionError: assert 'BLOCKED' == 'VALID'
+E         
+E         - VALID
+E         + BLOCKED
+
+tests\test_d3_actions.py:236: AssertionError
+_ test_d3_revalidation_blocks_changed_current_fact_without_creating_repair[UPDATE integrations SET credential_ref='cred-v2', config_version=config_version+1 WHERE tenant_id='tenant-a' AND integration_id='integration-a'-CURRENT_PROBE_NOT_401] _
+
+demo_db = WindowsPath('D:/tmp/ops-pilot-ar05-s1-d3-close-hf01-red/test_d3_revalidation_blocks_ch0/domain.sqlite3')
+live_api = 'http://127.0.0.1:65447'
+update_sql = "UPDATE integrations SET credential_ref='cred-v2', config_version=config_version+1 WHERE tenant_id='tenant-a' AND integration_id='integration-a'"
+reason_code = 'CURRENT_PROBE_NOT_401'
+
+    @pytest.mark.parametrize(
+        ("update_sql", "reason_code"),
+        [
+            (
+                "UPDATE integrations SET credential_ref='cred-v2', config_version=config_version+1 "
+                "WHERE tenant_id='tenant-a' AND integration_id='integration-a'",
+                "CURRENT_PROBE_NOT_401",
+            ),
+            (
+                "UPDATE principals SET status='DISABLED', principal_version=principal_version+1 "
+                "WHERE tenant_id='tenant-a' AND principal_id='principal-a'",
+                "PRINCIPAL_DISABLED",
+            ),
+        ],
+    )
+    def test_d3_revalidation_blocks_changed_current_fact_without_creating_repair(
+        demo_db: Path, live_api: str, update_sql: str, reason_code: str,
+    ) -> None:
+        binding, _, plan = _ready(demo_db, live_api)
+        approval = _approve(demo_db, binding, plan)
+        with connect(demo_db) as connection:
+            connection.execute(update_sql)
+        receipt = revalidate_approved_plan(
+            demo_db, str(binding["task_id"]), str(plan["plan_hash"]),
+            str(approval["approval_id"]), "executor-a", live_api,
+        )
+        assert receipt["status"] == "BLOCKED"
+        assert receipt["reason_code"] == reason_code
+        state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
+        authorization = next(row for row in state["plan_authorizations"] if row["plan_hash"] == plan["plan_hash"])
+        permission = next(row for row in state["permissions"] if row["plan_hash"] == plan["plan_hash"] and row["action_kind"] == "REPAIR")
+>       assert authorization["eligibility"] == "CANCELLED"
+E       AssertionError: assert 'ACTIVE' == 'CANCELLED'
+E         
+E         - CANCELLED
+E         + ACTIVE
+
+tests\test_d3_actions.py:203: AssertionError
+_ test_d3_revalidation_blocks_changed_current_fact_without_creating_repair[UPDATE principals SET status='DISABLED', principal_version=principal_version+1 WHERE tenant_id='tenant-a' AND principal_id='principal-a'-PRINCIPAL_DISABLED] _
+
+demo_db = WindowsPath('D:/tmp/ops-pilot-ar05-s1-d3-close-hf01-red/test_d3_revalidation_blocks_ch1/domain.sqlite3')
+live_api = 'http://127.0.0.1:65450'
+update_sql = "UPDATE principals SET status='DISABLED', principal_version=principal_version+1 WHERE tenant_id='tenant-a' AND principal_id='principal-a'"
+reason_code = 'PRINCIPAL_DISABLED'
+
+    @pytest.mark.parametrize(
+        ("update_sql", "reason_code"),
+        [
+            (
+                "UPDATE integrations SET credential_ref='cred-v2', config_version=config_version+1 "
+                "WHERE tenant_id='tenant-a' AND integration_id='integration-a'",
+                "CURRENT_PROBE_NOT_401",
+            ),
+            (
+                "UPDATE principals SET status='DISABLED', principal_version=principal_version+1 "
+                "WHERE tenant_id='tenant-a' AND principal_id='principal-a'",
+                "PRINCIPAL_DISABLED",
+            ),
+        ],
+    )
+    def test_d3_revalidation_blocks_changed_current_fact_without_creating_repair(
+        demo_db: Path, live_api: str, update_sql: str, reason_code: str,
+    ) -> None:
+        binding, _, plan = _ready(demo_db, live_api)
+        approval = _approve(demo_db, binding, plan)
+        with connect(demo_db) as connection:
+            connection.execute(update_sql)
+        receipt = revalidate_approved_plan(
+            demo_db, str(binding["task_id"]), str(plan["plan_hash"]),
+            str(approval["approval_id"]), "executor-a", live_api,
+        )
+        assert receipt["status"] == "BLOCKED"
+        assert receipt["reason_code"] == reason_code
+        state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
+        authorization = next(row for row in state["plan_authorizations"] if row["plan_hash"] == plan["plan_hash"])
+        permission = next(row for row in state["permissions"] if row["plan_hash"] == plan["plan_hash"] and row["action_kind"] == "REPAIR")
+>       assert authorization["eligibility"] == "CANCELLED"
+E       AssertionError: assert 'ACTIVE' == 'CANCELLED'
+E         
+E         - CANCELLED
+E         + ACTIVE
+
+tests\test_d3_actions.py:203: AssertionError
+_ test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval _
+
+approval_client = <starlette.testclient.TestClient object at 0x000002F36ED11010>
+demo_db = WindowsPath('D:/tmp/ops-pilot-ar05-s1-d3-close-hf01-red/test_ar05_approved_plan_fact_c0/domain.sqlite3')
+live_api = 'http://127.0.0.1:65459'
+tmp_path = WindowsPath('D:/tmp/ops-pilot-ar05-s1-d3-close-hf01-red/test_ar05_approved_plan_fact_c0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002F36E3ABA80>
+
+    def test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval(
+        approval_client: TestClient,
+        demo_db: Path,
+        live_api: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(MODEL_API_KEY, "ar05-test-no-provider-call")
+        monkeypatch.setenv(MODEL_NAME, "ar05-resume-does-not-call-model")
+        task = _prepare_waiting_task(approval_client, demo_db, live_api, tmp_path, key="revalidation-replan")
+        old_plan_hash = str(task["plan"]["plan_hash"])
+    
+        def process_queued_worker_run(expected_run_id: str) -> None:
+            from opspilot.domain.task_control import next_worker_run
+            from opspilot.web.worker import SingleInstanceWorker, _process_run
+    
+            worker = SingleInstanceWorker(demo_db)
+            worker.acquire()
+            worker.register()
+            try:
+                selected = next_worker_run(demo_db)
+                assert selected is not None and str(selected["run_id"]) == expected_run_id
+                asyncio.run(_process_run(
+                    demo_db, task["checkpoint_path"], worker.owner_id, "executor-a", selected, worker.epoch,
+                ))
+            finally:
+                worker.release()
+    
+        first_approval = _approve(approval_client, task, key="revalidation-first-approval")
+        assert first_approval.status_code == 202
+        first_resume_id = str(first_approval.json()["resume_run_id"])
+        first_link = get_approval_resume_link(
+            demo_db, trusted_identity(demo_db, "support-a"), first_resume_id,
+        )
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE integrations SET config_version = config_version + 1 "
+                "WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+            )
+    
+        process_queued_worker_run(first_resume_id)
+        first_run = approval_client.get(f"/api/runs/{first_resume_id}").json()
+        assert first_run["status"] == "WAITING_APPROVAL"
+        assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(task["task_id"]),)) == 0
+        assert _count(demo_db, "d3_action_intents", "task_id = ?", (str(task["task_id"]),)) == 0
+        support_headers = _login(approval_client, "support-a")
+        new_outcome = approval_client.get(
+            f"/api/tasks/{task['task_id']}/outcome", headers=support_headers,
+        ).json()
+        assert new_outcome.get("business_outcome") == "REAPPROVAL_REQUIRED", new_outcome
+        new_plan_hash = str(new_outcome["plan"]["plan_hash"])
+        assert new_plan_hash != old_plan_hash
+        assert new_outcome["repair"] is None and new_outcome["delivery"] is None
+        authorization_state = get_task_action_state(demo_db, str(task["task_id"]), "support-a")
+        old_authorization = next(row for row in authorization_state["plan_authorizations"] if row["plan_hash"] == old_plan_hash)
+        old_permissions = [row for row in authorization_state["permissions"] if row["plan_hash"] == old_plan_hash]
+        assert old_authorization["eligibility"] == "SUPERSEDED"
+>       assert old_permissions and all(row["state"] == "REVOKED" for row in old_permissions)
+E       AssertionError: assert ([{'tenant_id': 'tenant-a', 'task_id': 'task-372ef47d-1e80-4d57-ae80-c421f46a50a4', 'plan_hash': '670e9e7e102eeca0a4de3...4de3509ee84f184d967e20fb465dae0bd01cdafc1daa0b0', 'approval_id': 'approval-34367f6a-49e8-4d55-82ac-a3f769149b65', ...}] and False)
+E        +  where False = all(<generator object test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval.<locals>.<genexpr> at 0x000002F36DA42DC0>)
+
+tests\test_m1_web_approval.py:544: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_d3_actions.py::test_d3_expired_source_evidence_with_same_fresh_facts_reuses_approval
+FAILED tests/test_d3_actions.py::test_d3_revalidation_blocks_changed_current_fact_without_creating_repair[UPDATE integrations SET credential_ref='cred-v2', config_version=config_version+1 WHERE tenant_id='tenant-a' AND integration_id='integration-a'-CURRENT_PROBE_NOT_401]
+FAILED tests/test_d3_actions.py::test_d3_revalidation_blocks_changed_current_fact_without_creating_repair[UPDATE principals SET status='DISABLED', principal_version=principal_version+1 WHERE tenant_id='tenant-a' AND principal_id='principal-a'-PRINCIPAL_DISABLED]
+FAILED tests/test_m1_web_approval.py::test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval
+4 failed, 1 passed in 5.68s
+
+CAPTURED_EXIT_CODE=1

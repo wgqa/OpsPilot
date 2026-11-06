@@ -221,6 +221,8 @@ def _worker_error_class(error: BaseException) -> tuple[str, bool]:
                 return code, retryable
     if isinstance(error, TaskControlError):
         return error.code, error.code == "TASK_RUN_BUSY"
+    if getattr(error, "code", None) == "D3_REVALIDATION_SOURCE_UNKNOWN":
+        return "D3_REVALIDATION_SOURCE_UNKNOWN", True
     if "Missing required model configuration:" in str(error):
         return "MODEL_CONFIGURATION_MISSING", False
     if isinstance(error, ValueError):

@@ -1,0 +1,46 @@
+{
+  "task": "AR-05-S1-D3-CLOSE-HF01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "3dd622edfb548ba75f9bd2378bbe9604b705678d",
+  "branch": "codex/ar05-s1-d3-close-hf01",
+  "checks": {
+    "frozen_red": {"result": "4 failed, 1 passed", "duration_seconds": 5.68, "log": "logs/red-expiry-and-authorization.txt"},
+    "focused_green": {"result": "7 passed", "duration_seconds": 11.34, "log": "logs/green-targeted.txt"},
+    "related_regression_before_cancel_replay_case": {"result": "62 passed", "duration_seconds": 89.54, "log": "logs/green-d3-taskcontrol.txt"},
+    "related_regression": {"result": "63 passed", "duration_seconds": 84.43, "log": "logs/green-related-final.txt"},
+    "compileall": {"result": "passed", "command": "python -m compileall -q opspilot/domain/d3.py opspilot/investigator.py opspilot/web/worker.py"},
+    "diff_check": {"result": "passed", "scope": "source, tests, reports, and Ruff availability note; raw pytest transcript logs excluded because original output whitespace is preserved"},
+    "ruff": {"result": "not_run", "reason": "ruff executable unavailable in environment"},
+    "full_pytest": {
+      "result": "incomplete_interrupted",
+      "exit_code": 1,
+      "progress_percent": 28,
+      "last_completed_test": "tests/test_ar03_material_remainder_01.py::test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract[QUEUED-OFF]",
+      "observed_wait": "starlette.testclient.TestClient.wait_shutdown via anyio.from_thread.run",
+      "diagnostic": "faulthandler captured; shutdown root cause not established",
+      "known_unrelated_failure": "tests/test_ar03_material_live_exec_prep.py::test_resume_runner_preflight_rejects_wrong_branch_and_existing_campaign_state",
+      "isolated_failure": "GIT_PREFLIGHT_FAILED:rev-parse HEAD because the test Runner ROOT is a non-Git temporary directory",
+      "log": "logs/full-pytest.txt"
+    }
+  },
+  "acceptance_matrix": {
+    "expired_old_evidence_same_fresh_facts": "PASS",
+    "changed_facts_requires_reapproval_or_blocks": "PASS",
+    "disabled_principal_or_non_ready_gate_no_cas": "PASS",
+    "unknown_no_intent_and_recoverable_after_source_returns": "PASS",
+    "cancelled_or_superseded_plan_replay_no_side_effect": "PASS",
+    "committed_repair_recovery_regression": "PASS_IN_RELATED_SUITE"
+  },
+  "side_effects": {
+    "real_provider_requests": 0,
+    "browser_automation": 0,
+    "external_business_writes": 0,
+    "isolated_demo_sqlite_cas_test": 1
+  },
+  "known_limits": [
+    "Full pytest did not complete.",
+    "Starlette TestClient.wait_shutdown remains an observed but unresolved suite-level hang.",
+    "The unrelated AR-03 preflight test has a temporary-root Git assumption failure.",
+    "ruff was not installed."
+  ]
+}

@@ -188,12 +188,27 @@ def test_d3_revalidation_blocks_changed_current_fact_without_creating_repair(
     demo_db: Path, live_api: str, update_sql: str, reason_code: str,
 ) -> None:
     binding, _, plan = _ready(demo_db, live_api)
-    _approve(demo_db, binding, plan)
+    approval = _approve(demo_db, binding, plan)
     with connect(demo_db) as connection:
         connection.execute(update_sql)
-    receipt = _revalidate(demo_db, binding, plan, live_api)
+    receipt = revalidate_approved_plan(
+        demo_db, str(binding["task_id"]), str(plan["plan_hash"]),
+        str(approval["approval_id"]), "executor-a", live_api,
+    )
     assert receipt["status"] == "BLOCKED"
     assert receipt["reason_code"] == reason_code
+    state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
+    authorization = next(row for row in state["plan_authorizations"] if row["plan_hash"] == plan["plan_hash"])
+    permission = next(row for row in state["permissions"] if row["plan_hash"] == plan["plan_hash"] and row["action_kind"] == "REPAIR")
+    assert authorization["eligibility"] == "CANCELLED"
+    revoked_permissions = [row for row in state["permissions"] if row["plan_hash"] == plan["plan_hash"]]
+    assert permission["state"] == "REVOKED"
+    assert len(revoked_permissions) == 2 and all(row["state"] == "REVOKED" for row in revoked_permissions)
+    with pytest.raises(D3PreconditionRejected, match="APPROVAL_OR_PLAN_NOT_CURRENT"):
+        revalidate_approved_plan(
+            demo_db, str(binding["task_id"]), str(plan["plan_hash"]),
+            str(approval["approval_id"]), "executor-a", live_api,
+        )
     with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
         get_or_create_action_intent(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a")
     outcome = get_task_outcome(demo_db, str(binding["task_id"]), "support-a")
@@ -203,7 +218,44 @@ def test_d3_revalidation_blocks_changed_current_fact_without_creating_repair(
     assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(binding["task_id"]),)) == 0
 
 
-def test_d3_expired_source_evidence_cannot_authorize_repair(demo_db: Path, live_api: str) -> None:
+def test_d3_blocked_revalidation_revokes_preexisting_intent_before_replay(
+    demo_db: Path, live_api: str,
+) -> None:
+    binding, _, plan = _ready(demo_db, live_api)
+    approval = _approve(demo_db, binding, plan)
+    valid = revalidate_approved_plan(
+        demo_db, str(binding["task_id"]), str(plan["plan_hash"]),
+        str(approval["approval_id"]), "executor-a", live_api,
+    )
+    assert valid["status"] == "VALID"
+    intent = get_or_create_action_intent(
+        demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a",
+    )
+    with connect(demo_db) as connection:
+        connection.execute(
+            "UPDATE integrations SET credential_ref='cred-v2', config_version=config_version+1 "
+            "WHERE tenant_id='tenant-a' AND integration_id='integration-a'"
+        )
+    blocked = revalidate_approved_plan(
+        demo_db, str(binding["task_id"]), str(plan["plan_hash"]),
+        str(approval["approval_id"]), "executor-a", live_api,
+    )
+    assert blocked["status"] == "BLOCKED"
+    with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
+        execute_repair(demo_db, str(intent["action_id"]), "executor-a", "replay-after-invalidation")
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v2"
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 8
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(binding["task_id"]),)) == 0
+    state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
+    authorization = next(row for row in state["plan_authorizations"] if row["plan_hash"] == plan["plan_hash"])
+    permissions = [row for row in state["permissions"] if row["plan_hash"] == plan["plan_hash"]]
+    assert authorization["eligibility"] == "CANCELLED"
+    assert all(row["state"] == "REVOKED" for row in permissions)
+
+
+def test_d3_expired_source_evidence_with_same_fresh_facts_reuses_approval(
+    demo_db: Path, live_api: str,
+) -> None:
     binding, _, plan = _ready(demo_db, live_api)
     approval = _approve(demo_db, binding, plan)
     task_id = str(binding["task_id"])
@@ -218,15 +270,22 @@ def test_d3_expired_source_evidence_cannot_authorize_repair(demo_db: Path, live_
     receipt = revalidate_approved_plan(
         demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]), "executor-a", live_api,
     )
-    assert receipt["status"] == "BLOCKED"
-    assert receipt["reason_code"] == "REAPPROVAL_RUN_REQUIRED"
+    assert receipt["status"] == "VALID"
+    assert receipt["reason_code"] == "APPROVED_PLAN_STILL_CURRENT"
     assert set(receipt["evidence_ids"]).isdisjoint(evidence_ids)
-    with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
-        get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
-    assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v1"
-    assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 7
-    assert _count(demo_db, "d3_action_intents", "task_id = ?", (task_id,)) == 0
-    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (task_id,)) == 0
+    state = get_task_action_state(demo_db, task_id, "support-a")
+    authorization = next(row for row in state["plan_authorizations"] if row["plan_hash"] == plan["plan_hash"])
+    permission = next(row for row in state["permissions"] if row["plan_hash"] == plan["plan_hash"] and row["action_kind"] == "REPAIR")
+    assert authorization["eligibility"] == "ACTIVE"
+    assert permission["approval_id"] == approval["approval_id"]
+    assert permission["state"] == "AVAILABLE"
+    intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+    repair = execute_repair(demo_db, str(intent["action_id"]), "executor-a", "expired-source-same-facts")
+    assert repair["status"] == "COMMITTED"
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v2"
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 8
+    assert _count(demo_db, "d3_action_intents", "task_id = ? AND action_kind = 'REPAIR'", (task_id,)) == 1
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ? AND action_kind = 'REPAIR' AND status = 'COMMITTED'", (task_id,)) == 1
 
 
 def test_d3_unknown_revalidation_source_cannot_authorize_repair(
@@ -248,6 +307,11 @@ def test_d3_unknown_revalidation_source_cannot_authorize_repair(
 
     assert receipt["status"] == "UNKNOWN"
     assert str(receipt["reason_code"]).startswith("REVALIDATION_SOURCE_UNKNOWN:")
+    state = get_task_action_state(demo_db, task_id, "support-a")
+    authorization = next(row for row in state["plan_authorizations"] if row["plan_hash"] == plan["plan_hash"])
+    permission = next(row for row in state["permissions"] if row["plan_hash"] == plan["plan_hash"] and row["action_kind"] == "REPAIR")
+    assert authorization["eligibility"] == "ACTIVE"
+    assert permission["state"] == "AVAILABLE"
     with pytest.raises(D3PreconditionRejected, match="REVALIDATION_REQUIRED"):
         get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
     assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v1"
@@ -255,6 +319,20 @@ def test_d3_unknown_revalidation_source_cannot_authorize_repair(
     assert _count(demo_db, "d3_action_intents", "task_id = ?", (task_id,)) == 0
     assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (task_id,)) == 0
     assert get_task_outcome(demo_db, task_id, "support-a")["business_outcome"] == "UNKNOWN"
+
+    monkeypatch.setattr("opspilot.domain.d2.probe_endpoint_fact", probe_endpoint_fact)
+    retry = revalidate_approved_plan(
+        demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]),
+        "executor-a", live_api,
+    )
+    assert retry["status"] == "VALID"
+    recovered_state = get_task_action_state(demo_db, task_id, "support-a")
+    recovered_authorization = next(row for row in recovered_state["plan_authorizations"] if row["plan_hash"] == plan["plan_hash"])
+    recovered_permission = next(row for row in recovered_state["permissions"] if row["plan_hash"] == plan["plan_hash"] and row["action_kind"] == "REPAIR")
+    assert recovered_authorization["eligibility"] == "ACTIVE"
+    assert recovered_permission["state"] == "AVAILABLE"
+    intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+    assert execute_repair(demo_db, str(intent["action_id"]), "executor-a", "unknown-recovered")["status"] == "COMMITTED"
 
 
 def test_d3_plan_cancellation_blocks_approval_and_action(demo_db: Path, live_api: str) -> None:
@@ -265,6 +343,32 @@ def test_d3_plan_cancellation_blocks_approval_and_action(demo_db: Path, live_api
         _approve(demo_db, binding, plan)
     with pytest.raises(D3PreconditionRejected, match="PLAN_ALREADY_INACTIVE"):
         activate_plan(demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "support-a")
+
+
+def test_d3_cancelled_plan_revokes_permissions_and_blocks_existing_intent_replay(
+    demo_db: Path, live_api: str,
+) -> None:
+    binding, _, plan = _ready(demo_db, live_api)
+    approval = _approve(demo_db, binding, plan)
+    assert revalidate_approved_plan(
+        demo_db, str(binding["task_id"]), str(plan["plan_hash"]),
+        str(approval["approval_id"]), "executor-a", live_api,
+    )["status"] == "VALID"
+    intent = get_or_create_action_intent(
+        demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "REPAIR", "executor-a",
+    )
+    cancelled = cancel_plan(
+        demo_db, str(binding["task_id"]), str(plan["plan_hash"]), "support-a", "cancel after approval",
+    )
+    assert cancelled["eligibility"] == "CANCELLED"
+    state = get_task_action_state(demo_db, str(binding["task_id"]), "support-a")
+    plan_permissions = [row for row in state["permissions"] if row["plan_hash"] == plan["plan_hash"]]
+    assert len(plan_permissions) == 2 and all(row["state"] == "REVOKED" for row in plan_permissions)
+    with pytest.raises(D3PreconditionRejected, match="PLAN_NOT_ACTIVE"):
+        execute_repair(demo_db, str(intent["action_id"]), "executor-a", "cancelled-intent-replay")
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(binding["task_id"]),)) == 0
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v1"
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 7
 
 
 def test_d3_approval_requires_task_tenant_approver_and_intact_plan_hash(demo_db: Path, live_api: str) -> None:

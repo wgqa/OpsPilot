@@ -2029,7 +2029,11 @@ def build_investigation_graph(
         return {"stage": "complete", "local_report_ref": report["report_ref"]}
 
     async def d3_revalidate_approved_plan(state: InvestigatorState) -> dict[str, object]:
-        from opspilot.domain.d3 import get_plan_for_task, revalidate_approved_plan
+        from opspilot.domain.d3 import (
+            D3RevalidationSourceUnknown,
+            get_plan_for_task,
+            revalidate_approved_plan,
+        )
 
         if not executor_id or not business_api_url or not run_id:
             raise RuntimeError("D3 approval revalidation requires the trusted executor, active Run, and loopback API.")
@@ -2059,6 +2063,12 @@ def build_investigation_graph(
                 "approver_id": "",
                 "approval_resume_id": "",
             }
+        if receipt["status"] == "UNKNOWN":
+            # Fail this graph node so the existing Worker recovery path can
+            # retry it from the previous checkpoint. Returning WAITING_INPUT
+            # here would complete the approval Run and strand a still valid
+            # approval after a transient source read failure.
+            raise D3RevalidationSourceUnknown(str(receipt["reason_code"]))
         return {
             "stage": "waiting_input",
             "blocked_reason": str(receipt["reason_code"]),

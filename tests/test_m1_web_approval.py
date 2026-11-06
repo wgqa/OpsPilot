@@ -20,12 +20,13 @@ from opspilot.domain.d2 import (
     record_tool_observation,
 )
 from opspilot.domain.database import connect, get_integration_info
-from opspilot.domain.d3 import cancel_plan, get_task_action_state
+from opspilot.domain.d3 import D3PreconditionRejected, cancel_plan, get_task_action_state, revalidate_approved_plan
 from opspilot.domain.task_control import (
     TaskControlError,
     claim_task_run,
     finish_task_run,
     get_approval_resume_link,
+    get_task_run,
     trusted_identity,
 )
 from opspilot.domain.d3 import create_plan_from_gate
@@ -537,6 +538,17 @@ def test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approv
     new_plan_hash = str(new_outcome["plan"]["plan_hash"])
     assert new_plan_hash != old_plan_hash
     assert new_outcome["repair"] is None and new_outcome["delivery"] is None
+    authorization_state = get_task_action_state(demo_db, str(task["task_id"]), "support-a")
+    old_authorization = next(row for row in authorization_state["plan_authorizations"] if row["plan_hash"] == old_plan_hash)
+    old_permissions = [row for row in authorization_state["permissions"] if row["plan_hash"] == old_plan_hash]
+    assert old_authorization["eligibility"] == "SUPERSEDED"
+    assert old_permissions and all(row["state"] == "REVOKED" for row in old_permissions)
+    assert new_outcome["plan"]["eligibility"] == "ACTIVE"
+    with pytest.raises(D3PreconditionRejected, match="APPROVAL_OR_PLAN_NOT_CURRENT"):
+        revalidate_approved_plan(
+            demo_db, str(task["task_id"]), old_plan_hash,
+            str(first_link["approval_id"]), "executor-a", live_api,
+        )
 
     replacement_task = {**task, "plan": {**task["plan"], "plan_hash": new_plan_hash}}
     second_approval = _approve(
@@ -566,6 +578,81 @@ def test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approv
     assert _count(demo_db, "d3_revalidation_receipts", "task_id = ? AND status='REAPPROVAL_REQUIRED'", (str(task["task_id"]),)) == 1
     assert _count(demo_db, "d3_revalidation_receipts", "task_id = ? AND plan_hash = ? AND status='VALID'", (str(task["task_id"]), new_plan_hash)) == 1
     assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v2"
+
+
+def test_ar05_transient_revalidation_unknown_keeps_approval_resume_recoverable(
+    approval_client: TestClient,
+    demo_db: Path,
+    live_api: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(MODEL_API_KEY, "ar05-test-no-provider-call")
+    monkeypatch.setenv(MODEL_NAME, "ar05-resume-does-not-call-model")
+    task = _prepare_waiting_task(approval_client, demo_db, live_api, tmp_path, key="revalidation-unknown-recovery")
+    approval_response = _approve(approval_client, task, key="revalidation-unknown-recovery-approval")
+    assert approval_response.status_code == 202, approval_response.text
+    resume_run_id = str(approval_response.json()["resume_run_id"])
+    identity = trusted_identity(demo_db, "support-a")
+    original_probe = probe_endpoint_fact
+    attempts = 0
+
+    def fail_once(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary loopback source failure")
+        return original_probe(*args, **kwargs)
+
+    monkeypatch.setattr("opspilot.domain.d2.probe_endpoint_fact", fail_once)
+
+    def process_resume_run() -> None:
+        from opspilot.web.worker import SingleInstanceWorker, _process_run
+
+        worker = SingleInstanceWorker(demo_db)
+        worker.acquire()
+        worker.register()
+        try:
+            run = get_task_run(demo_db, identity, resume_run_id)
+            asyncio.run(_process_run(
+                demo_db, task["checkpoint_path"], worker.owner_id, "executor-a", run, worker.epoch,
+            ))
+        finally:
+            worker.release()
+
+    process_resume_run()
+    recoverable = get_task_run(demo_db, identity, resume_run_id)
+    assert recoverable["status"] == "INTERRUPTED_RECOVERABLE", recoverable
+    assert recoverable["blocked_reason"] == "D3_REVALIDATION_SOURCE_UNKNOWN", recoverable
+    link = get_approval_resume_link(demo_db, identity, resume_run_id)
+    assert link["approval_id"] == approval_response.json()["approval_id"]
+    action_state = get_task_action_state(demo_db, str(task["task_id"]), "support-a")
+    old_authorization = next(
+        row for row in action_state["plan_authorizations"]
+        if row["plan_hash"] == task["plan"]["plan_hash"]
+    )
+    assert old_authorization["eligibility"] == "ACTIVE"
+    assert all(row["state"] == "AVAILABLE" for row in action_state["permissions"])
+    assert _count(demo_db, "d3_action_intents", "task_id = ?", (str(task["task_id"]),)) == 0
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(task["task_id"]),)) == 0
+
+    process_resume_run()
+    completed = get_task_run(demo_db, identity, resume_run_id)
+    assert completed["status"] == "SUCCEEDED", completed
+    assert attempts == 2
+    assert _count(
+        demo_db, "d3_revalidation_receipts",
+        "task_id = ? AND plan_hash = ? AND status = 'UNKNOWN'", (str(task["task_id"]), str(task["plan"]["plan_hash"])),
+    ) == 1
+    assert _count(
+        demo_db, "d3_revalidation_receipts",
+        "task_id = ? AND plan_hash = ? AND status = 'VALID'", (str(task["task_id"]), str(task["plan"]["plan_hash"])),
+    ) == 1
+    assert _count(
+        demo_db, "d3_action_ledgers",
+        "task_id = ? AND action_kind = 'REPAIR' AND status = 'COMMITTED'", (str(task["task_id"]),),
+    ) == 1
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 8
 
 
 @pytest.mark.parametrize(

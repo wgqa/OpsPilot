@@ -56,6 +56,12 @@ class D3PreconditionRejected(D3Error):
     pass
 
 
+class D3RevalidationSourceUnknown(D3Error):
+    """Current facts could not be read; keep the existing Run recoverable."""
+
+    code = "D3_REVALIDATION_SOURCE_UNKNOWN"
+
+
 class KeyReuseConflict(D3Error):
     pass
 
@@ -216,6 +222,11 @@ def _activate_plan_in_transaction(
             (generation, actor_id, "superseded_by_new_plan", utc_now(), tenant_id, task_id, active["plan_hash"]),
         )
         _write_plan_history(connection, tenant_id, task_id, str(active["plan_hash"]), "SUPERSEDED", generation, actor_id, "superseded_by_new_plan")
+        connection.execute(
+            """UPDATE d3_action_permissions SET state = 'REVOKED', changed_at = ?
+               WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? AND state = 'AVAILABLE'""",
+            (utc_now(), tenant_id, task_id, active["plan_hash"]),
+        )
     prior = _authorization(connection, tenant_id, task_id, plan_hash)
     if prior is not None:
         if prior["eligibility"] != "ACTIVE":
@@ -419,6 +430,11 @@ def cancel_plan(path: str | Path, task_id: str, plan_hash: str, actor_id: str, r
                 (generation, actor_id, reason.strip()[:500], now, binding["tenant_id"], task_id, plan_hash),
             )
             _write_plan_history(connection, str(binding["tenant_id"]), task_id, plan_hash, "CANCELLED", generation, actor_id, reason.strip()[:500])
+            connection.execute(
+                """UPDATE d3_action_permissions SET state = 'REVOKED', changed_at = ?
+                   WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? AND state = 'AVAILABLE'""",
+                (now, binding["tenant_id"], task_id, plan_hash),
+            )
             resumable_runs = connection.execute(
                 """SELECT r.run_id, r.tenant_id, r.session_id FROM approval_resume_links l
                    JOIN task_runs r ON r.run_id = l.resume_run_id
@@ -1099,6 +1115,27 @@ def _persist_revalidation_receipt(
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         _require_executor(connection, executor_id, str(binding["tenant_id"]))
+        if status == "BLOCKED":
+            authorization = _authorization(connection, str(binding["tenant_id"]), task_id, plan_hash)
+            if authorization is not None and str(authorization["eligibility"]) == "ACTIVE":
+                generation = int(authorization["generation"]) + 1
+                changed_at = utc_now()
+                connection.execute(
+                    """UPDATE d3_plan_authorizations SET eligibility = 'CANCELLED', generation = ?,
+                              changed_by = ?, change_reason = ?, changed_at = ?
+                       WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? AND eligibility = 'ACTIVE'""",
+                    (generation, executor_id, reason_code[:500], changed_at,
+                     binding["tenant_id"], task_id, plan_hash),
+                )
+                _write_plan_history(
+                    connection, str(binding["tenant_id"]), task_id, plan_hash,
+                    "CANCELLED", generation, executor_id, reason_code[:500],
+                )
+                connection.execute(
+                    """UPDATE d3_action_permissions SET state = 'REVOKED', changed_at = ?
+                       WHERE tenant_id = ? AND task_id = ? AND plan_hash = ? AND state = 'AVAILABLE'""",
+                    (changed_at, binding["tenant_id"], task_id, plan_hash),
+                )
         connection.execute(
             """INSERT INTO d3_revalidation_receipts
                (receipt_id, tenant_id, task_id, plan_hash, approval_id, run_id, status,
@@ -1195,7 +1232,6 @@ def revalidate_approved_plan(
             # resume that same ActionIntent and continue verification, not probe
             # the expected post-repair HTTP 200 as if it invalidated the Plan.
             return _revalidation_receipt_value(receipt)
-        source_ids = [str(value) for value in plan.get("required_evidence_ids", [])]
 
     from opspilot.domain.d2 import (
         get_auth_policy_fact,
@@ -1256,7 +1292,6 @@ def revalidate_approved_plan(
             evidence_ids=current_evidence_ids, facts=facts,
         )
 
-    old_gate = evaluate_evidence_gate(path, task_id, source_ids)
     candidate = fresh_gate.get("plan_candidate")
     same_candidate = isinstance(candidate, dict) and all(candidate.get(key) == value for key, value in {
         "action_type": plan.get("repair_action_type"),
@@ -1266,7 +1301,46 @@ def revalidate_approved_plan(
         "expected_auth_policy_version": plan.get("expected_auth_policy_version"),
         "new_credential_ref": plan.get("new_credential_ref"),
     }.items())
-    if old_gate.get("decision") == "READY" and same_candidate:
+    config = facts.get("integration_config", {}).get("facts", {})
+    principal = facts.get("principal_status", {}).get("facts", {})
+    policy = facts.get("auth_policy", {}).get("facts", {})
+    probe = facts.get("endpoint_probe", {}).get("facts", {})
+    versions = facts.get("endpoint_probe", {}).get("observed_versions", {})
+    expected_versions = {
+        "config_version": plan.get("expected_config_version"),
+        "principal_version": plan.get("expected_principal_version"),
+        "policy_version": plan.get("expected_auth_policy_version"),
+    }
+    same_approved_facts = (
+        isinstance(config, dict)
+        and isinstance(principal, dict)
+        and isinstance(policy, dict)
+        and isinstance(probe, dict)
+        and isinstance(versions, dict)
+        and config.get("integration_id") == plan.get("integration_id")
+        and config.get("principal_id") == plan.get("principal_id")
+        and config.get("credential_ref") == plan.get("old_credential_ref")
+        and config.get("config_version") == plan.get("expected_config_version")
+        and principal.get("principal_id") == plan.get("principal_id")
+        and principal.get("status") == "ENABLED"
+        and principal.get("principal_version") == plan.get("expected_principal_version")
+        and policy.get("service_id") == plan.get("service_id")
+        and policy.get("policy_version") == plan.get("expected_auth_policy_version")
+        and policy.get("accepted_credential_ref") == plan.get("new_credential_ref")
+        and probe.get("service_id") == plan.get("service_id")
+        and probe.get("integration_id") == plan.get("integration_id")
+        and probe.get("principal_id") == plan.get("principal_id")
+        and probe.get("route") == plan.get("verification_contract", {}).get("route")
+        and probe.get("http_status") == 401
+        and probe.get("auth_event_result") == "AUTH_REJECTED"
+        and probe.get("auth_event_scope_valid") is True
+        and probe.get("versions_stable_during_probe") is True
+        and bool(probe.get("request_id"))
+        and bool(probe.get("auth_event_id"))
+        and versions.get("before") == expected_versions
+        and versions.get("after") == expected_versions
+    )
+    if same_candidate and same_approved_facts:
         return _persist_revalidation_receipt(
             path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
             run_id=run_id, status="VALID", reason_code="APPROVED_PLAN_STILL_CURRENT",
@@ -1285,9 +1359,8 @@ def revalidate_approved_plan(
     facts["replacement_plan_hash"] = str(replacement["plan_hash"])
     return _persist_revalidation_receipt(
         path, executor_id=executor_id, task_id=task_id, plan_hash=plan_hash, approval_id=approval_id,
-        run_id=run_id, status="REAPPROVAL_REQUIRED", reason_code=(
-            "OLD_EVIDENCE_EXPIRED" if old_gate.get("decision") != "READY" else "PLAN_FACTS_CHANGED"
-        ), evidence_ids=current_evidence_ids, facts=facts,
+        run_id=run_id, status="REAPPROVAL_REQUIRED", reason_code="PLAN_FACTS_CHANGED",
+        evidence_ids=current_evidence_ids, facts=facts,
         replacement_plan_hash=str(replacement["plan_hash"]),
     )
 
