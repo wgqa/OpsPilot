@@ -191,6 +191,7 @@ class IntegrationFixtureModel(BaseChatModel):
 
     mode: str
     receiver_state: str = "QUEUED"
+    target_event_id: str | None = None
     seen: list = Field(default_factory=list)
     decisions: list = Field(default_factory=list)
     offered_tool_names: list = Field(default_factory=list)
@@ -292,6 +293,48 @@ class IntegrationFixtureModel(BaseChatModel):
                     args = {"query": "回调重试协议"}
         elif self.mode == "history-answer":
             answer = "我依据上一轮仍有效但仅属历史线索的协议版本比较回答；它不是线上部署证明或新的业务观察。"
+        elif self.mode == "material":
+            answer = (
+                "你贴出的 JSON 将 max_attempts 设为 5、backoff 设为 fixed；这是待分析材料，"
+                "不能证明服务器已采用。依据前一轮 callback-retry-contract v1.0.0 与 "
+                "callback-retry-contract-v2 v2.0.0 的授权比较，线上部署版本仍未核实。"
+            )
+        elif self.mode == "corrected-event":
+            history = payloads.get("get_callback_transport_history")
+            if history is None:
+                selected = "get_callback_transport_history"
+                args = {"reason": "按用户纠正后的 Event 核对该订单已记录的传输尝试", "event_id": self.target_event_id}
+            else:
+                facts = history.get("facts", {})
+                attempt = next((row for row in facts.get("attempts", []) if row.get("event_id") == self.target_event_id), None)
+                if attempt is None:
+                    answer = f"没有取得 Event {self.target_event_id} 的匹配记录；当前处理状态未知。"
+                else:
+                    response = json.loads(attempt["response_json"]) if attempt.get("response_json") else {}
+                    answer = (
+                        "说明草稿依据 callback-retry-contract v1.0.0 与 callback-retry-contract-v2 v2.0.0 的授权比较；"
+                        "新版要求结合失败代码与请求关联核验重试。你贴出的 max_attempts=5、backoff=fixed 是待核实材料。"
+                        f"Event {self.target_event_id} 的传输尝试返回 HTTP {attempt.get('http_status')}，"
+                        f"受理响应为 {response.get('receiver_state')}。这是传输历史，不是当前 Receiver 状态；"
+                        "前一 Event 的 PROCESSED 不适用于这里，当前处理状态仍未知。此为未提交草稿。"
+                    )
+        elif self.mode == "current-event-only":
+            delivery = payloads.get("get_callback_delivery", {}).get("facts", {})
+            receiver = payloads.get("get_receiver_processing", {}).get("facts", {})
+            if not delivery:
+                selected = "get_callback_delivery"
+                args = {"reason": "核对绑定订单当前 Event 的投递状态"}
+            elif not receiver:
+                selected = "get_receiver_processing"
+                args = {"reason": "核对当前 Event 的 Receiver 处理状态"}
+            else:
+                same_event = delivery.get("event_id") == receiver.get("event_id")
+                status = receiver.get("status") if same_event else "UNKNOWN"
+                answer = (
+                    f"当前同一 Event {delivery.get('event_id')} 的 Delivery HTTP "
+                    f"{delivery.get('receiver_http_status')} / {delivery.get('status')}；Receiver 为 {status}。"
+                    "协议比较来自本 Session 的先前授权资料；线上部署版本仍未知。"
+                )
         elif self.mode == "binding":
             answer = "可信订单选择操作已确认资源绑定；聊天文本本身不授予查询权限。"
         elif self.mode == "unauthorized":
@@ -1054,3 +1097,196 @@ def test_full_frozen_goal_in_trusted_order_initial_message_uses_one_assistant_ru
         if trace_target:
             monkeypatch.setenv("AR02_AR03_TRACE_PATH", trace_target)
             _append_formal_trace(demo_db, session_id, [binding["run_id"]], [model])
+
+
+
+def test_product_01_same_session_material_current_check_and_event_correction(demo_db, tmp_path):
+    """Exercise continuous support through the formal API, Worker, Assistant and MCP."""
+    from fastapi.testclient import TestClient
+    from opspilot.domain.database import connect
+    from opspilot.domain.s3_history import prepare_transport_history_fixture
+    from opspilot.web.app import create_app
+    from test_ar02_assistant import ORIGIN, PASSWORDS
+
+    fixture = prepare_transport_history_fixture(
+        demo_db, order_id="product-01-order", receiver_status="PROCESSED", contract_version=2,
+        attempts=[{"event_id": "event-previous", "http_status": 202}, {"event_id": "event-current", "http_status": 202}],
+    )
+    assert [row["request"]["event_id"] for row in fixture["transport_trace"]] == [
+        "event-previous", "event-current",
+    ]
+    run_models = [
+        IntegrationFixtureModel(mode="unbound"), IntegrationFixtureModel(mode="material"),
+        IntegrationFixtureModel(mode="current-event-only"),
+        IntegrationFixtureModel(mode="corrected-event", target_event_id="event-previous"),
+    ]
+    queued_models = list(run_models)
+    app = create_app(
+        db_path=demo_db, checkpoint_db_path=tmp_path / "product-01-cp.sqlite3", start_worker=True,
+        credentials=PASSWORDS, expected_origin=ORIGIN, assistant_model_factory=lambda: queued_models.pop(0),
+    )
+    with TestClient(app) as client:
+        headers = _login(client)
+        session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+
+        def submit(path, key, body):
+            response = client.post(path, headers={**headers, "Idempotency-Key": key}, json=body)
+            assert response.status_code == 202, response.text
+            item = response.json()
+            assert _wait_run(client, item["run_id"])["status"] == "SUCCEEDED"
+            return item
+
+        first = submit(
+            f"/api/sessions/{session_id}/assistant/messages", "product-01-protocol",
+            {"body": "我们准备升级到新版回调协议，主要有哪些变化？"},
+        )
+        assert first.get("task_id") is None
+        with connect(demo_db) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM task_bindings").fetchone()[0] == 0
+            protocol = connection.execute(
+                "SELECT request_json,result_json FROM assistant_calls WHERE run_id=? AND kind='MCP' ORDER BY created_at",
+                (first["run_id"],),
+            ).fetchall()
+            assert [json.loads(row["request_json"])["name"] for row in protocol] == [
+                "list_scoped_protocol_documents", "compare_scoped_protocols",
+            ]
+            comparison = json.loads(protocol[1]["result_json"])
+            assert comparison["base_ref"]["document_id"] == "callback-retry-contract"
+            assert comparison["target_ref"]["document_id"] == "callback-retry-contract-v2"
+            assert comparison["diff_evidence"][0]["base_location"]
+            assert comparison["diff_evidence"][0]["target_location"]
+
+        material = ('这是我们当前使用的配置，结合刚才协议检查。\n'
+                    '{"callback":{"retry":{"max_attempts":5,"backoff":"fixed"}},"event_id":"event-previous"}')
+        second = submit(
+            f"/api/sessions/{session_id}/assistant/messages", "product-01-material", {"body": material},
+        )
+        second_answer = next(
+            row["body"] for row in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            if row.get("answer_source_message_id") == second["message_id"]
+        )
+        assert "max_attempts 设为 5" in second_answer and "不能证明服务器已采用" in second_answer
+        assert "callback-retry-contract-v2 v2.0.0" in second_answer
+        assert "max_attempts" in str(run_models[1].seen)
+        assert "callback-retry-contract-v2" in str(run_models[1].seen)
+        with connect(demo_db) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM task_bindings").fetchone()[0] == 0
+
+        bound_response = client.post(
+            f"/api/sessions/{session_id}/assistant/order",
+            headers={**headers, "Idempotency-Key": "product-01-current-event"},
+            json={
+                "order_id": "product-01-order",
+                "initial_message": "但是我们这边有一个回调一直没有处理完成，你帮我看看实际状态。",
+            },
+        )
+        assert bound_response.status_code == 202, bound_response.text
+        bound = bound_response.json()
+        assert _wait_run(client, bound["run_id"])["status"] == "SUCCEEDED"
+        current_answer = next(
+            row["body"] for row in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            if row.get("answer_source_message_id") == bound["message_id"]
+        )
+        assert "event-current" in current_answer and "PROCESSED" in current_answer
+        assert "线上部署版本" in current_answer
+        assert "callback-retry-contract-v2" in str(run_models[2].seen)
+        assert "max_attempts" in str(run_models[2].seen)
+
+        corrected = submit(
+            f"/api/sessions/{session_id}/assistant/messages", "product-01-event-correction",
+            {"task_id": bound["task_id"], "body": "我说的不是 event-current，是 event-previous，请重查并写客户说明。"},
+        )
+        final_answer = next(
+            row["body"] for row in client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            if row.get("answer_source_message_id") == corrected["message_id"]
+        )
+        assert "event-previous" in final_answer and "HTTP 202" in final_answer
+        assert "callback-retry-contract-v1.0.0" in final_answer or "callback-retry-contract v1.0.0" in final_answer
+        assert "callback-retry-contract-v2 v2.0.0" in final_answer and "max_attempts=5" in final_answer
+        assert "PROCESSED 不适用于这里" in final_answer and "当前处理状态仍未知" in final_answer
+        assert "未提交草稿" in final_answer
+        assert "max_attempts" in str(run_models[3].seen)
+        with connect(demo_db) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM task_runs WHERE session_id=?", (session_id,)).fetchone()[0] == 4
+            assert connection.execute("SELECT COUNT(*) FROM task_bindings").fetchone()[0] == 1
+            call = connection.execute(
+                "SELECT request_json,result_json,evidence_id,observation_id FROM assistant_calls WHERE run_id=? AND kind='MCP'",
+                (corrected["run_id"],),
+            ).fetchone()
+            request, history = json.loads(call["request_json"]), json.loads(call["result_json"])
+            assert request["name"] == "get_callback_transport_history"
+            assert request["args"]["event_id"] == "event-previous"
+            assert history["facts"]["requested_event_id"] == "event-previous"
+            assert "not the target Event current processing state" in history["facts"]["processing_authority"]
+            assert call["evidence_id"] and call["observation_id"]
+            model_request = connection.execute(
+                "SELECT request_json FROM assistant_calls WHERE run_id=? AND kind='MODEL' ORDER BY created_at LIMIT 1",
+                (corrected["run_id"],),
+            ).fetchone()
+            refs = json.loads(model_request["request_json"])["source_refs"]
+            assert refs["current_run"]["business_observations"] == []
+            assert any(item["current_source_valid"] for item in refs["history_sources"])
+            for table in ("d3_action_intents", "d3_action_ledgers", "d3_delivery_records", "s3_handoff_receipts"):
+                assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+        _append_formal_trace(demo_db, session_id,
+                             [first["run_id"], second["run_id"], bound["run_id"], corrected["run_id"]], run_models)
+
+
+def test_product_01_same_event_queued_to_processed_uses_new_observation(demo_db, tmp_path):
+    """A changed fixture invalidates old evidence; the same Event is freshly observed."""
+    from fastapi.testclient import TestClient
+    from opspilot.domain.database import connect
+    from opspilot.domain.s3 import prepare_s3_fixture
+    from opspilot.web.app import create_app
+    from test_ar02_assistant import ORIGIN, PASSWORDS
+
+    fixture = prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="product-01-changing-order", contract_version=2)
+    event_id = fixture["transport_trace"][0]["request"]["event_id"]
+    run_models = [
+        IntegrationFixtureModel(mode="current-event-only"),
+        IntegrationFixtureModel(mode="current-event-only"),
+    ]
+    queued_models = list(run_models)
+    app = create_app(
+        db_path=demo_db, checkpoint_db_path=tmp_path / "product-01-state-change-cp.sqlite3", start_worker=True,
+        credentials=PASSWORDS, expected_origin=ORIGIN, assistant_model_factory=lambda: queued_models.pop(0),
+    )
+    with TestClient(app) as client:
+        headers = _login(client)
+        session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+        response = client.post(
+            f"/api/sessions/{session_id}/assistant/order", headers={**headers, "Idempotency-Key": "product-01-queued"},
+            json={"order_id": "product-01-changing-order", "initial_message": "请核实当前 Event。"},
+        )
+        assert response.status_code == 202, response.text
+        first = response.json()
+        assert _wait_run(client, first["run_id"])["status"] == "SUCCEEDED"
+        with connect(demo_db) as connection:
+            connection.execute("UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id=?",
+                               ("product-01-changing-order",))
+        response = client.post(
+            f"/api/sessions/{session_id}/assistant/messages", headers={**headers, "Idempotency-Key": "product-01-recheck"},
+            json={"body": "请重新核实同一 Event 的 Receiver 状态。", "task_id": first["task_id"]},
+        )
+        assert response.status_code == 202, response.text
+        second = response.json()
+        assert _wait_run(client, second["run_id"])["status"] == "SUCCEEDED"
+        messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+        old_answer = next(row["body"] for row in messages if row.get("answer_source_message_id") == first["message_id"])
+        new_answer = next(row["body"] for row in messages if row.get("answer_source_message_id") == second["message_id"])
+        assert old_answer == "这条历史答复的来源已失效，不能作为当前依据。请重新查询。"
+        assert event_id in new_answer and "PROCESSED" in new_answer
+        assert client.get(f"/api/runs/{first['run_id']}/assistant-sources").json()["current"] is False
+        assert client.get(f"/api/runs/{second['run_id']}/assistant-sources").json()["current"] is True
+        with connect(demo_db) as connection:
+            result = connection.execute(
+                "SELECT result_json FROM assistant_calls WHERE run_id=? AND kind='MCP'",
+                (second["run_id"],),
+            ).fetchall()
+            receiver = next(
+                json.loads(row["result_json"]) for row in result
+                if json.loads(row["result_json"]).get("fact_type") == "s3_receiver"
+            )
+            assert receiver["facts"]["event_id"] == event_id
+            assert receiver["facts"]["status"] == "PROCESSED"
+        _append_formal_trace(demo_db, session_id, [first["run_id"], second["run_id"]], run_models)
