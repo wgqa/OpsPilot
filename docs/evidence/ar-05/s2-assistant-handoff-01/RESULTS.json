@@ -1,0 +1,83 @@
+{
+  "task": "AR-05-S2-ASSISTANT-HANDOFF-01",
+  "base_sha": "65612ff1cb72664c124ec5aa70cbcfa8f869eced",
+  "branch": "codex/ar05-s2-assistant-handoff-01",
+  "review_basis": {
+    "north_star_blob": "e36f2f75509738551ac6d4a2de5b4f9cf44a7991",
+    "agents_blob": "f174a6ab7f23f9e6d8b3ef98d455b99a75193143",
+    "project_skill_blob": "d405c8d413d633824b279202cc1503dab4cf0b03",
+    "m2_03_api_blob": "d11f7e28bd0508bf85ec881ee91a86c2daff9bfd",
+    "m2_03_data_blob": "86bf5e7b90360656f4d2eab61cc106c402c33480",
+    "m2_03_access_blob": "125aea88e725e10adb936673949c66e3084466a9",
+    "m2_03_gold_blob": "0efc6abdd5ececaf69b8c5cde5c11ca340a0a1c6",
+    "m2_03_acceptance_plan_blob": "f788712bf9690cd3ce47bdd9b723c6fa8c899fd0",
+    "m2_02_deferred_gates_blob": "2536030b5b942bf9e3765e0916607549fa919934"
+  },
+  "status": "ACCEPTANCE_CANDIDATE",
+  "product_code_changed": false,
+  "new_test": {
+    "path": "tests/test_ar05_s2_assistant_handoff_01.py",
+    "test": "test_ar05_same_session_assistant_to_s2_handoff_receipt",
+    "result": "PASS",
+    "passed": 1,
+    "failed": 0,
+    "log": "GREEN-FINAL.log"
+  },
+  "regressions": [
+    {
+      "command": "python -m pytest tests/test_m2_03_handoff.py tests/test_m2_02_s2_diagnosis.py tests/test_ar05_s1_session_bridge_01.py -vv -s --basetemp .pytest-tmp-ar05-regression-01",
+      "result": "PASS",
+      "passed": 25,
+      "failed": 0,
+      "duration_seconds": 22.68,
+      "log": "REGRESSION-S2-S1.log"
+    },
+    {
+      "command": "python -m pytest tests/test_m4_02_s3.py tests/test_m4_03_s3.py -vv -s --basetemp .pytest-tmp-ar05-regression-s3-01",
+      "result": "PASS",
+      "passed": 34,
+      "failed": 0,
+      "duration_seconds": 57.51,
+      "log": "REGRESSION-S3.log"
+    }
+  ],
+  "aggregate_test_executions": {
+    "passed": 60,
+    "failed": 0,
+    "note": "Separate pytest invocations; not one combined suite"
+  },
+  "journey": {
+    "session_id": "session-d8a6d416-d6c1-4d32-8992-adeff16f03dd",
+    "source_message_id": "message-3ec624fe-7004-44c9-8621-5bebe809f953",
+    "task_id": "task-ef6709cd-6aef-49e9-b571-2dd013f177b0",
+    "assistant_run_id": "run-fe9bf716-b44a-47cd-bdd2-053c22b72ae2",
+    "assistant_execution_core": "ASSISTANT_V1",
+    "investigation_run_id": "run-8c955dab-feb3-4300-a595-d2f9bcc008ae",
+    "investigation_execution_core": "PROFESSIONAL_INVESTIGATOR",
+    "mcp_observations": 2,
+    "diagnosis": "HANDOFF_READY",
+    "submitted_outcome": "SCOPE_ESCALATED",
+    "handoff_status": "PENDING_REVIEW",
+    "queue_entries": 1,
+    "handoff_receipts": 1,
+    "handoff_outbox_events": 1,
+    "scope_authorized": false,
+    "recovered": false,
+    "d3_repairs": 0
+  },
+  "side_effects": {
+    "real_provider_http_requests": 0,
+    "external_business_writes": 0,
+    "local_controlled_queue_entries": 1,
+    "scope_policy_write_attempts": 0,
+    "scope_grants_changed": false
+  },
+  "not_run": [
+    "Full pytest suite; historical TestClient shutdown hang remains separate regression debt",
+    "Browser acceptance; existing browser STOP remains active",
+    "Real Provider evaluation"
+  ],
+  "tooling": {
+    "ruff": "NOT_RUN: ruff package is not installed in the active Python environment"
+  }
+}
