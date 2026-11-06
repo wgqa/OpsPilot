@@ -8,6 +8,7 @@ export interface SessionItem {
 export interface SessionDetail {
   session_id: string;
   tasks: Array<{ task_id: string; linked_at: string; is_primary: number }>;
+  s1_demo_resource: { service_id: string; integration_id: string; principal_id: string } | null;
 }
 
 export interface AcceptedMessage {
@@ -67,6 +68,7 @@ export interface MessageItem {
   answer_run_id?: string | null;
   answer_source_message_id?: string | null;
   answer_kind?: 'CHAT_MODEL' | 'PROGRAM_LIMIT' | null;
+  investigation_origin_message_id?: string | null;
 }
 
 export interface InvestigationUpdateProposal {
@@ -104,6 +106,7 @@ export interface InvestigationUpdateAssessment {
 
 export interface RunItem {
   run_id: string;
+  execution_core?: 'ASSISTANT_V1' | 'LEGACY_CHAT_READONLY' | 'PROFESSIONAL_INVESTIGATOR';
   task_id: string | null;
   session_id: string;
   source_message_id: string | null;
@@ -411,10 +414,11 @@ export const api = {
   createTask(
     sessionId: string, initialMessage: string, csrf: string,
     investigationKind: 'AUTH_INCIDENT' | 'ASYNC_CALLBACK' = 'AUTH_INCIDENT', s3OrderId?: string,
+    operationId?: string, sourceMessageId?: string,
   ) {
-    return request<{ task_id: string; run_id: string; status: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
-      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': crypto.randomUUID() },
-      body: JSON.stringify({ initial_message: initialMessage, investigation_kind: investigationKind, ...(s3OrderId ? { s3_order_id: s3OrderId } : {}) }),
+    return request<{ task_id: string; run_id: string; message_id: string; status: string; replayed: boolean }>(`/api/sessions/${encodeURIComponent(sessionId)}/tasks`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': operationId ?? crypto.randomUUID() },
+      body: JSON.stringify({ initial_message: initialMessage, investigation_kind: investigationKind, ...(s3OrderId ? { s3_order_id: s3OrderId } : {}), ...(sourceMessageId ? { source_message_id: sourceMessageId } : {}) }),
     });
   },
   runs(taskId: string) { return request<{ items: RunItem[] }>(`/api/tasks/${encodeURIComponent(taskId)}/runs`); },

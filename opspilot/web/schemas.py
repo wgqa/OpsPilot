@@ -22,6 +22,7 @@ class CreateTaskRequest(StrictModel):
     initial_message: str = Field(min_length=1, max_length=20_000)
     investigation_kind: Literal["AUTH_INCIDENT", "ASYNC_CALLBACK"] = "AUTH_INCIDENT"
     s3_order_id: str | None = Field(default=None, min_length=1, max_length=100)
+    source_message_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class MessageRequest(StrictModel):

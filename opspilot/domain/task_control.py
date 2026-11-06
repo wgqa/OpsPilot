@@ -952,6 +952,7 @@ def create_task_with_initial_run(
     deadline_ms: int = 300_000,
     s3_order_id: str | None = None,
     assistant_core: bool = False,
+    source_message_id: str | None = None,
 ) -> dict[str, object]:
     """Atomically create a trusted S1 binding and its first Message/Command/Run."""
     if not initial_message.strip():
@@ -976,6 +977,10 @@ def create_task_with_initial_run(
         if service_id != "orders-async-demo":
             raise TaskControlError("ASSISTANT_BINDING_KIND_INVALID")
         request["execution_core"] = "ASSISTANT_V1"
+    if source_message_id is not None:
+        if service_id == "orders-async-demo" or assistant_core:
+            raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+        request["origin_message_id"] = source_message_id
     request_digest = _digest(request)
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -993,6 +998,15 @@ def create_task_with_initial_run(
         ).fetchone()
         if session is None:
             raise TaskControlError("SESSION_SCOPE_DENIED")
+        origin = None
+        if source_message_id is not None:
+            origin = connection.execute(
+                """SELECT message_id, body, body_digest FROM messages
+                   WHERE message_id = ? AND tenant_id = ? AND session_id = ? AND role = 'USER'""",
+                (source_message_id, identity.tenant_id, session_id),
+            ).fetchone()
+            if origin is None or hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() != str(origin["body_digest"]):
+                raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
         try:
             from opspilot.domain.d2 import ScopeDenied, _create_task_binding_in_transaction
 
@@ -1032,6 +1046,8 @@ def create_task_with_initial_run(
             "run_status": "QUEUED", "request_digest": request_digest,
             "application_state": "RECEIVED_NOT_APPLIED", "replayed": False,
         }
+        if origin is not None:
+            result["origin_message_id"] = str(origin["message_id"])
         _record_command(
             connection, command_id=command_id, identity=identity, command_kind=command_kind,
             target_ref=session_id, idempotency_key=idempotency_key, request_digest=request_digest,
@@ -1045,6 +1061,12 @@ def create_task_with_initial_run(
             (message_id, identity.tenant_id, session_id, task_id, sequence,
              initial_message, body_digest, command_id, now),
         )
+        if origin is not None:
+            connection.execute(
+                """INSERT INTO chat_message_sources (message_id, source_kind, source_ref, source_digest)
+                   VALUES (?, 'MESSAGE', ?, ?)""",
+                (message_id, str(origin["message_id"]), str(origin["body_digest"])),
+            )
         connection.execute(
             """INSERT INTO task_runs
                (run_id, tenant_id, task_id, session_id, command_id, source_message_id,

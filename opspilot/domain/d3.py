@@ -1672,6 +1672,12 @@ def get_task_outcome(path: str | Path, task_id: str, actor_id: str) -> dict[str,
                 return s2_outcome
             return {"task_id": task_id, "task_status": str(binding["status"]), "business_outcome": "NO_PLAN"}
         plan_hash = str(plan["plan_hash"])
+        # The owner may inspect a minimal preview, but authority remains with the
+        # existing approval path. Validate the immutable Plan before projecting it.
+        canonical_plan = _load_plan(connection, str(binding["tenant_id"]), task_id, plan_hash)
+        verification_contract = canonical_plan.get("verification_contract")
+        verification_preview = ({key: verification_contract.get(key) for key in ("method", "route", "expected_http_status")}
+                                if isinstance(verification_contract, dict) else None)
         approval = connection.execute(
             """SELECT approval_id, approver_id, decision, decided_at FROM d3_approvals
                WHERE tenant_id = ? AND task_id = ? AND plan_hash = ?""",
@@ -1769,7 +1775,11 @@ def get_task_outcome(path: str | Path, task_id: str, actor_id: str) -> dict[str,
         "task_id": task_id,
         "task_status": str(binding["status"]),
         "plan": {"plan_hash": plan_hash, "plan_version": int(plan["plan_version"]),
-                 "eligibility": str(plan["eligibility"]) if plan["eligibility"] else None},
+                 "eligibility": str(plan["eligibility"]) if plan["eligibility"] else None,
+                 "repair_action_type": canonical_plan.get("repair_action_type"),
+                 "target_resource_id": canonical_plan.get("target_resource_id"),
+                 "expected_config_version": canonical_plan.get("expected_config_version"),
+                 "verification_preview": verification_preview},
         "approval": approval_value,
         "resume_link": ({key: resume_link[key] for key in resume_link.keys()} if resume_link else None),
         "resume_run": ({key: resume_run[key] for key in resume_run.keys()} if resume_run else None),

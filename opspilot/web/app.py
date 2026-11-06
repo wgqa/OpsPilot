@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -132,6 +133,8 @@ def _public_run(row: Any) -> dict[str, Any]:
         "session_id": str(row["session_id"]),
         "source_message_id": str(row["source_message_id"]) if row["source_message_id"] else None,
         "kind": kind,
+        "execution_core": ("ASSISTANT_V1" if row["assistant_registered"] else
+                           "LEGACY_CHAT_READONLY" if kind == "CHAT_READONLY" else "PROFESSIONAL_INVESTIGATOR"),
         "status": status,
         "waiting_reason": str(row["blocked_reason"]) if row["blocked_reason"] else None,
         "created_at": str(row["created_at"]),
@@ -397,8 +400,19 @@ def create_app(
                 "SELECT task_id, linked_at, is_primary FROM session_task_links WHERE session_id = ? ORDER BY linked_at, task_id",
                 (session_id,),
             ).fetchall()
+            s1_resource = None
+            if context.identity.role == "SUPPORT":
+                s1_resource = connection.execute(
+                    """SELECT s.service_id, i.integration_id, i.principal_id
+                       FROM services s JOIN integrations i ON i.tenant_id=s.tenant_id AND i.integration_id=s.integration_id
+                       JOIN principals p ON p.tenant_id=i.tenant_id AND p.principal_id=i.principal_id
+                       WHERE s.tenant_id=? AND s.service_id=? AND i.integration_id=?""",
+                    (context.identity.tenant_id, os.environ.get("OPSPILOT_DEMO_SERVICE_ID", "orders-demo"),
+                     os.environ.get("OPSPILOT_DEMO_INTEGRATION_ID", "integration-a")),
+                ).fetchone()
         return {**{key: row[key] for key in row.keys()},
-                "tasks": [{key: link[key] for key in link.keys()} for link in links]}
+                "tasks": [{key: link[key] for key in link.keys()} for link in links],
+                "s1_demo_resource": dict(s1_resource) if s1_resource else None}
 
     @app.get("/api/sessions/{session_id}/runs")
     async def get_session_runs(
@@ -407,7 +421,8 @@ def create_app(
         require_session_owner(context.identity, session_id)
         with connect(resolved_db) as connection:
             rows = connection.execute(
-                "SELECT * FROM task_runs WHERE session_id = ? AND tenant_id = ? ORDER BY created_at, run_id",
+                """SELECT r.*, EXISTS(SELECT 1 FROM assistant_runs a WHERE a.run_id=r.run_id) AS assistant_registered
+                   FROM task_runs r WHERE r.session_id = ? AND r.tenant_id = ? ORDER BY r.created_at, r.run_id""",
                 (session_id, context.identity.tenant_id),
             ).fetchall()
         return {"items": [_public_run(row) for row in rows]}
@@ -442,7 +457,7 @@ def create_app(
             integration_id=f"async-integration-{context.identity.tenant_id.removeprefix('tenant-')}" if body.investigation_kind == "ASYNC_CALLBACK" else os.environ.get("OPSPILOT_DEMO_INTEGRATION_ID", "integration-a"),
             ticket_id=os.environ.get("OPSPILOT_DEMO_TICKET_ID", "INC-A-001"),
             initial_message=body.initial_message, idempotency_key=key,
-            deadline_ms=deadline_ms, s3_order_id=body.s3_order_id,
+            deadline_ms=deadline_ms, s3_order_id=body.s3_order_id, source_message_id=body.source_message_id,
         )
         replayed = bool(result.pop("replayed", False))
         return JSONResponse({**result, "replayed": replayed}, status_code=200 if replayed else 202)
@@ -467,7 +482,8 @@ def create_app(
         require_task_reader(context.identity, task_id)
         with connect(resolved_db) as connection:
             rows = connection.execute(
-                "SELECT * FROM task_runs WHERE task_id = ? AND tenant_id = ? ORDER BY created_at, run_id",
+                """SELECT r.*, EXISTS(SELECT 1 FROM assistant_runs a WHERE a.run_id=r.run_id) AS assistant_registered
+                   FROM task_runs r WHERE r.task_id = ? AND r.tenant_id = ? ORDER BY r.created_at, r.run_id""",
                 (task_id, context.identity.tenant_id),
             ).fetchall()
         return {"items": [_public_run(row) for row in rows]}
@@ -607,7 +623,8 @@ def create_app(
     async def get_run(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
         with connect(resolved_db) as connection:
             row = connection.execute(
-                "SELECT * FROM task_runs WHERE run_id = ? AND tenant_id = ?",
+                """SELECT r.*, EXISTS(SELECT 1 FROM assistant_runs a WHERE a.run_id=r.run_id) AS assistant_registered
+                   FROM task_runs r WHERE r.run_id = ? AND r.tenant_id = ?""",
                 (run_id, context.identity.tenant_id),
             ).fetchone()
         if row is None:
@@ -729,6 +746,23 @@ def create_app(
             items = []
             for row in rows:
                 item = {key: row[key] for key in row.keys()}
+                item["investigation_origin_message_id"] = None
+                if str(row["role"]) == "USER" and row["task_id"]:
+                    origin = connection.execute(
+                        """SELECT source.message_id, source.body, source.body_digest FROM chat_message_sources ms
+                           JOIN messages source ON source.message_id=ms.source_ref
+                             AND source.body_digest=ms.source_digest AND source.role='USER'
+                             AND source.tenant_id=? AND source.session_id=? AND source.sequence<?
+                           JOIN task_runs r ON r.source_message_id=ms.message_id
+                             AND r.tenant_id=? AND r.session_id=? AND r.task_id=? AND r.kind='INVESTIGATE'
+                           JOIN commands c ON c.command_id=r.command_id AND c.command_kind='CREATE_TASK'
+                             AND c.message_id=ms.message_id AND c.run_id=r.run_id
+                           WHERE ms.message_id=? AND ms.source_kind='MESSAGE' LIMIT 1""",
+                        (context.identity.tenant_id, session_id, int(row["sequence"]),
+                         context.identity.tenant_id, session_id, row["task_id"], row["message_id"]),
+                    ).fetchone()
+                    if origin and hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() == str(origin["body_digest"]):
+                        item["investigation_origin_message_id"] = str(origin["message_id"])
                 if row['role'] == 'ASSISTANT':
                     from opspilot.domain.assistant import sources_current as assistant_sources_current
                     assistant_answer=connection.execute('SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?',(row['message_id'],)).fetchone()
