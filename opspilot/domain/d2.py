@@ -827,12 +827,12 @@ def configure_material_remainder_budget(path, task_id, experiment_id):
 def configure_ar04c_memory_budget(path, task_id, experiment_id):
     """Apply the isolated 8-provider/no-low-MCP policy to one bound AR-04C Task."""
     from opspilot.domain.assistant_experiment import (
-        AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
+        AR04C_CAMPAIGN_IDS,
         AR04C_CONDITION_BUDGET_USD_MICRO,
         AR04C_CONDITION_PROVIDER_LIMIT,
         AR04C_PRICE_VERSION,
     )
-    if experiment_id != AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+    if experiment_id not in AR04C_CAMPAIGN_IDS:
         raise ValueError("AR04C_EXPERIMENT_SCOPE_INVALID")
     from opspilot.domain.s3 import get_s3_binding
     with connect(path) as connection:

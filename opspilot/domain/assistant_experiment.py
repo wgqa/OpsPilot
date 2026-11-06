@@ -25,11 +25,14 @@ AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01-RESUME-0
 AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID = "AR-03-MATERIAL-LIVE-01-RESUME-02"
 AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID = "AR-03-MATERIAL-REMAINDER-01"
 AR04C_REAL_JOURNEY_01_EXPERIMENT_ID = "AR-04C-REAL-JOURNEY-01"
+AR04C_RECHECK_EXPERIMENT_ID = "AR04C-F01-RECHECK-01"
+AR04C_CAMPAIGN_IDS = frozenset({AR04C_REAL_JOURNEY_01_EXPERIMENT_ID, AR04C_RECHECK_EXPERIMENT_ID})
 EXPERIMENTS_AWAITING_PAID_AUTHORIZATION = frozenset({
     AR03_MATERIAL_LIVE_01_RESUME_01_EXPERIMENT_ID,
     AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
     AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
+    AR04C_RECHECK_EXPERIMENT_ID,
 })
 SUPPORTED_EXPERIMENT_IDS = frozenset({
     EXPERIMENT_ID,
@@ -43,6 +46,7 @@ SUPPORTED_EXPERIMENT_IDS = frozenset({
     AR03_MATERIAL_LIVE_01_RESUME_02_EXPERIMENT_ID,
     AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
     AR04C_REAL_JOURNEY_01_EXPERIMENT_ID,
+    AR04C_RECHECK_EXPERIMENT_ID,
 })
 EXPERIMENT_ENV = "OPSPILOT_ASSISTANT_EXPERIMENT_ID"
 PROVIDER_LIMIT = 16
@@ -55,6 +59,7 @@ AR03_SCENARIO_MCP_LIMIT = 6
 AR04C_CONDITION_PROVIDER_LIMIT = 8
 AR04C_CONDITION_BUDGET_USD_MICRO = 5_250_000
 AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
+AR04C_RECHECK_RESERVATION_USD_MICRO = 668_468
 
 # DeepSeek Flash peak cache-miss input/output rates checked 2026-11-01.
 # The reservation uses the documented maximum output/context envelope rather
@@ -72,7 +77,7 @@ MAX_PROVIDER_RESERVATION_USD_MICRO = 645_600
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ar02_live_experiment_budgets (
     experiment_id TEXT PRIMARY KEY CHECK (
-        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02', 'AR-03-MATERIAL-LIVE-01', 'AR-03-MATERIAL-LIVE-01-RESUME-01', 'AR-03-MATERIAL-LIVE-01-RESUME-02', 'AR-03-MATERIAL-REMAINDER-01', 'AR-04C-REAL-JOURNEY-01')
+        experiment_id IN ('AR-02-LIVE-01', 'AR-02-REAL-JOURNEY-01', 'AR-02-REAL-JOURNEY-02', 'AR-02-REAL-JOURNEY-03', 'AR-03-REAL-LLM-01', 'AR-03-REAL-LLM-02', 'AR-03-MATERIAL-LIVE-01', 'AR-03-MATERIAL-LIVE-01-RESUME-01', 'AR-03-MATERIAL-LIVE-01-RESUME-02', 'AR-03-MATERIAL-REMAINDER-01', 'AR-04C-REAL-JOURNEY-01', 'AR04C-F01-RECHECK-01')
     ),
     provider_limit INTEGER NOT NULL,
     mcp_limit INTEGER,
@@ -138,7 +143,7 @@ def _limits_for_experiment(experiment_id: str) -> tuple[int, int | None]:
         # Provider spend, Task/Run timeouts and LangGraph recursion remain hard
         # stops; this policy is scoped to the new isolated experiment only.
         return PROVIDER_LIMIT, AR03_MATERIAL_REMAINDER_MCP_LIMIT
-    if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+    if experiment_id in AR04C_CAMPAIGN_IDS:
         # Each isolated Memory condition receives half of the frozen campaign
         # ceiling. Together, OFF and ON can reserve at most 16 calls and $10.50.
         return AR04C_CONDITION_PROVIDER_LIMIT, None
@@ -146,18 +151,20 @@ def _limits_for_experiment(experiment_id: str) -> tuple[int, int | None]:
 
 
 def _budget_for_experiment(experiment_id: str) -> int:
-    if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+    if experiment_id in AR04C_CAMPAIGN_IDS:
         return AR04C_CONDITION_BUDGET_USD_MICRO
     return BUDGET_USD_MICRO
 
 
 def _price_version_for_experiment(experiment_id: str) -> str:
-    if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
+    if experiment_id in AR04C_CAMPAIGN_IDS:
         return AR04C_PRICE_VERSION
     return PRICE_VERSION
 
 
 def _reservation_for_experiment(experiment_id: str) -> int:
+    if experiment_id == AR04C_RECHECK_EXPERIMENT_ID:
+        return AR04C_RECHECK_RESERVATION_USD_MICRO
     if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID:
         return AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO
     return MAX_PROVIDER_RESERVATION_USD_MICRO
@@ -375,7 +382,7 @@ def _actual_cost_micro(
 ) -> int:
     output_rate = (
         AR04C_OUTPUT_USD_PER_MILLION
-        if experiment_id == AR04C_REAL_JOURNEY_01_EXPERIMENT_ID
+        if experiment_id in AR04C_CAMPAIGN_IDS
         else OUTPUT_USD_PER_MILLION
     )
     cost = (
@@ -446,10 +453,12 @@ def complete_dispatch(
 
         input_tokens, output_tokens, total_tokens = normalized
         actual_micro = _actual_cost_micro(input_tokens, output_tokens, experiment_id)
+        context_limit = 1_048_576 if experiment_id == AR04C_RECHECK_EXPERIMENT_ID else MODEL_CONTEXT_TOKENS
+        output_limit = 393_216 if experiment_id == AR04C_RECHECK_EXPERIMENT_ID else MODEL_MAX_OUTPUT_TOKENS
         violation = (
             output_tokens > REQUEST_MAX_OUTPUT_TOKENS
-            or output_tokens > MODEL_MAX_OUTPUT_TOKENS
-            or input_tokens + output_tokens > MODEL_CONTEXT_TOKENS
+            or output_tokens > output_limit
+            or input_tokens + output_tokens > context_limit
             or actual_micro > _reservation_for_experiment(experiment_id)
         )
         usage_payload = {
