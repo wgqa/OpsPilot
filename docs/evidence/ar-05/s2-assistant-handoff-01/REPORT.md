@@ -3,6 +3,7 @@
 **状态：`ACCEPTANCE_CANDIDATE`**
 
 **基线：** `65612ff1cb72664c124ec5aa70cbcfa8f869eced`
+
 **分支：** `codex/ar05-s2-assistant-handoff-01`
 
 ## 用户旅程证据
@@ -30,6 +31,7 @@
 - 全量 pytest 未运行；保留既有 TestClient shutdown 停滞为独立回归债务。AR-03 Runner 预检失败未重跑。
 - 浏览器验收未运行（既有 STOP）；真实 Provider 请求为 0。
 - `ruff` 未运行：当前 Python 环境未安装该包。前端源码未改，未运行 typecheck/build。
+- 推送隔离分支时 GitHub 返回 HTTP 403；随后的 `ls-remote` 也返回 HTTP 403，因此候选远端 SHA 为 `UNVERIFIED`。未尝试绕过。推送前最后一次成功 fetch 的 `origin/main` 为 `60eee87bfe3cca522011316cb4cd2c0064ad291b`。
 
 初期测试失败均来自测试断言/审计查询与真实合同不一致，而非产品行为：缺省字段 `recovered` 被误当必需、事件列写成 `event_type`、命令表误假设有 `task_id`。修正为兼容既有响应和实际 Schema 后，整合旅程通过；完整原始日志保留于本目录。
 

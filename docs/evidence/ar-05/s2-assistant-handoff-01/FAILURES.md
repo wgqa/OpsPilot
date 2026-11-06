@@ -17,6 +17,7 @@ Windows 控制台/`Tee-Object` 对非 ASCII Trace 的显示存在代码页乱码
 
 ## 未运行 / 未验证
 
+- `git push -u origin codex/ar05-s2-assistant-handoff-01` 被 GitHub 返回 HTTP 403；随后 `git ls-remote` 也返回 HTTP 403。候选仅在本地，远端存在性未验证；未绕过权限或重试。
 - 全量 pytest 未运行。已知 TestClient lifespan shutdown 停滞由先前任务独立记录，本轮不重开该问题，也未声称全量通过。
 - 浏览器自动化未运行，既有浏览器 STOP 仍有效。
 - 真实 Provider 请求未运行，模型能力与自主工具选择未验证。
