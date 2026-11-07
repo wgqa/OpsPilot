@@ -461,7 +461,10 @@ def get_receiver_processing_fact(path, task_id):
     return _table_fact(path, task_id, "s3_receiver")
 
 
-def _observation_scope(connection, task_id, evidence_rows, run_id, observation_ids):
+def _observation_scope(
+    connection, task_id, evidence_rows, run_id, observation_ids, *,
+    allow_failed_chat_run=False,
+):
     """Return one trusted business Run and exact per-Evidence observation pins."""
     pins: dict[str, str] = {}
     if isinstance(observation_ids, dict):
@@ -505,16 +508,28 @@ def _observation_scope(connection, task_id, evidence_rows, run_id, observation_i
     run = connection.execute(
         "SELECT task_id,kind,status FROM task_runs WHERE run_id=?", (run_id,),
     ).fetchone()
+    assistant_chat = bool(
+        run is not None and str(run["kind"]) == "CHAT_READONLY"
+        and connection.execute(
+            "SELECT 1 FROM assistant_runs WHERE run_id=? AND core='ASSISTANT_V1'", (run_id,),
+        ).fetchone()
+    )
+    failed_chat_source_view = bool(
+        allow_failed_chat_run and assistant_chat and str(run["status"]) == "FAILED"
+    )
     if (
         run is None or str(run["task_id"]) != str(task_id)
-        or (str(run["kind"]) == "CHAT_READONLY" and not connection.execute("SELECT 1 FROM assistant_runs WHERE run_id=? AND core='ASSISTANT_V1'",(run_id,)).fetchone())
-        or str(run["status"]) not in {"RUNNING", "SUCCEEDED"}
+        or (str(run["kind"]) == "CHAT_READONLY" and not assistant_chat)
+        or (str(run["status"]) not in {"RUNNING", "SUCCEEDED"} and not failed_chat_source_view)
     ):
         return str(run_id), pins, "S3_RUN_ASSOCIATION_INVALID"
     return str(run_id), pins, None
 
 
-def _s3_observation(connection, *, task_id, evidence, run_id, observation_id=None, observed_before=None):
+def _s3_observation(
+    connection, *, task_id, evidence, run_id, observation_id=None, observed_before=None,
+    allow_failed_chat_run=False,
+):
     fact_type = str(evidence["fact_type"])
     tool_name = FACT_TO_TOOL.get(fact_type)
     if tool_name is None:
@@ -550,13 +565,20 @@ def _s3_observation(connection, *, task_id, evidence, run_id, observation_id=Non
         ).fetchone()
         return None, "S3_OBSERVATION_RUN_MISMATCH" if other else "S3_OBSERVATION_UNAVAILABLE"
     item = dict(row)
+    failed_chat_source_view = bool(
+        allow_failed_chat_run and str(item["run_kind"]) == "CHAT_READONLY"
+        and str(item["run_status"]) == "FAILED"
+        and connection.execute(
+            "SELECT 1 FROM assistant_runs WHERE run_id=? AND core='ASSISTANT_V1'", (run_id,),
+        ).fetchone()
+    )
     if (
         str(item["task_id"]) != str(task_id)
         or str(item["attempt_task_id"]) != str(task_id)
         or str(item["attempt_run_id"]) != str(run_id)
         or str(item["run_task_id"]) != str(task_id)
         or (str(item["run_kind"]) == "CHAT_READONLY" and not connection.execute("SELECT 1 FROM assistant_runs WHERE run_id=? AND core='ASSISTANT_V1'",(run_id,)).fetchone())
-        or str(item["run_status"]) not in {"RUNNING", "SUCCEEDED"}
+        or (str(item["run_status"]) not in {"RUNNING", "SUCCEEDED"} and not failed_chat_source_view)
         or str(item["attempt_kind"]) != "MCP"
         or str(item["attempt_status"]) != "OK"
         or str(item["status"]) != "OK"
@@ -599,7 +621,7 @@ def _s3_observation(connection, *, task_id, evidence, run_id, observation_id=Non
 
 def current_s3_evidence(
     connection, task_id, evidence_ids=None, *, run_id=None, observation_ids=None,
-    observed_before=None, historical=False,
+    observed_before=None, historical=False, allow_failed_chat_run=False,
 ):
     """Revalidate facts and the exact successful Observation for one trusted Run."""
     params: list[object] = [task_id]
@@ -626,6 +648,7 @@ def current_s3_evidence(
         return [], excluded
     selected_run, pins, scope_error = _observation_scope(
         connection, task_id, rows, run_id, observation_ids,
+        allow_failed_chat_run=allow_failed_chat_run,
     )
     if scope_error:
         return [], [{"source_id": str(row["evidence_id"]), "reason": scope_error} for row in rows] or [
@@ -671,6 +694,7 @@ def current_s3_evidence(
                 selected_observation, reason = _s3_observation(
                     connection, task_id=task_id, evidence=e, run_id=selected_run,
                     observation_id=pins.get(str(e["evidence_id"])), observed_before=observed_before,
+                    allow_failed_chat_run=allow_failed_chat_run,
                 )
             if reason is None:
                 fact_result = selected_observation["result"]

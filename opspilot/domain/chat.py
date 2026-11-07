@@ -1671,7 +1671,13 @@ def record_chat_limit_in_transaction(
     was_failed = str(run["status"]) == "FAILED"
     command_id = f"budget-notice:{run_id}"
     if connection.execute("SELECT 1 FROM messages WHERE command_id=?",(command_id,)).fetchone() is None:
-        text = user_message or f"本次解释未完成：{reason}。这是程序生成的限制说明，未提交模型最终答复；此前已预留或失败的调用仍计入额度。本说明未重新取得业务事实，历史结论不能冒充本次新调查结果。Task 和既有业务授权保持不变。"
+        text = user_message or (
+            f"本次解释未完成：{reason}。这是程序生成的限制说明，未提交模型最终答复；"
+            "此前已预留或失败的调用仍计入额度。本说明不对当前业务状态作结论。"
+            "请展开“查看答复来源”核对本轮工具记录；系统会重新验证其来源与时效，"
+            "失效或不匹配的内容不会展示。历史结论不能冒充本次新调查结果。"
+            "Task 和既有业务授权保持不变。"
+        )
         sequence = int(connection.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM messages WHERE session_id=?",(run["session_id"],)).fetchone()[0])
         mid = f"message-{uuid.uuid4()}"
         connection.execute(

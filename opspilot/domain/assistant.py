@@ -616,7 +616,7 @@ def finish(path,call_id,status,result=None,usage=None,observation=None):
     with connect(path) as c:
         c.execute("UPDATE assistant_calls SET status=?,result_json=?,usage_json=?,observation_id=?,evidence_id=?,completed_at=? WHERE call_id=? AND status='RESERVED'",(status,canonical_json(result),canonical_json(usage), (observation or {}).get('observation_id'),(observation or {}).get('evidence_id'),utc_now(),call_id))
 
-def sources_current(connection, run_id):
+def sources_current(connection, run_id, *, allow_failed_chat_observations=False):
     """Revalidate actual persisted sources; never trust a saved Prompt/answer."""
     from opspilot.domain.assistant_knowledge import sources_current as knowledge_current
     from opspilot.domain.scoped_protocol_comparison import (
@@ -627,6 +627,11 @@ def sources_current(connection, run_id):
     from opspilot.domain.s3 import current_s3_evidence, get_s3_binding
     try:
         run,identity=state(connection,run_id,active=False)
+        failed_chat_source_view = bool(
+            allow_failed_chat_observations
+            and run['kind'] == 'CHAT_READONLY'
+            and run['status'] == 'FAILED'
+        )
         if run['task_id']:
             get_s3_binding(connection,run['task_id'])
             control=connection.execute('SELECT control_revision,terminal_state FROM task_controls WHERE task_id=?',(run['task_id'],)).fetchone()
@@ -652,7 +657,11 @@ def sources_current(connection, run_id):
                 if not _professional_outcome_source_is_current(connection, run_id, value):
                     return False, 'ASSISTANT_PROFESSIONAL_OUTCOME_SOURCE_INVALID'
             elif row['evidence_id']:
-                facts,excluded=current_s3_evidence(connection,run['task_id'],[row['evidence_id']],run_id=run_id,observation_ids={row['evidence_id']:row['observation_id']})
+                facts,excluded=current_s3_evidence(
+                    connection, run['task_id'], [row['evidence_id']], run_id=run_id,
+                    observation_ids={row['evidence_id']:row['observation_id']},
+                    allow_failed_chat_run=failed_chat_source_view,
+                )
                 if excluded or not facts: return False,'BUSINESS_SOURCE_INVALIDATED'
             elif 'protocol_documents' in value:
                 if value.get('success') is not True:

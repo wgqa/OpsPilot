@@ -873,10 +873,10 @@ def test_formal_worker_can_deliver_from_current_observations_after_mcp_cap_refus
 
 
 @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
-def test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current(
+def test_terminal_model_cap_discloses_only_revalidated_failed_run_sources(
     demo_db, tmp_path, receiver_state, monkeypatch,
 ):
-    """A failed Run's observations are not revived as current facts in a program notice."""
+    """A failed Run gets no model answer; source details require fresh Domain revalidation."""
     from fastapi.testclient import TestClient
     from opspilot.domain.database import connect
     from opspilot.domain.s3 import prepare_s3_fixture
@@ -928,9 +928,40 @@ def test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current
         assert notice["answer_kind"] == "PROGRAM_LIMIT"
         assert "ASSISTANT_RUN_MODEL_LIMIT" in notice["body"]
         assert "未提交模型最终答复" in notice["body"]
-        assert "未重新取得业务事实" in notice["body"]
+        source_view = client.get(f"/api/runs/{binding['run_id']}/assistant-sources")
+        assert source_view.status_code == 200, source_view.text
+        sources = source_view.json()
+        assert sources["authority"] == "ASSISTANT_EXPLANATION_ONLY"
+        assert sources["current"] is True, sources
+        receiver_source = next(
+            item for item in sources["items"] if item["tool_name"] == "get_receiver_processing"
+        )
+        assert receiver_source["status"] == "OK"
+        assert receiver_source["result"]["facts"]["status"] == receiver_state
+        assert "本说明不对当前业务状态作结论" in notice["body"]
+        assert "查看答复来源" in notice["body"]
+        assert "未重新取得业务事实" not in notice["body"]
         assert "PROCESSED" not in notice["body"] and "QUEUED" not in notice["body"]
         assert "event-00000000-0000-4000-8000-000000000001" not in notice["body"]
+        with connect(demo_db) as connection:
+            # Default source use for model/history remains closed for failed Runs;
+            # only the explicit source-detail endpoint can disclose a revalidated item.
+            assert assistant_domain.sources_current(connection, binding["run_id"])[0] is False
+        _append_formal_trace(demo_db, session_id, [binding["run_id"]], [model])
+
+        # A failed Run's observation is visible only while the same scoped
+        # source still matches current Domain state and freshness checks.
+        changed_state = "PROCESSED" if receiver_state == "QUEUED" else "QUEUED"
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE s3_receivers SET status=?,version=version+1 WHERE order_id='ar03-order'",
+                (changed_state,),
+            )
+        stale_sources = client.get(f"/api/runs/{binding['run_id']}/assistant-sources")
+        assert stale_sources.status_code == 200, stale_sources.text
+        stale_view = stale_sources.json()
+        assert stale_view["current"] is False
+        assert all(item["result"] is None for item in stale_view["items"])
 
         with connect(demo_db) as connection:
             calls = connection.execute(

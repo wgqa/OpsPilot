@@ -721,7 +721,14 @@ def create_app(
                 from opspilot.domain.s3 import get_s3_binding
                 try:get_s3_binding(connection,row['task_id'])
                 except Exception as error:raise HTTPException(status_code=403,detail='S3_SCOPE_DENIED') from error
-            valid,reason=current_sources(connection,run_id)
+            # A failed read-only chat may still have completed MCP observations.
+            # Re-expose them only through this read-only source view, where the
+            # Domain revalidates the exact Run, TaskBinding, versions and TTL.
+            # Failed-run observations never become a model answer or current
+            # model context through this opt-in.
+            valid,reason=current_sources(
+                connection, run_id, allow_failed_chat_observations=True,
+            )
             items=[]
             for call in connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' ORDER BY created_at",(run_id,)):
                 request=json.loads(call['request_json'])

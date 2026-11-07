@@ -1,0 +1,170 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\product-01-continuity-review-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 2 items
+
+[11/07/26 13:13:05] INFO     HTTP Request: GET                  _client.py:1025
+                             http://127.0.0.1:60260/api/async-o
+                             rders/async-order?order_id=ar03-or
+                             der "HTTP/1.0 200 OK"
+tests/test_ar02_ar03_integration_01.py::test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current[QUEUED] FAILED
+[11/07/26 13:13:09] INFO     HTTP Request: GET                  _client.py:1025
+                             http://127.0.0.1:60270/api/async-o
+                             rders/async-order?order_id=ar03-or
+                             der "HTTP/1.0 200 OK"
+tests/test_ar02_ar03_integration_01.py::test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current[PROCESSED] FAILED
+
+================================== FAILURES ===================================
+_ test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current[QUEUED] _
+
+demo_db = WindowsPath('D:/Temp/OpsPilot-product-01-continuity-review-01/pytest-red/test_terminal_model_cap_fails_0/domain.sqlite3')
+tmp_path = WindowsPath('D:/Temp/OpsPilot-product-01-continuity-review-01/pytest-red/test_terminal_model_cap_fails_0')
+receiver_state = 'QUEUED'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023216155F30>
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current(
+        demo_db, tmp_path, receiver_state, monkeypatch,
+    ):
+        """A failed Run's observations are not revived as current facts in a program notice."""
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+
+        paired_ids = iter((
+            uuid.UUID("00000000-0000-4000-8000-000000000001"),
+            uuid.UUID("00000000-0000-4000-8000-000000000002"),
+        ))
+        with monkeypatch.context() as patcher:
+            patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+            prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2)
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+                )
+
+        frozen_cases_path = (
+            Path(__file__).resolve().parents[1]
+            / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+        )
+        initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+        model = IntegrationFixtureModel(mode="cap-terminal-failed", receiver_state=receiver_state)
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / f"cap-terminal-{receiver_state}.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: model,
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": f"ar03-cap-terminal-{receiver_state}"},
+                json={"order_id": "ar03-order", "initial_message": initial_message},
+            )
+            assert accepted.status_code == 202, accepted.text
+            binding = accepted.json()
+            run = _wait_run(client, binding["run_id"])
+            assert run["status"] == "FAILED", run
+
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            notice = next(row for row in messages if row.get("answer_source_message_id") == binding["message_id"])
+            assert notice["answer_kind"] == "PROGRAM_LIMIT"
+            assert "ASSISTANT_RUN_MODEL_LIMIT" in notice["body"]
+            assert "δ�ύģ�����մ�" in notice["body"]
+            source_view = client.get(f"/api/runs/{binding['run_id']}/assistant-sources")
+            assert source_view.status_code == 200, source_view.text
+            sources = source_view.json()
+            assert sources["authority"] == "ASSISTANT_EXPLANATION_ONLY"
+>           assert sources["current"] is True, sources
+E           AssertionError: {'run_id': 'run-cd232ec6-a7e4-430f-b852-24b9447294ea', 'authority': 'ASSISTANT_EXPLANATION_ONLY', 'current': False, 'exclusion_reason': 'BUSINESS_SOURCE_INVALIDATED', ...}
+E           assert False is True
+
+tests\test_ar02_ar03_integration_01.py:935: AssertionError
+_ test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current[PROCESSED] _
+
+demo_db = WindowsPath('D:/Temp/OpsPilot-product-01-continuity-review-01/pytest-red/test_terminal_model_cap_fails_1/domain.sqlite3')
+tmp_path = WindowsPath('D:/Temp/OpsPilot-product-01-continuity-review-01/pytest-red/test_terminal_model_cap_fails_1')
+receiver_state = 'PROCESSED'
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002321969F890>
+
+    @pytest.mark.parametrize("receiver_state", ["QUEUED", "PROCESSED"])
+    def test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current(
+        demo_db, tmp_path, receiver_state, monkeypatch,
+    ):
+        """A failed Run's observations are not revived as current facts in a program notice."""
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+
+        paired_ids = iter((
+            uuid.UUID("00000000-0000-4000-8000-000000000001"),
+            uuid.UUID("00000000-0000-4000-8000-000000000002"),
+        ))
+        with monkeypatch.context() as patcher:
+            patcher.setattr("opspilot.domain.s3.uuid.uuid4", lambda: next(paired_ids))
+            prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="ar03-order", contract_version=2)
+        if receiver_state == "PROCESSED":
+            with connect(demo_db) as connection:
+                connection.execute(
+                    "UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id='ar03-order'"
+                )
+
+        frozen_cases_path = (
+            Path(__file__).resolve().parents[1]
+            / "docs/evidence/ar-03-real-llm-01-prep/CASES.json"
+        )
+        initial_message = json.loads(frozen_cases_path.read_text(encoding="utf-8"))["prompt"]
+        model = IntegrationFixtureModel(mode="cap-terminal-failed", receiver_state=receiver_state)
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / f"cap-terminal-{receiver_state}.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=lambda: model,
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**headers, "Idempotency-Key": f"ar03-cap-terminal-{receiver_state}"},
+                json={"order_id": "ar03-order", "initial_message": initial_message},
+            )
+            assert accepted.status_code == 202, accepted.text
+            binding = accepted.json()
+            run = _wait_run(client, binding["run_id"])
+            assert run["status"] == "FAILED", run
+
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            notice = next(row for row in messages if row.get("answer_source_message_id") == binding["message_id"])
+            assert notice["answer_kind"] == "PROGRAM_LIMIT"
+            assert "ASSISTANT_RUN_MODEL_LIMIT" in notice["body"]
+            assert "δ�ύģ�����մ�" in notice["body"]
+            source_view = client.get(f"/api/runs/{binding['run_id']}/assistant-sources")
+            assert source_view.status_code == 200, source_view.text
+            sources = source_view.json()
+            assert sources["authority"] == "ASSISTANT_EXPLANATION_ONLY"
+>           assert sources["current"] is True, sources
+E           AssertionError: {'run_id': 'run-4f224c7a-f116-47af-a6f6-5fdca1cf5cf5', 'authority': 'ASSISTANT_EXPLANATION_ONLY', 'current': False, 'exclusion_reason': 'BUSINESS_SOURCE_INVALIDATED', ...}
+E           assert False is True
+
+tests\test_ar02_ar03_integration_01.py:935: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_ar03_integration_01.py::test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current[QUEUED] - AssertionError: {'run_id': 'run-cd232ec6-a7e4-430f-b852-24b9447294ea', 'authority': 'ASSISTANT_EXPLANATION_ONLY', 'current': False, 'exclusion_reason': 'BUSINESS_SOURCE_INVALIDATED', ...}
+assert False is True
+FAILED tests/test_ar02_ar03_integration_01.py::test_terminal_model_cap_fails_closed_when_failed_run_sources_are_not_current[PROCESSED] - AssertionError: {'run_id': 'run-4f224c7a-f116-47af-a6f6-5fdca1cf5cf5', 'authority': 'ASSISTANT_EXPLANATION_ONLY', 'current': False, 'exclusion_reason': 'BUSINESS_SOURCE_INVALIDATED', ...}
+assert False is True
+============================== 2 failed in 8.80s ==============================
