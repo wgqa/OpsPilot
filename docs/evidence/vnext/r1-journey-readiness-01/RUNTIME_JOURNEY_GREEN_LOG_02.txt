@@ -1,0 +1,322 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\r1-journey-readiness-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_r1_journey_readiness_01.py::test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction FAILED
+
+================================== FAILURES ===================================
+_____ test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-journey-readiness-01/.pytest-r1jr-runtime-03/test_r1_j1_j2_formal_runtime_g0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-journey-readiness-01/.pytest-r1jr-runtime-03/test_r1_j1_j2_formal_runtime_g0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000199FA099350>
+
+    def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
+        demo_db, tmp_path, monkeypatch,
+    ):
+        fixture = prepare_transport_history_fixture(
+            demo_db,
+            order_id="r1-readiness-order",
+            receiver_status="PROCESSED",
+            contract_version=2,
+            attempts=[
+                {"event_id": "event-previous", "http_status": 202},
+                {"event_id": "event-current", "http_status": 202},
+            ],
+        )
+        assert [row["request"]["event_id"] for row in fixture["transport_trace"]] == [
+            "event-previous", "event-current",
+        ]
+
+        _configure(monkeypatch)
+        _provision(demo_db, total=500_000)
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_RUNTIME_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-only-placeholder")
+        monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "0")
+        monkeypatch.delenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", raising=False)
+
+        wire: list[dict[str, object]] = []
+        completion_number = 0
+
+        async def respond(request: httpx.Request) -> httpx.Response:
+            nonlocal completion_number
+            completion_number += 1
+            assert str(request.url) == "https://api.deepseek.com/chat/completions"
+            assert request.method == "POST"
+            payload = json.loads((await request.aread()).decode("utf-8"))
+            assert payload["model"] == "deepseek-flash"
+            assert payload["max_tokens"] == 2_048
+            assert payload["thinking"] == {"type": "disabled"}
+            assert payload["stream"] is False
+            assert "max_completion_tokens" not in payload
+            tool_schemas = payload.get("tools", [])
+            tool_names = [item["function"]["name"] for item in tool_schemas]
+            if tool_schemas:
+                assert payload["tool_choice"] == "auto"
+                assert payload["parallel_tool_calls"] is False
+
+            # This assertion is inside the explicit MockTransport: each simulated
+            # HTTP send must already have durable, single-flight spend authority.
+            with connect(demo_db) as db:
+                granted = db.execute(
+                    "SELECT status,reserved_usd_micro FROM assistant_runtime_spends "
+                    "WHERE status='SEND_GRANTED'"
+                ).fetchall()
+            assert len(granted) == 1
+            assert int(granted[0]["reserved_usd_micro"]) == 14_048
+
+            messages = payload["messages"]
+            user_text = next(
+                (_message_content(item.get("content")) for item in reversed(messages)
+                 if item.get("role") == "user"),
+                "",
+            )
+            prior_tool_names: list[str] = []
+            names_by_call_id: dict[str, str] = {}
+            for item in messages:
+                if item.get("role") == "assistant":
+                    for call in item.get("tool_calls", []) or []:
+                        call_id = str(call.get("id", ""))
+                        name = str((call.get("function") or {}).get("name", ""))
+                        if call_id and name:
+                            names_by_call_id[call_id] = name
+                            prior_tool_names.append(name)
+
+            tool_results: dict[str, dict[str, object]] = {}
+            for item in messages:
+                if item.get("role") != "tool":
+                    continue
+                name = names_by_call_id.get(str(item.get("tool_call_id", "")))
+                if not name:
+                    continue
+                try:
+                    result = json.loads(_message_content(item.get("content")))
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(result, dict):
+                    tool_results[name] = result
+
+            action: dict[str, object]
+            answer: str | None = None
+            if "�ص�����Э��" in user_text:
+                discovery = tool_results.get("list_scoped_protocol_documents")
+                comparison = tool_results.get("compare_scoped_protocols")
+                if discovery is None:
+                    assert "list_scoped_protocol_documents" in tool_names
+                    action = {"tool": "list_scoped_protocol_documents", "args": {"topic": "callback retry"}}
+                elif comparison is None:
+                    documents = discovery.get("protocol_documents", [])
+                    versions = {str(item.get("version")): item for item in documents if isinstance(item, dict)}
+                    base = versions.get("1.0.0")
+                    target = versions.get("2.0.0")
+                    assert base and target
+                    action = {
+                        "tool": "compare_scoped_protocols",
+                        "args": {
+                            "base_document_id": base["document_id"],
+                            "base_version": base["version"],
+                            "target_document_id": target["document_id"],
+                            "target_version": target["version"],
+                        },
+                    }
+                else:
+                    assert comparison.get("success") is True
+                    answer = (
+                        "��Ȩ������ʾ callback-retry-contract v1.0.0 �� "
+                        "callback-retry-contract-v2 v2.0.0 �а汾���죻��ֻ��˵���ĵ��仯��"
+                        "����֤���ͻ������Ѿ����� v2��"
+                    )
+                    action = {"answer": answer}
+            elif '"backoff":"fixed"' in user_text and "event_id" in user_text:
+                # The model may answer without a new tool because the previous
+                # protocol comparison is in the same Session context.
+                answer = (
+                    "�������� max_attempts=5��backoff=fixed ���ڴ���ʵ���û����ϣ�"
+                    "����֤����������ǰ���ã���Ͳ������ú˶Ժ�����ж��Ƿ�����°�Э�顣"
+                )
+                action = {"answer": answer}
+            elif "event-current" in user_text and "event-previous" not in user_text:
+                delivery = tool_results.get("get_callback_delivery")
+                receiver = tool_results.get("get_receiver_processing")
+                if delivery is None:
+                    assert "get_callback_delivery" in tool_names
+                    action = {"tool": "get_callback_delivery", "args": {"reason": "�鿴��ǰ�󶨶����Ļص�Ͷ��"}}
+                elif receiver is None:
+                    assert "get_receiver_processing" in tool_names
+                    action = {"tool": "get_receiver_processing", "args": {"reason": "�˶�ͬһ�¼��Ľ��շ�����״̬"}}
+                else:
+                    delivery_facts = delivery.get("facts", {})
+                    receiver_facts = receiver.get("facts", {})
+                    assert delivery_facts.get("event_id") == "event-current"
+                    assert receiver_facts.get("event_id") == "event-current"
+                    answer = (
+                        "��ǰ event-current �� Delivery Ϊ HTTP 202/ACKNOWLEDGED��"
+                        "ͬһ Event �� Receiver Ϊ PROCESSED����ȷ����� Event �Ѵ�����"
+                        "���ܾݴ��ƶ����� Event ������Э�鲿��汾��"
+                    )
+                    action = {"answer": answer}
+            elif "event-previous" in user_text and "����" in user_text:
+                history = tool_results.get("get_callback_transport_history")
+                if history is None:
+                    assert "get_callback_transport_history" in tool_names
+                    action = {
+                        "tool": "get_callback_transport_history",
+                        "args": {"reason": "���������Ŀ���¼���ѯ��ʷͶ��", "event_id": "event-previous"},
+                    }
+                else:
+                    facts = history.get("facts", {})
+                    assert facts.get("requested_event_id") == "event-previous"
+                    assert facts.get("processing_authority") == "not the target Event current processing state"
+                    answer = (
+                        "������� event-previous �� HTTP 202 Ͷ�ݼ�¼��������ʷ���ϲ��ǵ�ǰ Receiver ����״̬��"
+                        "Ŀǰ����ȷ��������ɡ�������δ�ύ�Ŀͻ�˵���ݸ壬�貹��� Event �ĵ�ǰ���շ�״̬��"
+                    )
+                    action = {"answer": answer}
+            else:
+                raise AssertionError(f"Unexpected model request for current user message: {user_text!r}")
+
+            response_message: dict[str, object] = {"role": "assistant", "content": answer}
+            finish_reason = "stop"
+            if "tool" in action:
+                call_id = f"r1-jr-call-{completion_number}"
+                response_message = {
+                    "role": "assistant", "content": None,
+                    "tool_calls": [_tool_call(
+                        str(action["tool"]), action["args"], call_id,
+                    )],
+                }
+                finish_reason = "tool_calls"
+
+            prompt_tokens = (
+                estimate_messages_tokens(messages)
+                + estimate_text_tokens(canonical_json(tool_schemas))
+                + 64
+            )
+            assert 0 < prompt_tokens <= 12_000
+            output_tokens = 48
+            wire.append({
+                "completion_id": f"r1-readiness-completion-{completion_number}",
+                "model": payload["model"],
+                "max_tokens": payload["max_tokens"],
+                "thinking": payload["thinking"],
+                "tool_choice": payload.get("tool_choice"),
+                "parallel_tool_calls": payload.get("parallel_tool_calls"),
+                "stream": payload["stream"],
+                "user_excerpt": user_text[:180],
+                "tools_available": tool_names,
+                "model_action": action,
+                "estimated_input_tokens": prompt_tokens,
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": prompt_tokens + output_tokens,
+                },
+            })
+            return httpx.Response(200, headers={"x-request-id": f"r1-readiness-request-{completion_number}"}, json={
+                "id": f"r1-readiness-completion-{completion_number}",
+                "object": "chat.completion", "created": 1, "model": "deepseek-flash",
+                "system_fingerprint": "offline-fixture-only",
+                "choices": [{"index": 0, "message": response_message, "finish_reason": finish_reason}],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": prompt_tokens + output_tokens,
+                    "prompt_tokens_details": {
+                        "cached_tokens": 0,
+                        "prompt_cache_hit_tokens": 0,
+                        "prompt_cache_miss_tokens": prompt_tokens,
+                    },
+                },
+            })
+
+        def reject_sync(request: httpx.Request) -> httpx.Response:
+            raise AssertionError("Sync transport must not be used by this async Worker path")
+
+        def model_factory(*, runtime_grant_binding):
+            return create_assistant_model(
+                runtime_grant_binding=runtime_grant_binding,
+                transport_async=httpx.MockTransport(respond),
+                transport_sync=httpx.MockTransport(reject_sync),
+            )
+
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "r1-readiness-runtime-checkpoint.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=model_factory,
+            assistant_runtime_enabled=True,
+        )
+        with TestClient(app) as client:
+            login = client.post(
+                "/api/auth/login", headers={"Origin": ORIGIN},
+                json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+            )
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+
+            def submit(path, key, body):
+                response = client.post(
+                    path, headers={**headers, "Idempotency-Key": key}, json=body,
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                assert _wait_run(client, item["run_id"])["status"] == "SUCCEEDED"
+                return item
+
+            j1_protocol = submit(
+                f"/api/sessions/{session_id}/assistant/messages", "r1-jr-j1-protocol",
+                {"body": "��Ƚϻص�����Э�� v1 �� v2 �Ĳ��죬��˵�����ÿ�����Ӱ��Ĳ��֡�"},
+            )
+            j1_material = submit(
+                f"/api/sessions/{session_id}/assistant/messages", "r1-jr-j1-material",
+                {"body": "��ϸղŵ�Э�鿴������ã�{\"callback\":{\"retry\":{\"max_attempts\":5,\"backoff\":\"fixed\"}},\"event_id\":\"event-previous\"}"},
+            )
+            bound = submit(
+                f"/api/sessions/{session_id}/assistant/order", "r1-jr-j2-current",
+                {
+                    "order_id": "r1-readiness-order",
+                    "initial_message": "���ʵ event-current �ĵ�ǰ�ص�Ͷ�ݺͽ��շ�����״̬��",
+                },
+            )
+            assert bound["task_id"]
+>           corrected = submit(
+                f"/api/sessions/{session_id}/assistant/messages", "r1-jr-j2-correction",
+                {
+                    "task_id": bound["task_id"],
+                    "body": "�Ҹ���Ŀ�꣺��� event-previous������ event-current��˵�����Ƿ��Ѿ�����������һ�ݿͻ�˵���ݸ塣",
+                },
+            )
+
+tests\test_r1_journey_readiness_01.py:315:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = '/api/sessions/session-671827fa-fe35-41e3-98c6-a1b4c8ed86d8/assistant/messages'
+key = 'r1-jr-j2-correction'
+body = {'task_id': 'task-7c939d20-5dcb-4f97-b021-06217770c590', 'body': '�Ҹ���Ŀ�꣺��� event-previous������ event-current��˵�����Ƿ��Ѿ�����������һ�ݿͻ�˵���ݸ塣'}
+
+    def submit(path, key, body):
+        response = client.post(
+            path, headers={**headers, "Idempotency-Key": key}, json=body,
+        )
+        assert response.status_code == 202, response.text
+        item = response.json()
+>       assert _wait_run(client, item["run_id"])["status"] == "SUCCEEDED"
+E       AssertionError: assert 'FAILED' == 'SUCCEEDED'
+E
+E         - SUCCEEDED
+E         + FAILED
+
+tests\test_r1_journey_readiness_01.py:296: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_r1_journey_readiness_01.py::test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction - AssertionError: assert 'FAILED' == 'SUCCEEDED'
+
+  - SUCCEEDED
+  + FAILED
+============================= 1 failed in 10.25s ==============================

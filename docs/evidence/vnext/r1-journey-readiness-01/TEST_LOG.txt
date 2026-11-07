@@ -1,0 +1,35 @@
+# R1-JOURNEY-READINESS-01 测试执行索引
+
+环境：Windows / Python 3.14.0 / pytest 9.1.1。所有 pytest 命令通过 `python -m pytest` 执行；`PYTHONPATH` 显式为 worktree 根目录，`--basetemp` 指向 worktree 下新建的隔离目录。
+
+## 最终相关回归：10/10
+
+原始完整输出：[`TEST_LOG_FINAL.txt`](TEST_LOG_FINAL.txt)，退出码 0，44.19 秒。覆盖：
+
+- 新增正式 Runtime Grant + HTTPX MockTransport 的 J1/J2 连续旅程。
+- 既有正式 API/Worker J1/J2 与 Event 纠错。
+- S2 同 Session 结果回读与显式提交。
+- S1 正式 Investigator / D3 本地 Demo 因果链与 Outcome 回读。
+- Runtime Grant 缺失/Provider-disabled 拒绝（参数化两例）、合法 Mock 发送/结算、撤权在发送前拒绝、价格版本过期暂停。
+
+## 来源再校验回归：3/3
+
+原始输出：[`SOURCE_REVALIDATION_LOG.txt`](SOURCE_REVALIDATION_LOG.txt)，退出码 0，3.57 秒。
+
+- Knowledge grant 撤销/恢复/版本变化要求新查询。
+- 受限协议比较重新校验可见差异来源。
+- 撤权后普通 Assistant 不能借用旧 Core 的观察。
+
+## 独立基线和定向 RED/GREEN
+
+- 初始现有 R1 测试基线 1/1：[`BASELINE_TEST_LOG_LOCAL_TMP.txt`](BASELINE_TEST_LOG_LOCAL_TMP.txt)。
+- S2 缺 Legacy test opt-in 的 RED 与修正后 GREEN：[`S2_READBACK_ISOLATED_LOG.txt`](S2_READBACK_ISOLATED_LOG.txt)、[`S2_READBACK_GREEN_LOG.txt`](S2_READBACK_GREEN_LOG.txt)。
+- 新旅程 Fixture 早期 RED/GREEN 过程保存在 `FAILURES.md` 所列原始日志中；最终修正比较基准后的旅程结果在 [`RUNTIME_JOURNEY_FINAL_LOG.txt`](RUNTIME_JOURNEY_FINAL_LOG.txt)。
+
+未运行完整 pytest、npm build/typecheck、浏览器、真实 Provider 或任何外部业务写入。前端源码未改，因此没有重跑前端构建。
+
+文档核验：`CASES.json`、`RESULTS.json` 均可解析；`TRACE.jsonl` 含 3 条合法 JSON 记录；本目录 Markdown 相对链接均可解析；仅对本轮交付文件与新增测试运行的凭据样式扫描无命中；`git diff --check` 通过。
+
+本轮 pytest 的 `.pytest-r1jr-*` 临时数据库目录仍留在隔离 worktree，未纳入 Git。递归删除命令被本机执行策略拒绝；没有尝试用其他方式绕过该限制。原始日志和脱敏 Trace 已独立保存在本目录。
+
+Committed text logs remove only trailing terminal-formatting whitespace; no test output, failure record, or assertion was removed.

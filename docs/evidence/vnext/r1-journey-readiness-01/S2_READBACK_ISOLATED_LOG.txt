@@ -1,0 +1,98 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\r1-journey-readiness-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_product_01_final_bridge_01.py::test_assistant_proposes_s2_then_reads_same_session_handoff_without_writing FAILED
+
+================================== FAILURES ===================================
+_ test_assistant_proposes_s2_then_reads_same_session_handoff_without_writing __
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-journey-readiness-01/.pytest-r1jr-s2-alone/test_assistant_proposes_s2_the0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-journey-readiness-01/.pytest-r1jr-s2-alone/test_assistant_proposes_s2_the0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D6EB44B6F0>
+
+    def test_assistant_proposes_s2_then_reads_same_session_handoff_without_writing(
+        demo_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import opspilot.investigator as investigator
+
+        reset_fixture(demo_db, "S2_SCOPE_DENIED")
+        _install_scope_write_audit(demo_db)
+        monkeypatch.setattr(investigator, "ChatOpenAI", _S2InvestigatorFixture)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-placeholder")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "offline-deterministic-model")
+        checkpoint = tmp_path / "p01-checkpoint.sqlite3"
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=checkpoint, start_worker=False,
+            credentials=PASSWORDS, expected_origin=ORIGIN,
+            assistant_model_factory=lambda: _BridgeAssistantModel(mode="proposal"),
+        )
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            headers = _login(client)[1]
+            session_id = _session(client, headers)
+            question = "�ӿڷ���ʧ�ܣ��һ�����Ȩ�����⣬���Ҳ�һ�¡�"
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "p01-final-bridge-proposal"},
+                json={"body": question, "task_id": None},
+            )
+            assert accepted.status_code == 202, accepted.text
+            source_message_id = str(accepted.json()["message_id"])
+            assistant_run_id = str(accepted.json()["run_id"])
+            proposal_model = _BridgeAssistantModel(mode="proposal")
+            _dispatch(demo_db, checkpoint, assistant_run_id, lambda: proposal_model)
+            run = client.get(f"/api/runs/{assistant_run_id}").json()
+            assert run["execution_core"] == "ASSISTANT_V1"
+            assert "propose_controlled_auth_investigation" in proposal_model.offered_tools
+            proposal_sources = client.get(f"/api/runs/{assistant_run_id}/assistant-sources", headers=headers)
+            assert proposal_sources.status_code == 200, proposal_sources.text
+            proposal_item = next(
+                item for item in proposal_sources.json()["items"]
+                if item["tool_name"] == "propose_controlled_auth_investigation"
+            )
+            proposal = proposal_item["result"]
+            assert proposal_sources.json()["current"] is True
+            assert proposal["source_message_id"] == source_message_id
+            assert proposal["task_created"] is False and proposal["authorization_created"] is False
+            with connect(demo_db) as db:
+                assert db.execute("SELECT COUNT(*) FROM task_bindings").fetchone()[0] == 0
+                assert db.execute("SELECT COUNT(*) FROM d3_approvals").fetchone()[0] == 0
+                assert db.execute("SELECT COUNT(*) FROM d3_action_ledgers").fetchone()[0] == 0
+
+            # Explicit confirmation uses the existing trusted Session/Task API and exact source Message.
+            task_response = client.post(
+                f"/api/sessions/{session_id}/tasks",
+                headers={**headers, "Idempotency-Key": "p01-final-bridge-task-confirm"},
+                json={
+                    "initial_message": question,
+                    "investigation_kind": "AUTH_INCIDENT",
+                    "source_message_id": source_message_id,
+                },
+            )
+            assert task_response.status_code == 202, task_response.text
+            task = task_response.json()
+            task_id, investigator_run_id = str(task["task_id"]), str(task["run_id"])
+            _dispatch(demo_db, checkpoint, investigator_run_id, lambda: _BridgeAssistantModel(mode="proposal"))
+            investigator_result = client.get(f"/api/runs/{investigator_run_id}").json()
+            assert investigator_result["execution_core"] == "PROFESSIONAL_INVESTIGATOR"
+            handoff_ready = client.get(f"/api/tasks/{task_id}/handoff", headers=headers).json()
+>           assert handoff_ready["business_outcome"] == "HANDOFF_READY"
+E           AssertionError: assert 'NO_S2_DIAGNOSIS' == 'HANDOFF_READY'
+E
+E             - HANDOFF_READY
+E             + NO_S2_DIAGNOSIS
+
+tests\test_product_01_final_bridge_01.py:184: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_product_01_final_bridge_01.py::test_assistant_proposes_s2_then_reads_same_session_handoff_without_writing - AssertionError: assert 'NO_S2_DIAGNOSIS' == 'HANDOFF_READY'
+
+  - HANDOFF_READY
+  + NO_S2_DIAGNOSIS
+============================== 1 failed in 4.06s ==============================
+
+EXIT_CODE=1

@@ -125,6 +125,11 @@ def test_assistant_proposes_s2_then_reads_same_session_handoff_without_writing(
     monkeypatch.setattr(investigator, "ChatOpenAI", _S2InvestigatorFixture)
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-placeholder")
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "offline-deterministic-model")
+    # This test exercises the explicitly-authorized legacy Investigator path.
+    # ChatOpenAI is replaced with a deterministic fixture above, so these
+    # test-scoped opt-ins cannot reach a real Provider.
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "1")
     checkpoint = tmp_path / "p01-checkpoint.sqlite3"
     app = create_app(
         db_path=demo_db, checkpoint_db_path=checkpoint, start_worker=False,
