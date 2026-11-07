@@ -99,7 +99,12 @@ def classify_input(
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_openai import ChatOpenAI
 
-    from opspilot.config import MODEL_API_KEY
+    from opspilot.config import MODEL_API_KEY, require_legacy_provider_authorization
+
+    # This classifier predates the normal Assistant Runtime Grant and sends a
+    # separate Provider request from the formal API route. Keep it behind the
+    # same explicit legacy-path authorization as the old Worker cores.
+    require_legacy_provider_authorization()
 
     resolved_key = (api_key or os.environ.get(MODEL_API_KEY, "")).strip()
     if not model_id.strip() or not resolved_key:

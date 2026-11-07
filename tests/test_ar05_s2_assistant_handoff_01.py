@@ -128,6 +128,8 @@ def test_ar05_same_session_assistant_to_s2_handoff_receipt(
     monkeypatch.setattr(investigator, "ChatOpenAI", _S2InvestigatorFixture)
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-placeholder")
     monkeypatch.setenv("OPSPILOT_MODEL_NAME", "offline-deterministic-model")
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "1")
     checkpoint_db = tmp_path / "ar05-s2-checkpoint.sqlite3"
     app = create_app(
         db_path=demo_db,

@@ -555,6 +555,191 @@ def revise_default_grant(
         return dict(row)
 
 
+def resume_spend_pool(
+    path: str | Path, *, expected_version: int, operator_id: str, source: str,
+    evidence_ref: str, evidence_digest: str, idempotency_key: str,
+) -> dict[str, object]:
+    """Locally resume a pool paused only for stale Provider configuration.
+
+    The operator supplies evidence that the pinned model and price configuration
+    was rechecked. Existing ledger accounting remains authoritative; UNKNOWN
+    sends keep their full reservation and are never changed here.
+    """
+    _validate_evidence(operator_id, source, evidence_ref, evidence_digest, idempotency_key)
+    if source.strip() != "LOCAL_OPERATOR_RECOVERY":
+        raise RuntimeGrantError("RUNTIME_POOL_RESUME_SOURCE_INVALID")
+    if type(expected_version) is not int or expected_version < 1:
+        raise RuntimeGrantError("RUNTIME_POOL_VERSION_INVALID")
+    request = {"expected_version": expected_version, "pool_id": POOL_ID}
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        authority = _authority(connection, path)
+        pool_row = connection.execute(
+            "SELECT * FROM assistant_runtime_pools WHERE pool_id=?", (POOL_ID,)
+        ).fetchone()
+        grant_row = connection.execute(
+            "SELECT * FROM assistant_runtime_default_grant WHERE singleton=1"
+        ).fetchone()
+        if pool_row is None or grant_row is None:
+            raise RuntimeGrantError("RUNTIME_GRANT_NOT_PROVISIONED")
+        pool, grant = dict(pool_row), dict(grant_row)
+        previous = connection.execute(
+            "SELECT * FROM assistant_runtime_audit WHERE idempotency_key=?",
+            (idempotency_key.strip(),),
+        ).fetchone()
+        if previous is not None:
+            if not _audit_replay_matches(
+                previous, action="RESUME_POOL", operator_id=operator_id, source=source,
+                evidence_ref=evidence_ref, evidence_digest=evidence_digest,
+                request_digest=digest_json(request),
+            ):
+                raise RuntimeGrantError("RUNTIME_AUDIT_IDEMPOTENCY_CONFLICT")
+            current = connection.execute(
+                "SELECT * FROM assistant_runtime_pools WHERE pool_id=?", (POOL_ID,)
+            ).fetchone()
+            return {**dict(current), "replay": True}
+
+        if int(pool["version"]) != expected_version:
+            raise RuntimeGrantError("RUNTIME_POOL_VERSION_CONFLICT")
+        if pool["status"] != "PAUSED":
+            raise RuntimeGrantError("RUNTIME_SPEND_POOL_NOT_PAUSED")
+        if pool["pause_reason"] != "PROVIDER_CONFIGURATION_OR_PRICE_VERSION_STALE":
+            raise RuntimeGrantError("RUNTIME_POOL_PAUSE_NOT_RESUMABLE")
+        if (pool["authority_id"] != authority["authority_id"]
+                or grant["authority_id"] != authority["authority_id"]
+                or grant["pool_id"] != POOL_ID):
+            raise RuntimeGrantError("RUNTIME_DB_IDENTITY_MISMATCH")
+        if grant["status"] != "ACTIVE":
+            raise RuntimeGrantError("RUNTIME_GRANT_REVOKED")
+        now = _valid_iso(utc_now(), "RUNTIME_CLOCK_INVALID")
+        if now < _valid_iso(grant["valid_from"], "RUNTIME_GRANT_TIME_INVALID") or now >= _valid_iso(
+            grant["expires_at"], "RUNTIME_GRANT_TIME_INVALID"
+        ):
+            raise RuntimeGrantError("RUNTIME_GRANT_EXPIRED_OR_NOT_YET_VALID")
+        if (
+            grant["model_id"] != "deepseek-flash"
+            or _endpoint(grant["endpoint"]) != grant["endpoint"]
+            or any(not isinstance(grant[key], str) or not grant[key].strip()
+                   for key in ("service_identity", "model_config_version", "price_version"))
+            or type(grant["input_rate_micro_per_million"]) is not int
+            or type(grant["output_rate_micro_per_million"]) is not int
+            or int(grant["input_rate_micro_per_million"]) <= 0
+            or int(grant["output_rate_micro_per_million"]) <= 0
+            or type(grant["max_input_tokens"]) is not int
+            or type(grant["max_output_tokens"]) is not int
+            or not 0 < int(grant["max_input_tokens"]) <= MAX_PRODUCT_INPUT_TOKENS
+            or not 0 < int(grant["max_output_tokens"]) <= MAX_PRODUCT_OUTPUT_TOKENS
+            or type(pool["total_limit_usd_micro"]) is not int
+            or int(pool["total_limit_usd_micro"]) <= 0
+        ):
+            raise RuntimeGrantError("RUNTIME_POOL_GRANT_CONFIGURATION_INVALID")
+
+        config = runtime_config_from_env()
+        expected_config = {
+            "model_id": grant["model_id"], "endpoint": grant["endpoint"],
+            "model_config_version": grant["model_config_version"],
+            "price_version": grant["price_version"], "service_identity": grant["service_identity"],
+        }
+        config["endpoint"] = _endpoint(config["endpoint"])
+        if config != expected_config:
+            raise RuntimeGrantError("RUNTIME_PROVIDER_CONFIGURATION_STALE")
+        history = connection.execute(
+            "SELECT snapshot_json FROM assistant_runtime_grant_history WHERE grant_id=? AND version=?",
+            (grant["grant_id"], int(grant["version"])),
+        ).fetchone()
+        try:
+            snapshot = json.loads(history["snapshot_json"]) if history else None
+        except (TypeError, json.JSONDecodeError):
+            snapshot = None
+        if snapshot != _grant_snapshot(grant, pool_limit=int(pool["total_limit_usd_micro"])):
+            raise RuntimeGrantError("RUNTIME_POOL_GRANT_HISTORY_INVALID")
+
+        violation = connection.execute(
+            "SELECT 1 FROM assistant_runtime_spends WHERE pool_id=? AND status='VIOLATION' LIMIT 1",
+            (POOL_ID,),
+        ).fetchone()
+        active_send = connection.execute(
+            "SELECT 1 FROM assistant_runtime_spends WHERE pool_id=? AND status='SEND_GRANTED' LIMIT 1",
+            (POOL_ID,),
+        ).fetchone()
+        if violation:
+            raise RuntimeGrantError("RUNTIME_POOL_LEDGER_HAS_VIOLATION")
+        if active_send:
+            raise RuntimeGrantError("RUNTIME_POOL_LEDGER_HAS_ACTIVE_SEND")
+
+        unknown = connection.execute(
+            "SELECT * FROM assistant_runtime_spends WHERE pool_id=? AND status='UNKNOWN'",
+            (POOL_ID,),
+        ).fetchall()
+        unknown_reserved = 0
+        for row in unknown:
+            reserved = int(row["reserved_usd_micro"])
+            rates = (int(row["input_rate_micro_per_million"]), int(row["output_rate_micro_per_million"]))
+            max_input = int(row["max_input_tokens"])
+            max_output = int(row["max_output_tokens"])
+            bound = _cost_micro(max_input, max_output, *rates)
+            old_history = connection.execute(
+                "SELECT snapshot_json FROM assistant_runtime_grant_history WHERE grant_id=? AND version=?",
+                (row["grant_id"], int(row["grant_version"])),
+            ).fetchone()
+            try:
+                old_grant = json.loads(old_history["snapshot_json"]) if old_history else None
+            except (TypeError, json.JSONDecodeError):
+                old_grant = None
+            if (
+                reserved <= 0 or reserved < bound
+                or any(rate <= 0 for rate in rates)
+                or not 0 < max_input <= MAX_PRODUCT_INPUT_TOKENS
+                or not 0 < max_output <= MAX_PRODUCT_OUTPUT_TOKENS
+                or row["authority_id"] != authority["authority_id"]
+                or not isinstance(old_grant, dict)
+                or old_grant.get("grant_id") != row["grant_id"]
+                or old_grant.get("version") != int(row["grant_version"])
+                or old_grant.get("authority_id") != authority["authority_id"]
+                or old_grant.get("price_version") != row["price_version"]
+                or old_grant.get("input_rate_micro_per_million") != rates[0]
+                or old_grant.get("output_rate_micro_per_million") != rates[1]
+                or old_grant.get("max_input_tokens") != max_input
+                or old_grant.get("max_output_tokens") != max_output
+            ):
+                raise RuntimeGrantError("RUNTIME_LEDGER_INTEGRITY_ERROR")
+            unknown_reserved += reserved
+        try:
+            effective = _effective_spend(connection)
+        except RuntimeGrantError as error:
+            if error.commit_changes:
+                connection.commit()
+            raise
+        total_limit = int(pool["total_limit_usd_micro"])
+        if unknown_reserved > effective:
+            raise RuntimeGrantError("RUNTIME_LEDGER_INTEGRITY_ERROR")
+        if effective >= total_limit:
+            raise RuntimeGrantError("RUNTIME_POOL_REMAINING_BUDGET_UNAVAILABLE")
+
+        updated = connection.execute(
+            """UPDATE assistant_runtime_pools SET status='ACTIVE',pause_reason=NULL,
+               version=version+1,updated_at=? WHERE pool_id=? AND status='PAUSED' AND version=?""",
+            (utc_now(), POOL_ID, expected_version),
+        ).rowcount
+        if updated != 1:
+            raise RuntimeGrantError("RUNTIME_POOL_VERSION_CONFLICT")
+        resumed = connection.execute(
+            "SELECT * FROM assistant_runtime_pools WHERE pool_id=?", (POOL_ID,)
+        ).fetchone()
+        details = {
+            "from_pool_version": expected_version, "to_pool_version": int(resumed["version"]),
+            "prior_pause_reason": pool["pause_reason"], "effective_spend_usd_micro": effective,
+            "remaining_usd_micro": total_limit - effective,
+            "unknown_count": len(unknown), "unknown_reserved_usd_micro": unknown_reserved,
+        }
+        _audit(
+            connection, authority_id=authority["authority_id"], grant_id=grant["grant_id"],
+            action="RESUME_POOL", operator_id=operator_id, source=source,
+            evidence_ref=evidence_ref, evidence_digest=evidence_digest,
+            idempotency_key=idempotency_key, request=request, details=details,
+        )
+        return {**dict(resumed), "replay": False, **details}
+
 def _binding_from_history(connection, run_row, binding_row):
     history = connection.execute(
         "SELECT snapshot_json FROM assistant_runtime_grant_history WHERE grant_id=? AND version=?",
@@ -1072,6 +1257,7 @@ def spend_summary(path: str | Path) -> dict[str, object]:
             raise
         return {"authority_id": authority["authority_id"], "pool_id": POOL_ID,
                 "status": pool["status"], "pause_reason": pool["pause_reason"],
+                "version": int(pool["version"]),
                 "total_limit_usd_micro": int(pool["total_limit_usd_micro"]),
                 "committed_or_reserved_usd_micro": effective,
                 "remaining_usd_micro": max(0, int(pool["total_limit_usd_micro"]) - effective)}

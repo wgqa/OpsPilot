@@ -13,6 +13,13 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _authorize_offline_legacy_investigator(monkeypatch):
+    """D4 crash/replay cases explicitly model an authorized old Investigator deployment."""
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "1")
 from mcp import Client, StdioServerParameters
 
 from opspilot.config import ROOT

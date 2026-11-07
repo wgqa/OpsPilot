@@ -321,6 +321,9 @@ def test_hf01_classifier_provider_payload_contains_prior_answer_and_currentness(
 
     from opspilot.domain.investigation_updates import classify_input
 
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "1")
+
     db = tmp_path / "hf01-classifier-payload.sqlite3"
     reset_fixture(db, "S1_POS")
     session_id, task_id, _, _ = _diagnosed_task(db)

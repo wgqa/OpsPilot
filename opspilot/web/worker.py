@@ -140,6 +140,11 @@ async def _process_run_inner(
     run: dict[str, object],
     worker_epoch: int | None,
 ) -> None:
+    from opspilot.config import require_legacy_provider_authorization
+
+    # Investigator remains a distinct legacy execution core. It must not
+    # inherit ASSISTANT_V1's Runtime Grant or fall back around it.
+    require_legacy_provider_authorization()
     from opspilot.investigator import run_investigation
 
     run_id = str(run["run_id"])
@@ -325,6 +330,11 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
         _record_provider_metadata,
     )
     from opspilot.domain.context_engineering import ContextBudgetExceeded
+    from opspilot.config import require_legacy_provider_authorization
+
+    # CHAT_READONLY predates the durable Runtime Grant. Keep it available only
+    # under its own explicit deployment authorization.
+    require_legacy_provider_authorization()
 
     run_id = str(run["run_id"])
     actor_id = await asyncio.to_thread(_chat_run_actor, db_path, run_id)

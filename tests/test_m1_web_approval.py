@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _authorize_offline_legacy_investigator(monkeypatch):
+    """These deterministic D3 tests exercise the separately authorized old core."""
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "1")
 from fastapi.testclient import TestClient
 
 from opspilot.config import MODEL_API_KEY, MODEL_NAME

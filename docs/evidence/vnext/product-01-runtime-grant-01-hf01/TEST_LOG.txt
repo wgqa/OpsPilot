@@ -1,0 +1,44 @@
+Base SHA: 20cdc22a10c1a443059e96f5b126c5b7c7b959c9
+Branch: codex/product-01-runtime-grant-01-hf01
+
+RED:
+  python -m pytest tests/test_product_01_runtime_grant_01_hf01.py -q --basetemp='_hf-temp/red2'
+  exit 1; 2 failed, 1 passed. The two failures captured unauthorized MockTransport requests.
+  Full raw log remains locally at Git-ignored logs/red2.log; result is summarized in this file.
+
+Final targeted Runtime Grant regression:
+  python -m pytest tests/test_product_01_runtime_grant_01_hf01.py tests/test_product_01_runtime_grant_01.py -q --basetemp='_hf-temp/runtime-final4'
+  exit 0; 30 passed.
+  Full raw log remains locally at Git-ignored logs/runtime-final4.log; result is summarized in this file.
+
+Legacy Investigator / D2 / S1-S2 / D4 / M1 (earlier preserved run):
+  python -m pytest tests/test_product_01_runtime_grant_01.py tests/test_d2_investigation.py tests/test_ar05_s1_session_bridge_01.py tests/test_ar05_s2_assistant_handoff_01.py tests/test_d4_recovery.py tests/test_m1_web_approval.py -q --basetemp='_hf-temp/regression3'
+  exit 0; 106 passed.
+  Full raw log remains locally at Git-ignored logs/regression3.log. Its stdout does not preserve the invoked file list; do not use it as the final coverage manifest.
+
+D5 Context / M1 Worker / AR-02 journey / Runtime live scope:
+  python -m pytest tests/test_d5_context.py tests/test_m1_hf_worker.py tests/test_ar02_journey_p0.py tests/test_product_01_live_scope.py -q --basetemp='_hf-temp/regression4'
+  exit 0; 28 passed.
+  Full raw log remains locally at Git-ignored logs/regression4.log; result is summarized in this file.
+
+Final focused classifier regression:
+  python -m pytest tests/test_m4_c1_hf_01.py -q --basetemp='_hf-temp/m4-c1-final'
+  exit 0; 13 passed.
+  Full raw log remains locally at Git-ignored logs/m4-c1-final.log; result is summarized in this file.
+
+Final post-review targeted Runtime Grant regression:
+  python -m pytest tests/test_product_01_runtime_grant_01_hf01.py tests/test_product_01_runtime_grant_01.py -q --basetemp='_hf-temp/runtime-final5'
+  exit 0; 31 passed.
+  Full raw log remains locally at Git-ignored logs/runtime-final5.log; result is summarized in this file.
+
+Final post-review Legacy Investigator / D2 / S1-S2 / D4 / M1 regression:
+  python -m pytest tests/test_product_01_runtime_grant_01.py tests/test_d2_investigation.py tests/test_ar05_s1_session_bridge_01.py tests/test_ar05_s2_assistant_handoff_01.py tests/test_d4_recovery.py tests/test_m1_web_approval.py -q --basetemp='_hf-temp/regression-final3'
+  exit 0; 97 passed in 146.73s.
+  Full raw log remains locally at Git-ignored logs/regression-final3.log; result is summarized in this file.
+
+Final post-review D5 Context / M1 Worker / AR-02 journey / Runtime live scope:
+  python -m pytest tests/test_d5_context.py tests/test_m1_hf_worker.py tests/test_ar02_journey_p0.py tests/test_product_01_live_scope.py -q --basetemp='_hf-temp/regression-final4'
+  exit 0; 28 passed.
+  Full raw log remains locally at Git-ignored logs/regression-final4.log; result is summarized in this file.
+
+Intermediate fixture failures are retained in logs/regression2.log and logs/memory-regression.log. They stopped in the new explicit legacy authorization boundary until the deterministic test fixtures declared that authorization. No full-suite run was performed.

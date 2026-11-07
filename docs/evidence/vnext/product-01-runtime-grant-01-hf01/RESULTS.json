@@ -1,0 +1,67 @@
+{
+  "task": "PRODUCT-01-RUNTIME-GRANT-01-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "20cdc22a10c1a443059e96f5b126c5b7c7b959c9",
+  "branch": "codex/product-01-runtime-grant-01-hf01",
+  "provider_http_real": 0,
+  "provider_http_mocktransport": "verified only in isolated tests",
+  "browser_runs": 0,
+  "external_mcp_calls": 0,
+  "external_business_writes": 0,
+  "isolated_demo_db_side_effects": "Existing D4/M1 tests exercise local simulated business actions; no production or external system was changed.",
+  "p0": {
+    "unauthorized_chat_readonly": "PASS: formal API/Worker run failed closed before ChatOpenAI and made zero MockTransport requests.",
+    "unauthorized_investigator_worker": "PASS: INVESTIGATE and APPROVAL_RESUME dispatch variants rejected before the Provider stub.",
+    "unauthorized_direct_investigator": "PASS: rejected before ChatOpenAI construction.",
+    "endpoint_and_global_switch": "PASS: unsupported endpoint did not bypass authorization; legacy opt-in alone did not override global Provider disable.",
+    "explicit_legacy_authorization": "PASS: authorized legacy CHAT_READONLY and Investigator MockTransport paths remain usable.",
+    "runtime_failure_fallback": "PASS: missing ASSISTANT_V1 Grant failed without constructing either Runtime or legacy client.",
+    "investigation_update_classifier": "PASS: formal update-classification Provider request is blocked before client construction without legacy opt-in and remains usable with explicit legacy authorization.",
+    "assistant_v1_runtime_grant": "PASS: existing formal API/Worker Runtime Grant positive test remains green."
+  },
+  "p1": {
+    "unfixed_config": "PASS: resume rejected while current configuration still disagreed with the persisted Grant.",
+    "stale_configuration_fixed": "PASS: local resume reactivated the pool when model/price configuration, Grant history, validity, and ledger balance matched.",
+    "unknown_reservation": "PASS: UNKNOWN remained UNKNOWN and retained its original reservation; further reservation was allowed only when remaining balance could cover it.",
+    "exhausted_balance": "PASS: recovery refused when the preserved UNKNOWN reservation exhausted the pool.",
+    "usage_bound_violation": "PASS: nonrecoverable Usage violation remained PAUSED.",
+    "audit_idempotency": "PASS: exact replay made no second transition; altered evidence under the same idempotency key was rejected."
+  },
+  "tests": [
+    {
+      "command": "python -m pytest tests/test_product_01_runtime_grant_01_hf01.py tests/test_product_01_runtime_grant_01.py -q --basetemp='_hf-temp/runtime-final5'",
+      "result": "31 passed",
+      "exit_code": 0,
+      "raw_log": "TEST_LOG.txt (full stdout remains locally under ignored logs/)"
+    },
+    {
+      "command": "python -m pytest tests/test_product_01_runtime_grant_01.py tests/test_d2_investigation.py tests/test_ar05_s1_session_bridge_01.py tests/test_ar05_s2_assistant_handoff_01.py tests/test_d4_recovery.py tests/test_m1_web_approval.py -q --basetemp='_hf-temp/regression-final3'",
+      "result": "97 passed",
+      "exit_code": 0,
+      "raw_log": "TEST_LOG.txt (full stdout remains locally under ignored logs/)"
+    },
+    {
+      "command": "python -m pytest tests/test_d5_context.py tests/test_m1_hf_worker.py tests/test_ar02_journey_p0.py tests/test_product_01_live_scope.py -q --basetemp='_hf-temp/regression-final4'",
+      "result": "28 passed",
+      "exit_code": 0,
+      "raw_log": "TEST_LOG.txt (full stdout remains locally under ignored logs/)"
+    },
+    {
+      "command": "python -m pytest tests/test_m4_c1_hf_01.py -q --basetemp='_hf-temp/m4-c1-final'",
+      "result": "13 passed",
+      "exit_code": 0,
+      "raw_log": "TEST_LOG.txt (full stdout remains locally under ignored logs/)"
+    }
+  ],
+  "red_green": {
+    "command": "python -m pytest tests/test_product_01_runtime_grant_01_hf01.py -q --basetemp='_hf-temp/red2'",
+    "red_result": "2 failed, 1 passed; both failures observed one outgoing MockTransport request on an unauthorized legacy route.",
+    "red_exit_code": 1,
+      "raw_log": "FAILURES.md and TEST_LOG.txt (full stdout remains locally under ignored logs/)"
+  },
+  "not_run": [
+    "Full repository pytest suite",
+    "Real DeepSeek Provider",
+    "Browser automation"
+  ]
+}

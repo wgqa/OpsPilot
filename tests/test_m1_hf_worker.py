@@ -5,6 +5,13 @@ import time
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _authorize_offline_legacy_investigator(monkeypatch):
+    """These Worker tests exercise the old Investigator under an explicit local opt-in."""
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "1")
 from fastapi.testclient import TestClient
 
 from opspilot.domain.database import connect

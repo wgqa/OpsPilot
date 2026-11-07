@@ -2444,6 +2444,10 @@ async def run_investigation(
     model_id = os.environ.get(MODEL_NAME, "")
     if not model_api_key or not model_id:
         raise RuntimeError(f"Missing required model configuration: {MODEL_API_KEY}, {MODEL_NAME}.")
+    from opspilot.config import require_legacy_provider_authorization
+
+    # Guard direct/CLI Investigator use as well as the formal Worker route.
+    require_legacy_provider_authorization()
     llm = ChatOpenAI(
         model=model_id,
         api_key=model_api_key,

@@ -153,6 +153,8 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
     monkeypatch.setattr(investigator, 'ChatOpenAI', OfflineS1Model)
     monkeypatch.setenv('OPSPILOT_MODEL_API_KEY', 'offline-placeholder')
     monkeypatch.setenv('OPSPILOT_MODEL_NAME', 'offline-deterministic-model')
+    monkeypatch.setenv('OPSPILOT_ASSISTANT_PROVIDER_ENABLED', '1')
+    monkeypatch.setenv('OPSPILOT_LEGACY_PROVIDER_ENABLED', '1')
     with connect(demo_db) as db:
         before = tuple(db.execute("SELECT credential_ref, config_version FROM integrations WHERE tenant_id='tenant-a' AND integration_id='integration-a'").fetchone())
     app = create_app(db_path=demo_db, checkpoint_db_path=tmp_path / 'bridge-cp.sqlite3',

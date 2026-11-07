@@ -7,6 +7,13 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _authorize_offline_legacy_provider_paths(monkeypatch):
+    """Context-race cases use deterministic clients on explicitly authorized legacy paths."""
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "1")
+
 from opspilot.domain.d2 import (
     canonical_json,
     create_task_binding,
