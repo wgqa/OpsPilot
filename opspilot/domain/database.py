@@ -1099,9 +1099,10 @@ def initialize(path: str | Path) -> None:
         from opspilot.domain.s3_answers import SCHEMA as S3_ANSWER_SCHEMA
         from opspilot.domain.assistant import SCHEMA as ASSISTANT_SCHEMA
         from opspilot.domain.assistant_knowledge import SCHEMA as ASSISTANT_KNOWLEDGE_SCHEMA
-        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA + ASSISTANT_SCHEMA + ASSISTANT_KNOWLEDGE_SCHEMA)
+        from opspilot.domain.assistant_runtime_grant import SCHEMA as ASSISTANT_RUNTIME_GRANT_SCHEMA
+        connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA + ASSISTANT_SCHEMA + ASSISTANT_KNOWLEDGE_SCHEMA + ASSISTANT_RUNTIME_GRANT_SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 18:
+        if version > 19:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1465,6 +1466,11 @@ def initialize(path: str | Path) -> None:
             connection.execute("PRAGMA user_version = 17")
         if version < 18:
             connection.execute("PRAGMA user_version = 18")
+            version = 18
+        if version < 19:
+            # Runtime Grant tables are additive and intentionally contain no
+            # default authorization, allowance, or spend rows.
+            connection.execute("PRAGMA user_version = 19")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:

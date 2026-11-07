@@ -33,7 +33,7 @@ def _assistant_run(db_path, key: str, *, session_id: str | None = None):
     )
 
 
-def test_real_provider_requires_explicit_live_experiment_scope(monkeypatch):
+def test_real_provider_requires_runtime_grant_or_experiment_scope(monkeypatch):
     from opspilot.assistant import create_assistant_model
 
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
@@ -42,7 +42,7 @@ def test_real_provider_requires_explicit_live_experiment_scope(monkeypatch):
     monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
     monkeypatch.delenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", raising=False)
 
-    with pytest.raises(RuntimeError, match="AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED"):
+    with pytest.raises(RuntimeError, match="RUNTIME_GRANT_BINDING_REQUIRED"):
         create_assistant_model()
 
 

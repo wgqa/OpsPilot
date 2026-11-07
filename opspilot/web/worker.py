@@ -221,6 +221,9 @@ def _worker_error_class(error: BaseException) -> tuple[str, bool]:
                 return code, retryable
     if isinstance(error, TaskControlError):
         return error.code, error.code == "TASK_RUN_BUSY"
+    runtime_code = getattr(error, "code", None)
+    if isinstance(runtime_code, str) and runtime_code.startswith("RUNTIME_"):
+        return runtime_code, False
     if getattr(error, "code", None) == "D3_REVALIDATION_SOURCE_UNKNOWN":
         return "D3_REVALIDATION_SOURCE_UNKNOWN", True
     if "Missing required model configuration:" in str(error):
@@ -511,7 +514,7 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
 async def _dispatch_run(
     db_path: Path, checkpoint_path: Path, worker_id: str, executor_id: str,
     run: dict[str, object], worker_epoch: int | None = None, assistant_model_factory=None,
-    assistant_experiment_id: str | None = None,
+    assistant_experiment_id: str | None = None, assistant_runtime_enabled: bool = False,
 ) -> None:
     from opspilot.domain.assistant import selected as assistant_selected
     with connect(db_path) as connection:
@@ -521,11 +524,32 @@ async def _dispatch_run(
         from contextlib import suppress
         actor_id=await asyncio.to_thread(_chat_run_actor,db_path,str(run['run_id']))
         await asyncio.to_thread(claim_task_run,db_path,trusted_identity(db_path,actor_id),str(run['run_id']))
-        model=assistant_model_factory() if assistant_model_factory else None
+        runtime_binding = None
+        if assistant_runtime_enabled:
+            from opspilot.domain.assistant_runtime_grant import (
+                RuntimeGrantError, bind_run, runtime_config_from_env,
+            )
+            from opspilot.domain.assistant_experiment import EXPERIMENT_ENV
+
+            if (
+                assistant_experiment_id is not None
+                or os.environ.get(EXPERIMENT_ENV, "").strip()
+                or os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "").strip() != "1"
+                or assistant_model_factory is None
+            ):
+                raise RuntimeGrantError("RUNTIME_EXPLICIT_PROVIDER_AUTHORIZATION_REQUIRED")
+            runtime_binding = await asyncio.to_thread(
+                bind_run, db_path, str(run["run_id"]), runtime_config_from_env(),
+            )
+            model = assistant_model_factory(runtime_grant_binding=runtime_binding)
+            if model is None:
+                raise RuntimeGrantError("RUNTIME_PROVIDER_FACTORY_DISABLED")
+        else:
+            model=assistant_model_factory() if assistant_model_factory else None
         try:
             await run_assistant(
                 db_path, checkpoint_path, worker_id, str(run["run_id"]), model=model,
-                experiment_id=assistant_experiment_id,
+                experiment_id=assistant_experiment_id, runtime_grant_binding=runtime_binding,
             )
         finally:
             # The formal factory owns one explicit HTTPX client pair per Run.
@@ -556,9 +580,16 @@ async def run_worker(
     worker_epoch: int | None = None,
     assistant_model_factory=None,
     assistant_experiment_id: str | None = None,
+    assistant_runtime_enabled: bool = False,
 ) -> None:
     resolved_db = Path(db_path).resolve()
     resolved_checkpoint = Path(checkpoint_db_path).resolve()
+    if assistant_runtime_enabled:
+        from opspilot.domain.assistant_runtime_grant import recover_interrupted_sends
+
+        # Only the new, exclusive Worker may classify an earlier process's
+        # send grant. UNKNOWN reservations remain charged and are never resent.
+        await asyncio.to_thread(recover_interrupted_sends, resolved_db, worker_id)
     while True:
         if not await asyncio.to_thread(
             worker_owner_matches, str(resolved_db), worker_id, worker_epoch
@@ -571,7 +602,7 @@ async def run_worker(
         try:
             await _dispatch_run(
                 resolved_db, resolved_checkpoint, worker_id, executor_id, run, worker_epoch,
-                assistant_model_factory, assistant_experiment_id,
+                assistant_model_factory, assistant_experiment_id, assistant_runtime_enabled,
             )
         except asyncio.CancelledError:
             raise

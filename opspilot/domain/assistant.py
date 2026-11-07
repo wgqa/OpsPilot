@@ -583,7 +583,7 @@ def run_limits_for_experiment(experiment_id):
     return 8, 6
 
 
-def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None):
+def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None,runtime_recovery=False):
     """Count durable dispatches, including unknown results, before external I/O."""
     from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
     with connect(path) as c:
@@ -592,7 +592,12 @@ def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None)
         old=c.execute('SELECT * FROM assistant_calls WHERE run_id=? AND kind=? AND logical_key=?',(run_id,kind,logical_key)).fetchone()
         if old:
             if old['request_digest']!=digest_json(request): raise TaskControlError('ASSISTANT_REPLAY_CONTEXT_CHANGED')
-            if old['status']!='OK': raise TaskControlError('ASSISTANT_EXTERNAL_RESULT_UNKNOWN')
+            if old['status']!='OK':
+                if runtime_recovery and kind == 'MODEL' and old['status'] in {'RESERVED','UNKNOWN'}:
+                    from opspilot.domain.assistant_runtime_grant import recoverable_response
+                    if recoverable_response(path, str(old['call_id']), str(old['request_digest'])) is not None:
+                        return dict(old),False
+                raise TaskControlError('ASSISTANT_EXTERNAL_RESULT_UNKNOWN')
             if kind == 'MCP':
                 try:
                     cached_result = json.loads(old['result_json']) if old['result_json'] is not None else None
@@ -615,6 +620,25 @@ def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None)
 def finish(path,call_id,status,result=None,usage=None,observation=None):
     with connect(path) as c:
         c.execute("UPDATE assistant_calls SET status=?,result_json=?,usage_json=?,observation_id=?,evidence_id=?,completed_at=? WHERE call_id=? AND status='RESERVED'",(status,canonical_json(result),canonical_json(usage), (observation or {}).get('observation_id'),(observation or {}).get('evidence_id'),utc_now(),call_id))
+
+def finish_runtime_replay(path,call_id,result,usage=None):
+    """Complete an Assistant call only from a Runtime Grant's stored HTTP response."""
+    with connect(path) as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute("SELECT * FROM assistant_calls WHERE call_id=? AND kind='MODEL'",(call_id,)).fetchone()
+        if row is None or row['status'] not in {'RESERVED','UNKNOWN'}:
+            raise TaskControlError('ASSISTANT_RUNTIME_REPLAY_STATE_INVALID')
+        replay=c.execute(
+            """SELECT 1 FROM assistant_runtime_spends WHERE assistant_call_id=? AND request_digest=?
+               AND status IN ('RESPONSE_STORED','DELIVERED') AND response_body IS NOT NULL AND usage_json IS NOT NULL""",
+            (str(call_id),str(row['request_digest'])),
+        ).fetchone()
+        if replay is None:
+            raise TaskControlError('ASSISTANT_RUNTIME_REPLAY_EVIDENCE_MISSING')
+        c.execute(
+            "UPDATE assistant_calls SET status='OK',result_json=?,usage_json=?,completed_at=? WHERE call_id=? AND status IN ('RESERVED','UNKNOWN')",
+            (canonical_json(result),canonical_json(usage),utc_now(),call_id),
+        )
 
 def sources_current(connection, run_id, *, allow_failed_chat_observations=False):
     """Revalidate actual persisted sources; never trust a saved Prompt/answer."""

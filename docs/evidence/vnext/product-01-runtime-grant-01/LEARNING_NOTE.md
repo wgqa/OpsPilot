@@ -1,0 +1,7 @@
+# Design note: durable model-call spend
+
+- `assistant_calls` is an execution journal scoped to one Assistant Run. It stores request/result/Usage status, but is tied to Run cleanup and has no deployment-wide money pool or pricing/settlement authority. It cannot by itself prevent a new Session from spending the same allowance again.
+- The Runtime Grant reserves the full configured worst-case request cost in SQLite before transport. `SEND_GRANTED` is committed separately before network I/O, so a crash after that point is treated as potentially billable. A retry cannot infer “not sent” from a missing response.
+- UNKNOWN is not equivalent to a safe retry. The same request remains non-replayable and its full reserve remains occupied. Other calls can proceed only if the shared pool still covers their own full reserve; one uncertain call therefore does not automatically stop every Session.
+- Context Compression is a model request, so it is recorded as an ordinary MODEL spend in the same pool. A compression call can consume allowance that a later answer needs; if the remaining balance cannot reserve that answer, the answer is stopped before transport.
+- Runtime Grant authorizes model spend, not business access. TaskBinding, source revalidation, and the existing MCP/Domain policies independently decide whether a tool may read a business resource. No Approval, ActionIntent, Repair, or Delivery authority follows from the grant.

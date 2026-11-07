@@ -596,6 +596,17 @@ def _provider_dispatch_context(experiment_id, path, run_id, logical_key):
         _AR04C_DISPATCH_CONTEXT.reset(token)
 
 
+@contextmanager
+def _runtime_provider_dispatch_context(binding, dispatch, call_id, request_digest, worker_id):
+    from opspilot.runtime_provider import dispatch_context
+
+    with dispatch_context(
+        binding, dispatch, call_id=call_id, request_digest=request_digest,
+        worker_id=worker_id,
+    ):
+        yield
+
+
 def _material_remainder_live_expected_authorization() -> dict[str, object]:
     """Freeze only the user's exact three-case paid authorization."""
     return {
@@ -893,7 +904,9 @@ def _close_terminal_assistant_failure(
     return {"status": "FAILED", "run_id": run_id, "reason": reason}
 
 
-def create_assistant_model(*, transport_async=None, transport_sync=None):
+def create_assistant_model(
+    *, transport_async=None, transport_sync=None, runtime_grant_binding=None,
+):
     """Build the real Assistant provider only after the applicable opt-in checks.
 
     The opt-in is deliberately separate from API-key presence: credentials alone
@@ -911,6 +924,21 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     )
 
     experiment_id = os.environ.get(EXPERIMENT_ENV, "").strip()
+    runtime_enabled = os.environ.get("OPSPILOT_ASSISTANT_RUNTIME_ENABLED", "").strip() == "1"
+    runtime_binding = None
+    if runtime_grant_binding is not None:
+        if not runtime_enabled or experiment_id:
+            raise RuntimeError("RUNTIME_MODE_OR_EXPERIMENT_SCOPE_INVALID")
+        from opspilot.domain.assistant_runtime_grant import validate_run_binding
+
+        runtime_binding = validate_run_binding(
+            str(runtime_grant_binding.get("db_path", "")),
+            str(runtime_grant_binding.get("run_id", "")),
+            runtime_grant_binding,
+            config=None,
+        )
+    elif not experiment_id:
+        raise RuntimeError("RUNTIME_GRANT_BINDING_REQUIRED")
     if experiment_id in EXPERIMENTS_AWAITING_PAID_AUTHORIZATION:
         if experiment_id == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
             authorized = _material_remainder_live_one_shot_authorized(experiment_id)
@@ -929,15 +957,19 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
                 else "AR03_MATERIAL_LIVE_PAID_AUTHORIZATION_REQUIRED"
             )
             raise RuntimeError(code)
-    if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
+    if experiment_id and experiment_id not in SUPPORTED_EXPERIMENT_IDS:
         raise RuntimeError("AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED")
-    model_id = os.environ.get(MODEL_NAME, '').strip()
+    if runtime_binding is not None:
+        model_id = str(runtime_binding["model_id"])
+        base_url = str(runtime_binding["endpoint"])
+    else:
+        model_id = os.environ.get(MODEL_NAME, '').strip()
+        base_url = os.environ.get(MODEL_BASE_URL, '').strip()
     api_key = os.environ.get(MODEL_API_KEY, '').strip()
     if not model_id or not api_key:
         raise RuntimeError(f'Missing required model configuration: {MODEL_API_KEY}, {MODEL_NAME}.')
     if model_id != "deepseek-flash":
         raise RuntimeError("AR02_LIVE_MODEL_CONFIGURATION_MISMATCH")
-    base_url = os.environ.get(MODEL_BASE_URL, '').strip()
     if not base_url:
         raise RuntimeError(f'Missing required model configuration: {MODEL_BASE_URL}.')
     endpoint = urlparse(base_url)
@@ -965,6 +997,12 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
 
     async_transport = transport_async or httpx.AsyncHTTPTransport(retries=0)
     sync_transport = transport_sync or httpx.HTTPTransport(retries=0)
+    if runtime_binding is not None:
+        from opspilot.runtime_provider import wrap_transports
+
+        async_transport, sync_transport = wrap_transports(
+            runtime_binding, async_transport, sync_transport,
+        )
     if experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS:
         class AR04CGuardedAsyncTransport(httpx.AsyncBaseTransport):
             def __init__(self, inner):
@@ -1043,7 +1081,11 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
             http_async_client=async_client,
             http_client=sync_client,
             http_socket_options=(),
-            extra_body={"max_tokens": 2048, "thinking": {"type": "disabled"}},
+            extra_body={
+                "max_tokens": int(runtime_binding["max_output_tokens"])
+                if runtime_binding is not None else 2048,
+                "thinking": {"type": "disabled"},
+            },
         )
     except BaseException:
         try:
@@ -1094,12 +1136,14 @@ def assistant_memory_enabled_for_experiment(experiment_id):
     return mode == "ON"
 
 class Loop(AgentMiddleware):
-    def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,reserved_tokens=0):
+    def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,
+                 reserved_tokens=0,runtime_grant_binding=None):
         self.path,self.run_id,self.worker_id,self.client,self.specs,self.trace=path,run_id,worker_id,client,specs,trace
         self.run,self.actor=domain.read_run(path,run_id,worker_id=worker_id)
         self.model_id=model_id
         self.experiment_id=experiment_id
         self.reserved_tokens=int(reserved_tokens)
+        self.runtime_grant_binding=runtime_grant_binding
 
     @staticmethod
     def _usage_from_messages(messages):
@@ -1309,15 +1353,37 @@ class Loop(AgentMiddleware):
             _ar04c_bind_campaign_database(
                 self.path, _claim_database_slot(self.experiment_id),
             )
-        call,fresh=domain.reserve(self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',wire,self.worker_id,experiment_id=self.experiment_id)
+        call,fresh=domain.reserve(
+            self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',
+            wire,self.worker_id,experiment_id=self.experiment_id,
+            runtime_recovery=bool(self.runtime_grant_binding),
+        )
         self.trace('model_request',call_id=call['call_id'],replay=not fresh,**wire)
-        if not fresh:
+        if not fresh and str(call.get('status')) == 'OK':
             self._assert_memories_current(memory_refs)
             self._settle_cached_campaign_dispatch(
                 'MODEL', call['logical_key'], self._campaign_usage_for_cached_call(call)
             )
             from langchain.agents.middleware.types import ModelResponse
             return ModelResponse(result=messages_from_dict(json.loads(call['result_json'])))
+        runtime_dispatch = None
+        if self.runtime_grant_binding is not None:
+            from opspilot.domain.assistant_runtime_grant import reserve_dispatch
+            try:
+                runtime_dispatch = reserve_dispatch(
+                    self.path, self.runtime_grant_binding, call_id=str(call['call_id']),
+                    logical_key=str(call['logical_key']),
+                    request_digest=str(call['request_digest']), worker_id=self.worker_id,
+                )
+            except Exception as error:
+                if fresh:
+                    domain.finish(
+                        self.path,call['call_id'],'FAILED',
+                        {'error':getattr(error,'code',type(error).__name__)},
+                    )
+                raise
+            if not fresh and not runtime_dispatch.get('replay'):
+                raise TaskControlError('RUNTIME_EXTERNAL_RESULT_UNKNOWN')
         if self.experiment_id:
             from opspilot.domain.assistant_experiment import reserve_dispatch
             try:
@@ -1342,12 +1408,30 @@ class Loop(AgentMiddleware):
             # pinned ChatOpenAI emit DeepSeek's unsupported alias.
             model_settings={**request.model_settings,'parallel_tool_calls':False}
             tool_choice='auto' if request.tools else request.tool_choice
-            with _provider_dispatch_context(self.experiment_id, self.path, self.run_id, call["logical_key"]):
-                result=await asyncio.wait_for(handler(request.override(
-                    system_message=system,tool_choice=tool_choice,model_settings=model_settings,
-                )),30)
+            provider_request=request.override(
+                system_message=system,tool_choice=tool_choice,model_settings=model_settings,
+            )
+            if self.runtime_grant_binding is not None:
+                dispatch_context = _runtime_provider_dispatch_context(
+                    self.runtime_grant_binding, runtime_dispatch, str(call['call_id']),
+                    str(call['request_digest']), self.worker_id,
+                )
+            else:
+                dispatch_context = _provider_dispatch_context(
+                    self.experiment_id, self.path, self.run_id, call["logical_key"],
+                )
+            with dispatch_context:
+                result=await asyncio.wait_for(handler(provider_request),30)
             messages_result = messages_to_dict(result.result)
             usage_result = [getattr(m,'usage_metadata',None) for m in result.result]
+            runtime_result = None
+            if self.runtime_grant_binding is not None:
+                from opspilot.domain.assistant_runtime_grant import require_stored_response
+                runtime_result = require_stored_response(
+                    self.path, str(runtime_dispatch['request_key']),
+                    call_id=str(call['call_id']), request_digest=str(call['request_digest']),
+                )
+                usage_result = [runtime_result['usage']]
             if self.experiment_id:
                 from opspilot.domain.assistant_experiment import complete_dispatch
                 settlement = complete_dispatch(
@@ -1368,12 +1452,40 @@ class Loop(AgentMiddleware):
                         usage_state=state, reason=code, messages=messages_result,
                     )
                     raise TaskControlError(code)
-            domain.finish(self.path,call['call_id'],'OK',messages_result,usage_result)
-            self.trace('model_response',call_id=call['call_id'],messages=messages_to_dict(result.result))
+            if self.runtime_grant_binding is not None and runtime_dispatch.get('replay'):
+                domain.finish_runtime_replay(
+                    self.path, call['call_id'], messages_result, usage_result,
+                )
+            else:
+                domain.finish(self.path,call['call_id'],'OK',messages_result,usage_result)
+            if runtime_dispatch is not None:
+                from opspilot.domain.assistant_runtime_grant import mark_delivered
+                mark_delivered(self.path, str(runtime_dispatch['request_key']))
+            self.trace(
+                'model_response',call_id=call['call_id'],messages=messages_to_dict(result.result),
+                completion_id=(runtime_result or {}).get('completion_id'),
+                provider_usage=(runtime_result or {}).get('usage'),
+            )
             return result
         except Exception as error:
             from opspilot.domain.episodic_memory import ContextAssetInvalidated
-            if isinstance(error, ContextAssetInvalidated) and not send_started:
+            if self.runtime_grant_binding is not None:
+                from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch
+                state = (
+                    close_unfinished_dispatch(self.path, str(runtime_dispatch['request_key']), type(error).__name__)
+                    if runtime_dispatch is not None else 'MISSING'
+                )
+                call_status = 'FAILED' if state in {'MISSING','NOT_DISPATCHED','VIOLATION'} else 'UNKNOWN'
+                domain.finish(
+                    self.path, call['call_id'], call_status,
+                    {'error': getattr(error,'code',type(error).__name__), 'runtime_dispatch_state': state},
+                )
+                self.trace(
+                    'model_runtime_failure', call_id=call['call_id'],
+                    status=call_status, dispatch_state=state,
+                    reason=getattr(error,'code',type(error).__name__),
+                )
+            elif isinstance(error, ContextAssetInvalidated) and not send_started:
                 domain.finish(
                     self.path, call['call_id'], 'FAILED',
                     {'error': 'ASSISTANT_MEMORY_INVALIDATED_BEFORE_SEND'},
@@ -1390,28 +1502,43 @@ class Loop(AgentMiddleware):
                     reason='ASSISTANT_MEMORY_INVALIDATED_BEFORE_SEND',
                 )
                 raise
+            else:
+                if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS and send_started:
+                    _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
+                domain.finish(self.path,call['call_id'],'UNKNOWN')
+                if self.experiment_id:
+                    from opspilot.domain.assistant_experiment import mark_unknown
+                    mark_unknown(
+                        self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                        kind='MODEL', logical_key=call['logical_key'],
+                        error_code=type(error).__name__,
+                    )
             if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS and send_started:
                 _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
-            domain.finish(self.path,call['call_id'],'UNKNOWN')
-            if self.experiment_id:
-                from opspilot.domain.assistant_experiment import mark_unknown
-                mark_unknown(
-                    self.path, experiment_id=self.experiment_id, run_id=self.run_id,
-                    kind='MODEL', logical_key=call['logical_key'],
-                    error_code=type(error).__name__,
-                )
             raise
         except BaseException as error:
-            if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS and send_started:
-                _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
-            domain.finish(self.path,call['call_id'],'UNKNOWN')
-            if self.experiment_id:
-                from opspilot.domain.assistant_experiment import mark_unknown
-                mark_unknown(
-                    self.path, experiment_id=self.experiment_id, run_id=self.run_id,
-                    kind='MODEL', logical_key=call['logical_key'],
-                    error_code=type(error).__name__,
+            if self.runtime_grant_binding is not None:
+                from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch
+                state = (
+                    close_unfinished_dispatch(self.path, str(runtime_dispatch['request_key']), type(error).__name__)
+                    if runtime_dispatch is not None else 'MISSING'
                 )
+                call_status = 'FAILED' if state in {'MISSING','NOT_DISPATCHED','VIOLATION'} else 'UNKNOWN'
+                domain.finish(
+                    self.path, call['call_id'], call_status,
+                    {'error': getattr(error,'code',type(error).__name__), 'runtime_dispatch_state': state},
+                )
+            else:
+                if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS and send_started:
+                    _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
+                domain.finish(self.path,call['call_id'],'UNKNOWN')
+                if self.experiment_id:
+                    from opspilot.domain.assistant_experiment import mark_unknown
+                    mark_unknown(
+                        self.path, experiment_id=self.experiment_id, run_id=self.run_id,
+                        kind='MODEL', logical_key=call['logical_key'],
+                        error_code=type(error).__name__,
+                    )
             raise
 
     async def awrap_tool_call(self,request,handler):
@@ -1517,18 +1644,27 @@ class Loop(AgentMiddleware):
             self.trace('tool_error',name=name,arguments=args,error=type(error).__name__,reason=str(error)[:400])
             return ToolMessage(content=canonical_json({'error':str(error),'authority':'TOOL_REFUSAL_NOT_FACT'}),tool_call_id=call['id'])
 
-async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None):
+async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None,
+                        runtime_grant_binding=None):
     from opspilot.domain.execution_budget import begin_execution_interval,end_execution_interval
     from opspilot.web.worker import _heartbeat_budget
     run,_=domain.read_run(path,run_id,worker_id=worker_id)
     if not run['task_id'] or model is None:
-        return await _run_assistant(path,checkpoint_path,worker_id,run_id,model=model,trace=trace,experiment_id=experiment_id)
+        return await _run_assistant(
+            path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
+            experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
+        )
     remaining=begin_execution_interval(path,run['task_id'])
     stopped=asyncio.Event()
     heartbeat=asyncio.create_task(_heartbeat_budget(str(path),run['task_id'],stopped))
     try:
         if remaining<=0:raise TaskControlError('ACTIVE_TIME_LIMIT')
-        return await asyncio.wait_for(_run_assistant(path,checkpoint_path,worker_id,run_id,model=model,trace=trace,experiment_id=experiment_id),min(60,remaining/1000))
+        return await asyncio.wait_for(
+            _run_assistant(
+                path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
+                experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
+            ),min(60,remaining/1000),
+        )
     except (asyncio.TimeoutError,TaskControlError) as error:
         _close_terminal_assistant_failure(
             path, worker_id, run_id, error, 'ACTIVE_TIME_LIMIT:'+type(error).__name__
@@ -1540,10 +1676,13 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
         except asyncio.CancelledError:pass
         end_execution_interval(path,run['task_id'])
 
-def _compression_model(model):
+def _compression_model(model, runtime_grant_binding=None):
     """Bind the compression output cap without losing the Provider's pinned wire options."""
     extra_body = dict(getattr(model, "extra_body", None) or {})
-    extra_body["max_tokens"] = MAX_COMPRESSION_OUTPUT_TOKENS
+    cap = MAX_COMPRESSION_OUTPUT_TOKENS
+    if runtime_grant_binding is not None:
+        cap = min(cap, int(runtime_grant_binding["max_output_tokens"]))
+    extra_body["max_tokens"] = cap
     return model.bind(extra_body=extra_body)
 
 
@@ -1589,7 +1728,8 @@ def _settle_compression_replay(path, experiment_id, run_id, logical_key, usage):
         raise ExperimentBudgetError("AR02_LIVE_SPEND_BOUND_BREACHED")
 
 
-def _close_cancelled_compression(path, run_id, worker_id, state, experiment_id):
+def _close_cancelled_compression(path, run_id, worker_id, state, experiment_id,
+                                runtime_grant_binding=None):
     """Persist a conservative terminal state for a cancelled compression dispatch.
 
     Runs synchronously so a second cancellation cannot skip the ledger close. The
@@ -1622,7 +1762,17 @@ def _close_cancelled_compression(path, run_id, worker_id, state, experiment_id):
             attempt_ids.append(str(row["attempt_id"]))
     try:
         if call_id is not None and not settled:
-            if dispatch_started:
+            if runtime_grant_binding is not None and state.get("runtime_request_key"):
+                from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch
+                runtime_state = close_unfinished_dispatch(
+                    path, str(state["runtime_request_key"]), "CancelledError",
+                )
+                call_status = "FAILED" if runtime_state in {"NOT_DISPATCHED", "VIOLATION"} else "UNKNOWN"
+                domain.finish(
+                    path, call_id, call_status,
+                    {"error": "CancelledError", "runtime_dispatch_state": runtime_state},
+                )
+            elif dispatch_started:
                 # The request may have reached the Provider: keep the full
                 # reservation and record UNKNOWN instead of releasing spend.
                 domain.finish(path, call_id, "UNKNOWN")
@@ -1664,25 +1814,28 @@ def _close_cancelled_compression(path, run_id, worker_id, state, experiment_id):
 
 async def _prepare_assistant_context(
     path, run_id, worker_id, model_id, model, *, reserved_tokens: int = 0,
-    experiment_id=None,
+    experiment_id=None, runtime_grant_binding=None,
 ):
     state = {
         "attempt_id": None, "call_id": None, "logical_key": None,
-        "dispatch_started": False, "settled": False,
+        "dispatch_started": False, "settled": False, "runtime_request_key": None,
     }
     try:
         return await _prepare_assistant_context_impl(
             path, run_id, worker_id, model_id, model,
-            reserved_tokens=reserved_tokens, experiment_id=experiment_id, state=state,
+            reserved_tokens=reserved_tokens, experiment_id=experiment_id,
+            runtime_grant_binding=runtime_grant_binding,state=state,
         )
     except asyncio.CancelledError:
-        _close_cancelled_compression(path, run_id, worker_id, state, experiment_id)
+        _close_cancelled_compression(
+            path, run_id, worker_id, state, experiment_id, runtime_grant_binding,
+        )
         raise
 
 
 async def _prepare_assistant_context_impl(
     path, run_id, worker_id, model_id, model, *, reserved_tokens: int = 0,
-    experiment_id=None, state=None,
+    experiment_id=None, runtime_grant_binding=None, state=None,
 ):
     """Reuse the existing bounded chat-context compression before the first Provider call.
 
@@ -1740,6 +1893,7 @@ async def _prepare_assistant_context_impl(
             "logical_key": None,
             "dispatch_started": False,
             "settled": False,
+            "runtime_request_key": None,
         })
         try:
             current = assert_chat_compression_sources_current(path, worker_id, attempt_id)
@@ -1754,7 +1908,11 @@ async def _prepare_assistant_context_impl(
             wire = {
                 "purpose": "CONTEXT_COMPRESSION",
                 "model_id": model_id,
-                "max_output_tokens": MAX_COMPRESSION_OUTPUT_TOKENS,
+                "max_output_tokens": min(
+                    MAX_COMPRESSION_OUTPUT_TOKENS,
+                    int(runtime_grant_binding["max_output_tokens"])
+                    if runtime_grant_binding is not None else MAX_COMPRESSION_OUTPUT_TOKENS,
+                ),
                 "messages": compression["messages"],
             }
             logical_key = "context-compression:" + digest_json(compression["messages"])
@@ -1765,14 +1923,53 @@ async def _prepare_assistant_context_impl(
                 call, fresh = domain.reserve(
                     path, run_id, "MODEL", logical_key, wire, worker_id,
                     experiment_id=experiment_id,
+                    runtime_recovery=bool(runtime_grant_binding),
                 )
             except TaskControlError as error:
                 code = str(getattr(error, "code", None) or "ASSISTANT_MODEL_RESERVE_FAILED")
                 fail_chat_compression_attempt(path, worker_id, attempt_id, code)
                 return stop(code)
             state["call_id"] = str(call["call_id"])
-            if fresh:
+            runtime_dispatch = None
+            if runtime_grant_binding is not None:
+                from opspilot.domain.assistant_runtime_grant import reserve_dispatch
+                try:
+                    runtime_dispatch = reserve_dispatch(
+                        path, runtime_grant_binding, call_id=str(call["call_id"]),
+                        logical_key=logical_key, request_digest=str(call["request_digest"]),
+                        worker_id=worker_id,
+                    )
+                except Exception as error:
+                    if fresh:
+                        domain.finish(
+                            path, call["call_id"], "FAILED",
+                            {"error": getattr(error,"code",type(error).__name__)},
+                        )
+                    fail_chat_compression_attempt(
+                        path, worker_id, attempt_id,
+                        str(getattr(error,"code",None) or "RUNTIME_DISPATCH_RESERVE_FAILED"),
+                    )
+                    return stop(str(getattr(error,"code",None) or "RUNTIME_DISPATCH_RESERVE_FAILED"))
+                state["runtime_request_key"] = str(runtime_dispatch["request_key"])
+            if not fresh and str(call.get("status")) == "OK":
+                text, provider_id, usage = _cached_compression_result(call)
                 if experiment_id:
+                    try:
+                        _settle_compression_replay(
+                            path, experiment_id, run_id, logical_key, usage,
+                        )
+                    except ExperimentBudgetError as error:
+                        fail_chat_compression_attempt(
+                            path, worker_id, attempt_id, error.code,
+                        )
+                        return stop(error.code)
+            else:
+                if not fresh and (runtime_dispatch is None or not runtime_dispatch.get("replay")):
+                    fail_chat_compression_attempt(
+                        path, worker_id, attempt_id, "RUNTIME_EXTERNAL_RESULT_UNKNOWN",
+                    )
+                    return stop("RUNTIME_EXTERNAL_RESULT_UNKNOWN")
+                if fresh and experiment_id:
                     try:
                         campaign = reserve_dispatch(
                             path, experiment_id=experiment_id,
@@ -1794,8 +1991,18 @@ async def _prepare_assistant_context_impl(
                         return stop(code)
                 try:
                     state["dispatch_started"] = True
-                    with _provider_dispatch_context(product_claim, path, run_id, logical_key):
-                        response = await _compression_model(model).ainvoke(messages)
+                    compression_model = _compression_model(model, runtime_grant_binding)
+                    if runtime_grant_binding is not None:
+                        dispatch_context = _runtime_provider_dispatch_context(
+                            runtime_grant_binding, runtime_dispatch, str(call["call_id"]),
+                            str(call["request_digest"]), worker_id,
+                        )
+                    else:
+                        dispatch_context = _provider_dispatch_context(
+                            product_claim, path, run_id, logical_key,
+                        )
+                    with dispatch_context:
+                        response = await compression_model.ainvoke(messages)
                     text = str(getattr(response, "content", "") or "")
                     metadata = getattr(response, "response_metadata", None)
                     metadata = metadata if isinstance(metadata, dict) else {}
@@ -1803,6 +2010,18 @@ async def _prepare_assistant_context_impl(
                         getattr(response, "id", None) or metadata.get("id") or ""
                     ) or None
                     usage = Loop._usage_from_messages([response])
+                    runtime_result = None
+                    if runtime_grant_binding is not None:
+                        from opspilot.domain.assistant_runtime_grant import (
+                            mark_delivered, require_stored_response,
+                        )
+                        runtime_result = require_stored_response(
+                            path, str(runtime_dispatch["request_key"]),
+                            call_id=str(call["call_id"]),
+                            request_digest=str(call["request_digest"]),
+                        )
+                        provider_id = runtime_result["completion_id"] or provider_id
+                        usage = runtime_result["usage"]
                     if experiment_id:
                         settlement = complete_dispatch(
                             path, experiment_id=experiment_id,
@@ -1822,11 +2041,20 @@ async def _prepare_assistant_context_impl(
                                 path, worker_id, attempt_id, code,
                             )
                             return stop(code)
-                    domain.finish(
-                        path, call["call_id"], "OK",
-                        {"content": text, "provider_response_id": provider_id},
-                        [getattr(response, "usage_metadata", None)],
-                    )
+                    if runtime_grant_binding is not None and runtime_dispatch.get("replay"):
+                        domain.finish_runtime_replay(
+                            path, call["call_id"],
+                            {"content": text, "provider_response_id": provider_id},
+                            [usage] if usage else None,
+                        )
+                    else:
+                        domain.finish(
+                            path, call["call_id"], "OK",
+                            {"content": text, "provider_response_id": provider_id},
+                            [usage] if usage else [getattr(response, "usage_metadata", None)],
+                        )
+                    if runtime_grant_binding is not None:
+                        mark_delivered(path, str(runtime_dispatch["request_key"]))
                     state["settled"] = True
                 except asyncio.CancelledError:
                     raise
@@ -1834,27 +2062,26 @@ async def _prepare_assistant_context_impl(
                     code = str(
                         getattr(error, "code", None) or "CHAT_CONTEXT_COMPRESSION_FAILED"
                     )
-                    domain.finish(path, call["call_id"], "UNKNOWN")
-                    if experiment_id:
-                        mark_unknown(
-                            path, experiment_id=experiment_id,
-                            run_id=run_id, kind="MODEL", logical_key=logical_key,
-                            error_code=type(error).__name__,
+                    if runtime_grant_binding is not None and runtime_dispatch is not None:
+                        from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch
+                        runtime_state = close_unfinished_dispatch(
+                            path, str(runtime_dispatch["request_key"]), type(error).__name__,
                         )
+                        call_status = "FAILED" if runtime_state in {"NOT_DISPATCHED","VIOLATION"} else "UNKNOWN"
+                        domain.finish(
+                            path, call["call_id"], call_status,
+                            {"error": code, "runtime_dispatch_state": runtime_state},
+                        )
+                    else:
+                        domain.finish(path, call["call_id"], "UNKNOWN")
+                        if experiment_id:
+                            mark_unknown(
+                                path, experiment_id=experiment_id,
+                                run_id=run_id, kind="MODEL", logical_key=logical_key,
+                                error_code=type(error).__name__,
+                            )
                     fail_chat_compression_attempt(path, worker_id, attempt_id, code)
                     return stop(code)
-            else:
-                text, provider_id, usage = _cached_compression_result(call)
-                if experiment_id:
-                    try:
-                        _settle_compression_replay(
-                            path, experiment_id, run_id, logical_key, usage,
-                        )
-                    except ExperimentBudgetError as error:
-                        fail_chat_compression_attempt(
-                            path, worker_id, attempt_id, error.code,
-                        )
-                        return stop(error.code)
             result = complete_chat_compression_attempt(
                 path, worker_id, attempt_id, text,
                 provider_response_id=provider_id,
@@ -1875,7 +2102,8 @@ async def _prepare_assistant_context_impl(
             return stop("CHAT_CONTEXT_COMPRESSION_FAILED")
 
 
-async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None):
+async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,
+                         experiment_id=None,runtime_grant_binding=None):
     trace=trace or (lambda event,**values:None)
     run,actor=domain.read_run(path,run_id,worker_id=worker_id)
     if model is None:
@@ -1919,7 +2147,10 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         # context the assistant could still answer from.
         tools_tokens=estimate_text_tokens(canonical_json(specs))+8 if specs else 0
         base_reserved=tools_tokens+estimate_text_tokens(SYSTEM)+4
-        probe=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=base_reserved)
+        probe=Loop(
+            path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
+            reserved_tokens=base_reserved,runtime_grant_binding=runtime_grant_binding,
+        )
         _,probe_payload=probe.context()
         reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(domain.source_context_for_model(probe_payload)))+4
         if specs:
@@ -1927,12 +2158,15 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         if delivery is None:
             prepared=await _prepare_assistant_context(
                 path,run_id,worker_id,model_id,model,reserved_tokens=reserved_tokens,
-                experiment_id=experiment_id,
+                experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
             )
             if prepared.get('error'): return prepared
             delivery=prepared['attempt_id']
             with connect(path) as c:c.execute('UPDATE assistant_runs SET delivery_attempt_id=? WHERE run_id=?',(delivery,run_id))
-        loop=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=reserved_tokens)
+        loop=Loop(
+            path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
+            reserved_tokens=reserved_tokens,runtime_grant_binding=runtime_grant_binding,
+        )
         prepared,_=loop.context()
         initial=[]
         for item in prepared['messages']:

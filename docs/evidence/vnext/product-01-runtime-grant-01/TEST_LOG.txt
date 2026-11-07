@@ -1,0 +1,26 @@
+Command:
+python -m pytest tests/test_product_01_runtime_grant_01.py tests/test_ar02_live_budget.py tests/test_ar02_runtime.py tests/test_ar02_journey_p0.py tests/test_m302_context.py tests/test_ar02_assistant.py -q --basetemp=_test-temp/runtime-grant-regression-final
+
+Final output:
+......................................................................   [100%]
+70 passed in 84.22s (0:01:24)
+Exit code: 0
+
+Targeted-only command:
+python -m pytest tests/test_product_01_runtime_grant_01.py -q --basetemp=_test-temp/runtime-grant-11
+
+Final output:
+..................                                                       [100%]
+18 passed in 11.49s
+Exit code: 0
+
+All HTTPX transports added by the Runtime Grant tests are explicit MockTransport instances. No real Provider HTTP, browser, external MCP request, or external business write was made.
+
+Additional post-regression check after renaming the existing Provider-scope test:
+Command:
+python -m pytest tests/test_ar02_live_budget.py -q -k 'real_provider_requires_runtime_grant_or_experiment_scope'
+
+Final output:
+.                                                                        [100%]
+1 passed, 16 deselected in 0.79s
+Exit code: 0

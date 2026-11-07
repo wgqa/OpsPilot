@@ -154,6 +154,7 @@ def create_app(
     heartbeat_seconds: float = 10.0,
     assistant_model_factory=None,
     assistant_experiment_id: str | None = None,
+    assistant_runtime_enabled: bool | None = None,
 ) -> FastAPI:
     from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
 
@@ -171,6 +172,17 @@ def create_app(
     resolved_experiment = assistant_experiment_id or configured_experiment
     if resolved_experiment is not None and resolved_experiment not in SUPPORTED_EXPERIMENT_IDS:
         raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+    runtime_flag = os.environ.get("OPSPILOT_ASSISTANT_RUNTIME_ENABLED", "").strip()
+    if assistant_runtime_enabled is None:
+        if runtime_flag not in {"", "0", "1"}:
+            raise ValueError("ASSISTANT_RUNTIME_ENABLE_FLAG_INVALID")
+        resolved_runtime_enabled = runtime_flag == "1"
+    else:
+        if type(assistant_runtime_enabled) is not bool:
+            raise TypeError("assistant_runtime_enabled must be a bool")
+        resolved_runtime_enabled = assistant_runtime_enabled
+    if resolved_runtime_enabled and resolved_experiment is not None:
+        raise ValueError("ASSISTANT_RUNTIME_AND_EXPERIMENT_SCOPES_CONFLICT")
     resolved_db = database_path(str(db_path) if db_path is not None else None)
     checkpoint_path = Path(checkpoint_db_path or os.environ.get("OPSPILOT_CHECKPOINT_DB_PATH") or DEFAULT_CHECKPOINT_DB_PATH)
     if not checkpoint_path.is_absolute():
@@ -218,6 +230,7 @@ def create_app(
                     worker_epoch=worker.epoch,
                     assistant_model_factory=assistant_model_factory,
                     assistant_experiment_id=resolved_experiment,
+                    assistant_runtime_enabled=resolved_runtime_enabled,
                 ),
                 name="opspilot-domain-run-worker",
             )
@@ -243,6 +256,7 @@ def create_app(
     app.state.cookie_secure = origin.lower().startswith("https://")
     app.state.worker_configured = bool(start_worker)
     app.state.assistant_experiment_id = resolved_experiment
+    app.state.assistant_runtime_enabled = resolved_runtime_enabled
     app.state.worker_task = None
     app.state.worker_id = None
     app.state.worker_epoch = None
