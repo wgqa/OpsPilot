@@ -2,9 +2,9 @@
 
 ## 当前交付路线与产品主线（v1.2，2026-11-07）
 
-> **状态快照，不替代开工时核对 Git。** 本次文档修订基于 `codex/product-01-final-bridge-01@5b174aa59be072d38d716b7e908f523fa7df92f9`；远端 `main@60eee87bfe3cca522011316cb4cd2c0064ad291b`。文档修订在独立分支进行，不合并 main；本快照不是主 Agent 对 R1 或当前候选的验收。
+> **状态快照，不替代开工时核对 Git。** 本路线文档最初来自 `codex/product-roadmap-v1-2@339c2385ce0346dc97feaa63c9ca034545adbe77`；本次集成以 `codex/product-01-bridge-closeout-01@6b5bfb16c461afcf1cdafaad9ebe08dd6a004b27` 为代码基线，远端 `main@60eee87bfe3cca522011316cb4cd2c0064ad291b`。文档与代码/证据在独立分支集成，不合并 main；本快照不是主 Agent 对 R1 或当前候选的验收。
 >
-> PRODUCT-01 Slice 01 有确定性离线业务链证据；Slice 02 已有真实 DeepSeek 四轮旅程，用户结果为 `PARTIAL`，其中部分配置推断超出证据；Final Bridge 已提交隔离候选，确定性 S1/S2 同 Session 路径通过，但真实 Provider、浏览器和全量 pytest 尚未由该切片证明。详见 [Slice 02 报告](docs/evidence/vnext/product-01-slice-02-live/REPORT.md) 与 [Final Bridge 报告](docs/evidence/vnext/product-01-final-bridge-01/REPORT.md)。不得把这些不同证据等级合并成整体 PASS。
+> PRODUCT-01 Slice 01 有确定性离线业务链证据；Slice 02 的真实 DeepSeek 四轮旅程为 `PARTIAL`，其中部分配置推断超出证据。Final Bridge 与 Bridge Closeout 均获主 Agent `ACCEPT_WITH_LIMITS`，其离线 S1/S2 同 Session 接线成立，但新 Bridge 真实模型与浏览器旅程尚未验证。前次完整 pytest 为 741/757、16 项失败；其中 12 项绑定历史实验身份/Claim，3 项 AR-03 Runner MockTransport 失败本轮已定位为冻结 allowlist 不包含 Product Bridge 新增 Assistant 工具 Schema，1 项要求退役 C1 合同。该完整结果不是本次集成 SHA 的新运行。详见 [Slice 02 报告](docs/evidence/vnext/product-01-slice-02-live/REPORT.md)、[Bridge Closeout 报告](docs/evidence/vnext/product-01-bridge-closeout-01/REPORT.md) 与 [本轮归因](docs/evidence/vnext/r1-final-integration-01/FAILURES.md)。不得把不同证据等级合并成整体 PASS。
 
 **研发排序：用户可见工作成果 → 模型在合法范围内自主决策 → 最小可运行实现 → 实际使用与有界验证 → 按明确风险和已观察缺陷补强工程。** 安全、授权及副作用合同始终是底线。校招交付与长期产品成长互不阻断；发布 HOLD 不自动禁止无关的隔离只读开发。
 
@@ -16,7 +16,7 @@
 
 在同一 Session 中推进协议版本对比、用户配置/日志等材料分析、按需可信只读核查、用户纠错或追问，并交付有来源且区分历史与当前事实的处理说明。材料充分时允许直接回答；材料不足时由 Agent 在授权范围内决定补查、澄清、继续或停止，不规定固定工具顺序。优先复用现有 Assistant、Knowledge、Skill、Memory、Context、Session、MCP 与 S3 只读工具。
 
-现有证据须按等级陈述：Slice 02 的真实模型旅程为 `PARTIAL`；Final Bridge 的离线同 Session S1/S2 接线是待独立审查的候选，不等于真实模型或浏览器验收。此候选描述产品工作方向，不自动授权后续代码、付费请求、浏览器或写入。
+现有证据须按等级陈述：Slice 02 的真实模型旅程为 `PARTIAL`；Final Bridge 与 Bridge Closeout 的离线同 Session S1/S2 接线已获 `ACCEPT_WITH_LIMITS`，不等于新 Bridge 的真实模型或浏览器验收。此段记录产品工作方向，不自动授权后续代码、付费请求、浏览器或写入。
 
 `R1-ENGINE` 若有足够已验证工程证据，可独立支持准确的简历表述；若浏览器 STOP 仍有效，`R1-INTERACTIVE` 必须保持未完成/未验证，不能由 API 或离线 UI 测试代替。
 
@@ -26,7 +26,7 @@
 
 ### R3 — 长期企业 API 工作能力扩展
 
-R2 之后持续围绕 API 接入、联调、运行支持、变更分析和协作处置开展产品切片，优先复用现有统一 Assistant、Session、MCP、Knowledge、Memory、Skill 与可信 Domain：
+R1 冻结后，可与 R2 交错推进独立授权的 API 接入、联调、运行支持、变更分析和协作处置切片，优先复用现有统一 Assistant、Session、MCP、Knowledge、Memory、Skill 与可信 Domain：
 
 1. API 联调、响应契约校验与修正后复测。
 2. 日志、Trace、发布配置与授权资源发现。
@@ -41,6 +41,14 @@ R2 之后持续围绕 API 接入、联调、运行支持、变更分析和协作
 仅处理 AR-04C 12 项历史实验测试和 C1 `READONLY_FOLLOWUP` 旧 RED 的适用性、隔离和当前合同证明。原始 Claim、Gold、RED 与日志保留；不把有意排除算作通过。该收口影响对应候选的正式发布/合并判断，不自动阻断无关的隔离只读产品开发。
 
 **授权边界：** 本路线修订不授权新代码实施、真实 Provider、浏览器自动化、受控/外部业务写入或 main 合并；相关事项继续遵守原有单独授权和 STOP 条件。
+
+### 当前 R1 集成状态（2026-11-07）
+
+- Final Bridge 与 Bridge Closeout：`ACCEPT_WITH_LIMITS`，限于已有离线 S1/S2 同 Session 业务链与回归证据。
+- 本次 R1-ENGINE 集成候选：等待主 Agent 独立评审；实施方不得自签放行。
+- R1-INTERACTIVE：`HOLD`；浏览器 `NOT_RUN / BROWSER_STOP_ACTIVE`。
+- PRODUCT-01 新 Bridge 真实 Provider：`NOT_RUN`；本任务不含收费授权。
+- 前次全量 pytest：741/757，16 项失败；本次相关定向范围另行记录，不将历史数字算作本候选测试结果。
 
 ## 历史执行跟踪（D1–D7 / M1 / R1 原记录保留）
 

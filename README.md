@@ -6,7 +6,7 @@ OpsPilot 是面向企业 API 接入与技术支持的持续协作 Agent，也是
 
 校招交付与长期产品成长并行推进。**R1** 是简历可投递版本，达成后冻结版本、更新简历并开始投递，不必等待 **R2** 完整展示成品或 **R3** 长期企业 API 能力扩展。R1-ENGINE 与 R1-INTERACTIVE 仍按原定义分别验收；浏览器 STOP 下不得宣称互动体验已验收。详见 [当前路线与里程碑](TASKS.md) 和 [North Star](PROJECT_NORTH_STAR.md)。
 
-PRODUCT-01 已有不同阶段的证据：Slice 02 的真实 DeepSeek 四轮结果为 `PARTIAL`，存在超出证据的配置推断；Final Bridge 有确定性离线 S1/S2 同 Session 接线候选，仍待独立审查，未证明真实模型或浏览器体验。[Slice 02 报告](docs/evidence/vnext/product-01-slice-02-live/REPORT.md) · [Final Bridge 报告](docs/evidence/vnext/product-01-final-bridge-01/REPORT.md)。这些结果不能合并表述为整体 PASS。
+PRODUCT-01 Slice 02 的真实 DeepSeek 四轮结果为 `PARTIAL`，其中配置推断曾超出证据。Final Bridge 与 Bridge Closeout 已获 `ACCEPT_WITH_LIMITS`：确定性离线 S1/S2 同 Session 路径成立，但新 Bridge 的真实模型行为和浏览器体验仍未验证。当前 R1 集成候选尚待独立审查；截至本次集成前，R1-ENGINE 冻结结论为 `HOLD`，R1-INTERACTIVE 也为 `HOLD`。全量 pytest 的已知历史结果为 741/757、16 项失败（12 项实验身份/旧 claim 绑定，3 项 AR-03 Runner MockTransport 与新增 Assistant 工具 Schema 不兼容，1 项退役 C1 合同）；本轮已定位这 3 项的旧 Runner allowlist 根因，但未修改历史实验合同。本次不把旧结果冒充为新 SHA 回归。新 Bridge 真实 Provider 为 `NOT_RUN`；浏览器为 `NOT_RUN / BROWSER_STOP_ACTIVE`。[Slice 02 报告](docs/evidence/vnext/product-01-slice-02-live/REPORT.md) · [Bridge Closeout 报告](docs/evidence/vnext/product-01-bridge-closeout-01/REPORT.md) · [集成评审输入](docs/evidence/vnext/r1-final-integration-01/RELEASE_DECISION_INPUT.md)。这些结果不能合并表述为整体 PASS。
 
 已有 S1/S2 离线业务链、TaskControl、审批与交接能力继续受原合同约束。普通聊天不自动取得业务权限；历史对话和 Memory 不替代当前可信事实。冻结的 REPAIR/Handoff 安全边界不因产品优先而放松。AR-04C 的真实模型结果仍保留其历史 PARTIAL/G7 ON FAIL 结论；AR-05 全量回归、浏览器及真实模型状态按各自最新正式报告核对。本文不把确定性替身测试写成真实模型成果，也不自动授权代码、Provider、浏览器、外部业务写入或 main 合并。
 
