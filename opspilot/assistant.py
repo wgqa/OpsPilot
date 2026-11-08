@@ -1259,11 +1259,20 @@ class Loop(AgentMiddleware):
                     'tool': request['name'], 'call_id': call['call_id'], 'completed_at': call['completed_at'],
                 })
                 if call['evidence_id'] and call['observation_id']:
-                    current['business_observations'].append({
-                        'tool': request['name'], 'evidence_id': call['evidence_id'],
+                    source = {
+                        'tool': request['name'], 'call_id': call['call_id'],
+                        'evidence_id': call['evidence_id'],
                         'observation_id': call['observation_id'], 'observed_at': result.get('observed_at'),
                         'observed_versions': result.get('observed_versions'), 'result_digest': digest_json(result),
-                    })
+                    }
+                    if run['task_id']:
+                        observation_link = c.execute(
+                            'SELECT tool_call_id FROM d2_tool_observations WHERE task_id=? AND call_id=?',
+                            (run['task_id'], call['call_id']),
+                        ).fetchone()
+                        if observation_link is not None:
+                            source['tool_call_id'] = observation_link['tool_call_id']
+                    current['business_observations'].append(source)
             previous=[]
             selected_ids=set(prepared.get('selected_message_ids',[]))
             for row in c.execute("SELECT m.message_id,m.body,m.body_digest,m.created_at,m.sequence,a.run_id,r.source_message_id,r.task_id AS answer_task_id FROM chat_run_answers a JOIN messages m ON m.message_id=a.message_id JOIN task_runs r ON r.run_id=a.run_id WHERE m.session_id=? AND m.tenant_id=? AND m.sequence<? AND (r.task_id IS NULL OR r.task_id IS ?) ORDER BY m.sequence DESC LIMIT 6",(run['session_id'],run['tenant_id'],run['consumed_message_seq'],run['task_id'])):

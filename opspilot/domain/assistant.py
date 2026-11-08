@@ -769,8 +769,23 @@ def history_sources(connection,run):
 def source_context_for_model(payload):
     """Present source time clearly; retain the full source ledger in audit metadata."""
     context = dict(payload)
-    current = dict(payload['current_run'])
-    count = len(current['business_observations'])
+    source_current = payload['current_run']
+    observations = [
+        {key: observation[key] for key in (
+            'tool', 'call_id', 'tool_call_id', 'evidence_id', 'observation_id', 'observed_at',
+        ) if key in observation and observation[key] is not None}
+        for observation in source_current.get('business_observations', [])
+        if isinstance(observation, dict)
+    ]
+    count = len(observations)
+    # Tool-call arguments and complete observations already appear in the native
+    # AI/Tool messages. Keep only the source link and time here; the full ledger
+    # remains in wire_source_refs for audit, while duplicated metadata stays out
+    # of the bounded model input.
+    current = {
+        'run_id': source_current['run_id'],
+        'business_observations': observations,
+    }
     current['description'] = (
         f'以下 {count} 条业务观察由本轮工具取得，只能对其实际覆盖的状态说本轮已查询。'
         if count else

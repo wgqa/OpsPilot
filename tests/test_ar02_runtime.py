@@ -127,6 +127,54 @@ def test_mixed_scope_denial_retains_legal_query(demo_db,tmp_path):
     assert in_scope[0]['result']['facts']['requested_event_id']=='event-in-bound'
     assert in_scope[0]['result']['facts']['attempts'][0]['event_id']=='event-in-bound'
     assert any(e['event']=='tool_observation' and e['name']=='get_order_status' for e in events)
+    with connect(demo_db) as c:
+        bound_order=c.execute(
+            'SELECT order_id FROM s3_task_resources WHERE task_id=?',(created['task_id'],)
+        ).fetchone()['order_id']
+    assert bound_order=='ar02-order'
+
+def test_order_binding_change_requires_a_trusted_new_order_command(demo_db):
+    from opspilot.domain.task_control import create_session, create_task_with_initial_run, admit_task_message, trusted_identity
+
+    prepare_transport_history_fixture(
+        demo_db,order_id='bound-order',contract_version=2,
+        attempts=[{'event_id':'event-bound','http_status':202}],
+    )
+    prepare_transport_history_fixture(
+        demo_db,order_id='requested-order',contract_version=2,
+        attempts=[{'event_id':'event-requested','http_status':202}],
+    )
+    identity=trusted_identity(demo_db,'support-a')
+    session_id=create_session(demo_db,identity)['session_id']
+    first=create_task_with_initial_run(
+        demo_db,identity,session_id=session_id,service_id='orders-async-demo',
+        integration_id='async-integration-a',s3_order_id='bound-order',ticket_id='INC-A-001',
+        initial_message='请检查 event-bound。',idempotency_key='trusted-bind-first',assistant_core=True,
+    )
+    followup=admit_task_message(
+        demo_db,identity,session_id=session_id,task_id=first['task_id'],input_kind='CHAT_READONLY',
+        body='改查 requested-order 的 event-requested。',idempotency_key='untrusted-rebind-text',assistant_core=True,
+    )
+    assert followup['task_id']==first['task_id']
+    with connect(demo_db) as c:
+        original=c.execute(
+            'SELECT order_id FROM s3_task_resources WHERE task_id=?',(first['task_id'],)
+        ).fetchone()['order_id']
+    assert original=='bound-order'
+
+    second=create_task_with_initial_run(
+        demo_db,identity,session_id=session_id,service_id='orders-async-demo',
+        integration_id='async-integration-a',s3_order_id='requested-order',ticket_id='INC-A-001',
+        initial_message='请对 requested-order 中的 event-requested 进行只读调查。',
+        idempotency_key='trusted-bind-second',assistant_core=True,
+    )
+    assert second['task_id']!=first['task_id']
+    with connect(demo_db) as c:
+        bindings={row['task_id']:row['order_id'] for row in c.execute(
+            'SELECT task_id,order_id FROM s3_task_resources WHERE task_id IN (?,?)',
+            (first['task_id'],second['task_id']),
+        )}
+    assert bindings=={first['task_id']:'bound-order',second['task_id']:'requested-order'}
 
 def test_worker_default_does_not_construct_paid_provider(demo_db,tmp_path):
     created=setup_run(demo_db,'普通解释','unauthorized-provider')

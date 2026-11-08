@@ -175,6 +175,7 @@ def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
             )
             action = {"answer": answer}
         elif "event-current" in user_text and "event-previous" not in user_text:
+            assert user_text == "请核实 event-current 的当前回调投递和接收方处理状态。"
             assert "同一 TaskBinding 订单内，用户明确指定的 Event ID 是只读查询目标" in system_text
             assert "不同 Event ID 本身不等同于更换受信订单或资源绑定" in system_text
             delivery = tool_results.get("get_callback_delivery")
@@ -200,8 +201,16 @@ def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
             assert "准确区分已完成、正在发生和建议后续执行" in system_text
             assert "没有实际动作回执时，后续核查、联系接收方或创建工单必须写成建议" in system_text
             assert "不得声称已经启动、正在执行、已指派人员或承诺反馈" in system_text
+            delivery = tool_results.get("get_callback_delivery")
+            receiver = tool_results.get("get_receiver_processing")
             history = tool_results.get("get_callback_transport_history")
-            if history is None:
+            if delivery is None:
+                assert "get_callback_delivery" in tool_names
+                action = {"tool": "get_callback_delivery", "args": {"reason": "核对绑定订单的当前投递目标"}}
+            elif receiver is None:
+                assert "get_receiver_processing" in tool_names
+                action = {"tool": "get_receiver_processing", "args": {"reason": "读取当前 Receiver 对应的 Event"}}
+            elif history is None:
                 assert "get_callback_transport_history" in tool_names
                 action = {
                     "tool": "get_callback_transport_history",
@@ -394,6 +403,49 @@ def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
     assert all(row["status"] == "OK" for row in model_calls)
     assert all(row["status"] == "DELIVERED" for row in spend)
     assert all(row["completion_id"] and row["usage_json"] for row in spend)
+    correction_wire = json.loads(next(
+        row["request_json"] for row in reversed(model_calls) if row["run_id"] == corrected["run_id"]
+    ))
+    bound_wire = json.loads(next(
+        row["request_json"] for row in model_calls if row["run_id"] == bound["run_id"]
+    ))
+    assert bound_wire["source_refs"]["source_message_id"] == bound["message_id"]
+    assert bound_wire["source_refs"]["trusted_binding"]["order_id"] == "r1-readiness-order"
+    with connect(demo_db) as db:
+        source_user_message = db.execute(
+            "SELECT role,input_kind,body FROM messages WHERE message_id=?", (bound["message_id"],),
+        ).fetchone()
+    assert source_user_message["role"] == "USER"
+    assert source_user_message["body"] == "请核实 event-current 的当前回调投递和接收方处理状态。"
+    audited_observations = correction_wire["source_refs"]["current_run"]["business_observations"]
+    assert len(audited_observations) == 3
+    assert all(
+        item.get("call_id") and item.get("evidence_id") and item.get("observation_id")
+        and item.get("tool_call_id") and item.get("observed_at")
+        and item.get("observed_versions") and item.get("result_digest")
+        for item in audited_observations
+    )
+    serialized_messages = correction_wire["messages"]
+    system_message = next(
+        item["data"]["content"] for item in serialized_messages if item["type"] == "system"
+    )
+    work_context_text = system_message.split("WORK_CONTEXT\n", 1)[1]
+    model_context, _ = json.JSONDecoder().raw_decode(work_context_text)
+    projected_observations = model_context["current_run"]["business_observations"]
+    assert len(projected_observations) == 3
+    assert all(
+        item.get("call_id") and item.get("evidence_id") and item.get("observation_id")
+        and item.get("tool_call_id") and item.get("observed_at")
+        and "observed_versions" not in item and "result_digest" not in item
+        for item in projected_observations
+    )
+    tool_messages = {
+        item["data"]["tool_call_id"]: item["data"]
+        for item in serialized_messages if item["type"] == "tool"
+    }
+    assert all(item["tool_call_id"] in tool_messages for item in audited_observations)
+    assert all("observed_versions" in json.loads(tool_messages[item["tool_call_id"]]["content"])
+               for item in audited_observations)
     business_observations = [
         row for row in mcp_calls
         if json.loads(row["request_json"])["name"] in {

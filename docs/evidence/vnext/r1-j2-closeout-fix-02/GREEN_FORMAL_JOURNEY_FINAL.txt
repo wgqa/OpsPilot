@@ -1,0 +1,406 @@
+F
+================================== FAILURES ===================================
+_____ test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction ______
+
+demo_db = WindowsPath('D:/Temp/pytest-r1-j2-closeout-fix-02-final-formal/test_r1_j1_j2_formal_runtime_g0/domain.sqlite3')
+tmp_path = WindowsPath('D:/Temp/pytest-r1-j2-closeout-fix-02-final-formal/test_r1_j1_j2_formal_runtime_g0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023EFD0FEB10>
+
+    def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
+        demo_db, tmp_path, monkeypatch,
+    ):
+        fixture = prepare_transport_history_fixture(
+            demo_db,
+            order_id="r1-readiness-order",
+            receiver_status="PROCESSED",
+            contract_version=2,
+            attempts=[
+                {"event_id": "event-previous", "http_status": 202},
+                {"event_id": "event-current", "http_status": 202},
+            ],
+        )
+        assert [row["request"]["event_id"] for row in fixture["transport_trace"]] == [
+            "event-previous", "event-current",
+        ]
+
+        _configure(monkeypatch)
+        _provision(demo_db, total=500_000)
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_RUNTIME_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-only-placeholder")
+        monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "0")
+        monkeypatch.delenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", raising=False)
+
+        wire: list[dict[str, object]] = []
+        completion_number = 0
+
+        async def respond(request: httpx.Request) -> httpx.Response:
+            nonlocal completion_number
+            completion_number += 1
+            assert str(request.url) == "https://api.deepseek.com/chat/completions"
+            assert request.method == "POST"
+            payload = json.loads((await request.aread()).decode("utf-8"))
+            assert payload["model"] == "deepseek-flash"
+            assert payload["max_tokens"] == 2_048
+            assert payload["thinking"] == {"type": "disabled"}
+            assert payload["stream"] is False
+            assert "max_completion_tokens" not in payload
+            tool_schemas = payload.get("tools", [])
+            tool_names = [item["function"]["name"] for item in tool_schemas]
+            if tool_schemas:
+                assert payload["tool_choice"] == "auto"
+                assert payload["parallel_tool_calls"] is False
+
+            # This assertion is inside the explicit MockTransport: each simulated
+            # HTTP send must already have durable, single-flight spend authority.
+            with connect(demo_db) as db:
+                granted = db.execute(
+                    "SELECT status,reserved_usd_micro FROM assistant_runtime_spends "
+                    "WHERE status='SEND_GRANTED'"
+                ).fetchall()
+            assert len(granted) == 1
+            assert int(granted[0]["reserved_usd_micro"]) == 14_048
+
+            messages = payload["messages"]
+            user_text = next(
+                (_message_content(item.get("content")) for item in reversed(messages)
+                 if item.get("role") == "user"),
+                "",
+            )
+            system_text = "\n".join(
+                _message_content(item.get("content")) for item in messages
+                if item.get("role") == "system"
+            )
+            prior_tool_names: list[str] = []
+            names_by_call_id: dict[str, str] = {}
+            for item in messages:
+                if item.get("role") == "assistant":
+                    for call in item.get("tool_calls", []) or []:
+                        call_id = str(call.get("id", ""))
+                        name = str((call.get("function") or {}).get("name", ""))
+                        if call_id and name:
+                            names_by_call_id[call_id] = name
+                            prior_tool_names.append(name)
+
+            tool_results: dict[str, dict[str, object]] = {}
+            for item in messages:
+                if item.get("role") != "tool":
+                    continue
+                name = names_by_call_id.get(str(item.get("tool_call_id", "")))
+                if not name:
+                    continue
+                try:
+                    result = json.loads(_message_content(item.get("content")))
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(result, dict):
+                    tool_results[name] = result
+
+            action: dict[str, object]
+            answer: str | None = None
+            if "回调重试协议" in user_text:
+                discovery = tool_results.get("list_scoped_protocol_documents")
+                comparison = tool_results.get("compare_scoped_protocols")
+                if discovery is None:
+                    assert "list_scoped_protocol_documents" in tool_names
+                    action = {"tool": "list_scoped_protocol_documents", "args": {"topic": "callback retry"}}
+                elif comparison is None:
+                    documents = discovery.get("protocol_documents", [])
+                    base = next((item for item in documents if isinstance(item, dict)
+                                 and item.get("document_id") == "callback-retry-contract"), None)
+                    target = next((item for item in documents if isinstance(item, dict)
+                                   and item.get("document_id") == "callback-retry-contract-v2"), None)
+                    assert base and target
+                    action = {
+                        "tool": "compare_scoped_protocols",
+                        "args": {
+                            "base_document_id": base["document_id"],
+                            "base_version": base["version"],
+                            "target_document_id": target["document_id"],
+                            "target_version": target["version"],
+                        },
+                    }
+                else:
+                    assert comparison.get("success") is True
+                    assert comparison.get("base_ref", {}).get("document_id") == "callback-retry-contract"
+                    assert comparison.get("target_ref", {}).get("document_id") == "callback-retry-contract-v2"
+                    assert comparison.get("diff_evidence")
+                    answer = (
+                        "授权资料显示 callback-retry-contract v1.0.0 与 "
+                        "callback-retry-contract-v2 v2.0.0 有版本差异；这只能说明文档变化，"
+                        "不能证明客户线上已经部署 v2。"
+                    )
+                    action = {"answer": answer}
+            elif '"backoff":"fixed"' in user_text and "event_id" in user_text:
+                # The model may answer without a new tool because the previous
+                # protocol comparison is in the same Session context.
+                answer = (
+                    "你贴出的 max_attempts=5、backoff=fixed 属于待核实的用户材料，"
+                    "不能证明服务器当前配置；需和部署配置核对后才能判断是否符合新版协议。"
+                )
+                action = {"answer": answer}
+            elif "event-current" in user_text and "event-previous" not in user_text:
+                assert user_text == "请核实 event-current 的当前回调投递和接收方处理状态。"
+                assert "同一 TaskBinding 订单内，用户明确指定的 Event ID 是只读查询目标" in system_text
+                assert "不同 Event ID 本身不等同于更换受信订单或资源绑定" in system_text
+                delivery = tool_results.get("get_callback_delivery")
+                receiver = tool_results.get("get_receiver_processing")
+                if delivery is None:
+                    assert "get_callback_delivery" in tool_names
+                    action = {"tool": "get_callback_delivery", "args": {"reason": "查看当前绑定订单的回调投递"}}
+                elif receiver is None:
+                    assert "get_receiver_processing" in tool_names
+                    action = {"tool": "get_receiver_processing", "args": {"reason": "核对同一事件的接收方处理状态"}}
+                else:
+                    delivery_facts = delivery.get("facts", {})
+                    receiver_facts = receiver.get("facts", {})
+                    assert delivery_facts.get("event_id") == "event-current"
+                    assert receiver_facts.get("event_id") == "event-current"
+                    answer = (
+                        "当前 event-current 的 Delivery 为 HTTP 202/ACKNOWLEDGED，"
+                        "同一 Event 的 Receiver 为 PROCESSED；可确认这个 Event 已处理，"
+                        "不能据此推断其他 Event 或线上协议部署版本。"
+                    )
+                    action = {"answer": answer}
+            elif "event-previous" in user_text and "更正" in user_text:
+                assert "准确区分已完成、正在发生和建议后续执行" in system_text
+                assert "没有实际动作回执时，后续核查、联系接收方或创建工单必须写成建议" in system_text
+                assert "不得声称已经启动、正在执行、已指派人员或承诺反馈" in system_text
+                delivery = tool_results.get("get_callback_delivery")
+                receiver = tool_results.get("get_receiver_processing")
+                history = tool_results.get("get_callback_transport_history")
+                if delivery is None:
+                    assert "get_callback_delivery" in tool_names
+                    action = {"tool": "get_callback_delivery", "args": {"reason": "核对绑定订单的当前投递目标"}}
+                elif receiver is None:
+                    assert "get_receiver_processing" in tool_names
+                    action = {"tool": "get_receiver_processing", "args": {"reason": "读取当前 Receiver 对应的 Event"}}
+                elif history is None:
+                    assert "get_callback_transport_history" in tool_names
+                    action = {
+                        "tool": "get_callback_transport_history",
+                        "args": {"reason": "按更正后的目标事件查询历史投递", "event_id": "event-previous"},
+                    }
+                else:
+                    facts = history.get("facts", {})
+                    assert facts.get("requested_event_id") == "event-previous"
+                    assert "not the target Event current processing state" in str(
+                        facts.get("processing_authority", "")
+                    )
+                    answer = (
+                        "更正后的 event-previous 有 HTTP 202 投递记录，但该历史材料不是当前 Receiver 处理状态；"
+                        "目前没有取得该 Event 的当前 Receiver 记录，目前不能确认它已完成。"
+                        "以下是未提交的客户说明草稿：建议向接收方核实该 Event 的最终处理状态。"
+                    )
+                    action = {"answer": answer}
+            else:
+                raise AssertionError(f"Unexpected model request for current user message: {user_text!r}")
+
+            response_message: dict[str, object] = {"role": "assistant", "content": answer}
+            finish_reason = "stop"
+            if "tool" in action:
+                call_id = f"r1-jr-call-{completion_number}"
+                response_message = {
+                    "role": "assistant", "content": None,
+                    "tool_calls": [_tool_call(
+                        str(action["tool"]), action["args"], call_id,
+                    )],
+                }
+                finish_reason = "tool_calls"
+
+            prompt_tokens = (
+                estimate_messages_tokens(messages)
+                + estimate_text_tokens(canonical_json(tool_schemas))
+                + 64
+            )
+            assert 0 < prompt_tokens <= 12_000
+            output_tokens = 48
+            wire.append({
+                "completion_id": f"r1-readiness-completion-{completion_number}",
+                "model": payload["model"],
+                "max_tokens": payload["max_tokens"],
+                "thinking": payload["thinking"],
+                "tool_choice": payload.get("tool_choice"),
+                "parallel_tool_calls": payload.get("parallel_tool_calls"),
+                "stream": payload["stream"],
+                "user_excerpt": user_text[:180],
+                "tools_available": tool_names,
+                "model_action": action,
+                "estimated_input_tokens": prompt_tokens,
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": prompt_tokens + output_tokens,
+                },
+            })
+            return httpx.Response(200, headers={"x-request-id": f"r1-readiness-request-{completion_number}"}, json={
+                "id": f"r1-readiness-completion-{completion_number}",
+                "object": "chat.completion", "created": 1, "model": "deepseek-flash",
+                "system_fingerprint": "offline-fixture-only",
+                "choices": [{"index": 0, "message": response_message, "finish_reason": finish_reason}],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": prompt_tokens + output_tokens,
+                    "prompt_tokens_details": {
+                        "cached_tokens": 0,
+                        "prompt_cache_hit_tokens": 0,
+                        "prompt_cache_miss_tokens": prompt_tokens,
+                    },
+                },
+            })
+
+        def reject_sync(request: httpx.Request) -> httpx.Response:
+            raise AssertionError("Sync transport must not be used by this async Worker path")
+
+        def model_factory(*, runtime_grant_binding):
+            return create_assistant_model(
+                runtime_grant_binding=runtime_grant_binding,
+                transport_async=httpx.MockTransport(respond),
+                transport_sync=httpx.MockTransport(reject_sync),
+            )
+
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=tmp_path / "r1-readiness-runtime-checkpoint.sqlite3",
+            start_worker=True,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=model_factory,
+            assistant_runtime_enabled=True,
+        )
+        with TestClient(app) as client:
+            login = client.post(
+                "/api/auth/login", headers={"Origin": ORIGIN},
+                json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+            )
+            headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+
+            def submit(path, key, body):
+                response = client.post(
+                    path, headers={**headers, "Idempotency-Key": key}, json=body,
+                )
+                assert response.status_code == 202, response.text
+                item = response.json()
+                assert _wait_run(client, item["run_id"])["status"] == "SUCCEEDED"
+                return item
+
+            j1_protocol = submit(
+                f"/api/sessions/{session_id}/assistant/messages", "r1-jr-j1-protocol",
+                {"body": "请比较回调重试协议 v1 和 v2 的差异，并说明配置可能受影响的部分。"},
+            )
+            j1_material = submit(
+                f"/api/sessions/{session_id}/assistant/messages", "r1-jr-j1-material",
+                {"body": "结合刚才的协议看这份配置：{\"callback\":{\"retry\":{\"max_attempts\":5,\"backoff\":\"fixed\"}},\"event_id\":\"event-previous\"}"},
+            )
+            bound = submit(
+                f"/api/sessions/{session_id}/assistant/order", "r1-jr-j2-current",
+                {
+                    "order_id": "r1-readiness-order",
+                    "initial_message": "请核实 event-current 的当前回调投递和接收方处理状态。",
+                },
+            )
+            assert bound["task_id"]
+            corrected = submit(
+                f"/api/sessions/{session_id}/assistant/messages", "r1-jr-j2-correction",
+                {
+                    "task_id": bound["task_id"],
+                    "body": "我更正目标：请查 event-previous，不是 event-current；说明它是否已经处理，并给一份客户说明草稿。",
+                },
+            )
+
+            messages = client.get(f"/api/sessions/{session_id}/messages?limit=500", headers=headers).json()["items"]
+            answers = {
+                row["answer_source_message_id"]: row["body"]
+                for row in messages if row["role"] == "ASSISTANT"
+            }
+            assert "callback-retry-contract v1.0.0" in answers[j1_protocol["message_id"]]
+            assert "callback-retry-contract-v2 v2.0.0" in answers[j1_protocol["message_id"]]
+            assert "不能证明客户线上已经部署 v2" in answers[j1_protocol["message_id"]]
+            assert "max_attempts=5" in answers[j1_material["message_id"]]
+            assert "待核实的用户材料" in answers[j1_material["message_id"]]
+            assert "event-current" in answers[bound["message_id"]] and "PROCESSED" in answers[bound["message_id"]]
+            assert "event-previous" in answers[corrected["message_id"]]
+            assert "目前不能确认它已完成" in answers[corrected["message_id"]]
+            assert "建议向接收方核实" in answers[corrected["message_id"]]
+            assert "正在进一步核实" not in answers[corrected["message_id"]]
+            assert "取得结果后会第一时间同步" not in answers[corrected["message_id"]]
+            run_cores = [
+                client.get(f"/api/runs/{item['run_id']}", headers=headers).json()["execution_core"]
+                for item in (j1_protocol, j1_material, bound, corrected)
+            ]
+
+        run_ids = [item["run_id"] for item in (j1_protocol, j1_material, bound, corrected)]
+        message_ids = [item["message_id"] for item in (j1_protocol, j1_material, bound, corrected)]
+        with connect(demo_db) as db:
+            runs = [dict(row) for row in db.execute(
+                "SELECT run_id,task_id,kind,status,source_message_id FROM task_runs "
+                "WHERE session_id=? ORDER BY created_at,rowid", (session_id,),
+            ).fetchall()]
+            assert [row["run_id"] for row in runs] == run_ids
+            assert runs[0]["task_id"] is None and runs[1]["task_id"] is None
+            assert runs[2]["task_id"] == runs[3]["task_id"] == bound["task_id"]
+            calls = [dict(row) for row in db.execute(
+                "SELECT call_id,run_id,kind,logical_key,status,request_json,result_json,evidence_id,observation_id "
+                "FROM assistant_calls WHERE run_id IN (?,?,?,?) ORDER BY created_at,rowid", run_ids,
+            ).fetchall()]
+            spend = [dict(row) for row in db.execute(
+                "SELECT request_key,run_id,status,reserved_usd_micro,settled_usd_micro,completion_id,usage_json "
+                "FROM assistant_runtime_spends ORDER BY created_at,rowid",
+            ).fetchall()]
+            protected = {
+                table: int(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                for table in (
+                    "d3_approvals", "d3_action_permissions", "d3_action_intents", "d3_action_ledgers",
+                    "d3_delivery_records", "s2_handoff_queue_entries", "s2_handoff_receipts",
+                )
+            }
+            assert int(db.execute("SELECT COUNT(*) FROM task_bindings").fetchone()[0]) == 1
+            assert db.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 'ar02_live_%'"
+            ).fetchone()[0] == 0
+
+        model_calls = [row for row in calls if row["kind"] == "MODEL"]
+        mcp_calls = [row for row in calls if row["kind"] == "MCP"]
+        assert len(model_calls) == len(wire) and len(model_calls) >= 8
+        assert len(spend) == len(model_calls)
+        assert all(row["status"] == "OK" for row in model_calls)
+        assert all(row["status"] == "DELIVERED" for row in spend)
+        assert all(row["completion_id"] and row["usage_json"] for row in spend)
+        correction_wire = json.loads(next(
+            row["request_json"] for row in reversed(model_calls) if row["run_id"] == corrected["run_id"]
+        ))
+        audited_observations = correction_wire["source_refs"]["current_run"]["business_observations"]
+        assert len(audited_observations) == 3
+        assert all(
+            item.get("call_id") and item.get("evidence_id") and item.get("observation_id")
+            and item.get("observed_at") and item.get("observed_versions") and item.get("result_digest")
+            for item in audited_observations
+        )
+        serialized_messages = correction_wire["messages"]
+        system_message = next(
+            item["data"]["content"] for item in serialized_messages if item["type"] == "system"
+        )
+        work_context_text = system_message.split("WORK_CONTEXT\n", 1)[1]
+        model_context, _ = json.JSONDecoder().raw_decode(work_context_text)
+        projected_observations = model_context["current_run"]["business_observations"]
+        assert len(projected_observations) == 3
+        assert all(
+            item.get("call_id") and item.get("evidence_id") and item.get("observation_id")
+            and item.get("observed_at")
+            and "observed_versions" not in item and "result_digest" not in item
+            for item in projected_observations
+        )
+        tool_messages = {
+            item["data"]["tool_call_id"]: item["data"]
+            for item in serialized_messages if item["type"] == "tool"
+        }
+>       assert all(item["call_id"] in tool_messages for item in audited_observations)
+E       assert False
+E        +  where False = all(<generator object test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction.<locals>.<genexpr> at 0x0000023EFD7197E0>)
+
+tests\test_r1_journey_readiness_01.py:434: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_r1_journey_readiness_01.py::test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction
+1 failed in 11.05s

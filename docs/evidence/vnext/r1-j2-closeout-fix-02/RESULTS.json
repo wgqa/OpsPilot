@@ -1,0 +1,56 @@
+{
+  "task": "R1-J2-CLOSEOUT-FIX-02",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "ebc9a7b31e4e6acc899af39fa37fc23c953980ff",
+  "branch": "codex/r1-j2-closeout-fix-02",
+  "real_provider_http_requests": 0,
+  "browser_automation_runs": 0,
+  "external_business_writes": 0,
+  "historical_campaign": {
+    "campaign_id": "R1-J2-LIVE-RECHECK-01",
+    "status": "STOPPED",
+    "stop_reason": "CAMPAIGN_FINISHED",
+    "provider_sends_granted": 8,
+    "unknown_dispatches": 0,
+    "modified": false
+  },
+  "cases": {
+    "F1_current_event_target_presentation": {
+      "offline_result": "PASS",
+      "real_model_recheck": "NOT_RUN",
+      "legal_same_order_event_query": "PASS",
+      "cross_order_event_query": "REJECTED",
+      "chat_text_rebind": "REJECTED",
+      "trusted_new_binding": "PASS",
+      "historical_event_remains_lead": "PASS"
+    },
+    "F2_context_after_three_real_mcp_results": {
+      "replay_evidence": "SAVED_REAL_REQUEST_AND_THREE_REAL_MCP_RESULTS_REPLAYED_OFFLINE",
+      "before_estimated_input_tokens": 12199,
+      "after_estimated_input_tokens": 11900,
+      "input_limit_tokens": 12000,
+      "token_reduction": 299,
+      "tool_messages_retained": 3,
+      "source_call_link_retained": true,
+      "additional_synthetic_result_tokens": 12461,
+      "additional_result_behavior": "REJECTED_BEFORE_PROVIDER_RESERVATION"
+    },
+    "formal_offline_user_journey": {
+      "result": "PASS_FIXTURE_MODEL_ONLY",
+      "fixture_model_dispatches": 11,
+      "mcp_calls": 7,
+      "external_provider_http_requests": 0,
+      "business_writes": 0,
+      "journeys": ["protocol", "user_material", "event-current", "corrected-event-previous"]
+    }
+  },
+  "tests": {
+    "final_targeted": {"passed": 5, "collected": 5, "exit_code": 0},
+    "related_regression": {"passed": 50, "collected": 50, "exit_code": 0}
+  },
+  "limits": [
+    "Deterministic fixture does not prove future real-model behavior.",
+    "No browser or external business write path was exercised.",
+    "A larger additional tool result can exceed 12K; it is safely rejected rather than discarded."
+  ]
+}

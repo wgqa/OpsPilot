@@ -1566,7 +1566,8 @@ def _prepare_context(
             "authority": "UNTRUSTED_USER_INPUT" if item["role"] == "user" else "SOURCE_VALIDATED_ASSISTANT_HISTORY",
             "required": is_current or is_anchor, "priority": 1000 + index, "order": 100 + index,
             "messages": [{"role": item["role"], "content":
-                f"{item['anchor_kind']} (UNTRUSTED USER INPUT): {item['body']}" if is_anchor else item["body"]}],
+                f"{item['anchor_kind']} (UNTRUSTED USER INPUT): {item['body']}"
+                if is_anchor and not is_current else item["body"]}],
             "source_refs": [str(item["message_id"])], "history_item": item,
         })
     allocation = allocate_context_blocks(blocks, budget=effective_budget, strategy=strategy)

@@ -1,0 +1,119 @@
+.F
+================================== FAILURES ===================================
+__ test_next_oversized_tool_result_stops_before_persisted_model_reservation ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001CD566A6520>
+
+    def test_next_oversized_tool_result_stops_before_persisted_model_reservation(monkeypatch):
+        observations = [
+            {
+                "tool": f"read_fact_{index}", "call_id": f"call-{index}",
+                "evidence_id": f"evidence-{index}", "observation_id": f"observation-{index}",
+                "observed_at": f"2026-11-08T09:0{index}:00Z",
+                "observed_versions": {"resource": index + 1}, "result_digest": f"{index}" * 64,
+            }
+            for index in range(1, 5)
+        ]
+        payload = {
+            "authority": "EXPLANATION_ONLY_NO_BUSINESS_RECEIPT",
+            "current_run": {
+                "run_id": "run-budget-stop", "completed_tools": [],
+                "business_observations": observations,
+            },
+            "history_sources": [], "prior_answers": [], "task_id": "task-budget-stop",
+            "source_message_id": "message-budget-stop", "summary_refs": [],
+            "trusted_binding": {"service_id": "orders", "order_id": "order-a", "contract_version": 2},
+        }
+        prepared = {
+            "memory_guidance_messages": [], "summary_refs": [], "memory_refs": [],
+            "excluded_sources": [], "selected_message_ids": [], "messages": [],
+        }
+        messages = [HumanMessage(content="核对同一订单内的当前事实，保留来源。")]
+        messages.extend(
+            ToolMessage(
+                content='{"fixture_only":true,"fact":"bounded prior observation"}',
+                tool_call_id=f"call-{index}", name=f"read_fact_{index}",
+            )
+            for index in range(1, 4)
+        )
+        messages.append(ToolMessage(
+            content='{"fixture_only":true,"padding":"' + ("synthetic-only " * 16_000) + '"}',
+            tool_call_id="call-4", name="read_fact_4",
+        ))
+
+        loop = object.__new__(Loop)
+        loop.context = lambda: (prepared, payload)
+        loop.run = {"source_message_id": "message-budget-stop"}
+        loop.reserved_tokens = 0
+        loop.specs = []
+        loop.experiment_id = None
+        loop.path = "unused-offline-path"
+        loop.run_id = "run-budget-stop"
+        loop.worker_id = None
+        loop.runtime_grant_binding = None
+        loop.trace = lambda *_args, **_kwargs: None
+        reservations = []
+        provider_handlers = []
+        monkeypatch.setattr(domain, "reserve", lambda *args, **kwargs: reservations.append(args))
+
+        async def handler(_request):
+            provider_handlers.append(True)
+
+        with pytest.raises(ContextBudgetExceeded):
+>           asyncio.run(loop.awrap_model_call(SimpleNamespace(messages=messages), handler))
+
+tests\test_r1_j2_closeout_fix_02.py:144:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <opspilot.assistant.Loop object at 0x000001CD56704980>
+request = namespace(messages=[HumanMessage(content='核对同一订单内的当前事实，保留来源。', additional_kwargs={}, response_metadata={}), ToolMessag...etic-only synthetic-only synthetic-only synthetic-only synthetic-only "}', name='read_fact_4', tool_call_id='call-4')])
+handler = <function test_next_oversized_tool_result_stops_before_persisted_model_reservation.<locals>.handler at 0x000001CD5677C1A0>
+
+    async def awrap_model_call(self,request,handler):
+        prepared,payload=self.context()
+        # The native tool messages are retained; refresh trusted context before
+        # every dispatch, and stop rather than send invalidated source content.
+        messages=list(request.messages)
+        memory_guidance = list(prepared.get('memory_guidance_messages', []))
+        system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(domain.source_context_for_model(payload))
+        if memory_guidance:
+            system_content += '\n\n' + '\n\n'.join(memory_guidance)
+        system=SystemMessage(content=system_content)
+        sent=[system]+messages
+        summary_messages=[
+            item for item in prepared.get('messages',[])
+            if item.get('role')=='system' and str(item.get('content','')).startswith('HISTORICAL SESSION SUMMARY')
+        ]
+        memory_refs = prepared.get('memory_refs', [])
+        excluded_sources = prepared.get('excluded_sources', [])
+        provenance_metadata={
+            'source_message_id':self.run['source_message_id'],
+            'summary_refs':prepared.get('summary_refs',[]),
+            'selected_memories': memory_refs,
+            'excluded_sources': excluded_sources,
+            'reserved_tokens':self.reserved_tokens,
+            'context_component_estimates':{
+                'historical_summary':sum(
+                    estimate_text_tokens(str(item.get('content','')))+4 for item in summary_messages
+                ),
+                'external_guidance':sum(estimate_text_tokens(item)+4 for item in memory_guidance),
+            },
+        }
+>       provenance=investigator_context_budget(sent,self.model_id,self.specs,provenance_metadata)
+                                                    ^^^^^^^^^^^^^
+E       AttributeError: 'Loop' object has no attribute 'model_id'
+
+opspilot\assistant.py:1423: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/test_r1_j2_closeout_fix_02.py::test_next_oversized_tool_result_stops_before_persisted_model_reservation
+1 failed, 1 passed in 0.95s

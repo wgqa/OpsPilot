@@ -573,8 +573,7 @@ def test_trusted_order_material_investigation_uses_current_same_event_and_keeps_
         assert any(
             isinstance(message, HumanMessage)
             and isinstance(message.content, str)
-            and message.content.startswith("ORIGINAL_TASK_INPUT (UNTRUSTED USER INPUT): ")
-            and user_text in message.content
+            and message.content == user_text
             for invocation in model.seen for message in invocation
         )
         assert "升级影响说明草稿" in answer and "未提交" in answer
