@@ -1,6 +1,6 @@
 # R1-J2-LIVE-RECHECK-01
 
-**Execution state:** PAID EXECUTION AUTHORIZED; execution not yet started at this revision.
+**Execution state:** PAID EXECUTION COMPLETED ONCE; result PARTIAL; Campaign STOPPED normally.
 
 ## Frozen journey
 
@@ -33,3 +33,4 @@ The application reservation is a local safety bound, not a provider invoice. The
 - Local fixture HTTP posts prepare only the isolated Demo DB; external business writes are prohibited.
 - No S1/S2 readback is planned unless the new isolated DB itself contains a trusted persisted outcome; otherwise it remains NOT_RUN.
 - No browser automation or main merge is authorized.
+- The single execution ran against source SHA 05632c71d70efe38f7cb48de0854685ef844f1b4. It used 8 Provider sends and ended after J2-02 could not make its post-MCP model call fit the unchanged 12,000-token input limit. See REPORT.md, RESULTS.json, and FAILURES.md.

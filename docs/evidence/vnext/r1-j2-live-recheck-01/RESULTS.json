@@ -1,0 +1,132 @@
+{
+  "campaign_id": "R1-J2-LIVE-RECHECK-01",
+  "execution_source_sha": "05632c71d70efe38f7cb48de0854685ef844f1b4",
+  "branch": "codex/r1-j2-live-recheck-01",
+  "cases_sha256": "6b376a42af376e2076ded691d8000de4baef1b25044cc60914189293a04ee359",
+  "status": "PARTIAL",
+  "campaign_status": "STOPPED",
+  "campaign_stop_reason": "CAMPAIGN_FINISHED",
+  "hard_stop": null,
+  "provider": {
+    "name": "DeepSeek",
+    "model": "deepseek-flash",
+    "model_version": "DeepSeek-V4.1-Flash-1017",
+    "sends_granted": 8,
+    "http_responses": 8,
+    "http_200": 8,
+    "valid_usage": 8,
+    "unknown": 0,
+    "automatic_retries": 0,
+    "manual_resends": 0,
+    "input_tokens": 47750,
+    "output_tokens": 3585,
+    "total_tokens": 51335,
+    "reserved_usd": 5.1648,
+    "settled_application_estimate_usd": 0.018631,
+    "unsettled_unknown_reserve_usd": 0.0,
+    "budget_limit_usd": 8.0
+  },
+  "mcp": {
+    "tools_call_attempts": 9,
+    "successful": 9,
+    "failed": 0
+  },
+  "side_effects": {
+    "external_business_writes": 0,
+    "approvals": 0,
+    "repair": 0,
+    "deliver": 0,
+    "handoff": 0,
+    "browser_automation": 0,
+    "local_fixture_loopback_posts": 2
+  },
+  "session_id": "session-72d8a7a1-0b79-4c45-883c-ed1068a2100e",
+  "task_id": "task-24fd4d2f-620d-45ae-b1a6-6a599d863db8",
+  "cases": [
+    {
+      "id": "J1-01",
+      "status": "PASS",
+      "run_id": "run-6a7d5fdd-8972-4765-8de2-9797c668d7a0",
+      "message_id": "message-f71eec23-4aea-47a5-b9d8-d80e121d258e",
+      "provider_sends": 3,
+      "mcp_calls": 2,
+      "tools": [
+        "list_scoped_protocol_documents",
+        "compare_scoped_protocols"
+      ],
+      "assessment": "Real DeepSeek cited v1.0.0 and v2.0.0 authorized sources and comparison evidence, explained the changed retry criteria, and said static documents do not establish the deployed version."
+    },
+    {
+      "id": "J1-02",
+      "status": "PASS",
+      "run_id": "run-95ae5821-919c-441c-b068-ee04ddd54c83",
+      "message_id": "message-16293c4c-2931-4f58-9168-fe50755b1294",
+      "provider_sends": 1,
+      "mcp_calls": 0,
+      "assessment": "Real DeepSeek used same-Session protocol context, treated the supplied JSON as unverified material, and did not claim the parameters were deployed."
+    },
+    {
+      "id": "J2-01",
+      "status": "FAIL",
+      "run_id": "run-bdd8b069-3b14-4561-bd48-ffec04bee890",
+      "message_id": "message-96ea3e83-a342-4086-88aa-cdbc6deb7e6c",
+      "provider_sends": 3,
+      "mcp_calls": 4,
+      "tools": [
+        "list_scoped_protocol_documents",
+        "search_project_knowledge",
+        "compare_scoped_protocols",
+        "read_scoped_protocol_excerpt"
+      ],
+      "business_tools_called": [],
+      "assessment": "The binding existed and the user explicitly named event-current, but the model requested the Event be specified again and did not call Delivery or Receiver tools."
+    },
+    {
+      "id": "J2-02",
+      "status": "PARTIAL",
+      "run_id": "run-0a56fea6-8363-4510-bc94-ae37e0cbf05f",
+      "message_id": "message-665622e9-7760-46d0-b0bd-1135fb5fde50",
+      "provider_sends": 1,
+      "mcp_calls": 3,
+      "tools": [
+        "get_callback_delivery",
+        "get_receiver_processing",
+        "get_callback_transport_history"
+      ],
+      "mcp_observed": {
+        "event-current": {
+          "delivery": "HTTP 202 / ACKNOWLEDGED",
+          "receiver": "PROCESSED"
+        },
+        "event-previous": {
+          "transport_history": "one historical HTTP 202",
+          "current_receiver_observation": "absent"
+        }
+      },
+      "run_status": "FAILED",
+      "final_model_answer": false,
+      "program_stop": {
+        "error": "ContextBudgetExceeded",
+        "required_tokens": 12199,
+        "input_budget_tokens": 12000
+      },
+      "assessment": "Three MCP observations succeeded, but the post-observation model call was denied before Provider transport. No customer draft was delivered."
+    }
+  ],
+  "j3_j4_readback": "NOT_RUN",
+  "runner_exit_code": 2,
+  "runner_elapsed_seconds": 39.9,
+  "private_evidence_sha256": {
+    "provider_http.jsonl": "6549d240eadc505e9c608cf760a071d69da3af9d3cc53e55ac72fdfdc0dfca4c",
+    "execution.jsonl": "2716893eadb0fb8d0a27d8ee7407fe5f254dd26fdf346c5d8d47f64a0c4ae8fe",
+    "domain.sqlite3": "48da4c4af29caced9db2f93d53d6d15e312163dc27fe2b667d802c43541c4566",
+    "checkpoint.sqlite3": "97310fca2d0bce1f0108656624fcad12cad55c49e37f9d6372cebfc24e191601",
+    "runner_console.txt": "0223a7aefb517b514f9c0d92fbbaf3d460c99d7a50f406cbe48dc4a8c79da12c"
+  },
+  "test_log": "TEST_LOG.txt",
+  "trace": "TRACE.jsonl",
+  "report": "REPORT.md",
+  "cost_ledger": "COST_LEDGER.md",
+  "failures": "FAILURES.md",
+  "r1_engine_closeout": "R1_ENGINE_CLOSEOUT.md"
+}

@@ -1,0 +1,53 @@
+Execution source SHA: 05632c71d70efe38f7cb48de0854685ef844f1b4
+Command 1: python -m pytest -q -vv --basetemp=<unique> tests/test_r1_live_campaign_budget.py -k "r1-j2-recheck or r1_j2_live_recheck_campaign or campaign_uses_public_capacity_reserve"
+Command 2: python -m pytest -q -vv --basetemp=<unique> tests/test_r1_journey_readiness_01.py::test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction
+
+Both commands are offline: the campaign tests use MockTransport; the journey test uses FixtureModel and local loopback only.
+
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\学习\agent新项目\.worktrees\r1-live-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 31 items / 20 deselected / 11 selected
+
+tests/test_r1_live_campaign_budget.py::test_r1_j2_live_recheck_campaign_is_separate_and_enforces_its_own_12_send_cap PASSED [  9%]
+tests/test_r1_live_campaign_budget.py::test_campaign_concurrent_final_slot_is_consumed_atomically[r1-j2-recheck] PASSED [ 18%]
+tests/test_r1_live_campaign_budget.py::test_campaign_uses_public_capacity_reserve_and_refuses_when_pool_budget_is_exhausted PASSED [ 27%]
+tests/test_r1_live_campaign_budget.py::test_campaign_unknown_stops_future_sessions_and_preserves_reservation[mark-r1-j2-recheck] PASSED [ 36%]
+tests/test_r1_live_campaign_budget.py::test_campaign_unknown_stops_future_sessions_and_preserves_reservation[close-r1-j2-recheck] PASSED [ 45%]
+tests/test_r1_live_campaign_budget.py::test_campaign_unknown_stops_future_sessions_and_preserves_reservation[worker_restart-r1-j2-recheck] PASSED [ 54%]
+tests/test_r1_live_campaign_budget.py::test_campaign_missing_usage_response_stops_without_releasing_unknown_reserve[r1-j2-recheck] PASSED [ 63%]
+tests/test_r1_live_campaign_budget.py::test_campaign_known_provider_http_error_stops_future_sends[r1-j2-recheck] PASSED [ 72%]
+tests/test_r1_live_campaign_budget.py::test_campaign_rejects_price_or_capacity_drift_before_send[price_version-r1-j2-recheck] PASSED [ 81%]
+tests/test_r1_live_campaign_budget.py::test_campaign_rejects_price_or_capacity_drift_before_send[campaign_capacity-r1-j2-recheck] PASSED [ 90%]
+tests/test_r1_live_campaign_budget.py::test_formal_worker_campaign_request_is_reserved_before_mock_transport_and_settled[r1-j2-recheck] PASSED [100%]
+
+====================== 11 passed, 20 deselected in 9.11s ======================
+command_1_exit_code=0
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\学习\agent新项目\.worktrees\r1-live-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_r1_journey_readiness_01.py::test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction PASSED [100%]
+
+============================= 1 passed in 10.13s ==============================
+command_2_exit_code=0
+
+Live campaign:
+Execution source SHA: 05632c71d70efe38f7cb48de0854685ef844f1b4
+Private runner: .private/r1-j2-live-recheck-01-20261108/execute_live.py (kept outside Git)
+Command: PowerShell invoked python <private runner> with stdout/stderr redirected to the private runner_console.txt.
+Run count: exactly one.
+Elapsed: 39.9 seconds.
+Process exit code: 2 (business result PARTIAL; not an UNKNOWN transport result).
+Provider: 8 SEND_GRANTED records, 8 HTTP 200 responses, 8 valid Usage settlements.
+MCP: 9 successful tools/call records.
+Campaign state after close: STOPPED / CAMPAIGN_FINISHED.
+Retries or resends: 0.
+The unredacted Provider HTTP response, Domain DB, Checkpoint, and execution log remain private and are indexed by SHA-256 in REPORT.md. The public TRACE contains selected redacted evidence only.
