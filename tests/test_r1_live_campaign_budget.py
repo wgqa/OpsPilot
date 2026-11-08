@@ -16,6 +16,9 @@ from opspilot.domain.assistant_runtime_grant import (
     R1_J2_LIVE_RECHECK_APPLICATION_BUDGET_USD_MICRO,
     R1_J2_LIVE_RECHECK_CAMPAIGN_ID,
     R1_J2_LIVE_RECHECK_PROVIDER_LIMIT,
+    R1_J2_LIVE_RECHECK_02_APPLICATION_BUDGET_USD_MICRO,
+    R1_J2_LIVE_RECHECK_02_CAMPAIGN_ID,
+    R1_J2_LIVE_RECHECK_02_PROVIDER_LIMIT,
     RuntimeGrantError,
     bind_run,
     claim_send,
@@ -26,6 +29,7 @@ from opspilot.domain.assistant_runtime_grant import (
     r1_live_journey_campaign_policy,
     r1_live_journey_02_campaign_policy,
     r1_j2_live_recheck_campaign_policy,
+    r1_j2_live_recheck_02_campaign_policy,
     reserve_dispatch,
     runtime_config_from_env,
     spend_summary,
@@ -263,9 +267,9 @@ def test_r1_j2_live_recheck_campaign_is_separate_and_enforces_its_own_12_send_ca
     with pytest.raises(RuntimeGrantError, match="RUNTIME_CAMPAIGN_POLICY_INVALID"):
         _provision_campaign(
             demo_db, monkeypatch,
-            campaign_policy={**policy, "campaign_id": "R1-J2-LIVE-RECHECK-02"},
+            campaign_policy={**policy, "campaign_id": "R1-J2-LIVE-RECHECK-03"},
             pool_limit=8_000_000,
-            idempotency_key="r1-j2-live-recheck-invalid-old-id",
+            idempotency_key="r1-j2-live-recheck-invalid-new-id",
         )
     with pytest.raises(RuntimeGrantError, match="RUNTIME_CAMPAIGN_POLICY_INVALID"):
         _provision_campaign(
@@ -287,7 +291,6 @@ def test_r1_j2_live_recheck_campaign_is_separate_and_enforces_its_own_12_send_ca
             assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
             _complete_known_response(demo_db, prepared)
         worker.release()
-
         worker = _worker(demo_db)
         campaign = _campaign_row(demo_db)
         assert campaign["campaign_id"] == R1_J2_LIVE_RECHECK_CAMPAIGN_ID
@@ -314,13 +317,59 @@ def test_r1_j2_live_recheck_campaign_is_separate_and_enforces_its_own_12_send_ca
 
 
 @pytest.mark.parametrize(
+    ("policy_factory", "campaign_id", "provider_limit", "application_budget"),
+    [
+        (r1_j2_live_recheck_campaign_policy, R1_J2_LIVE_RECHECK_CAMPAIGN_ID,
+         R1_J2_LIVE_RECHECK_PROVIDER_LIMIT, R1_J2_LIVE_RECHECK_APPLICATION_BUDGET_USD_MICRO),
+        (r1_j2_live_recheck_02_campaign_policy, R1_J2_LIVE_RECHECK_02_CAMPAIGN_ID,
+         R1_J2_LIVE_RECHECK_02_PROVIDER_LIMIT,
+         R1_J2_LIVE_RECHECK_02_APPLICATION_BUDGET_USD_MICRO),
+    ],
+    ids=["recheck-01", "recheck-02"],
+)
+def test_r1_j2_live_recheck_campaign_policy_has_an_independent_12_send_cap(
+    demo_db, monkeypatch, policy_factory, campaign_id, provider_limit, application_budget,
+):
+    policy = policy_factory()
+    assert policy == {
+        "campaign_id": campaign_id,
+        "provider_model_version": "DeepSeek-V4.1-Flash-1017",
+        "public_context_tokens": 1_000_000,
+        "public_max_output_tokens": 384_000,
+        "provider_limit": provider_limit,
+        "per_request_reserve_usd_micro": 645_600,
+        "application_budget_usd_micro": application_budget,
+    }
+    assert provider_limit == 12
+    assert application_budget == 8_000_000
+    _provision_campaign(
+        demo_db, monkeypatch, campaign_policy=policy, pool_limit=application_budget,
+        idempotency_key=f"{campaign_id}-independent-policy-v1",
+    )
+    worker = _worker(demo_db)
+    try:
+        for ordinal in range(1, provider_limit + 1):
+            prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
+            assert prepared[3]["reserved_usd_micro"] == 645_600
+            assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+            _complete_known_response(demo_db, prepared)
+        campaign = _campaign_row(demo_db)
+        assert campaign["campaign_id"] == campaign_id
+        assert campaign["provider_sends_granted"] == provider_limit
+        assert campaign["application_budget_usd_micro"] == application_budget
+    finally:
+        worker.release()
+
+
+@pytest.mark.parametrize(
     ("campaign_policy", "pool_limit", "provider_limit"),
     [
         (r1_live_journey_campaign_policy(), 11_000_000, 16),
         (r1_live_journey_02_campaign_policy(), 8_000_000, 12),
         (r1_j2_live_recheck_campaign_policy(), 8_000_000, 12),
+        (r1_j2_live_recheck_02_campaign_policy(), 8_000_000, 12),
     ],
-    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck"],
+    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck-01", "r1-j2-recheck-02"],
 )
 def test_campaign_concurrent_final_slot_is_consumed_atomically(
     demo_db, monkeypatch, campaign_policy, pool_limit, provider_limit,
@@ -399,8 +448,9 @@ def test_campaign_uses_public_capacity_reserve_and_refuses_when_pool_budget_is_e
         (r1_live_journey_campaign_policy(), 11_000_000),
         (r1_live_journey_02_campaign_policy(), 8_000_000),
         (r1_j2_live_recheck_campaign_policy(), 8_000_000),
+        (r1_j2_live_recheck_02_campaign_policy(), 8_000_000),
     ],
-    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck"],
+    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck-01", "r1-j2-recheck-02"],
 )
 @pytest.mark.parametrize("unknown_transition", ["mark", "close", "worker_restart"])
 def test_campaign_unknown_stops_future_sessions_and_preserves_reservation(
@@ -449,8 +499,9 @@ def test_campaign_unknown_stops_future_sessions_and_preserves_reservation(
         (r1_live_journey_campaign_policy(), 11_000_000),
         (r1_live_journey_02_campaign_policy(), 8_000_000),
         (r1_j2_live_recheck_campaign_policy(), 8_000_000),
+        (r1_j2_live_recheck_02_campaign_policy(), 8_000_000),
     ],
-    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck"],
+    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck-01", "r1-j2-recheck-02"],
 )
 def test_campaign_missing_usage_response_stops_without_releasing_unknown_reserve(
     demo_db, monkeypatch, campaign_policy, pool_limit,
@@ -481,8 +532,9 @@ def test_campaign_missing_usage_response_stops_without_releasing_unknown_reserve
         r1_live_journey_campaign_policy(),
         r1_live_journey_02_campaign_policy(),
         r1_j2_live_recheck_campaign_policy(),
+        r1_j2_live_recheck_02_campaign_policy(),
     ],
-    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck"],
+    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck-01", "r1-j2-recheck-02"],
 )
 def test_campaign_known_provider_http_error_stops_future_sends(demo_db, monkeypatch, campaign_policy):
     _provision_campaign(
@@ -513,8 +565,9 @@ def test_campaign_known_provider_http_error_stops_future_sends(demo_db, monkeypa
         (r1_live_journey_campaign_policy(), 11_000_000),
         (r1_live_journey_02_campaign_policy(), 8_000_000),
         (r1_j2_live_recheck_campaign_policy(), 8_000_000),
+        (r1_j2_live_recheck_02_campaign_policy(), 8_000_000),
     ],
-    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck"],
+    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck-01", "r1-j2-recheck-02"],
 )
 @pytest.mark.parametrize("drift", ["price_version", "campaign_capacity"])
 def test_campaign_rejects_price_or_capacity_drift_before_send(
@@ -557,8 +610,9 @@ def test_campaign_rejects_price_or_capacity_drift_before_send(
         (r1_live_journey_campaign_policy(), "r1-live-journey-01-formal-worker-provision"),
         (r1_live_journey_02_campaign_policy(), "r1-live-journey-02-formal-worker-provision"),
         (r1_j2_live_recheck_campaign_policy(), "r1-j2-live-recheck-formal-worker-provision"),
+        (r1_j2_live_recheck_02_campaign_policy(), "r1-j2-live-recheck-02-formal-worker-provision"),
     ],
-    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck"],
+    ids=["r1-live-01", "r1-live-02", "r1-j2-recheck-01", "r1-j2-recheck-02"],
 )
 def test_formal_worker_campaign_request_is_reserved_before_mock_transport_and_settled(
     demo_db, tmp_path, monkeypatch, campaign_policy, idempotency_key,
