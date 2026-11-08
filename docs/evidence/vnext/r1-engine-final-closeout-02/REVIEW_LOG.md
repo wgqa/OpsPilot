@@ -30,3 +30,10 @@
 
 - Pytest：本轮未运行；本次仅为证据与简历材料整理，引用的测试结果均标明其历史 SHA，不作为当前候选新结果。
 - Provider HTTP：0；MCP：0；Browser：0；外部业务写入：0；main 合并：0。
+
+## 候选发布
+
+- `git push -u origin codex/r1-engine-final-closeout-02`：失败，无法连接 `github.com:443`。
+- GitHub connector `create_blob`：HTTP 403 `Resource not accessible by integration`，未继续使用 API 方式发布。
+- 随后 `git ls-remote origin refs/heads/codex/r1-engine-final-closeout-02 refs/heads/main`：候选 ref 无输出（未创建）；`main` 仍为 `60eee87bfe3cca522011316cb4cd2c0064ad291b`。
+- 需在该 worktree 手动发布时运行：`git push -u origin codex/r1-engine-final-closeout-02`。

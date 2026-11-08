@@ -50,6 +50,8 @@
 
 本次是证据整理，没有运行产品测试：Provider HTTP `0`、MCP `0`、Browser `0`、外部业务写入 `0`。全量 pytest、浏览器验收、R1 新桥接的真实模型 S1/S2 执行仍未完成。细节见 [RESULTS.json](RESULTS.json)。
 
+提交后尝试正常发布隔离分支：`git push -u origin codex/r1-engine-final-closeout-02` 因无法连接 `github.com:443` 失败；随后通过已连接 GitHub 接口创建审计 blob 也收到 HTTP 403 `Resource not accessible by integration`。最终只读核验显示远端候选分支尚不存在，远端 `main` 仍为 `60eee87bfe3cca522011316cb4cd2c0064ad291b`。没有绕过限制。候选保留在本地分支，准确 SHA 见最终交付；手动发布命令记于 [REVIEW_LOG.md](REVIEW_LOG.md)。
+
 ## 六维自检
 
 1. **用户变化：** 本轮不增加产品功能；把已证明的连续真实模型支持旅程与 S1/S2 本地闭环整理成可独立评审、可准确引用的 R1-ENGINE 候选。
