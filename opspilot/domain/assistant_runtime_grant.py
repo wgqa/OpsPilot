@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS assistant_runtime_spends (
   run_id TEXT NOT NULL,
   session_id TEXT NOT NULL,
   source_message_id TEXT NOT NULL,
+  campaign_id TEXT,
   logical_key TEXT NOT NULL,
   request_digest TEXT NOT NULL,
   http_body_digest TEXT,
@@ -117,6 +118,32 @@ CREATE INDEX IF NOT EXISTS ix_assistant_runtime_spends_pool_status
   ON assistant_runtime_spends(pool_id,status);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_assistant_runtime_one_send_per_pool
   ON assistant_runtime_spends(pool_id) WHERE status='SEND_GRANTED';
+CREATE TABLE IF NOT EXISTS assistant_runtime_campaigns (
+  campaign_id TEXT PRIMARY KEY,
+  pool_id TEXT NOT NULL UNIQUE CHECK(pool_id='DEFAULT'),
+  authority_id TEXT NOT NULL,
+  grant_id TEXT NOT NULL,
+  grant_version INTEGER NOT NULL CHECK(grant_version >= 1),
+  model_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  model_config_version TEXT NOT NULL,
+  price_version TEXT NOT NULL,
+  input_rate_micro_per_million INTEGER NOT NULL,
+  output_rate_micro_per_million INTEGER NOT NULL,
+  max_input_tokens INTEGER NOT NULL,
+  max_output_tokens INTEGER NOT NULL,
+  provider_model_version TEXT NOT NULL,
+  public_context_tokens INTEGER NOT NULL,
+  public_max_output_tokens INTEGER NOT NULL,
+  provider_limit INTEGER NOT NULL CHECK(provider_limit > 0),
+  provider_sends_granted INTEGER NOT NULL DEFAULT 0 CHECK(provider_sends_granted >= 0),
+  per_request_reserve_usd_micro INTEGER NOT NULL CHECK(per_request_reserve_usd_micro > 0),
+  application_budget_usd_micro INTEGER NOT NULL CHECK(application_budget_usd_micro > 0),
+  status TEXT NOT NULL CHECK(status IN ('ACTIVE','STOPPED')),
+  stop_reason TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS assistant_runtime_audit (
   audit_id TEXT PRIMARY KEY,
   authority_id TEXT NOT NULL,
@@ -144,6 +171,45 @@ class RuntimeGrantError(RuntimeError):
 POOL_ID = "DEFAULT"
 MAX_PRODUCT_INPUT_TOKENS = 12_000
 MAX_PRODUCT_OUTPUT_TOKENS = 2_048
+
+# Frozen, single-campaign policy for the currently authorized R1 live journey.
+# The regular Runtime Grant path remains unchanged when no campaign row exists.
+R1_LIVE_JOURNEY_CAMPAIGN_ID = "R1-LIVE-JOURNEY-01"
+R1_LIVE_JOURNEY_MODEL_VERSION = "DeepSeek-V4.1-Flash-1017"
+R1_LIVE_JOURNEY_PRICE_VERSION = "DEEPSEEK_FLASH_PEAK_2026-11-08"
+R1_LIVE_JOURNEY_INPUT_RATE_MICRO_PER_MILLION = 300_000
+R1_LIVE_JOURNEY_OUTPUT_RATE_MICRO_PER_MILLION = 1_200_000
+R1_LIVE_JOURNEY_PUBLIC_CONTEXT_TOKENS = 1_000_000
+R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS = 384_000
+R1_LIVE_JOURNEY_PROVIDER_LIMIT = 16
+R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO = 645_600
+R1_LIVE_JOURNEY_APPLICATION_BUDGET_USD_MICRO = 11_000_000
+
+
+def r1_live_journey_campaign_policy() -> dict[str, object]:
+    return {
+        "campaign_id": R1_LIVE_JOURNEY_CAMPAIGN_ID,
+        "provider_model_version": R1_LIVE_JOURNEY_MODEL_VERSION,
+        "public_context_tokens": R1_LIVE_JOURNEY_PUBLIC_CONTEXT_TOKENS,
+        "public_max_output_tokens": R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS,
+        "provider_limit": R1_LIVE_JOURNEY_PROVIDER_LIMIT,
+        "per_request_reserve_usd_micro": R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO,
+        "application_budget_usd_micro": R1_LIVE_JOURNEY_APPLICATION_BUDGET_USD_MICRO,
+    }
+
+
+def migrate_runtime_campaign_schema(connection) -> None:
+    """Additive migration for the existing Runtime Grant spend ledger."""
+    columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(assistant_runtime_spends)").fetchall()
+    }
+    if "campaign_id" not in columns:
+        connection.execute("ALTER TABLE assistant_runtime_spends ADD COLUMN campaign_id TEXT")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS ix_assistant_runtime_spends_campaign_status "
+        "ON assistant_runtime_spends(campaign_id,status)"
+    )
 
 
 def _file_identity(path: str | Path) -> str:
@@ -304,6 +370,97 @@ def _cost_micro(input_tokens, output_tokens, input_rate, output_rate):
     return (numerator + 999_999) // 1_000_000
 
 
+def _validated_r1_campaign_policy(policy):
+    if policy is None:
+        return None
+    if not isinstance(policy, dict) or policy != r1_live_journey_campaign_policy():
+        raise RuntimeGrantError("RUNTIME_CAMPAIGN_POLICY_INVALID")
+    expected_reserve = _cost_micro(
+        R1_LIVE_JOURNEY_PUBLIC_CONTEXT_TOKENS - R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS,
+        R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS,
+        R1_LIVE_JOURNEY_INPUT_RATE_MICRO_PER_MILLION,
+        R1_LIVE_JOURNEY_OUTPUT_RATE_MICRO_PER_MILLION,
+    )
+    if expected_reserve != R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO:
+        raise RuntimeGrantError("RUNTIME_CAMPAIGN_PRICE_BOUND_INVALID")
+    return dict(policy)
+
+
+def _campaign_send_count(connection, campaign_id):
+    row = connection.execute(
+        """SELECT COUNT(*) AS n FROM assistant_runtime_spends
+           WHERE campaign_id=? AND status IN
+             ('SEND_GRANTED','UNKNOWN','RESPONSE_STORED','DELIVERED','VIOLATION','RECONCILED')""",
+        (campaign_id,),
+    ).fetchone()
+    return int(row["n"])
+
+
+def _campaign_binding(connection, grant_snapshot, binding_row):
+    campaign = connection.execute(
+        "SELECT * FROM assistant_runtime_campaigns WHERE pool_id=?", (POOL_ID,),
+    ).fetchone()
+    if campaign is None:
+        return None
+    row = dict(campaign)
+    used = _campaign_send_count(connection, row["campaign_id"])
+    if row["status"] == "STOPPED":
+        raise RuntimeGrantError("RUNTIME_CAMPAIGN_STOPPED")
+    if (
+        row["status"] != "ACTIVE"
+        or row["campaign_id"] != R1_LIVE_JOURNEY_CAMPAIGN_ID
+        or row["authority_id"] != binding_row["authority_id"]
+        or row["grant_id"] != binding_row["grant_id"]
+        or int(row["grant_version"]) != int(binding_row["grant_version"])
+        or row["model_id"] != grant_snapshot.get("model_id")
+        or row["endpoint"] != grant_snapshot.get("endpoint")
+        or row["model_config_version"] != grant_snapshot.get("model_config_version")
+        or row["price_version"] != grant_snapshot.get("price_version")
+        or int(row["input_rate_micro_per_million"]) != int(grant_snapshot.get("input_rate_micro_per_million", -1))
+        or int(row["output_rate_micro_per_million"]) != int(grant_snapshot.get("output_rate_micro_per_million", -1))
+        or int(row["max_input_tokens"]) != MAX_PRODUCT_INPUT_TOKENS
+        or int(row["max_output_tokens"]) != MAX_PRODUCT_OUTPUT_TOKENS
+        or row["model_id"] != "deepseek-flash"
+        or row["price_version"] != R1_LIVE_JOURNEY_PRICE_VERSION
+        or int(row["input_rate_micro_per_million"]) != R1_LIVE_JOURNEY_INPUT_RATE_MICRO_PER_MILLION
+        or int(row["output_rate_micro_per_million"]) != R1_LIVE_JOURNEY_OUTPUT_RATE_MICRO_PER_MILLION
+        or int(row["provider_limit"]) != R1_LIVE_JOURNEY_PROVIDER_LIMIT
+        or row["provider_model_version"] != R1_LIVE_JOURNEY_MODEL_VERSION
+        or int(row["per_request_reserve_usd_micro"]) != R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
+        or int(row["application_budget_usd_micro"]) != R1_LIVE_JOURNEY_APPLICATION_BUDGET_USD_MICRO
+        or int(row["public_context_tokens"]) != R1_LIVE_JOURNEY_PUBLIC_CONTEXT_TOKENS
+        or int(row["public_max_output_tokens"]) != R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS
+        or int(grant_snapshot.get("total_limit_usd_micro", 0)) > int(row["application_budget_usd_micro"])
+        or int(row["provider_sends_granted"]) != used
+        or used > int(row["provider_limit"])
+    ):
+        raise RuntimeGrantError("RUNTIME_CAMPAIGN_CONFIGURATION_STALE")
+    return {
+        "campaign_id": row["campaign_id"],
+        "provider_limit": int(row["provider_limit"]),
+        "per_request_reserve_usd_micro": int(row["per_request_reserve_usd_micro"]),
+        "application_budget_usd_micro": int(row["application_budget_usd_micro"]),
+        "provider_model_version": row["provider_model_version"],
+        "public_context_tokens": int(row["public_context_tokens"]),
+        "public_max_output_tokens": int(row["public_max_output_tokens"]),
+        "price_version": row["price_version"],
+    }
+
+
+def _stop_campaign_for_spend(connection, request_key: str, reason: str) -> None:
+    row = connection.execute(
+        "SELECT campaign_id FROM assistant_runtime_spends WHERE request_key=?",
+        (request_key,),
+    ).fetchone()
+    if row is None or not row["campaign_id"]:
+        return
+    connection.execute(
+        """UPDATE assistant_runtime_campaigns SET status='STOPPED',stop_reason=?,updated_at=?
+           WHERE campaign_id=? AND status='ACTIVE'""",
+        (str(reason)[:120], utc_now(), row["campaign_id"]),
+    )
+
+
 def _effective_spend(connection):
     rows = connection.execute(
         "SELECT status,reserved_usd_micro,settled_usd_micro FROM assistant_runtime_spends WHERE pool_id=?",
@@ -375,7 +532,7 @@ def provision_default_grant(
     input_rate_micro_per_million: int, output_rate_micro_per_million: int,
     max_input_tokens: int, max_output_tokens: int, total_limit_usd_micro: int,
     valid_from: str, expires_at: str, evidence_ref: str, evidence_digest: str,
-    idempotency_key: str,
+    idempotency_key: str, campaign_policy: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Explicit local provisioning. Database initialization never calls this."""
     _validate_evidence(operator_id, grant_source, evidence_ref, evidence_digest, idempotency_key)
@@ -399,6 +556,18 @@ def provision_default_grant(
         raise RuntimeGrantError("RUNTIME_TOKEN_BOUND_INVALID")
     if total_limit_usd_micro <= 0:
         raise RuntimeGrantError("RUNTIME_BUDGET_INVALID")
+    campaign_policy = _validated_r1_campaign_policy(campaign_policy)
+    if campaign_policy is not None:
+        if (
+            model_id.strip() != "deepseek-flash"
+            or price_version.strip() != R1_LIVE_JOURNEY_PRICE_VERSION
+            or input_rate_micro_per_million != R1_LIVE_JOURNEY_INPUT_RATE_MICRO_PER_MILLION
+            or output_rate_micro_per_million != R1_LIVE_JOURNEY_OUTPUT_RATE_MICRO_PER_MILLION
+            or max_input_tokens != MAX_PRODUCT_INPUT_TOKENS
+            or max_output_tokens != MAX_PRODUCT_OUTPUT_TOKENS
+            or total_limit_usd_micro > int(campaign_policy["application_budget_usd_micro"])
+        ):
+            raise RuntimeGrantError("RUNTIME_CAMPAIGN_GRANT_CONFIGURATION_INVALID")
     valid_from = _valid_iso(valid_from, "RUNTIME_GRANT_TIME_INVALID")
     expires_at = _valid_iso(expires_at, "RUNTIME_GRANT_TIME_INVALID")
     if valid_from >= expires_at:
@@ -418,6 +587,7 @@ def provision_default_grant(
             "output_rate_micro_per_million": output_rate_micro_per_million,
             "max_input_tokens": max_input_tokens, "max_output_tokens": max_output_tokens,
             "total_limit_usd_micro": total_limit_usd_micro, "valid_from": valid_from, "expires_at": expires_at,
+            "campaign_policy": campaign_policy,
         }
         if existing_audit:
             if not _audit_replay_matches(
@@ -427,7 +597,24 @@ def provision_default_grant(
             ):
                 raise RuntimeGrantError("RUNTIME_AUDIT_IDEMPOTENCY_CONFLICT")
             row = connection.execute("SELECT * FROM assistant_runtime_default_grant WHERE singleton=1").fetchone()
-            return dict(row) if row else {"status": "PROVISIONED_RECORD_REMOVED"}
+            if row is None:
+                return {"status": "PROVISIONED_RECORD_REMOVED"}
+            campaign = connection.execute(
+                "SELECT * FROM assistant_runtime_campaigns WHERE pool_id=?", (POOL_ID,),
+            ).fetchone()
+            if campaign_policy is None and campaign is not None:
+                raise RuntimeGrantError("RUNTIME_AUDIT_IDEMPOTENCY_CONFLICT")
+            if campaign_policy is not None and (
+                campaign is None
+                or campaign["campaign_id"] != campaign_policy["campaign_id"]
+                or campaign["grant_id"] != row["grant_id"]
+                or int(campaign["grant_version"]) != int(row["version"])
+                or int(campaign["provider_sends_granted"]) != _campaign_send_count(
+                    connection, campaign_policy["campaign_id"],
+                )
+            ):
+                raise RuntimeGrantError("RUNTIME_CAMPAIGN_LEDGER_INVALID")
+            return dict(row)
         if connection.execute("SELECT 1 FROM assistant_runtime_authority WHERE singleton=1").fetchone():
             raise RuntimeGrantError("RUNTIME_DEFAULT_GRANT_ALREADY_PROVISIONED")
         authority_id = "assistant-runtime-authority-" + str(uuid.uuid4())
@@ -453,10 +640,30 @@ def provision_default_grant(
         )
         row = connection.execute("SELECT * FROM assistant_runtime_default_grant WHERE singleton=1").fetchone()
         _write_history(connection, row, total_limit_usd_micro)
+        if campaign_policy is not None:
+            connection.execute(
+                """INSERT INTO assistant_runtime_campaigns
+                   (campaign_id,pool_id,authority_id,grant_id,grant_version,model_id,endpoint,
+                    model_config_version,price_version,input_rate_micro_per_million,
+                    output_rate_micro_per_million,max_input_tokens,max_output_tokens,
+                    provider_model_version,public_context_tokens,public_max_output_tokens,
+                    provider_limit,provider_sends_granted,per_request_reserve_usd_micro,
+                    application_budget_usd_micro,status,stop_reason,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,'ACTIVE',NULL,?,?)""",
+                (campaign_policy["campaign_id"], POOL_ID, authority_id, grant_id, 1,
+                 model_id.strip(), endpoint, model_config_version.strip(), price_version.strip(),
+                 input_rate_micro_per_million, output_rate_micro_per_million,
+                 max_input_tokens, max_output_tokens,
+                 campaign_policy["provider_model_version"], campaign_policy["public_context_tokens"],
+                 campaign_policy["public_max_output_tokens"], campaign_policy["provider_limit"],
+                 campaign_policy["per_request_reserve_usd_micro"],
+                 campaign_policy["application_budget_usd_micro"], now, now),
+            )
         _audit(connection, authority_id=authority_id, grant_id=grant_id, action="PROVISION",
                operator_id=operator_id, source=grant_source, evidence_ref=evidence_ref,
                evidence_digest=evidence_digest, idempotency_key=idempotency_key, request=request,
-               details={"grant_version": 1, "pool_id": POOL_ID, "total_limit_usd_micro": total_limit_usd_micro})
+               details={"grant_version": 1, "pool_id": POOL_ID, "total_limit_usd_micro": total_limit_usd_micro,
+                        "campaign_id": campaign_policy.get("campaign_id") if campaign_policy else None})
         return dict(row)
 
 
@@ -751,7 +958,7 @@ def _binding_from_history(connection, run_row, binding_row):
         snapshot = json.loads(history["snapshot_json"])
     except (TypeError, json.JSONDecodeError) as error:
         raise RuntimeGrantError("RUNTIME_RUN_GRANT_HISTORY_INVALID") from error
-    return {
+    result = {
         **snapshot,
         "run_id": run_row["run_id"], "session_id": run_row["session_id"],
         "task_id": run_row["task_id"], "source_message_id": run_row["source_message_id"],
@@ -760,6 +967,8 @@ def _binding_from_history(connection, run_row, binding_row):
         "database_file_identity": binding_row["database_file_identity"],
         "db_path": str(Path(connection.execute("PRAGMA database_list").fetchone()[2]).resolve()),
     }
+    result["campaign"] = _campaign_binding(connection, snapshot, binding_row)
+    return result
 
 
 def bind_run(path: str | Path, run_id: str, config: dict[str, str]) -> dict[str, object]:
@@ -812,7 +1021,10 @@ def _validate_run_binding_in_transaction(connection, path, run_id, binding):
     if row is None or run is None:
         raise RuntimeGrantError("RUNTIME_RUN_BINDING_MISSING")
     expected = _binding_from_history(connection, dict(run) | {"run_id": run_id}, row)
-    for key in ("grant_id", "grant_version", "authority_id", "database_file_identity", "session_id", "source_message_id", "task_id"):
+    for key in (
+        "grant_id", "grant_version", "authority_id", "database_file_identity",
+        "session_id", "source_message_id", "task_id", "campaign",
+    ):
         if binding.get(key) != expected.get(key):
             raise RuntimeGrantError("RUNTIME_RUN_BINDING_MISMATCH")
     if authority["authority_id"] != binding.get("authority_id"):
@@ -882,6 +1094,22 @@ def reserve_dispatch(path, binding, *, call_id: str, logical_key: str, request_d
             int(grant["max_input_tokens"]), int(grant["max_output_tokens"]),
             int(grant["input_rate_micro_per_million"]), int(grant["output_rate_micro_per_million"]),
         )
+        campaign_id = None
+        campaign = expected.get("campaign")
+        if campaign is not None:
+            campaign_id = str(campaign["campaign_id"])
+            campaign_row = connection.execute(
+                "SELECT * FROM assistant_runtime_campaigns WHERE campaign_id=? AND pool_id=?",
+                (campaign_id, POOL_ID),
+            ).fetchone()
+            if campaign_row is None:
+                raise RuntimeGrantError("RUNTIME_CAMPAIGN_LEDGER_MISSING")
+            used = _campaign_send_count(connection, campaign_id)
+            if used != int(campaign_row["provider_sends_granted"]):
+                raise RuntimeGrantError("RUNTIME_CAMPAIGN_LEDGER_INTEGRITY_ERROR")
+            if used >= int(campaign_row["provider_limit"]):
+                raise RuntimeGrantError("RUNTIME_CAMPAIGN_PROVIDER_LIMIT")
+            reserve = max(reserve, int(campaign_row["per_request_reserve_usd_micro"]))
         try:
             effective = _effective_spend(connection)
         except RuntimeGrantError as error:
@@ -890,16 +1118,18 @@ def reserve_dispatch(path, binding, *, call_id: str, logical_key: str, request_d
             raise
         if effective + reserve > int(pool["total_limit_usd_micro"]):
             raise RuntimeGrantError("RUNTIME_BUDGET_EXHAUSTED")
+        if campaign is not None and effective + reserve > int(campaign["application_budget_usd_micro"]):
+            raise RuntimeGrantError("RUNTIME_CAMPAIGN_BUDGET_EXHAUSTED")
         now = utc_now()
         dispatch_id = "runtime-dispatch-" + str(uuid.uuid4())
         connection.execute(
             """INSERT INTO assistant_runtime_spends
             (dispatch_id,pool_id,authority_id,request_key,assistant_call_id,run_id,session_id,source_message_id,
-             logical_key,request_digest,worker_id,grant_id,grant_version,price_version,input_rate_micro_per_million,
+             campaign_id,logical_key,request_digest,worker_id,grant_id,grant_version,price_version,input_rate_micro_per_million,
              output_rate_micro_per_million,max_input_tokens,max_output_tokens,reserved_usd_micro,status,created_at,updated_at)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',?,?)""",
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'RESERVED',?,?)""",
             (dispatch_id, POOL_ID, authority["authority_id"], request_key, call_id, expected["run_id"],
-             expected["session_id"], expected["source_message_id"], logical_key, request_digest, worker_id,
+             expected["session_id"], expected["source_message_id"], campaign_id, logical_key, request_digest, worker_id,
              grant["grant_id"], grant["version"], grant["price_version"], grant["input_rate_micro_per_million"],
              grant["output_rate_micro_per_million"], grant["max_input_tokens"], grant["max_output_tokens"],
              reserve, now, now),
@@ -970,6 +1200,7 @@ def claim_send(path, binding, *, call_id: str, request_key: str, request_digest:
             or row["source_message_id"] != expected["source_message_id"]
             or row["grant_id"] != expected["grant_id"]
             or int(row["grant_version"]) != int(expected["grant_version"])
+            or row["campaign_id"] != (expected.get("campaign") or {}).get("campaign_id")
         ):
             raise RuntimeGrantError("RUNTIME_CALL_BINDING_MISMATCH")
         if row["assistant_call_id"] != call_id:
@@ -1006,24 +1237,51 @@ def claim_send(path, binding, *, call_id: str, request_key: str, request_digest:
         ).fetchone()
         if active:
             raise RuntimeGrantError("RUNTIME_PROVIDER_CONCURRENCY_LIMIT")
-        connection.execute(
+        campaign = expected.get("campaign")
+        campaign_row = None
+        campaign_used = 0
+        if campaign is not None:
+            campaign_row = connection.execute(
+                "SELECT * FROM assistant_runtime_campaigns WHERE campaign_id=? AND pool_id=?",
+                (campaign["campaign_id"], POOL_ID),
+            ).fetchone()
+            if campaign_row is None or campaign_row["status"] != "ACTIVE":
+                raise RuntimeGrantError("RUNTIME_CAMPAIGN_NOT_ACTIVE")
+            campaign_used = _campaign_send_count(connection, campaign["campaign_id"])
+            if campaign_used != int(campaign_row["provider_sends_granted"]):
+                raise RuntimeGrantError("RUNTIME_CAMPAIGN_LEDGER_INTEGRITY_ERROR")
+            if campaign_used >= int(campaign_row["provider_limit"]):
+                raise RuntimeGrantError("RUNTIME_CAMPAIGN_PROVIDER_LIMIT")
+        updated = connection.execute(
             """UPDATE assistant_runtime_spends SET status='SEND_GRANTED',http_body_digest=?,http_url=?,http_method=?,
                requested_max_output_tokens=?,worker_id=?,send_granted_at=?,updated_at=?
                WHERE request_key=? AND status='RESERVED'""",
             (body_digest, request_url, method.upper(), requested_max_output_tokens, worker_id,
              utc_now(), utc_now(), request_key),
         )
+        if updated.rowcount != 1:
+            raise RuntimeGrantError("RUNTIME_SEND_AUTHORITY_ALREADY_CONSUMED")
+        if campaign_row is not None:
+            consumed = connection.execute(
+                """UPDATE assistant_runtime_campaigns SET provider_sends_granted=provider_sends_granted+1,
+                   updated_at=? WHERE campaign_id=? AND status='ACTIVE' AND provider_sends_granted=?""",
+                (utc_now(), campaign["campaign_id"], campaign_used),
+            )
+            if consumed.rowcount != 1:
+                raise RuntimeGrantError("RUNTIME_CAMPAIGN_LEDGER_INTEGRITY_ERROR")
         return {"action": "SEND"}
 
 
 def mark_unknown(path, request_key: str, error_code: str):
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        connection.execute(
+        updated = connection.execute(
             """UPDATE assistant_runtime_spends SET status='UNKNOWN',error_code=?,completed_at=?,updated_at=?
                WHERE request_key=? AND status='SEND_GRANTED'""",
             (str(error_code)[:120], utc_now(), utc_now(), request_key),
         )
+        if updated.rowcount == 1:
+            _stop_campaign_for_spend(connection, request_key, error_code)
 
 
 def release_not_dispatched(path, request_key: str, reason: str):
@@ -1055,11 +1313,13 @@ def close_unfinished_dispatch(path, request_key: str, reason: str):
             )
             return "NOT_DISPATCHED"
         if status == "SEND_GRANTED":
-            connection.execute(
+            updated = connection.execute(
                 """UPDATE assistant_runtime_spends SET status='UNKNOWN',error_code=?,completed_at=?,updated_at=?
                    WHERE request_key=? AND status='SEND_GRANTED'""",
                 (str(reason)[:120], utc_now(), utc_now(), request_key),
             )
+            if updated.rowcount == 1:
+                _stop_campaign_for_spend(connection, request_key, reason)
             return "UNKNOWN"
         return status
 
@@ -1094,6 +1354,7 @@ def store_response(path, request_key: str, *, status_code: int, headers: dict[st
                    WHERE request_key=? AND status='SEND_GRANTED'""",
                 (status_code, canonical_json(safe_headers), sqlite3.Binary(body), utc_now(), utc_now(), request_key),
             )
+            _stop_campaign_for_spend(connection, request_key, "PROVIDER_USAGE_UNKNOWN")
             return {"replayable": False, "usage_state": "UNKNOWN"}
         actual = _cost_micro(
             values["input_tokens"], values["output_tokens"],
@@ -1113,6 +1374,7 @@ def store_response(path, request_key: str, *, status_code: int, headers: dict[st
                 (actual, canonical_json(values), status_code, canonical_json(safe_headers), sqlite3.Binary(body),
                  completion_id, utc_now(), utc_now(), request_key),
             )
+            _stop_campaign_for_spend(connection, request_key, "PROVIDER_USAGE_EXCEEDED_BOUND")
             return {"replayable": False, "usage_state": "VIOLATION", "actual_usd_micro": actual}
         connection.execute(
             """UPDATE assistant_runtime_spends SET status='RESPONSE_STORED',settled_usd_micro=?,usage_json=?,
@@ -1121,6 +1383,8 @@ def store_response(path, request_key: str, *, status_code: int, headers: dict[st
             (actual, canonical_json(values), status_code, canonical_json(safe_headers), sqlite3.Binary(body),
              completion_id, utc_now(), utc_now(), request_key),
         )
+        if status_code < 200 or status_code >= 300:
+            _stop_campaign_for_spend(connection, request_key, "PROVIDER_HTTP_ERROR")
         return {"replayable": True, "usage_state": "KNOWN", "actual_usd_micro": actual,
                 "completion_id": completion_id}
 
@@ -1182,6 +1446,8 @@ def recover_interrupted_sends(path: str | Path, worker_id: str):
                completed_at=?,updated_at=? WHERE status='SEND_GRANTED' AND worker_id<>?""",
             (utc_now(), utc_now(), worker_id),
         )
+        for row in rows:
+            _stop_campaign_for_spend(connection, str(row["request_key"]), "WORKER_RESTART_AFTER_SEND_GRANT")
         return [str(row["request_key"]) for row in rows]
 
 
