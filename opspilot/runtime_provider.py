@@ -46,6 +46,18 @@ def _usage_from_body(body: bytes):
     return payload.get("usage") if isinstance(payload, dict) else None
 
 
+def _decoded_body_headers(headers):
+    """Drop wire-body framing after HTTPX has decoded a response body."""
+    encoded_representation_headers = {
+        "content-encoding", "content-length", "transfer-encoding",
+    }
+    return {
+        str(name): str(value)
+        for name, value in headers.items()
+        if str(name).lower() not in encoded_representation_headers
+    }
+
+
 def wrap_transports(binding, async_transport, sync_transport):
     """Wrap only the current formal client pair; all grants remain DB-backed."""
 
@@ -79,7 +91,11 @@ def wrap_transports(binding, async_transport, sync_transport):
                     status_code=response.status_code, headers=dict(response.headers),
                     body=response_body, usage=_usage_from_body(response_body),
                 )
-                response_headers = dict(response.headers)
+                # `aread()` returns decoded bytes. Carrying the original
+                # content-encoding/length into a new Response makes HTTPX try
+                # to decode the already-decoded body again (and can surface
+                # as an SDK connection error after a real HTTP 200).
+                response_headers = _decoded_body_headers(response.headers)
                 await response.aclose()
             except BaseException as error:
                 runtime_grant.mark_unknown(
@@ -129,7 +145,7 @@ def wrap_transports(binding, async_transport, sync_transport):
                     status_code=response.status_code, headers=dict(response.headers),
                     body=response_body, usage=_usage_from_body(response_body),
                 )
-                response_headers = dict(response.headers)
+                response_headers = _decoded_body_headers(response.headers)
                 response.close()
             except BaseException as error:
                 runtime_grant.mark_unknown(

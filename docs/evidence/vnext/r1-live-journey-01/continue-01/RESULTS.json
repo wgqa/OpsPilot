@@ -1,0 +1,128 @@
+{
+  "status": "PARTIAL",
+  "candidate_status": "ACCEPTANCE_CANDIDATE",
+  "execution_head": "0f39d1e667d1ec31b0289c897e87f0a975741876",
+  "campaign_id": "R1-LIVE-JOURNEY-01",
+  "campaign_status": "STOPPED",
+  "campaign_stop_reason": "CAMPAIGN_FINISHED",
+  "frozen_cases_sha256": "a668240be2f816e66b39557daab5e58937f264fb258525d04765baf75974bf63",
+  "provider": {
+    "model": "deepseek-flash",
+    "returned_model": "deepseek-flash",
+    "requests_authorized": 16,
+    "requests_sent": 4,
+    "http_statuses": [
+      200,
+      200,
+      200,
+      200
+    ],
+    "automatic_retries": 0,
+    "manual_retries": 0,
+    "provider_unknown_dispatches": 0,
+    "assistant_model_calls_status_unknown": 4,
+    "completion_ids": [
+      "ab262ab0-b2f6-4071-b6e6-f65b19b73677",
+      "946d179b-cff5-4817-90ed-7365b8057889",
+      "4df2dbd1-6798-477e-99ea-b26fb793db9e",
+      "23d7fa13-90cb-4ed8-8266-f6f6f6e2987e"
+    ],
+    "configured_official_model_version": "DeepSeek-V4.1-Flash-1017",
+    "price_version": "DEEPSEEK_FLASH_PEAK_2026-11-08"
+  },
+  "usage": {
+    "input_tokens": 7864,
+    "output_tokens": 461,
+    "total_tokens": 8325,
+    "cache_hit_tokens": 768,
+    "cache_miss_tokens": 7096
+  },
+  "cost": {
+    "per_request_reserve_usd": 0.6456,
+    "total_reserved_usd": 2.5824,
+    "settled_by_runtime_ledger_usd": 0.002914,
+    "remaining_pool_usd": 10.997086,
+    "remaining_campaign_requests_not_reusable": 12,
+    "calculation": "all prompt_tokens at $0.30/M plus completion_tokens at $1.20/M; no cache discount"
+  },
+  "agent": {
+    "tool_calls_proposed": 9,
+    "mcp_tools_call_executed": 0,
+    "observation_count": 0,
+    "successful_final_model_answers": 0,
+    "program_failure_notices": 4
+  },
+  "journeys": {
+    "J1": {
+      "status": "FAIL",
+      "turns": [
+        "J1-01",
+        "J1-02"
+      ],
+      "reason": "Both Provider responses proposed protocol lookup, but Assistant Runs failed before MCP execution or a model answer was persisted."
+    },
+    "J2": {
+      "status": "FAIL",
+      "turns": [
+        "J2-01",
+        "J2-02"
+      ],
+      "reason": "Trusted order binding was created, and the model proposed current-event and correction/history tools, but no MCP call or Observation executed; no customer draft was delivered."
+    },
+    "J3": {
+      "status": "NOT_RUN",
+      "reason": "No trusted S2 result existed in the isolated campaign database."
+    },
+    "J4": {
+      "status": "NOT_RUN",
+      "reason": "No trusted S1 result existed in the isolated campaign database."
+    }
+  },
+  "runs": {
+    "session_count": 1,
+    "task_count": 1,
+    "task_run_count": 4,
+    "failed_runs": 4
+  },
+  "mcp_and_writes": {
+    "fixture_local_http_posts": 2,
+    "s3_transport_fixture_observations": 2,
+    "external_business_writes": 0,
+    "d3_action_intents": 0,
+    "d3_action_ledgers": 0,
+    "d3_delivery_records": 0,
+    "s2_handoff_receipts": 0,
+    "s2_handoff_queue_entries": 0
+  },
+  "browser_runs": 0,
+  "provider_calls_outside_campaign": 0,
+  "main_modified": false,
+  "limitations": [
+    "Provider HTTP 200 and Usage do not constitute a completed Assistant answer.",
+    "Actual response Content-Encoding headers were not preserved in the private trace, so gzip mismatch is a strong candidate cause but not a confirmed cause for these four failures.",
+    "J3/J4 were unavailable from this fresh isolated database."
+  ],
+  "authorization": {
+    "campaign_id": "R1-LIVE-JOURNEY-01",
+    "provider_limit": 16,
+    "application_budget_usd": 11.0,
+    "per_request_reserve_usd": 0.6456,
+    "concurrency_limit": 1,
+    "timeout_seconds": 30,
+    "automatic_retries": 0,
+    "manual_retries": 0,
+    "input_context_limit_tokens": 12000,
+    "max_output_tokens": 2048,
+    "thinking": "disabled",
+    "tool_choice": "auto",
+    "parallel_tool_calls": false
+  },
+  "startup_attempt": {
+    "status": "BLOCKED_BEFORE_PROVIDER_SEND",
+    "error_type": "ModuleNotFoundError",
+    "provider_requests": 0,
+    "grant_or_campaign_db_created": false,
+    "cause": "Private runner had tests/ in sys.path but omitted the isolated worktree root before importing local opspilot package.",
+    "resolution": "Added the isolated worktree root to the private runner path; then executed the single authorized campaign once."
+  }
+}

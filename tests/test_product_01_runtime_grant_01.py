@@ -862,3 +862,91 @@ def test_formal_api_worker_chatopenai_uses_persistent_runtime_grant_and_mock_tra
         assert connection.execute(
             "SELECT COUNT(*) FROM assistant_runtime_spends WHERE assistant_call_id=?", (call_id,)
         ).fetchone()[0] == 1
+
+
+def test_runtime_transport_replays_decoded_gzip_response_with_valid_http_headers(monkeypatch):
+    """A response body read by the ledger wrapper must not retain wire encoding headers."""
+    import asyncio
+    import gzip
+
+    import httpx
+    from opspilot import runtime_provider
+
+    payload = json.dumps({
+        "id": "offline-gzip-completion",
+        "model": "deepseek-flash",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Offline decoded response.",
+            },
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+    }, separators=(",", ":")).encode("utf-8")
+    compressed = gzip.compress(payload)
+
+    class GzipReplyTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            return httpx.Response(
+                200,
+                headers={
+                    "content-type": "application/json",
+                    "content-encoding": "gzip",
+                    "content-length": str(len(compressed)),
+                },
+                content=compressed,
+                request=request,
+            )
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(
+        runtime_provider.runtime_grant,
+        "validate_http_request",
+        lambda *_args: ("body-digest", 2048),
+    )
+    monkeypatch.setattr(
+        runtime_provider.runtime_grant,
+        "claim_send",
+        lambda *_args, **_kwargs: {"action": "SEND"},
+    )
+    monkeypatch.setattr(
+        runtime_provider.runtime_grant,
+        "store_response",
+        lambda *_args, **_kwargs: {"replayable": True, "usage_state": "KNOWN"},
+    )
+    binding = {
+        "run_id": "offline-run-gzip",
+        "db_path": "unused-offline-db",
+        "endpoint": "https://api.deepseek.com/v1",
+    }
+    dispatch = {"request_key": "offline-request-gzip"}
+
+    async def request_through_wrapped_transport():
+        inner = GzipReplyTransport()
+        wrapped_async, wrapped_sync = runtime_provider.wrap_transports(
+            binding, inner, httpx.HTTPTransport(),
+        )
+        try:
+            async with httpx.AsyncClient(
+                transport=wrapped_async, trust_env=False,
+            ) as client:
+                response = await client.post(
+                    "https://api.deepseek.com/v1/chat/completions",
+                    content=b"{}",
+                )
+                return response.json()
+        finally:
+            wrapped_sync.close()
+
+    with runtime_provider.dispatch_context(
+        binding, dispatch, call_id="offline-call-gzip",
+        request_digest="offline-digest", worker_id="offline-worker",
+    ):
+        parsed = asyncio.run(request_through_wrapped_transport())
+
+    assert parsed["id"] == "offline-gzip-completion"
+    assert parsed["usage"]["total_tokens"] == 7
