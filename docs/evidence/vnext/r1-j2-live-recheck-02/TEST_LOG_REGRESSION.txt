@@ -1,0 +1,25 @@
+COMMAND: python -m pytest -q --basetemp .pytest-tmp-r1-j2-live-recheck-02-regression tests/test_r1_j2_closeout_fix_02.py tests/test_ar04c_f01_context_currentness.py tests/test_ar02_context_continuity_01.py tests/test_ar02_assistant.py tests/test_ar02_runtime.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py
+.....F......................................................             [100%]
+================================== FAILURES ===================================
+________ test_zero_tool_followup_can_explain_valid_historical_snapshot ________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-j2-live-recheck-02/.pytest-tmp-r1-j2-live-recheck-02-regression/test_zero_tool_followup_can_ex0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-j2-live-recheck-02/.pytest-tmp-r1-j2-live-recheck-02-regression/test_zero_tool_followup_can_ex0')
+
+    def test_zero_tool_followup_can_explain_valid_historical_snapshot(demo_db, tmp_path):
+        initial, _ = _initial(demo_db, tmp_path)
+        next_run = _followup(demo_db, initial, FROZEN_CASES['user_inputs']['J4'], 'f01-explain')
+        model = ExplainHistoryFixture(mode='explain-history')
+        result, _ = execute(demo_db, next_run, model, tmp_path / 'checkpoint.sqlite3')
+        assert result['status'] == 'SUCCEEDED', result
+        context = _context(model.seen[0])
+        assert context['current_run']['run_id'] == next_run['run_id']
+>       assert context['current_run']['completed_tools'] == []
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'completed_tools'
+
+tests\test_ar04c_f01_context_currentness.py:87: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_f01_context_currentness.py::test_zero_tool_followup_can_explain_valid_historical_snapshot
+1 failed, 59 passed in 81.33s (0:01:21)
+EXIT_CODE: 1
