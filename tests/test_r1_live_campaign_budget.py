@@ -21,6 +21,7 @@ from opspilot.domain.assistant_runtime_grant import (
     mark_unknown,
     provision_default_grant,
     r1_live_journey_campaign_policy,
+    r1_live_journey_02_campaign_policy,
     reserve_dispatch,
     runtime_config_from_env,
     spend_summary,
@@ -39,6 +40,7 @@ from test_product_01_runtime_grant_01 import _configure, _run
 def _provision_campaign(
     db_path, monkeypatch, *, pool_limit=11_000_000,
     idempotency_key="r1-live-journey-01-campaign-provision-v1",
+    campaign_policy=None,
 ):
     _configure(monkeypatch)
     monkeypatch.setenv("OPSPILOT_MODEL_CONFIG_VERSION", "r1-live-config-v1")
@@ -63,7 +65,7 @@ def _provision_campaign(
         evidence_ref="docs/evidence/vnext/r1-live-journey-01/CASES.json",
         evidence_digest="a668240be2f816e66b39557daab5e58937f264fb258525d04765baf75974bf63",
         idempotency_key=idempotency_key,
-        campaign_policy=r1_live_journey_campaign_policy(),
+        campaign_policy=campaign_policy or r1_live_journey_campaign_policy(),
     )
 
 
@@ -182,17 +184,85 @@ def test_campaign_allows_sixteenth_send_and_persistently_rejects_seventeenth_aft
         worker.release()
 
 
-def test_campaign_concurrent_sixteenth_slot_is_consumed_atomically(demo_db, monkeypatch):
-    _provision_campaign(demo_db, monkeypatch)
+def test_r1_live_journey_02_campaign_uses_its_frozen_12_send_and_8_usd_limits(
+    demo_db, monkeypatch,
+):
+    policy = r1_live_journey_02_campaign_policy()
+    assert policy["campaign_id"] == "R1-LIVE-JOURNEY-02"
+    assert policy["provider_limit"] == 12
+    assert policy["application_budget_usd_micro"] == 8_000_000
+    assert policy["per_request_reserve_usd_micro"] == R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
+    for field, value in (
+        ("provider_limit", 13),
+        ("application_budget_usd_micro", 8_500_000),
+        ("per_request_reserve_usd_micro", 600_000),
+    ):
+        with pytest.raises(RuntimeGrantError, match="RUNTIME_CAMPAIGN_POLICY_INVALID"):
+            _provision_campaign(
+                demo_db, monkeypatch, campaign_policy={**policy, field: value},
+                pool_limit=8_000_000,
+            )
+    _provision_campaign(
+        demo_db, monkeypatch, campaign_policy=policy, pool_limit=8_000_000,
+        idempotency_key="r1-live-journey-02-campaign-provision-v1",
+    )
     worker = _worker(demo_db)
     try:
-        for ordinal in range(1, 16):
+        for ordinal in range(1, 13):
+            prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
+            assert prepared[3]["reserved_usd_micro"] == R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
+            assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+            _complete_known_response(demo_db, prepared)
+        worker.release()
+
+        worker = _worker(demo_db)
+        campaign = _campaign_row(demo_db)
+        assert campaign["campaign_id"] == "R1-LIVE-JOURNEY-02"
+        assert campaign["provider_sends_granted"] == 12
+        assert campaign["application_budget_usd_micro"] == 8_000_000
+
+        run = _run(demo_db, "r1-live-journey-02-call-13", worker_id=worker.owner_id)
+        binding = bind_run(demo_db, run["run_id"], runtime_config_from_env())
+        request = {"model_id": "deepseek-flash", "messages": [{"role": "user", "content": "13th"}]}
+        call, fresh = reserve_assistant_call(
+            demo_db, run["run_id"], "MODEL", "answer:13", request, worker.owner_id,
+            runtime_recovery=True,
+        )
+        assert fresh
+        with pytest.raises(RuntimeGrantError, match="RUNTIME_CAMPAIGN_PROVIDER_LIMIT"):
+            reserve_dispatch(
+                demo_db, binding, call_id=call["call_id"], logical_key=call["logical_key"],
+                request_digest=call["request_digest"], worker_id=worker.owner_id,
+            )
+        assert _campaign_row(demo_db)["provider_sends_granted"] == 12
+    finally:
+        worker.release()
+
+
+@pytest.mark.parametrize(
+    ("campaign_policy", "pool_limit", "provider_limit"),
+    [
+        (r1_live_journey_campaign_policy(), 11_000_000, 16),
+        (r1_live_journey_02_campaign_policy(), 8_000_000, 12),
+    ],
+    ids=["r1-live-01", "r1-live-02"],
+)
+def test_campaign_concurrent_final_slot_is_consumed_atomically(
+    demo_db, monkeypatch, campaign_policy, pool_limit, provider_limit,
+):
+    _provision_campaign(
+        demo_db, monkeypatch, campaign_policy=campaign_policy, pool_limit=pool_limit,
+        idempotency_key=f"{campaign_policy['campaign_id']}-concurrency-provision",
+    )
+    worker = _worker(demo_db)
+    try:
+        for ordinal in range(1, provider_limit):
             prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
             _send(demo_db, worker.owner_id, prepared)
             _complete_known_response(demo_db, prepared)
 
-        candidate_a = _reserved_call(demo_db, worker.owner_id, 16)
-        candidate_b = _reserved_call(demo_db, worker.owner_id, 17)
+        candidate_a = _reserved_call(demo_db, worker.owner_id, provider_limit)
+        candidate_b = _reserved_call(demo_db, worker.owner_id, provider_limit + 1)
         barrier = Barrier(2)
 
         def compete(prepared):
@@ -207,11 +277,11 @@ def test_campaign_concurrent_sixteenth_slot_is_consumed_atomically(demo_db, monk
 
         assert results.count("SEND") == 1
         assert sum(result != "SEND" for result in results) == 1
-        assert _campaign_row(demo_db)["provider_sends_granted"] == 16
-        assert _campaign_row(demo_db)["provider_sends_granted"] == 15 + results.count("SEND")
+        assert _campaign_row(demo_db)["provider_sends_granted"] == provider_limit
+        assert _campaign_row(demo_db)["provider_sends_granted"] == provider_limit - 1 + results.count("SEND")
         for prepared in (candidate_a, candidate_b):
             close_unfinished_dispatch(demo_db, prepared[3]["request_key"], "concurrency-loser")
-        assert _campaign_row(demo_db)["provider_sends_granted"] == 16
+        assert _campaign_row(demo_db)["provider_sends_granted"] == provider_limit
     finally:
         worker.release()
 
@@ -244,11 +314,22 @@ def test_campaign_uses_public_capacity_reserve_and_refuses_when_pool_budget_is_e
         worker.release()
 
 
+@pytest.mark.parametrize(
+    ("campaign_policy", "pool_limit"),
+    [
+        (r1_live_journey_campaign_policy(), 11_000_000),
+        (r1_live_journey_02_campaign_policy(), 8_000_000),
+    ],
+    ids=["r1-live-01", "r1-live-02"],
+)
 @pytest.mark.parametrize("unknown_transition", ["mark", "close", "worker_restart"])
 def test_campaign_unknown_stops_future_sessions_and_preserves_reservation(
-    demo_db, monkeypatch, unknown_transition,
+    demo_db, monkeypatch, campaign_policy, pool_limit, unknown_transition,
 ):
-    _provision_campaign(demo_db, monkeypatch)
+    _provision_campaign(
+        demo_db, monkeypatch, campaign_policy=campaign_policy, pool_limit=pool_limit,
+        idempotency_key=f"{campaign_policy['campaign_id']}-unknown-{unknown_transition}",
+    )
     worker = _worker(demo_db)
     prepared = _reserved_call(demo_db, worker.owner_id, 1)
     assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
@@ -268,7 +349,7 @@ def test_campaign_unknown_stops_future_sessions_and_preserves_reservation(
     row = _campaign_row(demo_db)
     assert row["status"] == "STOPPED"
     assert row["provider_sends_granted"] == 1
-    assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == 645_600
+    assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
 
     worker.release()
     restarted = _worker(demo_db)
@@ -277,15 +358,26 @@ def test_campaign_unknown_stops_future_sessions_and_preserves_reservation(
         with pytest.raises(RuntimeGrantError, match="RUNTIME_CAMPAIGN_STOPPED"):
             bind_run(demo_db, run["run_id"], runtime_config_from_env())
         assert _campaign_row(demo_db)["provider_sends_granted"] == 1
-        assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == 645_600
+        assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
     finally:
         restarted.release()
 
 
+@pytest.mark.parametrize(
+    ("campaign_policy", "pool_limit"),
+    [
+        (r1_live_journey_campaign_policy(), 11_000_000),
+        (r1_live_journey_02_campaign_policy(), 8_000_000),
+    ],
+    ids=["r1-live-01", "r1-live-02"],
+)
 def test_campaign_missing_usage_response_stops_without_releasing_unknown_reserve(
-    demo_db, monkeypatch,
+    demo_db, monkeypatch, campaign_policy, pool_limit,
 ):
-    _provision_campaign(demo_db, monkeypatch)
+    _provision_campaign(
+        demo_db, monkeypatch, campaign_policy=campaign_policy, pool_limit=pool_limit,
+        idempotency_key=f"{campaign_policy['campaign_id']}-missing-usage",
+    )
     worker = _worker(demo_db)
     try:
         prepared = _reserved_call(demo_db, worker.owner_id, 1)
@@ -296,7 +388,7 @@ def test_campaign_missing_usage_response_stops_without_releasing_unknown_reserve
         )
         assert result["usage_state"] == "UNKNOWN"
         assert _campaign_row(demo_db)["status"] == "STOPPED"
-        assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == 645_600
+        assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
         assert _campaign_row(demo_db)["provider_sends_granted"] == 1
     finally:
         worker.release()
@@ -321,18 +413,32 @@ def test_campaign_known_provider_http_error_stops_future_sends(demo_db, monkeypa
         worker.release()
 
 
+@pytest.mark.parametrize(
+    ("campaign_policy", "pool_limit"),
+    [
+        (r1_live_journey_campaign_policy(), 11_000_000),
+        (r1_live_journey_02_campaign_policy(), 8_000_000),
+    ],
+    ids=["r1-live-01", "r1-live-02"],
+)
 @pytest.mark.parametrize("drift", ["price_version", "campaign_capacity"])
-def test_campaign_rejects_price_or_capacity_drift_before_send(demo_db, monkeypatch, drift):
+def test_campaign_rejects_price_or_capacity_drift_before_send(
+    demo_db, monkeypatch, campaign_policy, pool_limit, drift,
+):
     from opspilot.domain.database import initialize
 
-    _provision_campaign(demo_db, monkeypatch)
+    _provision_campaign(
+        demo_db, monkeypatch, campaign_policy=campaign_policy, pool_limit=pool_limit,
+        idempotency_key=f"{campaign_policy['campaign_id']}-drift-{drift}",
+    )
     if drift == "price_version":
         monkeypatch.setenv("OPSPILOT_MODEL_PRICE_VERSION", "unexpected-rates")
     else:
         with connect(demo_db) as connection:
             connection.execute(
                 "UPDATE assistant_runtime_campaigns SET public_max_output_tokens=383_999 "
-                "WHERE campaign_id='R1-LIVE-JOURNEY-01'"
+                "WHERE campaign_id=?",
+                (campaign_policy["campaign_id"],),
             )
         initialize(demo_db)
 
@@ -350,14 +456,26 @@ def test_campaign_rejects_price_or_capacity_drift_before_send(demo_db, monkeypat
         ).fetchone()[0] == 0
 
 
+@pytest.mark.parametrize(
+    ("campaign_policy", "idempotency_key"),
+    [
+        (r1_live_journey_campaign_policy(), "r1-live-journey-01-formal-worker-provision"),
+        (r1_live_journey_02_campaign_policy(), "r1-live-journey-02-formal-worker-provision"),
+    ],
+    ids=["r1-live-01", "r1-live-02"],
+)
 def test_formal_worker_campaign_request_is_reserved_before_mock_transport_and_settled(
-    demo_db, tmp_path, monkeypatch,
+    demo_db, tmp_path, monkeypatch, campaign_policy, idempotency_key,
 ):
     from fastapi.testclient import TestClient
     from opspilot.assistant import create_assistant_model
     from opspilot.web.app import create_app
 
-    _provision_campaign(demo_db, monkeypatch)
+    _provision_campaign(
+        demo_db, monkeypatch, campaign_policy=campaign_policy,
+        pool_limit=int(campaign_policy["application_budget_usd_micro"]),
+        idempotency_key=idempotency_key,
+    )
     monkeypatch.setenv("OPSPILOT_ASSISTANT_RUNTIME_ENABLED", "1")
     monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
@@ -382,7 +500,7 @@ def test_formal_worker_campaign_request_is_reserved_before_mock_transport_and_se
             ).fetchone()
         assert spend["status"] == "SEND_GRANTED"
         assert spend["reserved_usd_micro"] == 645_600
-        assert spend["campaign_id"] == "R1-LIVE-JOURNEY-01"
+        assert spend["campaign_id"] == campaign_policy["campaign_id"]
         assert campaign["provider_sends_granted"] == 1
         observed.append(wire)
         return httpx.Response(200, headers={"x-request-id": "offline-campaign-request"}, json={

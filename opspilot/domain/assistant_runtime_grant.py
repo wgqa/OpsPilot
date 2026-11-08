@@ -172,8 +172,8 @@ POOL_ID = "DEFAULT"
 MAX_PRODUCT_INPUT_TOKENS = 12_000
 MAX_PRODUCT_OUTPUT_TOKENS = 2_048
 
-# Frozen, single-campaign policy for the currently authorized R1 live journey.
-# The regular Runtime Grant path remains unchanged when no campaign row exists.
+# Frozen, campaign-specific policies for authorized R1 live journeys. The
+# regular Runtime Grant path remains unchanged when no campaign row exists.
 R1_LIVE_JOURNEY_CAMPAIGN_ID = "R1-LIVE-JOURNEY-01"
 R1_LIVE_JOURNEY_MODEL_VERSION = "DeepSeek-V4.1-Flash-1017"
 R1_LIVE_JOURNEY_PRICE_VERSION = "DEEPSEEK_FLASH_PEAK_2026-11-08"
@@ -184,6 +184,12 @@ R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS = 384_000
 R1_LIVE_JOURNEY_PROVIDER_LIMIT = 16
 R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO = 645_600
 R1_LIVE_JOURNEY_APPLICATION_BUDGET_USD_MICRO = 11_000_000
+
+# Separate frozen policy template for the follow-up journey. This does not
+# grant authority or reopen the stopped R1-LIVE-JOURNEY-01 Campaign.
+R1_LIVE_JOURNEY_02_CAMPAIGN_ID = "R1-LIVE-JOURNEY-02"
+R1_LIVE_JOURNEY_02_PROVIDER_LIMIT = 12
+R1_LIVE_JOURNEY_02_APPLICATION_BUDGET_USD_MICRO = 8_000_000
 
 
 def r1_live_journey_campaign_policy() -> dict[str, object]:
@@ -196,6 +202,29 @@ def r1_live_journey_campaign_policy() -> dict[str, object]:
         "per_request_reserve_usd_micro": R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO,
         "application_budget_usd_micro": R1_LIVE_JOURNEY_APPLICATION_BUDGET_USD_MICRO,
     }
+
+
+def r1_live_journey_02_campaign_policy() -> dict[str, object]:
+    return {
+        "campaign_id": R1_LIVE_JOURNEY_02_CAMPAIGN_ID,
+        "provider_model_version": R1_LIVE_JOURNEY_MODEL_VERSION,
+        "public_context_tokens": R1_LIVE_JOURNEY_PUBLIC_CONTEXT_TOKENS,
+        "public_max_output_tokens": R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS,
+        "provider_limit": R1_LIVE_JOURNEY_02_PROVIDER_LIMIT,
+        "per_request_reserve_usd_micro": R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO,
+        "application_budget_usd_micro": R1_LIVE_JOURNEY_02_APPLICATION_BUDGET_USD_MICRO,
+    }
+
+
+def _campaign_policy_for_id(campaign_id: str) -> dict[str, object] | None:
+    policies = (
+        r1_live_journey_campaign_policy(),
+        r1_live_journey_02_campaign_policy(),
+    )
+    for policy in policies:
+        if policy["campaign_id"] == campaign_id:
+            return policy
+    return None
 
 
 def migrate_runtime_campaign_schema(connection) -> None:
@@ -373,15 +402,18 @@ def _cost_micro(input_tokens, output_tokens, input_rate, output_rate):
 def _validated_r1_campaign_policy(policy):
     if policy is None:
         return None
-    if not isinstance(policy, dict) or policy != r1_live_journey_campaign_policy():
+    if not isinstance(policy, dict):
+        raise RuntimeGrantError("RUNTIME_CAMPAIGN_POLICY_INVALID")
+    expected_policy = _campaign_policy_for_id(str(policy.get("campaign_id", "")))
+    if expected_policy is None or policy != expected_policy:
         raise RuntimeGrantError("RUNTIME_CAMPAIGN_POLICY_INVALID")
     expected_reserve = _cost_micro(
-        R1_LIVE_JOURNEY_PUBLIC_CONTEXT_TOKENS - R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS,
-        R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS,
+        int(expected_policy["public_context_tokens"]) - int(expected_policy["public_max_output_tokens"]),
+        int(expected_policy["public_max_output_tokens"]),
         R1_LIVE_JOURNEY_INPUT_RATE_MICRO_PER_MILLION,
         R1_LIVE_JOURNEY_OUTPUT_RATE_MICRO_PER_MILLION,
     )
-    if expected_reserve != R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO:
+    if expected_reserve != int(expected_policy["per_request_reserve_usd_micro"]):
         raise RuntimeGrantError("RUNTIME_CAMPAIGN_PRICE_BOUND_INVALID")
     return dict(policy)
 
@@ -404,11 +436,12 @@ def _campaign_binding(connection, grant_snapshot, binding_row):
         return None
     row = dict(campaign)
     used = _campaign_send_count(connection, row["campaign_id"])
+    policy = _campaign_policy_for_id(str(row["campaign_id"]))
     if row["status"] == "STOPPED":
         raise RuntimeGrantError("RUNTIME_CAMPAIGN_STOPPED")
     if (
-        row["status"] != "ACTIVE"
-        or row["campaign_id"] != R1_LIVE_JOURNEY_CAMPAIGN_ID
+        policy is None
+        or row["status"] != "ACTIVE"
         or row["authority_id"] != binding_row["authority_id"]
         or row["grant_id"] != binding_row["grant_id"]
         or int(row["grant_version"]) != int(binding_row["grant_version"])
@@ -424,12 +457,12 @@ def _campaign_binding(connection, grant_snapshot, binding_row):
         or row["price_version"] != R1_LIVE_JOURNEY_PRICE_VERSION
         or int(row["input_rate_micro_per_million"]) != R1_LIVE_JOURNEY_INPUT_RATE_MICRO_PER_MILLION
         or int(row["output_rate_micro_per_million"]) != R1_LIVE_JOURNEY_OUTPUT_RATE_MICRO_PER_MILLION
-        or int(row["provider_limit"]) != R1_LIVE_JOURNEY_PROVIDER_LIMIT
-        or row["provider_model_version"] != R1_LIVE_JOURNEY_MODEL_VERSION
-        or int(row["per_request_reserve_usd_micro"]) != R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
-        or int(row["application_budget_usd_micro"]) != R1_LIVE_JOURNEY_APPLICATION_BUDGET_USD_MICRO
-        or int(row["public_context_tokens"]) != R1_LIVE_JOURNEY_PUBLIC_CONTEXT_TOKENS
-        or int(row["public_max_output_tokens"]) != R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS
+        or int(row["provider_limit"]) != int(policy["provider_limit"])
+        or row["provider_model_version"] != policy["provider_model_version"]
+        or int(row["per_request_reserve_usd_micro"]) != int(policy["per_request_reserve_usd_micro"])
+        or int(row["application_budget_usd_micro"]) != int(policy["application_budget_usd_micro"])
+        or int(row["public_context_tokens"]) != int(policy["public_context_tokens"])
+        or int(row["public_max_output_tokens"]) != int(policy["public_max_output_tokens"])
         or int(grant_snapshot.get("total_limit_usd_micro", 0)) > int(row["application_budget_usd_micro"])
         or int(row["provider_sends_granted"]) != used
         or used > int(row["provider_limit"])
