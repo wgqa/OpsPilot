@@ -191,6 +191,13 @@ R1_LIVE_JOURNEY_02_CAMPAIGN_ID = "R1-LIVE-JOURNEY-02"
 R1_LIVE_JOURNEY_02_PROVIDER_LIMIT = 12
 R1_LIVE_JOURNEY_02_APPLICATION_BUDGET_USD_MICRO = 8_000_000
 
+# Separate frozen policy for the one authorized J1→J2 recheck. It has its own
+# campaign identity and database/Grant at execution time; the older stopped
+# campaigns remain immutable and cannot be selected as aliases.
+R1_J2_LIVE_RECHECK_CAMPAIGN_ID = "R1-J2-LIVE-RECHECK-01"
+R1_J2_LIVE_RECHECK_PROVIDER_LIMIT = 12
+R1_J2_LIVE_RECHECK_APPLICATION_BUDGET_USD_MICRO = 8_000_000
+
 
 def r1_live_journey_campaign_policy() -> dict[str, object]:
     return {
@@ -216,10 +223,23 @@ def r1_live_journey_02_campaign_policy() -> dict[str, object]:
     }
 
 
+def r1_j2_live_recheck_campaign_policy() -> dict[str, object]:
+    return {
+        "campaign_id": R1_J2_LIVE_RECHECK_CAMPAIGN_ID,
+        "provider_model_version": R1_LIVE_JOURNEY_MODEL_VERSION,
+        "public_context_tokens": R1_LIVE_JOURNEY_PUBLIC_CONTEXT_TOKENS,
+        "public_max_output_tokens": R1_LIVE_JOURNEY_PUBLIC_MAX_OUTPUT_TOKENS,
+        "provider_limit": R1_J2_LIVE_RECHECK_PROVIDER_LIMIT,
+        "per_request_reserve_usd_micro": R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO,
+        "application_budget_usd_micro": R1_J2_LIVE_RECHECK_APPLICATION_BUDGET_USD_MICRO,
+    }
+
+
 def _campaign_policy_for_id(campaign_id: str) -> dict[str, object] | None:
     policies = (
         r1_live_journey_campaign_policy(),
         r1_live_journey_02_campaign_policy(),
+        r1_j2_live_recheck_campaign_policy(),
     )
     for policy in policies:
         if policy["campaign_id"] == campaign_id:
