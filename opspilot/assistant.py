@@ -864,7 +864,19 @@ SYSTEM='''你是专业技术支持助手。保留用户的工作目标、日志�
 
 
 def _assistant_failure_notice(error: BaseException) -> str | None:
-    """Return user-safe program text for known connection failures only."""
+    """Describe provider dispatch outcomes without confusing known usage with UNKNOWN."""
+    code = getattr(error, "_opspilot_failure_code", None) or getattr(error, "code", None)
+    if code == "ASSISTANT_PROVIDER_NOT_SENT":
+        return "模型请求未越过发送授权边界，本次没有发送 Provider 请求，解释未完成；系统不会自动重试。"
+    if code == "ASSISTANT_PROVIDER_RESPONSE_PROCESSING_FAILED":
+        return "Provider 响应已保存且 Usage 已记账，但 Assistant 未能处理该响应，本次解释未完成；系统不会自动重试。"
+    if code == "ASSISTANT_PROVIDER_USAGE_VIOLATION":
+        return "Provider 已返回响应，但 Usage 超出已批准费用边界；系统已停止并保留账本记录，本次解释未完成，且不会自动重试。"
+    if code == "ASSISTANT_PROVIDER_RESULT_UNKNOWN":
+        return (
+            "Provider 发送结果或 Usage 尚无法确认；未决预留保持保留，"
+            "本次解释未完成，系统不会自动重试。"
+        )
     connection_errors = {
         "OpenAIConnectionError", "APIConnectionError", "ConnectError", "ConnectTimeout",
         "ReadTimeout", "WriteTimeout", "RemoteProtocolError",
@@ -880,6 +892,17 @@ def _assistant_failure_notice(error: BaseException) -> str | None:
             )
         current = current.__cause__ or current.__context__
     return None
+
+
+def _exception_type_chain(error: BaseException, limit: int = 8) -> list[str]:
+    result: list[str] = []
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen and len(result) < limit:
+        seen.add(id(current))
+        result.append(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    return result
 
 
 def _close_terminal_assistant_failure(
@@ -1307,6 +1330,64 @@ class Loop(AgentMiddleware):
             raise TaskControlError('ASSISTANT_MEMORY_MANIFEST_INVALID')
         self._assert_memories_current(selected_memories)
 
+    def _record_runtime_model_failure(self, call, runtime_dispatch, error):
+        from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch
+
+        state = (
+            close_unfinished_dispatch(
+                self.path, str(runtime_dispatch["request_key"]), type(error).__name__,
+            )
+            if runtime_dispatch is not None else "MISSING"
+        )
+        if state in {"RESPONSE_STORED", "DELIVERED"}:
+            call_status = "FAILED"
+            failure_code = "ASSISTANT_PROVIDER_RESPONSE_PROCESSING_FAILED"
+            response_known = True
+            usage_state = "KNOWN"
+        elif state == "VIOLATION":
+            call_status = "FAILED"
+            failure_code = "ASSISTANT_PROVIDER_USAGE_VIOLATION"
+            response_known = True
+            usage_state = "KNOWN_BUT_OVER_BOUND"
+        elif state == "NOT_DISPATCHED":
+            call_status = "FAILED"
+            failure_code = "ASSISTANT_PROVIDER_NOT_SENT"
+            response_known = False
+            usage_state = "NOT_APPLICABLE"
+        else:
+            call_status = "UNKNOWN"
+            failure_code = "ASSISTANT_PROVIDER_RESULT_UNKNOWN"
+            response_known = False
+            usage_state = "UNKNOWN"
+
+        domain.finish(
+            self.path,
+            call["call_id"],
+            call_status,
+            {
+                "error": failure_code,
+                "runtime_dispatch_state": state,
+                "provider_response_known": response_known,
+                "usage_state": usage_state,
+                "provider_error_type": type(error).__name__,
+                "cause_types": _exception_type_chain(error),
+            },
+        )
+        try:
+            setattr(error, "_opspilot_failure_code", failure_code)
+        except Exception:
+            pass
+        self.trace(
+            "model_runtime_failure",
+            call_id=call["call_id"],
+            status=call_status,
+            dispatch_state=state,
+            reason=failure_code,
+            provider_response_known=response_known,
+            usage_state=usage_state,
+            cause_types=_exception_type_chain(error),
+        )
+
     async def awrap_model_call(self,request,handler):
         prepared,payload=self.context()
         # The native tool messages are retained; refresh trusted context before
@@ -1470,21 +1551,7 @@ class Loop(AgentMiddleware):
         except Exception as error:
             from opspilot.domain.episodic_memory import ContextAssetInvalidated
             if self.runtime_grant_binding is not None:
-                from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch
-                state = (
-                    close_unfinished_dispatch(self.path, str(runtime_dispatch['request_key']), type(error).__name__)
-                    if runtime_dispatch is not None else 'MISSING'
-                )
-                call_status = 'FAILED' if state in {'MISSING','NOT_DISPATCHED','VIOLATION'} else 'UNKNOWN'
-                domain.finish(
-                    self.path, call['call_id'], call_status,
-                    {'error': getattr(error,'code',type(error).__name__), 'runtime_dispatch_state': state},
-                )
-                self.trace(
-                    'model_runtime_failure', call_id=call['call_id'],
-                    status=call_status, dispatch_state=state,
-                    reason=getattr(error,'code',type(error).__name__),
-                )
+                self._record_runtime_model_failure(call, runtime_dispatch, error)
             elif isinstance(error, ContextAssetInvalidated) and not send_started:
                 domain.finish(
                     self.path, call['call_id'], 'FAILED',
@@ -1518,16 +1585,7 @@ class Loop(AgentMiddleware):
             raise
         except BaseException as error:
             if self.runtime_grant_binding is not None:
-                from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch
-                state = (
-                    close_unfinished_dispatch(self.path, str(runtime_dispatch['request_key']), type(error).__name__)
-                    if runtime_dispatch is not None else 'MISSING'
-                )
-                call_status = 'FAILED' if state in {'MISSING','NOT_DISPATCHED','VIOLATION'} else 'UNKNOWN'
-                domain.finish(
-                    self.path, call['call_id'], call_status,
-                    {'error': getattr(error,'code',type(error).__name__), 'runtime_dispatch_state': state},
-                )
+                self._record_runtime_model_failure(call, runtime_dispatch, error)
             else:
                 if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS and send_started:
                     _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
