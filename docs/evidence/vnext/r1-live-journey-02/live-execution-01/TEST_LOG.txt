@@ -1,0 +1,15 @@
+R1-LIVE-JOURNEY-02 evidence validation
+Branch: codex/r1-live-journey-02
+Execution HEAD: e7f99d3817af273ecab81e2b1fd3c9ddd38ab346
+Provider sends already executed under authorization: 7
+External business writes: 0
+
+Inherited offline regression: ../TEST_LOG.txt
+Recorded command: python -m pytest -q --basetemp=.pytest-tmp-r1-live-02-final tests/test_r1_live_campaign_budget.py tests/test_r1_live_failure_closeout.py tests/test_product_01_runtime_grant_01.py::test_runtime_transport_replays_decoded_gzip_response_with_valid_http_headers
+Recorded result: 30 passed in 26.00s, exit code 0. Exact tested HEAD is not recorded; not counted as fresh regression for this live closeout.
+
+Current private runner syntax: python -m py_compile <private>/execute_live.py <private>/continue_live.py — PASS, exit code 0; compilation sends no requests.
+
+Evidence consistency validator: PASS. Python standard-library script read Domain SQLite in read-only mode and validated RESULTS.json, all TRACE.jsonl records, four persisted turns/answers, seven Provider sends, seven HTTP 200 responses with Usage, five OK MCP calls with tool_call_id matching a real model proposal, zero UNKNOWN, zero VIOLATION, matching artifact SHA-256 values, clean credential-pattern scan, and consistent campaign/spend totals. Domain audit had 14 local Session/Message/Task/Run/Answer outbox events; D3 ActionLedger, D3 DeliveryRecord and S2 HandoffReceipt counts were all zero. This is artifact validation, not product regression.
+
+Full pytest after live Campaign: NOT_RUN. No production source changed in this live evidence closeout.
