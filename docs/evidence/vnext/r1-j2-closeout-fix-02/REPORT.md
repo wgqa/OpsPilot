@@ -5,7 +5,7 @@ Base：`ebc9a7b31e4e6acc899af39fa37fc23c953980ff`
 分支：`codex/r1-j2-closeout-fix-02`
 本轮范围：F1 Event 查询语义呈现、F2 工具观察后的 Context 超限。真实 Provider、浏览器、外部业务写入均为 0；未合并 main。
 
-基线规范已从该 Base 实际读取：North Star Blob `43dabda468506717c6956e676dfad4304c4f38e6`，AGENTS Blob `807b928686a4dd2cac7b15b3c354b9943c93c910`，Review Skill Blob `d405c8d413d633824b279202cc1503dab4cf0b03`；冻结 `CASES.json` Blob 为 `320bab6afc5668c675455d370e6a3ded51119b08`。远端本轮无法核验：`git ls-remote` 连接 `github.com:443` 超时，故标记 `REMOTE_UNVERIFIED`，不虚构远端 SHA。
+基线规范已从该 Base 实际读取：North Star Blob `43dabda468506717c6956e676dfad4304c4f38e6`，AGENTS Blob `807b928686a4dd2cac7b15b3c354b9943c93c910`，Review Skill Blob `d405c8d413d633824b279202cc1503dab4cf0b03`；冻结 `CASES.json` Blob 为 `320bab6afc5668c675455d370e6a3ded51119b08`。GitHub API 只读核实远端基线分支为 `ebc9a7b31e4e6acc899af39fa37fc23c953980ff`、`main` 为 `60eee87bfe3cca522011316cb4cd2c0064ad291b`，新候选分支当时不存在。终端 Git transport 到 `github.com:443` 失败；GitHub 连接器的创建 Blob 写请求返回 403 `Resource not accessible by integration`，所以候选尚未发布，远端候选 SHA 不存在。
 
 ## 用户旅程证据
 
@@ -49,6 +49,6 @@ Base：`ebc9a7b31e4e6acc899af39fa37fc23c953980ff`
 3. **观察驱动：** `event-current` 的 PROCESSED 与纠错后 `event-previous` 只有历史传输、缺少当前 Receiver Observation，离线旅程输出不同且有限的结论。
 4. **约束双向检查：** 没有新增权限 Gate。合法同订单查询可继续，跨订单拒绝；预算内三条 Observation 可送往下一轮，真实超额样本在 Provider 预留前停止。
 5. **责任归属和简化：** F1 修在现有 Context 装配；F2 修在已有 Observation 投影。完整审计仍保留，模型输入只省去与 ToolMessage 重复的元数据；没有移除来源有效性、撤权或 TTL 检查。
-6. **证据与停止线：** 冻结旧 Gold/Trace/账本；本轮 Provider HTTP=0、外部写入=0、浏览器未运行。定向回归完成后停止。下一次真实复验须单独授权；建议保留至少 12 次请求的上限以覆盖四轮任务和工具后的回答，但不得视为本轮授权。
+6. **证据与停止线：** 冻结旧 Gold/Trace/账本；本轮 Provider HTTP=0、外部写入=0、浏览器未运行。定向回归完成后停止。下一次真实复验粗估 9–12 次请求：旧旅程用掉 8 次，J2-02 至少还缺一次观察后的最终模型答复；F1 可能减少旧的冗余查询，但不把节省计入保证值。12 次只是建议上限，不是本轮授权。
 
 本结论仅为实施方 `ACCEPTANCE_CANDIDATE`。R1-ENGINE 原裁决仍为 HOLD，是否接受修复由主 Agent 独立决定。
