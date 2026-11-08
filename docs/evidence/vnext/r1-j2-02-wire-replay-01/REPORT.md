@@ -16,7 +16,7 @@
 - AGENTS Blob：`807b928686a4dd2cac7b15b3c354b9943c93c910`
 - Review Skill Blob：`d405c8d413d633824b279202cc1503dab4cf0b03`
 - 当前本地工作分支基线：`codex/r1-j2-02-wire-replay-01@04560543afa5f6df54fe63f858ea206733559ad9`
-- 远端状态：`REMOTE_UNVERIFIED`；本次 GitHub HTTPS 连接失败，未能读取远端 refs。
+- 开工时远端读取：`REMOTE_UNVERIFIED`；初次 GitHub HTTPS 连接失败。
 
 ## 原始材料与可恢复性
 
@@ -48,3 +48,7 @@
 - 原 Campaign、原 Claim、原数据库、原 Trace、首次 PARTIAL 和冻结 Gold：未修改。
 
 实施状态为 `ACCEPTANCE_CANDIDATE`，结论仅为本次无法执行。没有重复样本，不得据此判定表达问题是偶发或稳定。
+
+## 发布核验
+
+候选已推送到 `codex/r1-j2-02-wire-replay-01`。推送后 `git ls-remote` 核实远端分支 SHA 与候选 HEAD 一致，远端 `main` 仍为 `60eee87bfe3cca522011316cb4cd2c0064ad291b`。最终候选 SHA 在交付消息中列出。
