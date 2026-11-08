@@ -102,6 +102,10 @@ def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
              if item.get("role") == "user"),
             "",
         )
+        system_text = "\n".join(
+            _message_content(item.get("content")) for item in messages
+            if item.get("role") == "system"
+        )
         prior_tool_names: list[str] = []
         names_by_call_id: dict[str, str] = {}
         for item in messages:
@@ -171,6 +175,8 @@ def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
             )
             action = {"answer": answer}
         elif "event-current" in user_text and "event-previous" not in user_text:
+            assert "同一 TaskBinding 订单内，用户明确指定的 Event ID 是只读查询目标" in system_text
+            assert "不同 Event ID 本身不等同于更换受信订单或资源绑定" in system_text
             delivery = tool_results.get("get_callback_delivery")
             receiver = tool_results.get("get_receiver_processing")
             if delivery is None:
@@ -191,6 +197,9 @@ def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
                 )
                 action = {"answer": answer}
         elif "event-previous" in user_text and "更正" in user_text:
+            assert "准确区分已完成、正在发生和建议后续执行" in system_text
+            assert "没有实际动作回执时，后续核查、联系接收方或创建工单必须写成建议" in system_text
+            assert "不得声称已经启动、正在执行、已指派人员或承诺反馈" in system_text
             history = tool_results.get("get_callback_transport_history")
             if history is None:
                 assert "get_callback_transport_history" in tool_names
@@ -206,7 +215,8 @@ def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
                 )
                 answer = (
                     "更正后的 event-previous 有 HTTP 202 投递记录，但该历史材料不是当前 Receiver 处理状态；"
-                    "目前不能确认它已完成。以下是未提交的客户说明草稿，需补查该 Event 的当前接收方状态。"
+                    "目前没有取得该 Event 的当前 Receiver 记录，目前不能确认它已完成。"
+                    "以下是未提交的客户说明草稿：建议向接收方核实该 Event 的最终处理状态。"
                 )
                 action = {"answer": answer}
         else:
@@ -339,6 +349,9 @@ def test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction(
         assert "event-current" in answers[bound["message_id"]] and "PROCESSED" in answers[bound["message_id"]]
         assert "event-previous" in answers[corrected["message_id"]]
         assert "目前不能确认它已完成" in answers[corrected["message_id"]]
+        assert "建议向接收方核实" in answers[corrected["message_id"]]
+        assert "正在进一步核实" not in answers[corrected["message_id"]]
+        assert "取得结果后会第一时间同步" not in answers[corrected["message_id"]]
         run_cores = [
             client.get(f"/api/runs/{item['run_id']}", headers=headers).json()["execution_core"]
             for item in (j1_protocol, j1_material, bound, corrected)

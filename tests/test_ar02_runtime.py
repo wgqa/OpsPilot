@@ -14,6 +14,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from opspilot.assistant import run_assistant
 from opspilot.domain.database import connect
 from opspilot.domain.s3 import prepare_s3_fixture
+from opspilot.domain.s3_history import prepare_transport_history_fixture
 from opspilot.domain.task_control import create_session,admit_task_message,create_task_with_initial_run,trusted_identity,claim_task_run,register_worker_owner
 
 class FixtureModel(BaseChatModel):
@@ -32,8 +33,9 @@ class FixtureModel(BaseChatModel):
             names=['get_order_status','get_callback_delivery','get_receiver_processing']
             if len(results)<3:name=names[len(results)];args={'reason':'核查当前绑定订单与同事件处理状态'}
         elif self.mode=='mixed':
-            if not results:name='get_callback_transport_history';args={'event_id':'event-outside','reason':'核对用户提供的事件，拒绝越域后仍继续合法目标'}
-            elif len(results)==1:name='get_order_status';args={'reason':'完成合法本订单查询'}
+            if not results:name='get_callback_transport_history';args={'event_id':'event-other-order','reason':'验证属于另一订单的事件会被拒绝'}
+            elif len(results)==1:name='get_callback_transport_history';args={'event_id':'event-in-bound','reason':'查询当前绑定订单内用户指定的事件'}
+            elif len(results)==2:name='get_order_status';args={'reason':'验证越域拒绝后仍可完成合法本订单查询'}
         if name:
             msg=AIMessage(content='',tool_calls=[{'name':name,'args':args,'id':'fixture-call-'+str(len(results))}])
         else:
@@ -49,7 +51,7 @@ class FixtureModel(BaseChatModel):
             elif self.mode=='business':
                 last=json.loads(results[-1].content)
                 text='本 Run 当前事实：'+json.dumps(last.get('facts'),ensure_ascii=False)+'；同事件 202 不是 PROCESSED。'
-            elif self.mode=='mixed':text='越域读取被拒绝；已继续查询合法订单：'+results[-1].content
+            elif self.mode=='mixed':text='跨范围 Event 查询被拒绝；同一绑定订单内的目标 Event 历史已查询，随后也完成了合法订单读取。'
             msg=AIMessage(content=text)
         msg.usage_metadata={'input_tokens':10,'output_tokens':5,'total_tokens':15}
         return ChatResult(generations=[ChatGeneration(message=msg)])
@@ -107,11 +109,23 @@ def test_knowledge_then_bound_investigation_same_session(demo_db,tmp_path):
         assert c.execute('SELECT control_revision FROM task_controls WHERE task_id=?',(second['task_id'],)).fetchone()[0]==0
 
 def test_mixed_scope_denial_retains_legal_query(demo_db,tmp_path):
-    prepare_s3_fixture(demo_db,'PROCESSING',order_id='ar02-order',contract_version=2)
-    created=setup_run(demo_db,'查 event-outside 别的订单，再查本订单','mixed',bind=True)
+    prepare_transport_history_fixture(
+        demo_db,order_id='ar02-order',contract_version=2,
+        attempts=[{'event_id':'event-in-bound','http_status':202}],
+    )
+    prepare_transport_history_fixture(
+        demo_db,order_id='another-order',contract_version=2,
+        attempts=[{'event_id':'event-other-order','http_status':202}],
+    )
+    created=setup_run(demo_db,'查询绑定订单内 event-in-bound，并验证跨范围目标会被拒绝','mixed',bind=True)
     result,events=execute(demo_db,created,FixtureModel(mode='mixed'),tmp_path/'cp.sqlite3')
     assert result['status']=='SUCCEEDED',result
-    assert any(e['event']=='tool_error' for e in events)
+    denied=[e for e in events if e['event']=='tool_error']
+    assert len(denied)==1 and 'S3_EVENT_NOT_AVAILABLE_WITHIN_BOUND_ORDER' in denied[0]['reason']
+    in_scope=[e for e in events if e['event']=='tool_observation' and e['name']=='get_callback_transport_history']
+    assert len(in_scope)==1
+    assert in_scope[0]['result']['facts']['requested_event_id']=='event-in-bound'
+    assert in_scope[0]['result']['facts']['attempts'][0]['event_id']=='event-in-bound'
     assert any(e['event']=='tool_observation' and e['name']=='get_order_status' for e in events)
 
 def test_worker_default_does_not_construct_paid_provider(demo_db,tmp_path):

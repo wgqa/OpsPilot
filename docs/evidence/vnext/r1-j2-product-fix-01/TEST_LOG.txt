@@ -1,0 +1,26 @@
+R1-J2-PRODUCT-FIX-01 offline verification
+
+Baseline: fa2777948c4e1749aca987d17d016696c47c7ff4
+Branch: codex/r1-j2-product-fix-01
+
+RED (before production prompt/tool-description changes)
+Command:
+  $env:PYTHONPATH=(Get-Location).Path; python -m pytest -q -s --basetemp .pytest-tmp-r1-j2-red tests/test_r1_journey_readiness_01.py::test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction
+Result: FAIL, exit 1. New contract assertion failed because the actual prompt did not distinguish an Event query within the trusted TaskBinding from a resource-binding change. The MockTransport assertion terminated the deterministic run before an answer. Provider HTTP=0.
+
+GREEN 1 (final run after the scope-negative fixture was upgraded to a real second order)
+Command:
+  $env:PYTHONPATH=(Get-Location).Path; python -m pytest -q -s --basetemp .pytest-tmp-r1-j2-final-a tests/test_r1_journey_readiness_01.py::test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction tests/test_ar02_runtime.py::test_mixed_scope_denial_retains_legal_query
+Result: 2 passed, exit 0. Proved current bound Event delivery/receiver reads, corrected Event history read, evidence/Event separation, false-followup-negative language, out-of-scope Event refusal, and continuation with legal in-scope reads. MockTransport sent 9 synthetic completions; external Provider HTTP=0, protected business write counts=0.
+
+GREEN 2
+Command:
+  $env:PYTHONPATH=(Get-Location).Path; python -m pytest -q -s --basetemp .pytest-tmp-r1-j2-regression tests/test_ar02_runtime.py::test_knowledge_then_bound_investigation_same_session tests/test_ar02_runtime.py::test_concept_without_task_and_reopen_history
+Result: 2 passed, exit 0. Proved ordinary no-Task explanation/history and unbound Knowledge followed by a trusted bound read remain usable.
+
+Private Runner predicate (offline, no Campaign execution)
+Command: Python import of private execute_live.py and helper assertions against captured private J1-01 rows and synthetic positive/negative rows; followed by python -m py_compile <private execute_live.py>.
+Result: passed. Captured successful unbound Knowledge MCP calls: 2; old predicate accepted 0; corrected predicate accepted 2. Refused Knowledge with no evidence rejected; task-bound business MCP missing Evidence/Observation rejected; task-bound business MCP with both accepted. Provider HTTP=0. Historical DB was not opened by this check.
+
+Test environment note
+Bare `pytest` did not put the repository root on Python import path. `python -m pytest` fixed module discovery. The shared default Windows pytest temp root also denied enumeration; each verification used a new, task-specific `--basetemp`. Pre-existing `.pytest-tmp-r1-live-*` directories were not touched.
