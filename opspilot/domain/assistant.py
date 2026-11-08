@@ -767,7 +767,7 @@ def history_sources(connection,run):
 
 
 def source_context_for_model(payload):
-    """Present source time clearly; retain the full source ledger in audit metadata."""
+    """Present source time clearly and share only exact, same-scope history summaries."""
     context = dict(payload)
     source_current = payload['current_run']
     observations = [
@@ -798,20 +798,35 @@ def source_context_for_model(payload):
         '没有新观察时，可以解释旧结果或说明当前未知，不能声称本轮已重读。'
     )
     history = []
+    summary_owners = {}
+    reused_summary_count = 0
     for prior in payload.get('history_sources', []):
         valid = prior['current_source_valid']
         snapshots = []
         for source in prior['sources'] if valid else []:
-            snapshots.append({
-                'summary': source['summary'],
-                'reference': {
-                    'source_run_id': prior['run_id'],
-                    **{key: source.get(key) for key in (
-                        'call_id', 'observation_id', 'evidence_id', 'result_digest',
-                        'observed_at', 'completed_at',
-                    )},
-                },
-            })
+            reference = {
+                'source_run_id': prior['run_id'],
+                **{key: source.get(key) for key in (
+                    'call_id', 'observation_id', 'evidence_id', 'result_digest',
+                    'observed_at', 'completed_at',
+                )},
+            }
+            snapshot = {'reference': reference}
+            summary = source['summary']
+            reuse_key = _historical_summary_reuse_key(summary)
+            if reuse_key is not None and reuse_key in summary_owners:
+                # Keep each call's own source link while avoiding a second copy
+                # of exactly identical historical content in the model input.
+                snapshot['summary_reused_from'] = summary_owners[reuse_key]
+                reused_summary_count += 1
+            else:
+                snapshot['summary'] = summary
+                if reuse_key is not None:
+                    summary_owners[reuse_key] = {
+                        'source_run_id': prior['run_id'],
+                        'call_id': source.get('call_id'),
+                    }
+            snapshots.append(snapshot)
         history.append({
             'source_run_id': prior['run_id'],
             'reference_scope': 'HISTORICAL_SNAPSHOT_NOT_REQUERIED' if valid else 'EXCLUDED_HISTORY',
@@ -820,4 +835,20 @@ def source_context_for_model(payload):
             'omitted_source_count': prior.get('omitted_source_count', 0),
         })
     context['history_sources'] = history
+    if reused_summary_count:
+        context['history_summary_reuse_guide'] = (
+            'summary_reused_from 指向本上下文中更早出现的历史快照；只有摘要正文及 '
+            'session/project/grant/scope 摘要完全一致时才省略重复正文。每条快照仍保留自己的 '
+            'Run、call、Observation、Evidence、Digest 和时间引用；所有这些仍是历史资料，不是本轮新观察。'
+        )
     return context
+
+
+def _historical_summary_reuse_key(summary):
+    """Only reuse byte-identical summary content within an explicit trusted scope."""
+    if not isinstance(summary, dict):
+        return None
+    scope_keys = ('session_id', 'project_id', 'grant_version', 'scope_digest')
+    if any(summary.get(key) is None for key in scope_keys):
+        return None
+    return tuple(summary[key] for key in scope_keys) + (digest_json(summary),)
