@@ -48,3 +48,9 @@
 原始脱敏前的完整 HTTP 请求/响应、Domain SQLite、Checkpoint、完整执行 Trace 和控制台日志留在私有目录：`D:\学习\agent新项目\.private\r1-live-journey-01-continue-01-20261108`。密钥从环境文件读取但从未输出、复制或提交。公开 `PROVIDER_HTTP.jsonl` 只保留核验所需字段，不含 Authorization 值、完整 System Prompt 或工具 Schema。私有文件 SHA-256 与公开 Trace/账本关联记录在本目录的测试日志末尾。
 
 本报告未改写原始 [`../REPORT.md`](../REPORT.md)、原始费用失败记录、Gold 或 Trace。实施方仅提交 `ACCEPTANCE_CANDIDATE`，等待主 Agent 独立验收。
+
+## 简历与面试材料（仅陈述已证实内容）
+
+**简历表述建议：** 为 OpsPilot 统一 Assistant 接入持久化 Runtime Grant 费用与请求次数保护；在正式 FastAPI/Worker 调用链中验证发送前预算预留、跨 Run 额度计数和 UNKNOWN 停止，并通过 HTTPX MockTransport 复现、修复压缩响应头重建缺陷，相关回归 44/44 通过。真实 DeepSeek Campaign 收到 4 次 HTTP 200 并保存有效 Usage，但 Assistant 在工具执行前失败，因此不将本次描述为完成了连续技术支持调查。
+
+**面试展开点：** 区分 Provider HTTP 成功、SDK 响应解码、Agent 工具执行和用户任务完成；说明如何在保留 UNKNOWN 不重试的前提下定位传输包装层问题，以及为何 gzip 缺陷虽已被离线复现修复，却不能在缺少真实响应编码头和异常 cause chain 时被断言为本次线上失败的确定根因。
