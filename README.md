@@ -254,6 +254,10 @@ D6 仅有 5 次真实模型 smoke 尝试，不是十个独立 benchmark 样本�
 - 本地可信操作者注册表、业务 API、fixture 与 SQLite 仅用于演示，不代表生产 IAM 或客户系统。D3 通过本地事务与跨进程 CLI 演示首次正确闭环。
 - D4 已用真实 OS 子进程验证 ActionIntent、REPAIR、冻结报告和 DELIVER 在提交/检查点边界进程退出后的幂等恢复，并覆盖计划取消/替换竞争、并发重复提交和未知终态阻断；D5 在同一本地 SQLite Demo Domain 中加入一类人工管理的 Episodic Memory、单一版本化 Skill 和模型调用来源台账。这些证据不代表生产 IAM 或分布式存储保证。向量记忆、Memory 自动总结、其他 Skill、多 Agent、Redis、S2/S3 与前端仍不在当前实现范围。
 
+## R1 所有者本地试用
+
+Windows 本地试用代码、隔离数据路径、初始化/启动/停止脚本和 Provider 限制见 [R1 用户试用指南](docs/user-demo/USER_GUIDE.md) 与 [环境变量和数据地图](docs/user-demo/ENVIRONMENT_MAP.md)。本试用工作树和运行数据与历史 Campaign 隔离。
+
 ## 文档与评审历史
 
 - [冻结基线](docs/baseline/v1.0-implementation-baseline.md) 是唯一有效的架构与验收合同。
