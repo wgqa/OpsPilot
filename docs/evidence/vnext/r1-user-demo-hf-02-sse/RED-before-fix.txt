@@ -1,0 +1,46 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\r1-user-demo-hf02-sse
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_r1_user_demo_hf02_sse.py::test_open_sse_streams_end_when_isolated_windows_api_shuts_down open_sse_shutdown_elapsed_seconds=6.007
+FAILED
+
+================================== FAILURES ===================================
+_______ test_open_sse_streams_end_when_isolated_windows_api_shuts_down ________
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-user-demo-hf02-sse/.runtime/hf02-pytest-tmp/test_open_sse_streams_end_when0')
+
+    def test_open_sse_streams_end_when_isolated_windows_api_shuts_down(tmp_path: Path) -> None:
+        process, db_path, _checkpoint, stop_path, port_value = _start_api(tmp_path)
+        port = port_value
+        clients: list[httpx.Client] = []
+        responses: list[httpx.Response] = []
+        try:
+            client, session_id = _client(port)
+            clients.append(client)
+            for _ in range(2):
+                response = client.send(client.build_request(
+                    "GET", f"/api/sessions/{session_id}/events?after=0", headers={"Origin": ORIGIN},
+                ), stream=True)
+                responses.append(response)
+                assert response.status_code == 200
+                iterator = response.iter_bytes()
+                first = next(iterator)
+                assert b"id: 1" in first and b"SESSION_CREATED" in first
+                setattr(response, "_sse_iterator", iterator)
+
+            time.sleep(0.25)
+            elapsed, output = _request_stop(process, stop_path)
+            print(f"open_sse_shutdown_elapsed_seconds={elapsed:.3f}")
+            if output is None:
+>               raise AssertionError(f"API remained alive {elapsed:.3f}s after shutdown while SSE clients stayed connected")
+E               AssertionError: API remained alive 6.007s after shutdown while SSE clients stayed connected
+
+tests\test_r1_user_demo_hf02_sse.py:93: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_r1_user_demo_hf02_sse.py::test_open_sse_streams_end_when_isolated_windows_api_shuts_down - AssertionError: API remained alive 6.007s after shutdown while SSE clients stayed connected
+============================= 1 failed in 15.57s ==============================
