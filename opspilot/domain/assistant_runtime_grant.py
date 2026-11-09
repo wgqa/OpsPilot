@@ -1256,7 +1256,8 @@ def validate_http_request(request_url: str, method: str, body: bytes, binding: d
 
 
 def claim_send(path, binding, *, call_id: str, request_key: str, request_digest: str, body_digest: str,
-               request_url: str, method: str, requested_max_output_tokens: int, worker_id: str):
+               request_url: str, method: str, requested_max_output_tokens: int, worker_id: str,
+               worker_epoch: int):
     """Atomically acquire the one-use Provider send authority or return a saved response."""
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -1294,6 +1295,35 @@ def claim_send(path, binding, *, call_id: str, request_key: str, request_digest:
                     "body": bytes(row["response_body"]), "completion_id": row["completion_id"]}
         if row["status"] != "RESERVED":
             raise RuntimeGrantError("RUNTIME_EXTERNAL_RESULT_UNKNOWN")
+        if type(worker_epoch) is not int or worker_epoch < 1:
+            raise RuntimeGrantError("RUNTIME_WORKER_FENCE_REQUIRED")
+        from opspilot.domain.task_control import (
+            TaskControlError, _assert_worker_fence, assert_task_control_in_transaction,
+        )
+
+        try:
+            _assert_worker_fence(connection, worker_id, worker_epoch)
+        except TaskControlError as error:
+            raise RuntimeGrantError(error.code) from error
+        current_run = connection.execute(
+            """SELECT r.status,r.task_id,r.tenant_id,r.expected_control_revision,a.core
+               FROM task_runs AS r JOIN assistant_runs AS a ON a.run_id=r.run_id
+               WHERE r.run_id=?""",
+            (expected["run_id"],),
+        ).fetchone()
+        if current_run is None or current_run["core"] != "ASSISTANT_V1":
+            raise RuntimeGrantError("RUNTIME_ASSISTANT_RUN_INVALID")
+        if current_run["task_id"] is not None:
+            try:
+                assert_task_control_in_transaction(
+                    connection, str(current_run["tenant_id"]), str(current_run["task_id"]),
+                    current_run["expected_control_revision"], run_id=str(expected["run_id"]),
+                    allow_completed=True,
+                )
+            except TaskControlError as error:
+                raise RuntimeGrantError(error.code) from error
+        elif str(current_run["status"]) != "RUNNING":
+            raise RuntimeGrantError("RUNTIME_RUN_NOT_ACTIVE")
         try:
             _, _, grant = _current_grant(connection, path, runtime_config_from_env())
         except RuntimeGrantError as error:

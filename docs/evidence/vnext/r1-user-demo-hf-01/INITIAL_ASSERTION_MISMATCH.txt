@@ -1,0 +1,39 @@
+F...                                                                     [100%]
+================================== FAILURES ===================================
+_____ test_user_demo_launcher_separates_browser_origin_from_api_upstream ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-user-demo-01/.runtime/user-demo-hf01-green-initial/test_user_demo_launcher_separa0/domain.sqlite3')
+
+    def test_user_demo_launcher_separates_browser_origin_from_api_upstream(demo_db):
+        """The Vite page origin is trusted while the API remains only the proxy target."""
+        from fastapi.testclient import TestClient
+        from opspilot.web.app import create_app
+    
+        launcher = (ROOT / "scripts" / "user-demo" / "Start-UserDemo.ps1").read_text(encoding="utf-8")
+        web_assignment = re.search(r"OPSPILOT_WEB_ORIGIN\s*=\s*'([^']+)'", launcher)
+        api_assignment = re.search(r"OPSPILOT_API_ORIGIN\s*=\s*'([^']+)'", launcher)
+        assert web_assignment and web_assignment.group(1) == WEB_ORIGIN
+        assert api_assignment and api_assignment.group(1) == API_ORIGIN
+    
+        vite_config = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
+        assert "target: process.env.OPSPILOT_API_ORIGIN" in vite_config
+        assert "port: 5173" in vite_config
+    
+        app = create_app(
+            db_path=demo_db, start_worker=False, credentials=PASSWORDS,
+            expected_origin=web_assignment.group(1),
+        )
+        with TestClient(app) as client:
+            rejected_login = client.post(
+                "/api/auth/login", headers={"Origin": API_ORIGIN},
+                json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+            )
+            assert rejected_login.status_code == 403
+>           assert rejected_login.json()["detail"] == "ORIGIN_REJECTED"
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           KeyError: 'detail'
+
+tests\test_r1_user_demo_hf_01.py:39: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_r1_user_demo_hf_01.py::test_user_demo_launcher_separates_browser_origin_from_api_upstream
+1 failed, 3 passed in 13.17s

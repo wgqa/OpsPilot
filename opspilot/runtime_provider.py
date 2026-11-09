@@ -14,13 +14,14 @@ _DISPATCH = contextvars.ContextVar("opspilot_runtime_provider_dispatch", default
 
 
 @contextmanager
-def dispatch_context(binding, dispatch, *, call_id, request_digest, worker_id):
+def dispatch_context(binding, dispatch, *, call_id, request_digest, worker_id, worker_epoch):
     value = {
         "binding": binding,
         "dispatch": dispatch,
         "call_id": call_id,
         "request_digest": request_digest,
         "worker_id": worker_id,
+        "worker_epoch": worker_epoch,
     }
     token = _DISPATCH.set(value)
     try:
@@ -77,6 +78,7 @@ def wrap_transports(binding, async_transport, sync_transport):
                 request_digest=context["request_digest"], body_digest=body_digest,
                 request_url=str(request.url), method=request.method,
                 requested_max_output_tokens=output_cap, worker_id=context["worker_id"],
+                worker_epoch=context["worker_epoch"],
             )
             if permit["action"] == "REPLAY":
                 return httpx.Response(
@@ -131,6 +133,7 @@ def wrap_transports(binding, async_transport, sync_transport):
                 request_digest=context["request_digest"], body_digest=body_digest,
                 request_url=str(request.url), method=request.method,
                 requested_max_output_tokens=output_cap, worker_id=context["worker_id"],
+                worker_epoch=context["worker_epoch"],
             )
             if permit["action"] == "REPLAY":
                 return httpx.Response(

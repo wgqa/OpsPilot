@@ -490,7 +490,7 @@ def test_pool_resume_preserves_unknown_reservation_and_revalidates_balance(
             demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
             request_digest=digest_json(request), body_digest=body_digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=output_cap, worker_id=worker.owner_id,
+            requested_max_output_tokens=output_cap, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         mark_unknown(demo_db, dispatch["request_key"], "offline-unknown-fixture")
 
@@ -558,7 +558,7 @@ def test_pool_resume_refuses_usage_bound_violation(demo_db, monkeypatch):
             demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
             request_digest=digest_json(request), body_digest=body_digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=output_cap, worker_id=worker.owner_id,
+            requested_max_output_tokens=output_cap, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         body = json.dumps({
             "id": "offline-bound-violation",

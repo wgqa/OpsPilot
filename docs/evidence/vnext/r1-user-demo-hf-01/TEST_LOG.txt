@@ -1,0 +1,50 @@
+Repository worktree: D:\学习\agent新项目\.worktrees\r1-user-demo-01
+Base: 20c12276045e6a68e8de029f71c64a0cc90e2c3e
+Branch: codex/r1-user-demo-hf-01
+All commands used isolated basetemp directories and offline fixtures/MockTransport.
+
+Final changed-slice verification (includes final Origin + CSRF assertions):
+  python -m pytest -q tests/test_r1_user_demo_hf_01.py --basetemp='.runtime/user-demo-hf01-new-final'
+  exit 0; 4 passed in 11.57s
+  Raw output: NEW_SLICE_GREEN.txt
+
+Ordered relevant regression after fixing the test fixture epoch:
+  python -m pytest -x -vv tests/test_r1_user_demo_hf_01.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py tests/test_r1_live_campaign_budget.py --basetemp='.runtime/user-demo-hf01-ordered-regression'
+  exit 0; 78 passed in 58.33s
+  Raw output: ORDERED_REGRESSION_GREEN.txt
+
+Additional completed runs:
+  python -m pytest -q tests/test_product_01_runtime_grant_01.py --basetemp='.runtime/user-demo-hf01-runtime-grant-rerun'
+  exit 0; 19 passed in 12.92s
+  Raw output: RUNTIME_GRANT_GREEN.txt
+
+  python -m pytest -q tests/test_product_01_runtime_grant_01_hf01.py --basetemp='.runtime/user-demo-hf01-legacy-rerun'
+  exit 0; 13 passed in 7.75s
+  Raw output: LEGACY_ISOLATION_GREEN.txt
+
+  python -m pytest -q tests/test_r1_live_campaign_budget.py --basetemp='.runtime/user-demo-hf01-campaign-rerun'
+  exit 0; 42 passed in 33.32s
+  Raw output: CAMPAIGN_BUDGET_GREEN.txt
+
+  python -m pytest -q tests/test_ar04a_context_journey_01.py::test_ar04a_invalidated_summary_is_not_sent_to_the_model --basetemp='.runtime/user-demo-hf01-context-rerun'
+  exit 0; 1 passed in 13.04s
+  Raw output: EXISTING_CONTEXT_GREEN.txt
+
+  python -m pytest -q tests/test_r1_user_demo_hf_01.py tests/test_r1_journey_readiness_01.py tests/test_r1_live_failure_closeout.py --basetemp='.runtime/user-demo-hf01-final-targeted'
+  exit 0; 14 passed in 31.82s
+  Raw output: FINAL_TARGETED_GREEN.txt
+
+Initial interrupted combined attempt:
+  python -m pytest -q tests/test_r1_user_demo_hf_01.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py tests/test_r1_live_campaign_budget.py tests/test_ar04a_context_journey_01.py::test_ar04a_invalidated_summary_is_not_sent_to_the_model --basetemp='.runtime/user-demo-hf01-regression'
+  exit 1 after interruption; 2 fixture failures were visible and the final context case did not finish. This run is not counted as a pass.
+  Raw partial output: INTERRUPTED_COMBINED_RUN.txt
+
+Static verification:
+  python -m compileall -q opspilot/assistant.py opspilot/domain/assistant_runtime_grant.py opspilot/runtime_provider.py opspilot/web/worker.py tests/test_r1_user_demo_hf_01.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py tests/test_r1_live_campaign_budget.py
+  exit 0
+  git diff --cached --check -- . ':(exclude)docs/evidence/vnext/r1-user-demo-hf-01/*.txt'
+  exit 0 for source and non-log evidence. Unfiltered staged checks flag trailing spaces in captured pytest text logs; those original logs were retained without editing.
+
+RED reproductions on the unfixed code are preserved in ORIGIN_RED.txt, SEND_AUTHORITY_RED.txt, and CHECKPOINT_CONTEXT_RED.txt.
+
+Execution counts: Provider HTTP 0; browser automation 0; external business writes 0.

@@ -597,12 +597,12 @@ def _provider_dispatch_context(experiment_id, path, run_id, logical_key):
 
 
 @contextmanager
-def _runtime_provider_dispatch_context(binding, dispatch, call_id, request_digest, worker_id):
+def _runtime_provider_dispatch_context(binding, dispatch, call_id, request_digest, worker_id, worker_epoch):
     from opspilot.runtime_provider import dispatch_context
 
     with dispatch_context(
         binding, dispatch, call_id=call_id, request_digest=request_digest,
-        worker_id=worker_id,
+        worker_id=worker_id, worker_epoch=worker_epoch,
     ):
         yield
 
@@ -1161,13 +1161,14 @@ def assistant_memory_enabled_for_experiment(experiment_id):
 
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,
-                 reserved_tokens=0,runtime_grant_binding=None):
+                 reserved_tokens=0,runtime_grant_binding=None,worker_epoch=None):
         self.path,self.run_id,self.worker_id,self.client,self.specs,self.trace=path,run_id,worker_id,client,specs,trace
         self.run,self.actor=domain.read_run(path,run_id,worker_id=worker_id)
         self.model_id=model_id
         self.experiment_id=experiment_id
         self.reserved_tokens=int(reserved_tokens)
         self.runtime_grant_binding=runtime_grant_binding
+        self.worker_epoch=worker_epoch
 
     @staticmethod
     def _usage_from_messages(messages):
@@ -1310,6 +1311,105 @@ class Loop(AgentMiddleware):
                 payload['trusted_binding']={k:binding[k] for k in ('service_id','order_id','contract_version')}
         return prepared,payload
 
+    def _fresh_context_prefix(self, prepared):
+        """Build only the history currently selected by Domain source checks.
+
+        Graph checkpoints are execution state, not an authority to retain revoked
+        history. Rebuild the pre-Run prefix from the freshly prepared Domain
+        projection, then append current-Run tool messages unchanged.
+        """
+        selected_ids = [str(item) for item in prepared.get('selected_message_ids', [])]
+        conversation = [
+            item for item in prepared.get('messages', [])
+            if item.get('role') in {'user', 'assistant'}
+        ]
+        if len(conversation) != len(selected_ids):
+            raise TaskControlError('ASSISTANT_CONTEXT_HISTORY_PROVENANCE_MISMATCH')
+        source_message_id = str(self.run.get('source_message_id') or '')
+        if not source_message_id or source_message_id not in selected_ids:
+            raise TaskControlError('ASSISTANT_CURRENT_INPUT_NOT_SELECTED')
+        with connect(self.path) as connection:
+            source = connection.execute(
+                "SELECT body,body_digest,tenant_id,session_id,role FROM messages WHERE message_id=?",
+                (source_message_id,),
+            ).fetchone()
+        if (
+            source is None or source['role'] != 'USER'
+            or source['tenant_id'] != self.run['tenant_id']
+            or source['session_id'] != self.run['session_id']
+            or hashlib.sha256(str(source['body']).encode('utf-8')).hexdigest() != str(source['body_digest'])
+        ):
+            raise TaskControlError('ASSISTANT_CURRENT_INPUT_SOURCE_INVALID')
+        source_body = str(source['body'])
+        selected_by_id = dict(zip(selected_ids, conversation))
+        if (
+            str(selected_by_id[source_message_id].get('content', '')) != source_body
+            or selected_by_id[source_message_id].get('role') != 'user'
+        ):
+            raise TaskControlError('ASSISTANT_CURRENT_INPUT_CONTEXT_MISMATCH')
+
+        summary_refs = iter(prepared.get('summary_refs', []))
+        history_refs = iter(zip(selected_ids, conversation))
+        prefix = []
+        current_marker = 'opspilot-current:' + source_message_id
+        current_found = False
+        for item in prepared.get('messages', []):
+            role = str(item.get('role', ''))
+            content = str(item.get('content', ''))
+            if role == 'system' and content.startswith('HISTORICAL SESSION SUMMARY'):
+                summary = next(summary_refs, None)
+                if not isinstance(summary, dict) or not summary.get('summary_id'):
+                    raise TaskControlError('ASSISTANT_CONTEXT_SUMMARY_PROVENANCE_MISMATCH')
+                prefix.append(SystemMessage(
+                    content=content, id='opspilot-summary:' + str(summary['summary_id']),
+                ))
+                continue
+            if role not in {'user', 'assistant'}:
+                continue
+            message_id, history_item = next(history_refs)
+            if message_id == source_message_id:
+                prefix.append(HumanMessage(content=source_body, id=current_marker))
+                current_found = True
+            elif role == 'assistant':
+                prefix.append(AIMessage(
+                    content='历史答复（不是本 Run 新观察）：' + content,
+                    id='opspilot-history:' + message_id,
+                ))
+            else:
+                prefix.append(HumanMessage(
+                    content=content, id='opspilot-history:' + message_id,
+                ))
+        if not current_found:
+            raise TaskControlError('ASSISTANT_CURRENT_INPUT_NOT_ASSEMBLED')
+        return prefix, current_marker, source_body
+
+    def _messages_for_dispatch(self, prepared, checkpoint_messages):
+        prefix, current_marker, source_body = self._fresh_context_prefix(prepared)
+        messages = list(checkpoint_messages)
+        indices = [
+            index for index, message in enumerate(messages)
+            if getattr(message, 'id', None) == current_marker
+        ]
+        if not indices:
+            # Compatibility with checkpoints written before stable message IDs
+            # were introduced. The latest exact match is the current user input.
+            indices = [
+                index for index, message in enumerate(messages)
+                if getattr(message, 'type', None) == 'human'
+                and isinstance(getattr(message, 'content', None), str)
+                and message.content == source_body
+            ]
+        if not indices:
+            raise TaskControlError('ASSISTANT_CHECKPOINT_CURRENT_INPUT_MISSING')
+        current_index = indices[-1]
+        current_message = messages[current_index]
+        if str(getattr(current_message, 'content', '')) != source_body:
+            raise TaskControlError('ASSISTANT_CHECKPOINT_CURRENT_INPUT_MISMATCH')
+        # Everything after the current user message belongs to this Run's native
+        # execution suffix. In particular keep the model tool proposal and its
+        # matching ToolMessage IDs exactly as Checkpoint stored them.
+        return prefix + messages[current_index + 1:]
+
     def _assert_memories_current(self, selected_memories):
         if not selected_memories:
             return
@@ -1400,9 +1500,9 @@ class Loop(AgentMiddleware):
 
     async def awrap_model_call(self,request,handler):
         prepared,payload=self.context()
-        # The native tool messages are retained; refresh trusted context before
-        # every dispatch, and stop rather than send invalidated source content.
-        messages=list(request.messages)
+        # Revalidate and rebuild historical context for the actual outbound
+        # messages. Native current-Run tool messages remain byte-for-byte intact.
+        messages=self._messages_for_dispatch(prepared, request.messages)
         memory_guidance = list(prepared.get('memory_guidance_messages', []))
         system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(domain.source_context_for_model(payload))
         if memory_guidance:
@@ -1500,12 +1600,12 @@ class Loop(AgentMiddleware):
             model_settings={**request.model_settings,'parallel_tool_calls':False}
             tool_choice='auto' if request.tools else request.tool_choice
             provider_request=request.override(
-                system_message=system,tool_choice=tool_choice,model_settings=model_settings,
+                messages=messages,system_message=system,tool_choice=tool_choice,model_settings=model_settings,
             )
             if self.runtime_grant_binding is not None:
                 dispatch_context = _runtime_provider_dispatch_context(
                     self.runtime_grant_binding, runtime_dispatch, str(call['call_id']),
-                    str(call['request_digest']), self.worker_id,
+                    str(call['request_digest']), self.worker_id, self.worker_epoch,
                 )
             else:
                 dispatch_context = _provider_dispatch_context(
@@ -1713,7 +1813,7 @@ class Loop(AgentMiddleware):
             return ToolMessage(content=canonical_json({'error':str(error),'authority':'TOOL_REFUSAL_NOT_FACT'}),tool_call_id=call['id'])
 
 async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None,
-                        runtime_grant_binding=None):
+                        runtime_grant_binding=None,worker_epoch=None):
     from opspilot.domain.execution_budget import begin_execution_interval,end_execution_interval
     from opspilot.web.worker import _heartbeat_budget
     run,_=domain.read_run(path,run_id,worker_id=worker_id)
@@ -1721,6 +1821,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
         return await _run_assistant(
             path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
             experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
+            worker_epoch=worker_epoch,
         )
     remaining=begin_execution_interval(path,run['task_id'])
     stopped=asyncio.Event()
@@ -1731,6 +1832,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
             _run_assistant(
                 path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
                 experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
+                worker_epoch=worker_epoch,
             ),min(60,remaining/1000),
         )
     except (asyncio.TimeoutError,TaskControlError) as error:
@@ -1882,7 +1984,7 @@ def _close_cancelled_compression(path, run_id, worker_id, state, experiment_id,
 
 async def _prepare_assistant_context(
     path, run_id, worker_id, model_id, model, *, reserved_tokens: int = 0,
-    experiment_id=None, runtime_grant_binding=None,
+    experiment_id=None, runtime_grant_binding=None,worker_epoch=None,
 ):
     state = {
         "attempt_id": None, "call_id": None, "logical_key": None,
@@ -1892,7 +1994,7 @@ async def _prepare_assistant_context(
         return await _prepare_assistant_context_impl(
             path, run_id, worker_id, model_id, model,
             reserved_tokens=reserved_tokens, experiment_id=experiment_id,
-            runtime_grant_binding=runtime_grant_binding,state=state,
+            runtime_grant_binding=runtime_grant_binding,state=state,worker_epoch=worker_epoch,
         )
     except asyncio.CancelledError:
         _close_cancelled_compression(
@@ -1903,7 +2005,7 @@ async def _prepare_assistant_context(
 
 async def _prepare_assistant_context_impl(
     path, run_id, worker_id, model_id, model, *, reserved_tokens: int = 0,
-    experiment_id=None, runtime_grant_binding=None, state=None,
+    experiment_id=None, runtime_grant_binding=None, state=None,worker_epoch=None,
 ):
     """Reuse the existing bounded chat-context compression before the first Provider call.
 
@@ -2063,7 +2165,7 @@ async def _prepare_assistant_context_impl(
                     if runtime_grant_binding is not None:
                         dispatch_context = _runtime_provider_dispatch_context(
                             runtime_grant_binding, runtime_dispatch, str(call["call_id"]),
-                            str(call["request_digest"]), worker_id,
+                            str(call["request_digest"]), worker_id, worker_epoch,
                         )
                     else:
                         dispatch_context = _provider_dispatch_context(
@@ -2171,7 +2273,7 @@ async def _prepare_assistant_context_impl(
 
 
 async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,
-                         experiment_id=None,runtime_grant_binding=None):
+                         experiment_id=None,runtime_grant_binding=None,worker_epoch=None):
     trace=trace or (lambda event,**values:None)
     run,actor=domain.read_run(path,run_id,worker_id=worker_id)
     if model is None:
@@ -2218,6 +2320,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         probe=Loop(
             path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
             reserved_tokens=base_reserved,runtime_grant_binding=runtime_grant_binding,
+            worker_epoch=worker_epoch,
         )
         _,probe_payload=probe.context()
         reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(domain.source_context_for_model(probe_payload)))+4
@@ -2227,6 +2330,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             prepared=await _prepare_assistant_context(
                 path,run_id,worker_id,model_id,model,reserved_tokens=reserved_tokens,
                 experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
+                worker_epoch=worker_epoch,
             )
             if prepared.get('error'): return prepared
             delivery=prepared['attempt_id']
@@ -2234,15 +2338,10 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         loop=Loop(
             path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
             reserved_tokens=reserved_tokens,runtime_grant_binding=runtime_grant_binding,
+            worker_epoch=worker_epoch,
         )
         prepared,_=loop.context()
-        initial=[]
-        for item in prepared['messages']:
-            content=str(item.get('content',''))
-            if item['role']=='system' and content.startswith('HISTORICAL SESSION SUMMARY'):
-                initial.append(SystemMessage(content=content))
-            elif item['role']=='user':initial.append(HumanMessage(content=content))
-            elif item['role']=='assistant':initial.append(AIMessage(content='历史答复（不是本 Run 新观察）：'+content))
+        initial,_,_=loop._fresh_context_prefix(prepared)
         cp=Path(checkpoint_path);cp.parent.mkdir(parents=True,exist_ok=True)
         config={'configurable':{'thread_id':'assistant-v1:'+run_id},'recursion_limit':36,'max_concurrency':1}
         try:

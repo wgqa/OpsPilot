@@ -1,0 +1,125 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\r1-user-demo-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 19 items
+
+tests/test_product_01_runtime_grant_01.py::test_database_initialization_does_not_provision_or_enable_runtime_grant PASSED [  5%]
+tests/test_product_01_runtime_grant_01.py::test_grant_reservation_send_authority_usage_and_replay_are_persistent PASSED [ 10%]
+tests/test_product_01_runtime_grant_01.py::test_unknown_holds_one_reservation_but_other_sessions_can_use_remaining_pool PASSED [ 15%]
+tests/test_product_01_runtime_grant_01.py::test_unknown_reconciliation_requires_audited_evidence_and_never_resends PASSED [ 21%]
+tests/test_product_01_runtime_grant_01.py::test_spend_pool_refuses_second_reservation_when_only_one_fits PASSED [ 26%]
+tests/test_product_01_runtime_grant_01.py::test_restarted_worker_marks_unresolved_send_unknown_without_releasing_reserve PASSED [ 31%]
+tests/test_product_01_runtime_grant_01.py::test_database_copy_cannot_reuse_runtime_grant_or_pool PASSED [ 36%]
+tests/test_product_01_runtime_grant_01.py::test_expired_grant_is_not_bound_and_zero_price_cannot_authorize_paid_calls PASSED [ 42%]
+tests/test_product_01_runtime_grant_01.py::test_revoke_between_reservation_and_send_denies_wire_and_releases_only_unsent_reserve PASSED [ 47%]
+tests/test_product_01_runtime_grant_01.py::test_stale_price_version_pauses_pool_without_resetting_any_spend PASSED [ 52%]
+tests/test_product_01_runtime_grant_01.py::test_usage_above_authorized_bound_pauses_shared_pool_and_is_not_delivered PASSED [ 57%]
+tests/test_product_01_runtime_grant_01.py::test_ledger_total_over_authorized_pool_pauses_instead_of_reporting_remaining_zero PASSED [ 63%]
+tests/test_product_01_runtime_grant_01.py::test_runtime_context_compression_and_answer_share_the_persistent_pool[pool-covers-compression-and-answer] FAILED [ 68%]
+
+================================== FAILURES ===================================
+_ test_runtime_context_compression_and_answer_share_the_persistent_pool[pool-covers-compression-and-answer] _
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-user-demo-01/.runtime/user-demo-hf01-runtime-grant/test_runtime_context_compressi0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-user-demo-01/.runtime/user-demo-hf01-runtime-grant/test_runtime_context_compressi0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014228F61550>
+pool_total = 100000, expect_complete = True
+
+    @pytest.mark.parametrize(
+        "pool_total,expect_complete",
+        [(100_000, True), (14_048, False)],
+        ids=["pool-covers-compression-and-answer", "compression-consumes-next-answer-allowance"],
+    )
+    def test_runtime_context_compression_and_answer_share_the_persistent_pool(
+        demo_db, tmp_path, monkeypatch, pool_total, expect_complete,
+    ):
+        import asyncio
+        import os
+        from test_m302_context import _turn
+        from opspilot.assistant import create_assistant_model, run_assistant
+        from opspilot.domain.assistant_runtime_grant import bind_run, runtime_config_from_env, spend_summary
+        from opspilot.domain.database import connect
+        from opspilot.domain.context_engineering import estimate_messages_tokens, estimate_text_tokens
+        from opspilot.domain.d2 import canonical_json
+        from opspilot.domain.task_control import create_session, register_worker_owner, trusted_identity
+    
+        _configure(monkeypatch)
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_RUNTIME_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "test-only-not-a-real-key")
+        monkeypatch.delenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", raising=False)
+        monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "ROLLING_SUMMARY")
+        monkeypatch.setenv("OPSPILOT_CONTEXT_INPUT_BUDGET_TOKENS", "12000")
+        _provision(demo_db, total=pool_total)
+        identity = trusted_identity(demo_db, "support-a")
+        session_id = str(create_session(demo_db, identity)["session_id"])
+        owner = "runtime-compression-history-worker"
+        register_worker_owner(demo_db, owner, os.getpid())
+        for index in range(6):
+            _turn(
+                demo_db, session_id, owner,
+                (f"Turn {index} preserves the original support goal, constraints, and user corrections. " * 180),
+                key=f"runtime-compression-history-{index}",
+                answer=(f"Historical response {index} is only an earlier explanation, not current evidence. " * 90),
+            )
+        run = _run(demo_db, "compression-shared-pool", session_id=session_id, worker_id=owner)
+        binding = bind_run(demo_db, run["run_id"], runtime_config_from_env())
+        import httpx
+    
+        sent = []
+    
+        async def respond(request):
+            payload = json.loads((await request.aread()).decode("utf-8"))
+            sent.append(payload)
+            if int(payload.get("max_tokens", 2048)) < 2048:
+                with connect(demo_db) as connection:
+                    attempt = connection.execute(
+                        "SELECT source_dependencies_json FROM context_compression_attempts WHERE run_id=? AND status='RESERVED' ORDER BY created_at DESC LIMIT 1",
+                        (run["run_id"],),
+                    ).fetchone()
+                assert attempt is not None
+                source_map = json.loads(attempt["source_dependencies_json"])["source_sequence_map"]
+                first_sequence = int(next(iter(source_map)))
+                content = json.dumps({
+                    "initial_goal": {"text": "Investigate the original user objective.", "source_sequences": [first_sequence]},
+                    "constraints": [], "user_assertions": [], "corrections": [],
+                    "rejected_hypotheses": [], "unresolved_items": [], "timeline": [],
+                })
+            else:
+                assert payload["max_tokens"] == 2048
+                content = "The context was compressed under the same authorized spend pool; no business facts were queried."
+            input_usage = (
+                estimate_messages_tokens(payload["messages"])
+                + estimate_text_tokens(canonical_json(payload.get("tools", [])))
+                + 64
+            )
+            assert 0 < input_usage <= 12_000
+            return httpx.Response(200, json={
+                "id": f"offline-runtime-{len(sent)}", "object": "chat.completion", "created": 1,
+                "model": "deepseek-flash",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": input_usage, "completion_tokens": 40, "total_tokens": input_usage + 40},
+            })
+    
+        model = create_assistant_model(
+            runtime_grant_binding=binding,
+            transport_async=httpx.MockTransport(respond),
+            transport_sync=httpx.MockTransport(lambda request: httpx.Response(500, request=request)),
+        )
+        try:
+            result = asyncio.run(run_assistant(
+                demo_db, tmp_path / "runtime-compression-checkpoint.sqlite3", owner,
+                run["run_id"], model=model, runtime_grant_binding=binding,
+>               worker_epoch=worker.epoch,
+                             ^^^^^^
+            ))
+E           NameError: name 'worker' is not defined
+
+tests\test_product_01_runtime_grant_01.py:646: NameError
+=========================== short test summary info ===========================
+FAILED tests/test_product_01_runtime_grant_01.py::test_runtime_context_compression_and_answer_share_the_persistent_pool[pool-covers-compression-and-answer] - NameError: name 'worker' is not defined
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+======================== 1 failed, 12 passed in 6.09s =========================

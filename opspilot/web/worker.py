@@ -560,6 +560,7 @@ async def _dispatch_run(
             await run_assistant(
                 db_path, checkpoint_path, worker_id, str(run["run_id"]), model=model,
                 experiment_id=assistant_experiment_id, runtime_grant_binding=runtime_binding,
+                worker_epoch=worker_epoch,
             )
         finally:
             # The formal factory owns one explicit HTTPX client pair per Run.

@@ -134,7 +134,7 @@ def test_grant_reservation_send_authority_usage_and_replay_are_persistent(demo_d
             demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
             request_digest=digest_json(request), body_digest=body_digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+            requested_max_output_tokens=max_tokens, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         assert permit["action"] == "SEND"
         response_body = json.dumps({
@@ -168,7 +168,7 @@ def test_grant_reservation_send_authority_usage_and_replay_are_persistent(demo_d
                 demo_db, binding, call_id="wrong-call-id", request_key=dispatch["request_key"],
                 request_digest=digest_json(request), body_digest=body_digest,
                 request_url="https://api.deepseek.com/chat/completions", method="POST",
-                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id, worker_epoch=worker.epoch,
             )
         unrelated_run = _run(demo_db, "unrelated-replay-run", worker_id=worker.owner_id)
         unrelated_binding = bind_run(demo_db, unrelated_run["run_id"], runtime_config_from_env())
@@ -177,14 +177,14 @@ def test_grant_reservation_send_authority_usage_and_replay_are_persistent(demo_d
                 demo_db, unrelated_binding, call_id=call["call_id"], request_key=dispatch["request_key"],
                 request_digest=digest_json(request), body_digest=body_digest,
                 request_url="https://api.deepseek.com/chat/completions", method="POST",
-                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id, worker_epoch=worker.epoch,
             )
         # The same logical request returns the saved wire response, never another send.
         replay = claim_send(
             demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
             request_digest=digest_json(request), body_digest=body_digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+            requested_max_output_tokens=max_tokens, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         assert replay == {
             "action": "REPLAY", "response_status": 200,
@@ -223,7 +223,7 @@ def test_unknown_holds_one_reservation_but_other_sessions_can_use_remaining_pool
             demo_db, binding1, call_id=call1["call_id"], request_key=dispatch1["request_key"],
             request_digest=call1["request_digest"], body_digest=digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+            requested_max_output_tokens=max_tokens, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         unknown = store_response(
             demo_db, dispatch1["request_key"], status_code=200,
@@ -237,7 +237,7 @@ def test_unknown_holds_one_reservation_but_other_sessions_can_use_remaining_pool
                 demo_db, binding1, call_id=call1["call_id"], request_key=dispatch1["request_key"],
                 request_digest=call1["request_digest"], body_digest=digest,
                 request_url="https://api.deepseek.com/chat/completions", method="POST",
-                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id, worker_epoch=worker.epoch,
             )
         # A separate authorized Session can spend the remaining pool; UNKNOWN is not a global stop.
         run2 = _run(demo_db, "unknown-2", worker_id=worker.owner_id)
@@ -271,7 +271,7 @@ def test_unknown_reconciliation_requires_audited_evidence_and_never_resends(demo
             demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
             request_digest=digest_json(request), body_digest=digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=cap, worker_id=worker.owner_id,
+            requested_max_output_tokens=cap, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         store_response(
             demo_db, dispatch["request_key"], status_code=200,
@@ -353,7 +353,7 @@ def test_restarted_worker_marks_unresolved_send_unknown_without_releasing_reserv
             demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
             request_digest=call["request_digest"], body_digest=digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=cap, worker_id=worker.owner_id,
+            requested_max_output_tokens=cap, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         assert recover_interrupted_sends(demo_db, "new-worker-epoch") == [dispatch["request_key"]]
         assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == 14_048
@@ -438,7 +438,7 @@ def test_revoke_between_reservation_and_send_denies_wire_and_releases_only_unsen
                 demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
                 request_digest=call["request_digest"], body_digest=digest,
                 request_url="https://api.deepseek.com/chat/completions", method="POST",
-                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id, worker_epoch=worker.epoch,
             )
         assert close_unfinished_dispatch(demo_db, dispatch["request_key"], "revoked-before-send") == "NOT_DISPATCHED"
         summary = spend_summary(demo_db)
@@ -492,7 +492,7 @@ def test_usage_above_authorized_bound_pauses_shared_pool_and_is_not_delivered(de
             demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
             request_digest=digest_json(request), body_digest=body_digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=cap, worker_id=worker.owner_id,
+            requested_max_output_tokens=cap, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         response = json.dumps({
             "id": "offline-over-bound", "usage": {"prompt_tokens": 1, "completion_tokens": 2049, "total_tokens": 2050},
@@ -538,7 +538,7 @@ def test_ledger_total_over_authorized_pool_pauses_instead_of_reporting_remaining
             demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
             request_digest=digest_json(request), body_digest=body_digest,
             request_url="https://api.deepseek.com/chat/completions", method="POST",
-            requested_max_output_tokens=cap, worker_id=worker.owner_id,
+            requested_max_output_tokens=cap, worker_id=worker.owner_id, worker_epoch=worker.epoch,
         )
         response = b'{"id":"offline-ledger","usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2},"choices":[]}'
         store_response(
@@ -587,7 +587,7 @@ def test_runtime_context_compression_and_answer_share_the_persistent_pool(
     identity = trusted_identity(demo_db, "support-a")
     session_id = str(create_session(demo_db, identity)["session_id"])
     owner = "runtime-compression-history-worker"
-    register_worker_owner(demo_db, owner, os.getpid())
+    worker_epoch = register_worker_owner(demo_db, owner, os.getpid())
     for index in range(6):
         _turn(
             demo_db, session_id, owner,
@@ -643,6 +643,7 @@ def test_runtime_context_compression_and_answer_share_the_persistent_pool(
         result = asyncio.run(run_assistant(
             demo_db, tmp_path / "runtime-compression-checkpoint.sqlite3", owner,
             run["run_id"], model=model, runtime_grant_binding=binding,
+            worker_epoch=worker_epoch,
         ))
     finally:
         asyncio.run(model.http_async_client.aclose())
@@ -944,7 +945,7 @@ def test_runtime_transport_replays_decoded_gzip_response_with_valid_http_headers
 
     with runtime_provider.dispatch_context(
         binding, dispatch, call_id="offline-call-gzip",
-        request_digest="offline-digest", worker_id="offline-worker",
+        request_digest="offline-digest", worker_id="offline-worker", worker_epoch=1,
     ):
         parsed = asyncio.run(request_through_wrapped_transport())
 

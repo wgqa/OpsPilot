@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | OPSPILOT_DB_PATH | Start 脚本强制为 .runtime/user-demo/domain.sqlite3 | Domain/会话/业务事实 |
 | OPSPILOT_CHECKPOINT_DB_PATH | Start 脚本强制为 .runtime/user-demo/checkpoint.sqlite3 | Graph 执行 Checkpoint |
-| OPSPILOT_WEB_ORIGIN | Start 脚本强制为 127.0.0.1:8000 | Web CSRF/Origin 校验 |
+| OPSPILOT_WEB_ORIGIN | Start 脚本强制为 127.0.0.1:5173 | Web CSRF/Origin 校验，必须匹配浏览器打开的 Vue 页面来源 |
 | OPSPILOT_API_ORIGIN | Start 脚本强制为 127.0.0.1:8000 | Vite API 代理目标 |
 | OPSPILOT_DEMO_SERVICE_ID / OPSPILOT_DEMO_INTEGRATION_ID | Start 脚本按 S1/S2 Profile 设置 | 新同步调查资源；S3 使用独立 async 资源 |
 | OPSPILOT_WEB_SUPPORT_PASSWORD | .env 模板有占位值；所有者必须填写 | support-a 本地登录 |

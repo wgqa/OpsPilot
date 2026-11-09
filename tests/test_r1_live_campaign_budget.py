@@ -113,13 +113,14 @@ def _reserved_call(db_path, worker_id, ordinal):
     return run, binding, call, dispatch, call["request_digest"], body_digest, output_cap
 
 
-def _send(db_path, worker_id, prepared):
+def _send(db_path, worker_id, worker_epoch, prepared):
     _, binding, call, dispatch, request_digest, body_digest, output_cap = prepared
     return claim_send(
         db_path, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
         request_digest=request_digest, body_digest=body_digest,
         request_url="https://api.deepseek.com/chat/completions", method="POST",
         requested_max_output_tokens=output_cap, worker_id=worker_id,
+        worker_epoch=worker_epoch,
     )
 
 
@@ -150,7 +151,7 @@ def test_campaign_allows_sixteenth_send_and_persistently_rejects_seventeenth_aft
         for ordinal in range(1, 9):
             prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
             assert prepared[3]["reserved_usd_micro"] == R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
-            assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+            assert _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"] == "SEND"
             _complete_known_response(demo_db, prepared)
         worker.release()
 
@@ -158,7 +159,7 @@ def test_campaign_allows_sixteenth_send_and_persistently_rejects_seventeenth_aft
         worker = _worker(demo_db)
         for ordinal in range(9, 17):
             prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
-            assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+            assert _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"] == "SEND"
             _complete_known_response(demo_db, prepared)
 
         campaign = _campaign_row(demo_db)
@@ -219,7 +220,7 @@ def test_r1_live_journey_02_campaign_uses_its_frozen_12_send_and_8_usd_limits(
         for ordinal in range(1, 13):
             prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
             assert prepared[3]["reserved_usd_micro"] == R1_LIVE_JOURNEY_PER_REQUEST_RESERVE_USD_MICRO
-            assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+            assert _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"] == "SEND"
             _complete_known_response(demo_db, prepared)
         worker.release()
 
@@ -288,7 +289,7 @@ def test_r1_j2_live_recheck_campaign_is_separate_and_enforces_its_own_12_send_ca
         for ordinal in range(1, 13):
             prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
             assert prepared[3]["reserved_usd_micro"] == 645_600
-            assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+            assert _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"] == "SEND"
             _complete_known_response(demo_db, prepared)
         worker.release()
         worker = _worker(demo_db)
@@ -351,7 +352,7 @@ def test_r1_j2_live_recheck_campaign_policy_has_an_independent_12_send_cap(
         for ordinal in range(1, provider_limit + 1):
             prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
             assert prepared[3]["reserved_usd_micro"] == 645_600
-            assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+            assert _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"] == "SEND"
             _complete_known_response(demo_db, prepared)
         campaign = _campaign_row(demo_db)
         assert campaign["campaign_id"] == campaign_id
@@ -382,7 +383,7 @@ def test_campaign_concurrent_final_slot_is_consumed_atomically(
     try:
         for ordinal in range(1, provider_limit):
             prepared = _reserved_call(demo_db, worker.owner_id, ordinal)
-            _send(demo_db, worker.owner_id, prepared)
+            _send(demo_db, worker.owner_id, worker.epoch, prepared)
             _complete_known_response(demo_db, prepared)
 
         candidate_a = _reserved_call(demo_db, worker.owner_id, provider_limit)
@@ -392,7 +393,7 @@ def test_campaign_concurrent_final_slot_is_consumed_atomically(
         def compete(prepared):
             barrier.wait(timeout=5)
             try:
-                return _send(demo_db, worker.owner_id, prepared)["action"]
+                return _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"]
             except RuntimeGrantError as error:
                 return error.code
 
@@ -462,7 +463,7 @@ def test_campaign_unknown_stops_future_sessions_and_preserves_reservation(
     )
     worker = _worker(demo_db)
     prepared = _reserved_call(demo_db, worker.owner_id, 1)
-    assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+    assert _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"] == "SEND"
 
     if unknown_transition == "mark":
         mark_unknown(demo_db, prepared[3]["request_key"], "SIMULATED_UNKNOWN")
@@ -513,7 +514,7 @@ def test_campaign_missing_usage_response_stops_without_releasing_unknown_reserve
     worker = _worker(demo_db)
     try:
         prepared = _reserved_call(demo_db, worker.owner_id, 1)
-        assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+        assert _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"] == "SEND"
         result = store_response(
             demo_db, prepared[3]["request_key"], status_code=200, headers={},
             body=b'{"id":"offline-no-usage","choices":[]}', usage=None,
@@ -545,7 +546,7 @@ def test_campaign_known_provider_http_error_stops_future_sends(demo_db, monkeypa
     worker = _worker(demo_db)
     try:
         prepared = _reserved_call(demo_db, worker.owner_id, 1)
-        assert _send(demo_db, worker.owner_id, prepared)["action"] == "SEND"
+        assert _send(demo_db, worker.owner_id, worker.epoch, prepared)["action"] == "SEND"
         result = store_response(
             demo_db, prepared[3]["request_key"], status_code=401, headers={},
             body=b'{"error":{"message":"redacted"}}',
