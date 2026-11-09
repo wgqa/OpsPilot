@@ -1,0 +1,53 @@
+{
+  "experiment_id": "R1-USER-DEMO-HF-02-SSE",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "6d36f06a0c9824764bdadfe390083e685d592231",
+  "branch": "codex/r1-user-demo-hf02-sse",
+  "remote_main_sha": "60eee87bfe3cca522011316cb4cd2c0064ad291b",
+  "results": {
+    "open_sse_graceful_shutdown": {
+      "status": "PASS",
+      "red_before_fix": "API still alive after 6.007 seconds",
+      "green_elapsed_seconds": 0.558,
+      "simultaneous_streams": 2
+    },
+    "no_sse_graceful_shutdown": {
+      "status": "PASS",
+      "green_elapsed_seconds": 0.655
+    },
+    "sse_continues_before_shutdown": {
+      "status": "PASS",
+      "evidence": "heartbeat observed while service remained active"
+    },
+    "early_disconnect_and_multiple_streams": {
+      "status": "PASS",
+      "evidence": "one stream closed by client; other streams continued until shutdown"
+    },
+    "restart_persistence_and_cursor": {
+      "status": "PASS",
+      "evidence": "Session, committed message, queued Run and event_seq replay retained; Last-Event-ID precedence retained"
+    },
+    "session_owner_scope": {
+      "status": "PASS",
+      "evidence": "non-owner SSE request returned 404"
+    },
+    "targeted_regression": {
+      "status": "PASS",
+      "passed": 17,
+      "collected": 17
+    }
+  },
+  "external_effects": {
+    "provider_http_requests": 0,
+    "business_writes": 0,
+    "browser_automation": 0,
+    "main_merges": 0,
+    "ports_8000_or_5173_used": false
+  },
+  "not_run": [
+    "full pytest suite",
+    "actual Stop-UserDemo.ps1 invocation",
+    "browser verification",
+    "shutdown during an active business Run"
+  ]
+}

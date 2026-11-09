@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import threading
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -201,6 +202,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.shutdown_requested.clear()
         initialize(resolved_db)
         if resolved_experiment is not None:
             from opspilot.domain.assistant_experiment import initialize_experiment
@@ -240,6 +242,10 @@ def create_app(
         try:
             yield
         finally:
+            # Also close streams for ASGI lifespan-only shutdown paths. The
+            # Windows launcher signals this before Uvicorn starts draining
+            # connections so long-lived streams do not hold graceful shutdown.
+            app.state.shutdown_requested.set()
             if worker_task is not None:
                 worker_task.cancel()
                 try:
@@ -261,6 +267,7 @@ def create_app(
     app.state.worker_id = None
     app.state.worker_epoch = None
     app.state.worker_loop = None
+    app.state.shutdown_requested = threading.Event()
 
     async def current_user(request: Request) -> AuthContext:
         return authenticate_session(resolved_db, request.cookies.get(COOKIE_NAME))
@@ -1261,7 +1268,7 @@ def create_app(
         async def stream() -> AsyncIterator[str]:
             nonlocal cursor
             last_heartbeat = time.monotonic()
-            while not await request.is_disconnected():
+            while not app.state.shutdown_requested.is_set() and not await request.is_disconnected():
                 try:
                     authenticate_session(resolved_db, request.cookies.get(COOKIE_NAME))
                 except TaskControlError:
