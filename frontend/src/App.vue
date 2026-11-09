@@ -1225,6 +1225,22 @@ function readableRunReason(value: unknown): string {
   return reason;
 }
 
+function terminalRunMessage(run: RunItem): string {
+  const reason = String(run.waiting_reason ?? '');
+  if (run.kind === 'INVESTIGATE' && reason === 'LEGACY_PROVIDER_AUTHORIZATION_REQUIRED') {
+    const source = messages.value.find((item) => item.message_id === run.source_message_id);
+    if (
+      source?.input_kind === 'CORRECT_TASK_INPUT'
+      && source.application_state === 'RECEIVED_NOT_APPLIED'
+      && !source.applied_run_id
+    ) {
+      return '正式更正已受理但尚未应用；正式调查因 Legacy Investigator Provider 未授权而停止。你仍可在同一 Task 中使用普通只读聊天查询已绑定订单；这不会应用更正、创建 Plan 或执行业务写入。';
+    }
+    return '正式调查未执行：当前未授权 Legacy Investigator 的模型调用。你可以在同一 Task 中使用普通只读聊天查询已绑定订单；只读聊天不会执行正式调查或业务写入。';
+  }
+  return `本次运行结束：${readableStatus(run.status)}${reason ? `（${readableRunReason(reason)}）` : ''}`;
+}
+
 async function refreshSessionMessagesOnly(): Promise<void> {
   if (!sessionId.value) return;
   const requestedSessionId = sessionId.value;
@@ -1272,7 +1288,8 @@ async function watchRun(runId: string): Promise<void> {
             await refreshInspector();
           }
           if (run.status === 'FAILED' || run.status === 'BLOCKED') {
-            errorMessage.value = `本次运行结束：${readableStatus(run.status)}${run.waiting_reason ? `（${run.waiting_reason}）` : ''}`;
+            if (notice.value.startsWith('正在提交关键更正；')) notice.value = '';
+            errorMessage.value = terminalRunMessage(run);
           }
           resolve();
         }

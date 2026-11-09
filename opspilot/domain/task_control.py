@@ -156,19 +156,19 @@ def assert_task_control_in_transaction(
     *,
     run_id: str | None = None,
     allow_completed: bool = False,
-    allow_pending_for_run: bool = False,
+    allow_pending_for_readonly_chat: bool = False,
 ) -> sqlite3.Row:
     """Final control check for callers already holding the Domain write transaction.
 
     Omitted revision is the deliberately narrow legacy route: it can act only at
-    revision zero. New Runs must supply their persisted run_id.
+    revision zero. New Runs must supply their persisted run_id. A pending formal
+    correction may coexist only with a CHAT_READONLY Run admitted after that
+    correction; the Run's persisted kind and consumed-message high-water are
+    checked here, while all business Runs and stale chat Runs remain blocked.
     """
     state = _control(connection, tenant_id, task_id)
     if str(state["terminal_state"]) != "ACTIVE":
         raise TaskControlError("TASK_ABORTED")
-    pending = state["pending_critical_message_seq"]
-    if pending is not None and not allow_pending_for_run:
-        raise TaskControlError("TASK_INPUT_PENDING")
     run: sqlite3.Row | None = None
     if run_id is not None:
         run = connection.execute(
@@ -179,6 +179,16 @@ def assert_task_control_in_transaction(
             raise TaskControlError("TASK_RUN_NOT_ACTIVE")
         if expected_control_revision is None:
             expected_control_revision = run["expected_control_revision"]
+    pending = state["pending_critical_message_seq"]
+    pending_readonly_chat = bool(
+        allow_pending_for_readonly_chat
+        and run is not None
+        and str(run["kind"]) == "CHAT_READONLY"
+        and pending is not None
+        and int(run["consumed_message_seq"]) >= int(pending)
+    )
+    if pending is not None and not pending_readonly_chat:
+        raise TaskControlError("TASK_INPUT_PENDING")
     if expected_control_revision is None:
         expected_control_revision = 0
     if int(state["control_revision"]) != int(expected_control_revision):

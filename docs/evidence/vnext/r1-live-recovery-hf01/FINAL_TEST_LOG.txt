@@ -1,0 +1,117 @@
+COMMAND: python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-green-01 -q tests/test_r1_live_recovery_hf01.py::test_c02_blocked_correction_does_not_block_same_task_assistant_readonly_red --tb=short
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_c02_blocked_correction_does_not_block_same_task_assistant_readonly_red _
+tests\test_r1_live_recovery_hf01.py:93: in test_c02_blocked_correction_does_not_block_same_task_assistant_readonly_red
+    assert run["status"] == "SUCCEEDED", run
+E   AssertionError: {'run_id': 'run-9d75fdb7-d91f-44e2-844b-c53d618c3987', 'task_id': 'task-77d034e6-eb02-40d5-9b37-0a15975150cb', 'sessio...ession-283236a4-c91f-4362-b153-1d545d091cd2', 'source_message_id': 'message-3a525c50-b417-4e8c-b251-21017f36162e', ...}
+E   assert 'FAILED' == 'SUCCEEDED'
+E
+E     - SUCCEEDED
+E     + FAILED
+=========================== short test summary info ===========================
+FAILED tests/test_r1_live_recovery_hf01.py::test_c02_blocked_correction_does_not_block_same_task_assistant_readonly_red
+1 failed in 4.79s
+EXIT_CODE=1
+\r\nRETRY COMMAND: python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-green-02 -q tests/test_r1_live_recovery_hf01.py::test_c02_blocked_correction_does_not_block_same_task_assistant_readonly_red --tb=short
+F                                                                        [100%]
+================================== FAILURES ===================================
+_ test_c02_blocked_correction_does_not_block_same_task_assistant_readonly_red _
+tests\test_r1_live_recovery_hf01.py:104: in test_c02_blocked_correction_does_not_block_same_task_assistant_readonly_red
+    assert "async-order-2" in answer
+E   AssertionError: assert 'async-order-2' in '��ǰͬһ Event event-76e26806-9247-4f4f-8f8c-65e3d658679c �� Delivery HTTP 503 / FAILED��Receiver Ϊ NOT_RECEIVED��Э��Ƚ����Ա� Session ����ǰ��Ȩ���ϣ����ϲ���汾��δ֪��'
+=========================== short test summary info ===========================
+FAILED tests/test_r1_live_recovery_hf01.py::test_c02_blocked_correction_does_not_block_same_task_assistant_readonly_red
+1 failed in 4.51s
+EXIT_CODE=1
+
+=== FOCUSED REGRESSION: 112 passed; one unchanged migration assertion mismatch ===
+COMMAND: python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-regression-01 -q tests/test_r1_live_recovery_hf01.py tests/test_m1_task_control.py tests/test_m4_01_dialogue_updates.py tests/test_m4_01_dialogue_update_safety.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_03_s3.py tests/test_m4_c1_hf_01.py tests/test_d3_actions.py
+............F........................................................... [ 63%]
+.........................................                                [100%]
+================================== FAILURES ===================================
+_____ test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash ______
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-live-recovery-hf01/docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-regression-01/test_schema_migration_is_idemp0/domain.sqlite3')
+live_api = 'http://127.0.0.1:57581'
+
+    def test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash(
+        demo_db: Path, live_api: str
+    ) -> None:
+        from opspilot.domain.database import initialize
+
+        binding, _, plan = _ready_task(demo_db, live_api, "migration")
+        task_id = str(binding["task_id"])
+        with connect(demo_db) as connection:
+            connection.execute("DELETE FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM task_controls WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM session_task_links WHERE task_id = ?", (task_id,))
+            connection.execute("DELETE FROM sessions WHERE session_id = ?", (binding["session_id"],))
+            connection.execute("PRAGMA user_version = 0")
+        initialize(demo_db)
+        initialize(demo_db)
+        with connect(demo_db) as connection:
+            control = connection.execute("SELECT terminal_state, control_revision FROM task_controls WHERE task_id = ?", (task_id,)).fetchone()
+            session_link = connection.execute("SELECT COUNT(*) FROM session_task_links WHERE task_id = ?", (task_id,)).fetchone()[0]
+            migrated_plan = connection.execute("SELECT plan_hash FROM d3_plans WHERE task_id = ?", (task_id,)).fetchone()[0]
+            plan_bindings = connection.execute("SELECT COUNT(*) FROM d3_plan_control_bindings WHERE task_id = ?", (task_id,)).fetchone()[0]
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        assert tuple(control) == ("ACTIVE", 0)
+>       assert session_link == 1 and migrated_plan == plan["plan_hash"] and plan_bindings == 1 and version == 18
+E       AssertionError: assert (1 == 1 and 'a9905a162a4e...e30e0d4b8e148' == 'a9905a162a4e...e30e0d4b8e148'
+E
+E         Skipping 53 identical leading characters in diff, use -v to show
+E           0e0d4b8e148 and 1 == 1 and 20 == 18)
+
+tests\test_m1_task_control.py:662: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_task_control.py::test_schema_migration_is_idempotent_and_preserves_frozen_plan_hash
+1 failed, 112 passed in 135.03s (0:02:15)
+EXIT_CODE=1
+
+=== DEDICATED RECOVERY TESTS: GREEN ===
+COMMAND: python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-green-final -q tests/test_r1_live_recovery_hf01.py --tb=short
+..                                                                       [100%]
+2 passed in 6.74s
+EXIT_CODE=0
+
+=== NORMAL ASSISTANT AND RUNTIME GRANT REGRESSION: GREEN ===
+COMMAND: python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-assistant-runtime -q tests/test_ar02_ar03_integration_01.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py --tb=short
+...........................................................              [100%]
+59 passed in 67.62s (0:01:07)
+EXIT_CODE=0
+
+=== FINAL GREEN: dedicated recovery tests including pending Investigator denial ===
+COMMAND: python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-green-final-02 -q tests/test_r1_live_recovery_hf01.py --tb=short
+...                                                                      [100%]
+3 passed in 7.05s
+EXIT_CODE=0
+
+=== Static checks ===
+COMMAND: git diff --check
+EXIT_CODE=0
+COMMAND: python -m compileall -q opspilot/domain/task_control.py opspilot/domain/assistant.py opspilot/domain/d2.py tests/test_r1_live_recovery_hf01.py
+EXIT_CODE=0
+
+=== Existing unrelated mismatch analysis ===
+At Base 6d36f06, opspilot/domain/database.py already migrates PRAGMA user_version through 20 (migrations 19 and 20 are present), while tests/test_m1_task_control.py still asserts version == 18. database.py is unchanged by this candidate. The sole failure in the focused regression is therefore an existing stale assertion; it was preserved and not edited.
+
+=== FINAL SOURCE CHECK: recovery journey tests after UI status fix ===
+COMMAND: python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-final-source -q tests/test_r1_live_recovery_hf01.py --tb=short
+...                                                                      [100%]
+3 passed in 6.62s
+EXIT_CODE=0
+
+=== FINAL STATIC CHECKS ===
+COMMAND: git diff --check; python -m compileall -q opspilot/domain/task_control.py opspilot/domain/assistant.py opspilot/domain/d2.py tests/test_r1_live_recovery_hf01.py
+git diff --check EXIT_CODE=0; compileall EXIT_CODE=0
+
+=== Frontend typecheck attempt ===
+COMMAND: npm run typecheck (frontend)
+> opspilot-vnext-workbench@0.3.0 typecheck
+> vue-tsc --noEmit
+vue-tsc was not recognized; frontend dependencies are unavailable in this worktree.
+EXIT_CODE=1
+COMMAND: npm ci --offline (frontend)
+ENOTCACHED: locked yocto-queue@0.1.0 tarball is not in the local npm cache; no online install was attempted.
+EXIT_CODE=1

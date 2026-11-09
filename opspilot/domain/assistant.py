@@ -272,7 +272,11 @@ def state(connection, run_id, *, active=True, worker_id=None):
     identity=trusted_identity(Path(connection.execute('PRAGMA database_list').fetchone()[2]),row['owner_id'])
     _verify_identity(connection,identity)
     if row['task_id'] and active:
-        assert_task_control_in_transaction(connection,row['tenant_id'],row['task_id'],run_id=run_id,allow_completed=True)
+        assert_task_control_in_transaction(
+            connection, row['tenant_id'], row['task_id'], run_id=run_id,
+            allow_completed=True,
+            allow_pending_for_readonly_chat=str(row['kind']) == 'CHAT_READONLY',
+        )
     return dict(row),identity
 
 def read_run(path,run_id,*,active=True,worker_id=None):

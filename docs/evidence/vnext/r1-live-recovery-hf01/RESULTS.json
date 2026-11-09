@@ -1,0 +1,82 @@
+{
+  "task_id": "R1-LIVE-RECOVERY-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "6d36f06a0c9824764bdadfe390083e685d592231",
+  "branch": "codex/r1-live-recovery-hf01",
+  "isolated_worktree": "D:/学习/agent新项目/.worktrees/r1-live-recovery-hf01",
+  "main_sha_at_start": "60eee87bfe3cca522011316cb4cd2c0064ad291b",
+  "instruction_blobs_at_base": {
+    "PROJECT_NORTH_STAR.md": "43dabda468506717c6956e676dfad4304c4f38e6",
+    "AGENTS.md": "807b928686a4dd2cac7b15b3c354b9943c93c910",
+    ".agents/skills/opspilot-slice-review/SKILL.md": "d405c8d413d633824b279202cc1503dab4cf0b03"
+  },
+  "root_cause": [
+    "TaskControl.state rejected all Runs while pending_critical_message_seq was set.",
+    "After the first narrow allowance, D2 MCP attempt reservation independently rejected the same CHAT_READONLY Run."
+  ],
+  "journey": {
+    "R1_correction_blocked_then_readonly_continues": "PASS",
+    "R2_same_bound_order_fresh_delivery_receiver_observations": "PASS",
+    "R3_current_run_observation_and_unapplied_correction": "PASS",
+    "R4_persisted_correction_run_source_and_control_revision": "PASS",
+    "S1_cross_session_task_rejected": "PASS",
+    "S2_no_plan_approval_or_business_write_eligibility_revival": "PASS",
+    "S3_investigator_not_authorized_by_readonly_exception": "PASS",
+    "S4_other_tenant_owner_and_revoked_scope_rejected": "PASS",
+    "S5_idempotent_correction_replay": "PASS",
+    "S6_existing_formal_correction_consumption_regression": "PASS"
+  },
+  "execution_counts": {
+    "provider_http_requests": 0,
+    "fixture_model_runs": 1,
+    "successful_mcp_calls_in_primary_journey": 2,
+    "browser_automation_runs": 0,
+    "external_business_writes": 0
+  },
+  "tests": [
+    {
+      "command": "python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-green-final-02 -q tests/test_r1_live_recovery_hf01.py --tb=short",
+      "result": "3 passed",
+      "exit_code": 0
+    },
+    {
+      "command": "python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-regression-01 -q tests/test_r1_live_recovery_hf01.py tests/test_m1_task_control.py tests/test_m4_01_dialogue_updates.py tests/test_m4_01_dialogue_update_safety.py tests/test_m4_03_hf_01.py tests/test_m4_03_hf_02.py tests/test_m4_03_s3.py tests/test_m4_c1_hf_01.py tests/test_d3_actions.py --tb=short",
+      "result": "112 passed, 1 failed (unchanged schema migration assertion expects 18; Base migration code reaches 20)",
+      "exit_code": 1,
+      "failure_is_in_changed_code": false
+    },
+    {
+      "command": "python -m pytest --basetemp docs/evidence/vnext/r1-live-recovery-hf01/pytest-tmp-assistant-runtime -q tests/test_ar02_ar03_integration_01.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py --tb=short",
+      "result": "59 passed",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed",
+      "exit_code": 0
+    },
+    {
+      "command": "python -m compileall -q opspilot/domain/task_control.py opspilot/domain/assistant.py opspilot/domain/d2.py tests/test_r1_live_recovery_hf01.py",
+      "result": "passed",
+      "exit_code": 0
+    },
+    {
+      "command": "npm run typecheck",
+      "result": "not run successfully: vue-tsc is unavailable in this worktree",
+      "exit_code": 1
+    },
+    {
+      "command": "npm ci --offline",
+      "result": "not completed: yocto-queue@0.1.0 was not present in local npm cache",
+      "exit_code": 1
+    }
+  ],
+  "unverified": [
+    "Real DeepSeek behavior",
+    "Browser UI rendering",
+    "Frontend TypeScript typecheck/build"
+  ],
+  "live_demo_worktree_touched": false,
+  "historical_gold_or_campaign_modified": false,
+  "main_modified_or_merged": false
+}

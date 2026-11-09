@@ -613,6 +613,7 @@ def reserve_attempt(
         ).fetchone()
         if binding is None:
             raise ScopeDenied("Attempt cannot be reserved without a trusted TaskBinding.")
+        assistant_readonly_run = False
         if run_id is not None:
             from opspilot.domain.assistant import selected as assistant_selected
             run = connection.execute(
@@ -624,6 +625,11 @@ def reserve_attempt(
                 or (str(run["kind"]) == "CHAT_READONLY" and not (kind == "MCP" and assistant_selected(connection,run_id))) or str(run["status"]) != "RUNNING"
             ):
                 raise ScopeDenied("Attempt Run is not an active business Run for this TaskBinding.")
+            assistant_readonly_run = bool(
+                str(run["kind"]) == "CHAT_READONLY"
+                and kind == "MCP"
+                and assistant_selected(connection, run_id)
+            )
         from opspilot.domain.execution_budget import investigation_budget_in_transaction
 
         budget = investigation_budget_in_transaction(connection, task_id, run_id)
@@ -637,7 +643,10 @@ def reserve_attempt(
             if task_run_control is not None and task_run_control.get("run_id") != run_id:
                 raise ScopeDenied("TASK_ATTEMPT_RUN_CONTEXT_MISMATCH")
             owner = connection.execute("SELECT tenant_id FROM task_bindings WHERE task_id=?",(task_id,)).fetchone()
-            assert_task_control_in_transaction(connection,str(owner["tenant_id"]),task_id,run_id=run_id)
+            assert_task_control_in_transaction(
+                connection, str(owner["tenant_id"]), task_id, run_id=run_id,
+                allow_pending_for_readonly_chat=assistant_readonly_run,
+            )
         used = budget["task_used"][kind]
         reason = budget["limit_reasons"][kind]
         if reason and budget["policy_version"] in {"CONTUX_S3_V1", "AR03_MATERIAL_REMAINDER_01_V1", "AR04C_MEMORY_ON_OFF_V1"}:
