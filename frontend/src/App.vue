@@ -4,6 +4,7 @@ import { api, explainError, type ApprovalResult, type AssistantScopes, type Assi
 import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
 import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
+import { renderAssistantMarkdown } from './markdown';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -498,6 +499,28 @@ function assistantInvestigationProposal(runId: string | null | undefined, source
   return runId
     ? controlledInvestigationProposal(assistantSourceDetails.value[runId]?.data, sourceMessageId)
     : null;
+}
+
+function assistantTurnMessages(item: { messages?: MessageItem[]; message?: MessageItem }): MessageItem[] {
+  return item.messages?.length ? item.messages : item.message ? [item.message] : [];
+}
+
+function assistantTurnLabel(item: { messages?: MessageItem[]; message?: MessageItem }): string {
+  const turnMessages = assistantTurnMessages(item);
+  if (turnMessages.length && turnMessages.every((message) => message.answer_kind === 'PROGRAM_LIMIT')) {
+    return '程序限制说明 · 非模型答复';
+  }
+  if (turnMessages.some((message) => message.answer_kind === 'PROGRAM_LIMIT')) {
+    return `同一轮答复 · 含程序状态（${turnMessages.length} 条记录）`;
+  }
+  return turnMessages.length > 1 ? `同一轮答复 · ${turnMessages.length} 条消息` : '聊天答复';
+}
+
+function assistantTurnSourceLabel(item: { messages?: MessageItem[]; message?: MessageItem }): string {
+  const turnMessages = assistantTurnMessages(item);
+  return turnMessages.every((message) => message.answer_kind === 'PROGRAM_LIMIT')
+    ? '程序生成的限制说明，不是模型答复'
+    : '该 Run 的工具调用与答复来源；刷新时会重新核验访问资格';
 }
 
 async function openAssistantOrderForm(): Promise<void> {
@@ -1653,16 +1676,21 @@ onBeforeUnmount(() => {
               </div>
             </article>
             <template v-for="item in thread.items" :key="item.id">
-              <article v-if="item.kind === 'CHAT_MESSAGE' && item.message" class="message-row assistant" :data-message-id="item.message.message_id" :data-run-id="item.runId">
+              <article v-if="item.kind === 'CHAT_MESSAGE' && item.message" class="message-row assistant" :data-message-id="item.message.message_id" :data-message-ids="assistantTurnMessages(item).map(message => message.message_id).join(',')" :data-run-id="item.runId">
                 <div class="message-avatar">✳</div><div class="message-content">
-                  <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(item.message.created_at) }}</span><span class="message-task">{{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序限制说明 · 非模型答复' : '聊天答复' }}</span></div>
-                  <div class="message-bubble">{{ item.message.body }}</div>
-                  <div v-if="item.runId && item.message.answer_kind === 'CHAT_MODEL' && assistantInvestigationProposal(item.runId, thread.anchor.message_id)" class="outcome-message warm-outcome" data-testid="assistant-investigation-proposal">
+                  <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(assistantTurnMessages(item)[0]?.created_at ?? item.message.created_at) }}</span><span class="message-task">{{ assistantTurnLabel(item) }}</span></div>
+                  <div class="message-bubble markdown-message">
+                    <div v-for="message in assistantTurnMessages(item)" :key="message.message_id" class="assistant-message-segment" :data-message-id="message.message_id">
+                      <span v-if="message.answer_kind === 'PROGRAM_LIMIT'" class="program-message-label">程序状态 · 非模型答复</span>
+                      <div class="markdown-body" v-html="renderAssistantMarkdown(message.body)"></div>
+                    </div>
+                  </div>
+                  <div v-if="item.runId && assistantTurnMessages(item).some(message => message.answer_kind === 'CHAT_MODEL') && assistantInvestigationProposal(item.runId, thread.anchor.message_id)" class="outcome-message warm-outcome" data-testid="assistant-investigation-proposal">
                     <p><strong>助手建议进入受控调查</strong> · {{ assistantInvestigationProposal(item.runId, thread.anchor.message_id)?.rationale }}</p>
                     <small>这是与原问题关联的未验证建议；尚未创建 Task、审批或业务权限。</small>
                     <button class="primary-button" type="button" :disabled="busy || !csrf" @click="openControlledInvestigation(thread.anchor)">核对原问题并确认进入调查</button>
                   </div>
-                  <details class="followup-sources" @toggle="loadAssistantSources($event, item.runId, item.message.task_id)"><summary>查看答复来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序生成的限制说明，不是模型答复' : '持久化的聊天答复' }}</small>
+                  <details class="followup-sources" @toggle="loadAssistantSources($event, item.runId, item.message.task_id)"><summary>查看工具与来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ assistantTurnSourceLabel(item) }}</small>
                     <template v-if="item.runId && assistantSourceDetails[item.runId]">
                       <small v-if="assistantSourceDetails[item.runId].message">{{ assistantSourceDetails[item.runId].message }}</small>
                       <ul v-if="assistantSourceDetails[item.runId].data"><li v-for="source in assistantSourceDetails[item.runId].data?.items ?? []" :key="source.call_id">
@@ -1677,7 +1705,7 @@ onBeforeUnmount(() => {
               <article v-else-if="item.kind === 'INVESTIGATION_ANSWER' && item.answer" class="readonly-followup-card" :data-testid="`investigation-answer-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
                 <div class="update-proposal-heading"><h2>本次调查答复</h2><span class="status-badge" :class="item.answer.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.answer.result_state === 'ANSWERED' ? '已答复' : item.answer.result_state === 'PARTIAL' ? '部分结果 · 仍有待核实事项' : item.answer.result_state === 'NOT_COMPLETED' ? '本次调查未完成' : '结果待确认' }}</span><span v-if="item.answer.currentness && item.answer.currentness !== 'CURRENT'" class="status-badge neutral">历史结果</span></div>
                 <small>形成于 {{ dateLabel(item.answer.created_at) }}。这是该 Run 的持久结果；刷新页面不会重新取证。</small>
-                <p>{{ item.answer.answer_text }}</p>
+                <div class="markdown-body result-markdown" v-html="renderAssistantMarkdown(item.answer.answer_text)"></div>
                 <div v-if="item.diagnosis" class="s3-result-card" data-testid="s3-diagnosis"><span>{{ item.diagnosis.currentness === 'CURRENT' ? '当前调查结果' : '历史调查结果 · 当前性已失效' }}</span><b>{{ readableS3Outcome(item.diagnosis.outcome) }}</b><small>仅只读诊断；未重发回调，也未宣称业务恢复。</small></div>
                 <details class="followup-sources"><summary>查看形成时间与来源（{{ item.answer.source_refs.length }}）</summary>
                   <small>{{ dateLabel(item.answer.created_at) }} · {{ item.answer.result?.delivery_mode === 'MODEL' ? '模型依据当时有效来源回答' : '可信事实与未知事项汇总' }}；这是对话答复，不授予业务操作资格。</small>
@@ -1687,7 +1715,7 @@ onBeforeUnmount(() => {
               </article>
               <article v-else-if="item.kind === 'READONLY_FOLLOWUP' && item.followup" class="readonly-followup-card" :data-testid="`readonly-followup-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
                 <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">补充调查</span><h2>同一任务的连续调查</h2></div><span class="status-badge" :class="item.followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.followup.result_state === 'ANSWERED' ? '已答复' : item.followup.result_state === 'PARTIAL' ? '部分结果 · 仍有待核实事项' : item.followup.result_state === 'NOT_COMPLETED' ? '本次补查未完成' : item.followup.run_status === 'FAILED' ? '补查失败' : '调查中' }}</span></div>
-                <p>{{ item.followup.answer_text || (item.followup.result_state === 'NOT_COMPLETED' ? '本次补查未能完成当前目标。' : '本次补查尚未形成最终回答。') }}</p>
+                <div class="markdown-body result-markdown" v-html="renderAssistantMarkdown(item.followup.answer_text || (item.followup.result_state === 'NOT_COMPLETED' ? '本次补查未能完成当前目标。' : '本次补查尚未形成最终回答。'))"></div>
                 <details class="followup-sources"><summary>查看来源与调查记录（{{ item.followup.source_refs.length }}）</summary>
                   <ul><li v-for="(sourceRef, index) in item.followup.source_refs" :key="index"><code>{{ JSON.stringify(sourceRef) }}</code></li></ul>
                   <small>Run {{ item.followup.run_id }} · 来源消息 {{ item.followup.source_message_id }} · 控制版本 {{ item.followup.expected_control_revision }}</small>
@@ -1718,7 +1746,7 @@ onBeforeUnmount(() => {
               </article>
               <div v-else-if="item.kind === 'STREAM' && item.run" class="streaming-row" data-testid="live-stream" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
                 <div class="message-avatar assistant-avatar">✳</div><div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label"><i></i>正在生成 · 暂存片段</span></div>
-                  <div class="stream-bubble" data-testid="stream-chunk">{{ (item.chunks ?? []).map((chunk) => chunk.body).join('') }}<span class="typing-cursor"></span></div>
+                  <div class="stream-bubble" data-testid="stream-chunk"><div class="markdown-body" v-html="renderAssistantMarkdown((item.chunks ?? []).map((chunk) => chunk.body).join(''))"></div><span class="typing-cursor"></span></div>
                 </div>
               </div>
             </template>
@@ -1775,7 +1803,9 @@ onBeforeUnmount(() => {
                 <i class="status-dot" :class="statusTone(item.status)"></i>
               </div>
             </div>
-            <div v-if="activeChatContext" class="plan-card context-budget-card" data-testid="context-budget-provenance">
+            <details v-if="activeChatContext" class="inspector-foldout">
+              <summary>模型上下文预算 · Domain 估算</summary>
+              <div class="plan-card context-budget-card" data-testid="context-budget-provenance">
               <div class="section-heading"><h3>模型上下文预算</h3><span class="read-only-label">Domain 估算</span></div>
               <div class="plan-row"><span>策略 / 估算器</span><b>{{ String((activeChatContext.context_budget as Record<string, unknown>)?.strategy ?? '—') }} · {{ String((activeChatContext.context_budget as Record<string, unknown>)?.estimator ?? '—') }}</b></div>
               <div class="plan-row"><span>输入 Token</span><b>{{ String((activeChatContext.context_budget as Record<string, unknown>)?.estimated_input_tokens ?? '—') }} / {{ String((activeChatContext.context_budget as Record<string, unknown>)?.input_budget_tokens ?? '—') }}</b></div>
@@ -1791,17 +1821,20 @@ onBeforeUnmount(() => {
               </div>
               <div v-if="Array.isArray(activeChatContext.summary_refs) && activeChatContext.summary_refs.length" class="evidence-footer">已用历史摘要：{{ JSON.stringify(activeChatContext.summary_refs) }}</div>
               <div v-if="Array.isArray(activeChatContext.excluded_sources) && activeChatContext.excluded_sources.length" class="evidence-footer">排除来源：{{ JSON.stringify(activeChatContext.excluded_sources) }}</div>
-            </div>
+              </div>
+            </details>
           </div>
-          <div class="inspector-section">
-            <div class="section-heading"><h3>当前 Evidence</h3><span class="section-count">{{ inspector.evidence.length }}</span></div>
+          <details class="inspector-section inspector-foldout">
+            <summary>当前 Evidence · {{ inspector.evidence.length }}</summary>
+            <div class="inspector-detail-content">
             <div v-if="inspector.evidence.length === 0" class="muted-card">当前 Task 尚无可展示的有效 MCP Evidence。</div>
             <div v-for="item in inspector.evidence" :key="String(item.evidence_id)" class="evidence-card">
               <div class="evidence-heading"><span class="evidence-type">{{ String(item.fact_type).replaceAll('_', ' ') }}</span><span class="verified-mark">✓ VERIFIED</span></div>
               <div class="evidence-facts"><template v-for="(value, key) in (item.facts as Record<string, unknown>)" :key="String(key)"><div><span>{{ String(key).replaceAll('_', ' ') }}</span><strong :title="typeof value === 'object' ? JSON.stringify(value) : String(value)">{{ typeof value === 'object' ? JSON.stringify(value) : String(value) }}</strong></div></template></div>
               <div class="evidence-footer"><code>{{ String(item.evidence_id).slice(0, 22) }}</code><span>{{ dateLabel(item.fetched_at) }}</span></div>
             </div>
-          </div>
+            </div>
+          </details>
           <div class="inspector-section">
             <div class="section-heading"><h3>计划与授权</h3><span class="read-only-label">只读</span></div>
             <div class="plan-card"><div class="plan-row"><span>最新 Plan</span><b>{{ inspector.trusted_state.plan ? String((inspector.trusted_state.plan as Record<string, unknown>).plan_hash).slice(0, 14) : '尚未生成' }}</b></div><div class="plan-row"><span>审批状态</span><b>{{ readableStatus((inspector.trusted_state.plan as Record<string, unknown> | null)?.approval_decision ?? 'UNKNOWN') }}</b></div><p v-if="currentTaskStatus === 'WAITING_APPROVAL' && (inspector.trusted_state.plan as Record<string, unknown> | null)?.eligibility === 'ACTIVE'">Task 正等待同租户独立 APPROVER 审批。聊天文本不能代签或授予动作权限。</p><p v-else-if="currentTaskStatus">业务状态由可信 Domain 控制。用户线索与只读回答都不会改变审批资格或写入权限。</p>
@@ -1840,8 +1873,8 @@ onBeforeUnmount(() => {
             <div v-if="s3HandoffOutcome.business_outcome === 'HANDOFF_ACCEPTED' && s3HandoffOutcome.handoff_receipt" class="outcome-row good-outcome" data-testid="s3-handoff-receipt"><span>HANDOFF_ACCEPTED · HandoffReceipt</span><code>{{ String((s3HandoffOutcome.handoff_receipt as Record<string, unknown>).receipt_id) }}</code><span>Queue Entry {{ String((s3HandoffOutcome.queue_entry as Record<string, unknown> | null)?.entry_id ?? '') }} · {{ readableStatus((s3HandoffOutcome.queue_entry as Record<string, unknown> | null)?.queue_status ?? 'PENDING_REVIEW') }}</span></div>
             <div v-if="s3HandoffOutcome.business_outcome === 'HANDOFF_ACCEPTED'" class="outcome-message warm-outcome">本地处理队列已持久接收。此回执只证明 HANDOFF_ACCEPTED；订单未因此恢复，回调也未因此完成或重发。</div>
           </div>
-          <div v-if="taskMemoryContext" class="inspector-section memory-section" data-testid="task-memory-context">
-            <div class="section-heading"><h3>跨 Task 案例经验</h3><span class="read-only-label">仅历史方法提示</span></div>
+          <details v-if="taskMemoryContext" class="inspector-section memory-section inspector-foldout" data-testid="task-memory-context">
+            <summary>跨 Task 案例经验 · 仅历史方法提示</summary>
             <div class="memory-warning">案例不属于当前 Evidence，不改变 Gate、授权、Plan 或业务状态。目标 Task 只会读取不同 source_task_id 的已审核经验。</div>
             <div v-for="item in taskMemoryContext.source_memories" :key="item.memory_id" class="memory-case-card" data-testid="source-memory-case">
               <div class="plan-row"><span>来源案例</span><b>{{ item.problem_type }} · {{ item.source_outcome }} · {{ item.state }}</b></div>
@@ -1873,9 +1906,9 @@ onBeforeUnmount(() => {
             </div>
             <div v-else class="muted-card">最近模型调用没有选用 Memory；当前工具、Evidence Gate 与业务资格仍来自实时来源。</div>
             <div v-if="latestExcludedMemorySources.length" class="evidence-footer" data-testid="excluded-memory-provenance">本轮未选入模型上下文的记忆：{{ JSON.stringify(latestExcludedMemorySources) }}</div>
-          </div>
-          <div v-if="taskSemanticContext" class="inspector-section memory-section" data-testid="semantic-memory-context">
-            <div class="section-heading"><h3>项目 Semantic Memory</h3><span class="read-only-label">历史约定提示</span></div>
+          </details>
+          <details v-if="taskSemanticContext" class="inspector-section memory-section inspector-foldout" data-testid="semantic-memory-context">
+            <summary>项目 Semantic Memory · 历史约定提示</summary>
             <div class="memory-warning">只加载其他 Task 来源、经项目授权 APPROVER 确认且来源仍有效的内容。它不能证明当前事实或授权；续会摘要与历史回答在版本变化或撤销后失效。</div>
             <div v-if="taskSemanticContext.active_project_memories.length === 0" class="muted-card">当前 Task 没有可用的跨 Task 项目约定。</div>
             <div v-for="item in taskSemanticContext.active_project_memories" :key="item.memory_id" class="memory-case-card" data-testid="active-semantic-memory">
@@ -1903,9 +1936,9 @@ onBeforeUnmount(() => {
               <small>来源 Message {{ semanticSourceMessageId }} · 提案不会修改当前 Task、Gate 或权限。</small>
               <button class="outline-button" type="submit" :disabled="busy || !csrf || !semanticDraftKey.trim() || !semanticDraftContent.trim()">保存待审候选</button>
             </form>
-          </div>
-          <div class="inspector-section input-provenance-section">
-            <div class="section-heading"><h3>用户线索 Provenance</h3><span class="read-only-label">未验证</span></div>
+          </details>
+          <details class="inspector-section input-provenance-section inspector-foldout">
+            <summary>用户线索 Provenance · 未验证</summary>
             <div v-if="latestSelectedInputs.length === 0" class="muted-card">尚无模型调用上下文；已提交消息仍保存在会话与 Task Run 中。</div>
             <div v-for="item in latestSelectedInputs" :key="String(item.message_id ?? item.digest)" class="provenance-row">
               <span class="trace-icon">↳</span><span><strong>{{ readableInputKind(item.kind) }}</strong><small>{{ String(item.message_id ?? 'legacy fallback') }} · #{{ item.sequence ?? '—' }} · {{ String(item.provenance) }}</small><small>Digest {{ String(item.digest).slice(0, 16) }} · 控制版本 {{ item.applied_control_revision ?? item.accepted_control_revision ?? '—' }}</small></span>
@@ -1918,20 +1951,20 @@ onBeforeUnmount(() => {
             <div v-if="latestContextProvenance?.selected_skill" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).name) }} · v{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).version) }}</strong><small>Skill SHA-256 {{ String((latestContextProvenance.selected_skill as Record<string, unknown>).digest).slice(0, 16) }}</small></span></div>
             <div v-for="item in latestSelectedKnowledge" :key="String(item.document_id)" class="trace-row"><span class="trace-icon">▤</span><span><strong>{{ String(item.document_id) }} · v{{ String(item.version) }}</strong><small>{{ String(item.source) }} · SHA-256 {{ String(item.digest).slice(0, 16) }}</small></span></div>
             <div class="gate-card"><span>确定性 Evidence Gate</span><b>{{ readableGate(inspector.current_gate.decision) }}</b><small>{{ String(inspector.current_gate.reason_code ?? '—') }} · 当前有效 Evidence {{ Array.isArray(inspector.current_gate.checked_fact_ids) ? (inspector.current_gate.checked_fact_ids as unknown[]).length : 0 }} 项</small></div>
-          </div>
+          </details>
           <div v-if="canCreateTask && taskId" class="inspector-section correction-section">
             <div class="section-heading"><h3>正式关键更正</h3><span class="status-badge warm">会提升控制版本</span></div>
             <p class="correction-warning">提交后会中断正在运行的业务调查，并让旧 Plan 与审批失效；新调查 Run 会重新消费更正。</p>
             <textarea v-model="correctionDraft" data-testid="critical-correction-input" rows="3" maxlength="20000" placeholder="更正：请说明新核实的事实或应优先调查的线索。" :disabled="busy || !csrf"></textarea>
             <button class="outline-button" type="button" data-testid="submit-critical-correction" :disabled="!correctionDraft.trim() || busy || !csrf" @click="submitCriticalCorrection">提交关键更正</button>
           </div>
-          <div class="inspector-section">
-            <div class="section-heading"><h3>MCP 与模型轨迹</h3><span class="section-count">{{ inspector.observations.length + inspector.investigation_model_traces.length + inspector.chat_model_attempts.length }}</span></div>
+          <details class="inspector-section inspector-foldout">
+            <summary>MCP 与模型轨迹 · {{ inspector.observations.length + inspector.investigation_model_traces.length + inspector.chat_model_attempts.length }}</summary>
             <div v-if="inspector.observations.length === 0 && inspector.investigation_model_traces.length === 0 && inspector.chat_model_attempts.length === 0" class="muted-card">尚无已记录的工具或模型调用。</div>
             <div v-for="item in inspector.observations.slice(0, 8)" :key="String(item.observation_id)" class="trace-row"><span class="trace-icon">⌕</span><span><strong>{{ String(item.tool_name) }}</strong><small>{{ String(item.status) }} · {{ dateLabel(item.created_at) }}</small></span><i class="status-dot" :class="statusTone(item.status)"></i></div>
             <div v-for="item in inspector.investigation_model_traces.slice(0, 4)" :key="String(item.provider_response_id ?? item.prompt_digest)" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String(item.model_id) }}</strong><small>{{ String(item.status) }} · {{ JSON.stringify(item.usage) }}</small></span><i class="status-dot" :class="statusTone(item.status)"></i></div>
             <div v-for="item in inspector.chat_model_attempts.slice(0, 4)" :key="String(item.attempt_id)" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String(item.model_id) }}</strong><small>Chat {{ String(item.status) }} · {{ item.total_tokens ?? 'Token 未提供' }} tokens</small></span><i class="status-dot" :class="statusTone(item.status)"></i></div>
-          </div>
+          </details>
           <div class="inspector-section timeline-section"><div class="section-heading"><h3>事件时间线</h3><button class="text-button" type="button" @click="reconnectEvents">刷新</button></div>
             <div v-if="sessionEvents.length === 0" class="muted-card">持久事件到达后会显示在这里。</div>
             <div v-for="item in sessionEventProjection.slice(0, 12)" :key="item.event_seq" class="timeline-item"><span class="timeline-dot"></span><div><strong>{{ item.event_kind.replaceAll('_', ' ') }}</strong><small>{{ dateLabel(item.happened_at) }} · #{{ item.event_seq }}</small></div></div>

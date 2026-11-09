@@ -65,6 +65,7 @@ export interface ConversationItem {
   createdAt: string;
   runId?: string;
   message?: MessageItem;
+  messages?: MessageItem[];
   answer?: ConversationAnswer;
   followup?: ConversationFollowup;
   assessment?: ConversationAssessment;
@@ -376,7 +377,9 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     for (const run of sidecars) correctionTakeoverSidecarIds.add(run.run_id);
   }
 
-  for (const message of uniqueMessages) {
+  const orderedMessages = [...uniqueMessages].sort((left, right) =>
+    left.sequence - right.sequence || left.message_id.localeCompare(right.message_id));
+  for (const message of orderedMessages) {
     if (message.role === 'USER') continue;
     const sourceId = message.answer_source_message_id ?? null;
     const source = sourceId ? messagesById.get(sourceId) : undefined;
@@ -384,10 +387,30 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     const displaySource = correctedSource?.correctionMessageId === sourceId ? correctedSource.sourceMessageId : sourceId;
     const valid = message.role === 'ASSISTANT' && !!source && source.role === 'USER'
       && taskMatches(message, source.task_id) && !!message.answer_run_id
-      && !!message.answer_kind && attach(displaySource, message.task_id, {
-        id: `message:${message.message_id}`, kind: 'CHAT_MESSAGE', createdAt: message.created_at,
-        runId: message.answer_run_id, message,
-      });
+      && !!message.answer_kind && !!displaySource && threadByMessageId.has(displaySource)
+      && taskMatches(threadByMessageId.get(displaySource)!.anchor, message.task_id);
+    if (valid && displaySource && message.answer_run_id) {
+      const itemId = `turn:${message.answer_run_id}:${displaySource}`;
+      const ids = idsByThread.get(displaySource)!;
+      const existing = ids.get(itemId);
+      if (existing?.kind === 'CHAT_MESSAGE') {
+        const turnMessages = existing.messages ?? (existing.message ? [existing.message] : []);
+        if (!turnMessages.some((candidate) => candidate.message_id === message.message_id)) {
+          turnMessages.push(message);
+          turnMessages.sort((left, right) =>
+            left.sequence - right.sequence || left.message_id.localeCompare(right.message_id));
+          existing.messages = turnMessages;
+          existing.message = turnMessages[turnMessages.length - 1];
+          existing.createdAt = turnMessages[0].created_at;
+        }
+      } else {
+        attach(displaySource, message.task_id, {
+          id: itemId, kind: 'CHAT_MESSAGE', createdAt: message.created_at,
+          runId: message.answer_run_id, message, messages: [message],
+        });
+      }
+      continue;
+    }
     if (!valid) {
       const item: ConversationItem = {
         id: `message:${message.message_id}`, kind: 'CHAT_MESSAGE', createdAt: message.created_at, message,
