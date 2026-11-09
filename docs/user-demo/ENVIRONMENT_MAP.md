@@ -3,7 +3,7 @@
 ## 版本与隔离路径
 
 - 试用源码根：D:\学习\agent新项目\.worktrees\r1-user-demo-01
-- 分支：codex/r1-user-demo-01；基于 r1-engine-final-closeout-02 的 fe8b69d9e44ea6f9c585830ff14a66e64d9b1cab。
+- 当前候选分支：codex/r1-user-demo-live-01；基于 user-demo 基线 4113fa25a0a46ca3c3fd15dfd0bf06697889fc7f。
 - 本轮专属运行目录：.runtime/user-demo/。
 - Domain SQLite：.runtime/user-demo/domain.sqlite3。
 - LangGraph Checkpoint SQLite：.runtime/user-demo/checkpoint.sqlite3。
@@ -14,9 +14,9 @@
 
 ## 配置优先级
 
-应用从当前试用源码根目录读取 .env。opspilot.config.load_local_environment() 使用 os.environ.setdefault：已经存在的 PowerShell/进程环境变量优先，.env 只填补进程环境中不存在的变量。它不会自动读取其他工作树的 .env。历史 m4_continuous smoke 有单独写死的原仓库 .env 路径，不是正式 Web 启动路径，本试用脚本不运行该 smoke。
+应用的 `load_local_environment()` 从当前试用源码根读取 `.env`，用 `os.environ.setdefault`：已存在的进程环境变量优先，`.env` 只填补缺失值。它不会自动读取其他工作树的 `.env`。历史 smoke 的专用配置路径不属于正式用户启动流程。
 
-Start-UserDemo.ps1 为新子进程显式设置本试用 DB/Checkpoint 路径、Web/API 地址、所选 Profile，并强制设置 Runtime、普通 Provider、Legacy Provider 为关闭、Experiment ID 为空、模型 Key 为空。该约束优先于本机 .env 或继承环境。脚本不会打印环境值。
+`Start-UserDemo.ps1` 先读取当前工作树 `.env`。Offline 子进程强制关闭 Runtime、普通 Provider 和 Legacy Provider、清空模型 Key、清空实验 ID。Live 启动前，`runtime_admin.py preflight` 核验同一 `.env` 与本地持久 Grant；发现当前模型/价格配置漂移时，沿用现有 Runtime Grant 行为暂停费用池。服务子进程再将同一 `.env` 中的 Provider 字段显式设为进程值，因此这些字段不会被其他 PowerShell 环境或其他工作树覆盖。两种模式都强制使用当前工作树的 Domain/Checkpoint、API Origin、Profile 资源及 `assistant_experiment_id=None`。登录密码沿用应用规则：调用进程已有密码变量优先，否则从本工作树 `.env` 读取。脚本不打印任何密码或 Key。HTTPX 仍遵守当前进程配置的代理环境；本轮检查时常见 HTTP(S)/ALL proxy 变量未设置。
 
 ## 当前变量来源与状态
 
@@ -32,17 +32,18 @@ Start-UserDemo.ps1 为新子进程显式设置本试用 DB/Checkpoint 路径、W
 | OPSPILOT_WEB_SUPPORT_PASSWORD | .env 模板有占位值；所有者必须填写 | support-a 本地登录 |
 | OPSPILOT_WEB_APPROVER_PASSWORD | .env 模板有占位值；所有者必须填写 | approver-a 本地登录 |
 | OPSPILOT_WEB_SUPPORT_B_PASSWORD / OPSPILOT_WEB_APPROVER_B_PASSWORD | 模板为空、可选填写 | tenant-b 隔离演示账号 |
-| OPSPILOT_ASSISTANT_RUNTIME_ENABLED | 启动子进程强制为 0 | 普通 Assistant Runtime 的产品开关 |
-| OPSPILOT_ASSISTANT_PROVIDER_ENABLED | 启动子进程强制为 0 | 普通 Provider 出站开关 |
+| OPSPILOT_ASSISTANT_RUNTIME_ENABLED | Offline 强制为 0；Live 预检通过后设为 1 | 普通 Assistant Runtime 产品开关 |
+| OPSPILOT_ASSISTANT_PROVIDER_ENABLED | Offline 强制为 0；Live 预检通过后设为 1 | 普通 Provider 出站开关 |
 | OPSPILOT_LEGACY_PROVIDER_ENABLED | 启动子进程强制为 0 | 旧 Chat/Investigator 出站开关 |
 | OPSPILOT_ASSISTANT_EXPERIMENT_ID | 启动子进程强制为空 | 防止进入实验专属 Runner |
-| OPSPILOT_MODEL_API_KEY | 启动子进程强制为空；未读取或显示本机值 | Provider 凭据；本试用不需要也不使用 |
-| OPSPILOT_MODEL_BASE_URL / OPSPILOT_MODEL_NAME | 本轮未配置；Provider 关闭 | 供应商地址和模型，仅未来单独授权时使用 |
-| OPSPILOT_MODEL_CONFIG_VERSION / OPSPILOT_MODEL_PRICE_VERSION / OPSPILOT_ASSISTANT_SERVICE_IDENTITY | 本轮未配置；Provider 关闭 | 持久 Runtime Grant 绑定字段 |
+| OPSPILOT_MODEL_API_KEY | Offline 强制为空；Live 从本工作树 `.env` 载入且只检查存在，不打印或验证网络 | DeepSeek Provider 凭据 |
+| OPSPILOT_MODEL_BASE_URL / OPSPILOT_MODEL_NAME | Offline Provider 关闭；Live 从本工作树 `.env` 固定为受支持的 DeepSeek 地址与 `deepseek-flash` | 供应商地址与模型身份；与 Grant 一致性校验 |
+| OPSPILOT_MODEL_CONFIG_VERSION / OPSPILOT_MODEL_PRICE_VERSION / OPSPILOT_ASSISTANT_SERVICE_IDENTITY | Offline Provider 关闭；Live 由本工作树 `.env` 提供并与 Grant 核对 | 持久 Runtime Grant 绑定字段 |
+| OPSPILOT_MODEL_INPUT_RATE_MICRO_PER_MILLION / OPSPILOT_MODEL_OUTPUT_RATE_MICRO_PER_MILLION | 仅 Live 需要，来自本工作树 `.env`；预检与 Grant 费率必须相同 | Runtime Grant 费用估算费率；须由所有者自行核对当前供应商价格 |
 | OPSPILOT_WEB_SESSION_TTL_SECONDS | .env 未提供时应用默认 3600 秒 | 本地登录 Session 时长 |
 | OPSPILOT_EXECUTOR_ID | .env 未提供时应用默认 executor-a | Demo Task 的本地 Executor 身份 |
 
-初始检查未发现本工作树 .env，也未发现 PowerShell 进程中 Provider/Proxy 环境变量；初始化器只会从模板生成被忽略的 .env。无 API Key、无模型授权、无 Runtime Grant。不要把本地 .env 或命令行环境转发到公开日志。
+本轮检查时本工作树 `.env` 已存在，含试用登录配置；其中 Live Provider Key、模型版本、价格版本和费率配置尚未设置，登录密码仍需所有者替换示例占位值。当前 Runtime Authority、费用池、Grant、Spend 和 Campaign 均未创建；本任务不会修改 `.env`、创建真实 Grant 或发送 Provider 请求。不要把本地 `.env` 或命令行环境转发到公开日志。
 
 ## 数据初始化、重置与保护
 
@@ -65,17 +66,19 @@ Initialize-UserDemo.ps1 只调用隔离初始化器；初始化器使用现有 r
 ## 试用状态
 
 - OFFLINE_DEMO_READY：本地 Web/API/Worker/持久化启动验证通过；不代表模型回答能力通过。
-- REAL_PROVIDER_READY：本轮未达到。
-- REAL_PROVIDER_BLOCKED：Provider 开关关闭、Key 未注入、Runtime Grant 未创建；需另行授权与受信配置。
-- BROWSER_NOT_VERIFIED：页面仅通过 HTTP 状态检查，所有者仍需亲自用浏览器体验。
+- REAL_PROVIDER_READY：本轮未达到；当前仅接通普通 Runtime Grant 的配置入口并做离线证明。
+- REAL_PROVIDER_BLOCKED：当前 Key/价格版本/费率配置与 Runtime Grant 均未设置；Live 模式会在启动前明确拒绝。
+- BROWSER_NOT_VERIFIED：本轮没有进行浏览器自动化；所有者仍需亲自打开页面体验。
 
 ## 本候选的本地验证记录
 
 - `python -m venv .venv` 与 `.venv\\Scripts\\python.exe -m pip install -e ".[dev]"`：通过。为支持干净隔离安装，候选只增加了 `pyproject.toml` 的 setuptools 包发现范围。
-- `.venv\\Scripts\\python.exe -m pytest -q --basetemp .runtime/user-demo-validation/pytest-user-demo-final-3 tests/test_user_demo_setup.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py`：33/33 通过。
+- 本轮扩展定向回归：`.venv\\Scripts\\python.exe -m pytest -q --basetemp .runtime/user-demo-validation/pytest-live-regression-02 tests/test_user_demo_live_mode.py tests/test_user_demo_setup.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py`：36/36 通过，覆盖新建授权、预检、撤销/过期/价格不匹配拒绝、余额下限，以及既有正式 API/Worker/ASSISTANT_V1 Runtime Grant MockTransport 路径。`compileall` 同时通过。
+- 本轮第一次未指定 `--basetemp` 的 pytest 在测试 setup 阶段因 Windows 系统 Temp 目录 `PermissionError` 中止，未进入测试主体；使用本工作树 `.runtime/user-demo-validation/` 下的隔离目录重跑，36/36 通过。
 - `npm --prefix frontend run build`：通过；本轮没有改前端源码。
-- 四个 PowerShell 试用脚本解析：通过。启动脚本拒绝示例密码；用仅存在于测试进程环境的临时密码启动后，API Health 为 `ok`、Worker `ready=true`、前端根路径 HTTP 200，正式 `/api/auth/login` 返回成功；随后通过脚本正常停止。
+- 本轮涉及的 Start/Configure/Show 三个 PowerShell 脚本解析：通过。本轮用仅存在于当前 PowerShell 进程的随机临时密码执行 Offline 启动，API Health 为 `ok`、Worker `ready=true`、前端根路径 HTTP 200，随后正常停止；本轮没有执行浏览器自动化。Live 启动在缺少专用 Provider 配置和 Runtime Grant 时被拒绝，未启动服务。
 - 使用本地登录接口建立的一个 Session，在停止并重启服务后仍可读回。当前隔离 Domain 有 1 个演示 Session、0 条聊天消息、0 个 Task；Runtime Grant、费用池、Grant Spend、Campaign 均为 0。Checkpoint 数据库已有 `checkpoints` 与 `writes` 表。
-- 验证调用计数：真实 Provider HTTP 0、MCP `tools/call` 0、浏览器自动化 0、外部业务写入 0。初始化演示资源时使用的回调仅访问本机隔离 Demo 服务。
+- 本轮结束核验：Domain 仍为 1 个 Session、0 条聊天消息、0 个 Task；Runtime Authority/Pool/Grant/Spend/Campaign 均为 0；Checkpoint 文件存在；8000/5173 无监听、`processes.json` 与 `shutdown.request` 均不存在。`.env`、Domain、Checkpoint 和日志均被 Git 忽略。
+- 本轮调用计数：真实 Provider HTTP 0、MCP `tools/call` 0、浏览器自动化 0、外部业务写入 0。之前已验证的登录/Session 重启证据沿用；本轮没有新建用户消息或 Task。
 
 这些结果证明隔离启动、登录会话持久化及基础服务可用；不证明页面浏览器体验、真实模型回答或真实 Assistant 调查。项目所有者需先在本地 `.env` 替换两个必填密码，再按用户指南自行打开浏览器。

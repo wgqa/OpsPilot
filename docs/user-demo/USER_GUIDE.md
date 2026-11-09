@@ -3,8 +3,8 @@
 ## 唯一试用版本
 
 - 工作树：D:\学习\agent新项目\.worktrees\r1-user-demo-01
-- 分支：codex/r1-user-demo-01
-- 起始候选：fe8b69d9e44ea6f9c585830ff14a66e64d9b1cab；最终 SHA 以本次候选提交为准。
+- 分支：codex/r1-user-demo-live-01
+- 起始试用基线：4113fa25a0a46ca3c3fd15dfd0bf06697889fc7f；最终 SHA 以本次候选提交为准。
 - 业务库：.runtime/user-demo/domain.sqlite3
 - Checkpoint：.runtime/user-demo/checkpoint.sqlite3
 - 本地 API：127.0.0.1:8000；前端：127.0.0.1:5173。
@@ -14,6 +14,8 @@
 ## 首次安装与初始化
 
 在 PowerShell 中进入上面的工作树目录。需要 Python 3.11 或更高版本、Node.js 20.19 或更高版本和 npm。
+
+    Set-Location 'D:\学习\agent新项目\.worktrees\r1-user-demo-01'
 
     python -m venv .venv
     .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
@@ -48,6 +50,28 @@
 
 S1/S2 Profile 只决定新建同步调查绑定的可信 Demo 资源。切换前先停止服务，再用另一 Profile 启动；已有 Task 的绑定和历史不随 Profile 改写。S3 资源仍通过页面的订单选择入口绑定。
 
+默认模式是 `Offline`，启动命令等同于 `-Mode Offline`，会强制关闭所有 Provider 路径并清空子进程 API Key。它保留登录、演示资源和已有离线能力。
+
+## 真实 Provider Live 模式（本地可选）
+
+当前源码只支持 DeepSeek `deepseek-flash`。本候选没有 API Key、Runtime Grant 或费用池，也没有发送真实 Provider 请求。只有在你另行核对模型和官方当前价格、选定愿意承担的费用总额，并明确授权真实调用后，才按以下步骤自行启用：
+
+1. 在 `.env` 中填写 `OPSPILOT_MODEL_API_KEY`。不要在聊天、命令行参数或日志中粘贴 Key。确认 `OPSPILOT_MODEL_NAME` 与 `OPSPILOT_MODEL_BASE_URL` 使用当前受支持的模型和官方端点；填写你核对过的 `OPSPILOT_MODEL_CONFIG_VERSION`、`OPSPILOT_MODEL_PRICE_VERSION`、输入/输出 `...RATE_MICRO_PER_MILLION` 和 `OPSPILOT_ASSISTANT_SERVICE_IDENTITY`。费率单位是每百万 Token 的微美元（USD × 1,000,000），不会自动从供应商读取。
+2. 停止服务后运行 `.\scripts\user-demo\Configure-UserDemoLive.ps1`。它会显示非密钥配置，让你输入自己选择的总额度和 Grant 到期时间，再要求键入包含该额度的确切授权句。该操作会在本地试用 Domain 中创建一次持久共享 Runtime Grant/费用池，但不会发送 Provider 请求。它只对空费用账本生效，已创建后不会再新建或重置费用池；所以先确定额度。不要在没有独立收费授权时运行此配置。
+3. 启动正式普通 Assistant：
+
+       .\scripts\user-demo\Start-UserDemo.ps1 -Profile S1 -Mode Live
+
+   脚本会在启动服务前检查 API Key 是否存在、模型/价格配置是否与当前 Grant 一致、Grant 是否有效、共享池是否 ACTIVE、余额是否足以覆盖一次最大请求预留，以及数据库是否混入实验 Campaign。它不发送连通性探针；Key 是否有效、网络是否可用，只会在你之后真实提交消息时知道。启动失败会报告原因并且不回退到旧 Provider 路径。
+
+4. 多 Session 共用同一数据库中的费用池。查看费用：
+
+       .\scripts\user-demo\Show-UserDemoSpend.ps1
+
+   输出包含 Usage 结算估算、未决/UNKNOWN 预留、已占用总额、剩余额度和暂停状态。它不是供应商账单。余额不足或 Grant/价格状态失效时不会自动重置数据库、替换费用池或重发 UNKNOWN 请求。
+
+切回 Offline 前先运行 Stop，再以 `-Mode Offline` 启动。Offline 会在该服务进程中禁用普通与 Legacy Provider；本地 Runtime Grant 和账本会保留。
+
 ## 停止、重启与保留数据
 
     .\scripts\user-demo\Stop-UserDemo.ps1
@@ -62,13 +86,13 @@ S1/S2 Profile 只决定新建同步调查绑定的可信 Demo 资源。切换前
 
 ## 真实可体验范围与限制
 
-当前候选的实测状态：OFFLINE_DEMO_READY（API、单 Worker、前端 HTTP 和持久化底座通过本地检查；真实模型回答未启用）；REAL_PROVIDER_BLOCKED；BROWSER_NOT_VERIFIED。
+当前候选的实测状态：OFFLINE_DEMO_READY（API、单 Worker、前端 HTTP、登录和持久化底座通过本地检查；真实模型回答未启用）；REAL_PROVIDER_BLOCKED（本地没有有效 Key/Grant，Live 未启用）；BROWSER_NOT_VERIFIED。
 
-重要：当前试用启动脚本刻意强制关闭 ASSISTANT_V1 Runtime Grant、普通 Provider 和 Legacy Provider，并清空该进程的模型 API Key。数据库不会创建 Runtime Grant、费用池、实验 Claim 或 Campaign。登录和页面可以使用，Domain 内有 S1/S2/S3 演示资源，但模型回答、由模型驱动的 S1/S2 调查与审批后修复闭环不能据此宣称可用。当前只有既有确定性测试证明这些本地 Domain 合同。
+重要：默认 Offline 启动脚本会关闭 ASSISTANT_V1 Runtime、普通 Provider 和 Legacy Provider，并清空该进程的模型 API Key。首次初始化不会创建 Runtime Grant、费用池、实验 Claim 或 Campaign。登录和页面可以使用，Domain 内有 S1/S2/S3 演示资源，但在你单独配置 Live Grant 前，模型回答、由模型驱动的 S1/S2 调查与审批后修复闭环不能据此宣称可用。当前只有既有确定性测试证明这些本地 Domain 合同。
 
 可以在页面探索协议/配置问题、普通会话、可信订单绑定、S1/S2/S3 的入口和已有结果投影；在本轮 Provider 被关闭的状态下，不能把程序的模型不可用提示当成 Agent 已完成调查。
 
-若要亲自体验真实 DeepSeek，需另行批准 Provider、模型、一次性费用上限和停止条件，并由受信管理员在隔离数据库里单独配置持久 Runtime Grant。仅填写 API Key 不会启用调用；不要自行打开 Provider 开关或复用历史实验账本。此候选未创建 Grant，因此暂不设置未获批准的金额。首次收费授权前应复核当日官方价格和当前发送预留；例如若现行单次保守预留仍是 USD 0.645600，四次调用的应用侧最低池可按 USD 2.5824 评估，但这只是待复核的讨论值，不是本次授权或已配置额度。
+仅填写 API Key 不会启用调用；Live 启动还要求当前隔离数据库中的持久 Grant。不要复制实验账本或历史 Grant。本候选没有代你设置预算金额、创建 Grant 或发送 Provider 请求。应用费用池按你亲自核对的价格和配置估算，并不等于供应商账单。
 
 ## 故障排查
 

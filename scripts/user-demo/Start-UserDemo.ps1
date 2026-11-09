@@ -1,6 +1,8 @@
 param(
     [ValidateSet('S1', 'S2')]
-    [string]$Profile = 'S1'
+    [string]$Profile = 'S1',
+    [ValidateSet('Offline', 'Live')]
+    [string]$Mode = 'Offline'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,6 +59,14 @@ $node = (Get-Command node -ErrorAction Stop).Source
 $vite = Join-Path $root 'frontend\node_modules\vite\bin\vite.js'
 if (-not (Test-Path -LiteralPath $vite)) { throw 'Frontend dependencies are missing. Run npm ci in frontend.' }
 
+if ($Mode -eq 'Live') {
+    $runtimeAdmin = Join-Path $PSScriptRoot 'runtime_admin.py'
+    & $python $runtimeAdmin preflight
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Live mode was not started. Fix the Runtime Grant/configuration shown above; no Provider request was sent.'
+    }
+}
+
 function Test-LocalPort([int]$Port) {
     $client = [System.Net.Sockets.TcpClient]::new()
     try { $client.Connect('127.0.0.1', $Port); return $true }
@@ -76,6 +86,9 @@ $webErr = Join-Path $logs 'web.stderr.log'
 $apiLauncher = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'run_api.py')).Path
 $profileService = if ($Profile -eq 'S2') { 'orders-demo-s2' } else { 'orders-demo' }
 $profileIntegration = if ($Profile -eq 'S2') { 'integration-s2-a' } else { 'integration-a' }
+$runtimeEnabled = if ($Mode -eq 'Live') { '1' } else { '0' }
+$providerEnabled = if ($Mode -eq 'Live') { '1' } else { '0' }
+$providerKey = if ($Mode -eq 'Live') { [string]$dotenv['OPSPILOT_MODEL_API_KEY'] } else { '' }
 
 $overrides = @{
     OPSPILOT_DB_PATH = $domain
@@ -84,11 +97,21 @@ $overrides = @{
     OPSPILOT_API_ORIGIN = 'http://127.0.0.1:8000'
     OPSPILOT_DEMO_SERVICE_ID = $profileService
     OPSPILOT_DEMO_INTEGRATION_ID = $profileIntegration
-    OPSPILOT_ASSISTANT_RUNTIME_ENABLED = '0'
-    OPSPILOT_ASSISTANT_PROVIDER_ENABLED = '0'
+    OPSPILOT_ASSISTANT_RUNTIME_ENABLED = $runtimeEnabled
+    OPSPILOT_ASSISTANT_PROVIDER_ENABLED = $providerEnabled
     OPSPILOT_LEGACY_PROVIDER_ENABLED = '0'
     OPSPILOT_ASSISTANT_EXPERIMENT_ID = ''
-    OPSPILOT_MODEL_API_KEY = ''
+    OPSPILOT_MODEL_API_KEY = $providerKey
+}
+if ($Mode -eq 'Live') {
+    foreach ($name in @(
+        'OPSPILOT_MODEL_NAME', 'OPSPILOT_MODEL_BASE_URL', 'OPSPILOT_MODEL_CONFIG_VERSION',
+        'OPSPILOT_MODEL_PRICE_VERSION', 'OPSPILOT_ASSISTANT_SERVICE_IDENTITY',
+        'OPSPILOT_MODEL_INPUT_RATE_MICRO_PER_MILLION', 'OPSPILOT_MODEL_OUTPUT_RATE_MICRO_PER_MILLION'
+    )) {
+        if (-not $dotenv.ContainsKey($name)) { throw "Live mode requires $name in this worktree's .env." }
+        $overrides[$name] = [string]$dotenv[$name]
+    }
 }
 $oldEnvironment = @{}
 foreach ($name in $overrides.Keys) {
@@ -141,5 +164,10 @@ if (-not ($apiReady -and $webReady)) {
 }
 Write-Host 'API and Worker ready at http://127.0.0.1:8000; frontend HTTP is ready at http://127.0.0.1:5173.'
 Write-Host "Profile $Profile uses $profileService / $profileIntegration for new synchronous investigations."
-Write-Host 'Real Provider and all legacy Provider paths were forced off for these processes.'
+if ($Mode -eq 'Offline') {
+    Write-Host 'Offline mode: real Provider and all legacy Provider paths were forced off for these processes.'
+} else {
+    Write-Host 'Live mode: ASSISTANT_V1 uses the existing persistent shared Runtime Grant; legacy Provider paths and experiment scope are disabled.'
+    Write-Host 'No Provider request is sent at startup. Subsequent user messages may incur charges within the configured shared pool.'
+}
 Write-Host "Logs: $logs"
