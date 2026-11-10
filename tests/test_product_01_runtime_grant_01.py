@@ -448,6 +448,106 @@ def test_revoke_between_reservation_and_send_denies_wire_and_releases_only_unsen
         worker.release()
 
 
+def test_current_readonly_followup_can_get_send_permit_while_correction_is_pending(
+    demo_db, monkeypatch,
+):
+    from test_ar02_runtime import setup_run
+    from opspilot.domain.s3 import prepare_s3_fixture
+    from opspilot.domain.assistant_runtime_grant import (
+        bind_run, claim_send, mark_unknown, runtime_config_from_env, validate_http_request,
+    )
+    from opspilot.domain.task_control import admit_task_message, claim_task_run, trusted_identity
+
+    _configure(monkeypatch)
+    _provision(demo_db, total=30_000)
+    prepare_s3_fixture(demo_db, "PROCESSING", order_id="ar02-order", contract_version=2)
+    worker = _worker(demo_db)
+    try:
+        initial = setup_run(demo_db, "核查当前订单", "pending-send", bind=True)
+        identity = trusted_identity(demo_db, "support-a")
+        correction = admit_task_message(
+            demo_db, identity, session_id=initial["session_id"], task_id=initial["task_id"],
+            input_kind="CORRECT_TASK_INPUT", body="请按新时间重新核对当前事实。",
+            idempotency_key="runtime-pending-correction",
+        )
+        followup = admit_task_message(
+            demo_db, identity, session_id=initial["session_id"], task_id=initial["task_id"],
+            input_kind="CHAT_READONLY", body="在更正处理前说明当前进度。",
+            idempotency_key="runtime-pending-readonly", assistant_core=True,
+        )
+        assert followup["sequence"] > correction["sequence"]
+        claim_task_run(demo_db, identity, followup["run_id"])
+        binding = bind_run(demo_db, followup["run_id"], runtime_config_from_env())
+        call, dispatch, _ = _call(demo_db, followup, worker.owner_id, binding)
+        body = json.dumps({
+            "model": "deepseek-flash", "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 2048, "thinking": {"type": "disabled"}, "stream": False,
+        }, separators=(",", ":")).encode()
+        body_digest, max_tokens = validate_http_request(
+            "https://api.deepseek.com/chat/completions", "POST", body, binding,
+        )
+
+        permit = claim_send(
+            demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
+            request_digest=call["request_digest"], body_digest=body_digest,
+            request_url="https://api.deepseek.com/chat/completions", method="POST",
+            requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+            worker_epoch=worker.epoch,
+        )
+        assert permit == {"action": "SEND"}
+        # No HTTP request is made by this offline test. Keep the durable send state
+        # conservative, as a process loss after the grant would be UNKNOWN.
+        mark_unknown(demo_db, dispatch["request_key"], "OFFLINE_TEST_STOPPED_AT_SEND_GRANT")
+    finally:
+        worker.release()
+
+
+def test_aborted_task_cannot_get_new_provider_send_permit(demo_db, monkeypatch):
+    from test_ar02_runtime import setup_run
+    from opspilot.domain.s3 import prepare_s3_fixture
+    from opspilot.domain.assistant_runtime_grant import (
+        RuntimeGrantError, bind_run, claim_send, close_unfinished_dispatch,
+        runtime_config_from_env, validate_http_request,
+    )
+    from opspilot.domain.task_control import abort_task, claim_task_run, trusted_identity
+
+    _configure(monkeypatch)
+    _provision(demo_db, total=30_000)
+    prepare_s3_fixture(demo_db, "PROCESSING", order_id="ar02-order", contract_version=2)
+    worker = _worker(demo_db)
+    try:
+        run = setup_run(demo_db, "核查当前订单", "abort-send", bind=True)
+        identity = trusted_identity(demo_db, "support-a")
+        claim_task_run(demo_db, identity, run["run_id"])
+        binding = bind_run(demo_db, run["run_id"], runtime_config_from_env())
+        call, dispatch, _ = _call(demo_db, run, worker.owner_id, binding)
+        abort_task(
+            demo_db, identity, task_id=run["task_id"], reason="offline send-boundary test",
+            idempotency_key="runtime-abort-before-send",
+        )
+        body = json.dumps({
+            "model": "deepseek-flash", "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 2048, "thinking": {"type": "disabled"}, "stream": False,
+        }, separators=(",", ":")).encode()
+        body_digest, max_tokens = validate_http_request(
+            "https://api.deepseek.com/chat/completions", "POST", body, binding,
+        )
+
+        with pytest.raises(RuntimeGrantError, match="TASK_ABORTED"):
+            claim_send(
+                demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
+                request_digest=call["request_digest"], body_digest=body_digest,
+                request_url="https://api.deepseek.com/chat/completions", method="POST",
+                requested_max_output_tokens=max_tokens, worker_id=worker.owner_id,
+                worker_epoch=worker.epoch,
+            )
+        assert close_unfinished_dispatch(
+            demo_db, dispatch["request_key"], "aborted-before-send",
+        ) == "NOT_DISPATCHED"
+    finally:
+        worker.release()
+
+
 def test_stale_price_version_pauses_pool_without_resetting_any_spend(demo_db, monkeypatch):
     from opspilot.domain.assistant_runtime_grant import (
         RuntimeGrantError, bind_run, runtime_config_from_env, spend_summary,

@@ -45,7 +45,6 @@ const investigationOriginMessageId = ref('');
 const s1DemoResource = ref<{ service_id: string; integration_id: string; principal_id: string } | null>(null);
 const correctionDraft = ref('');
 const showTaskForm = ref(false);
-const professionalMode = ref(true);
 const assistantScopes = ref<AssistantScopes>({ items: [], selected_project: null });
 const assistantScopeNotice = ref('');
 const showAssistantOrderForm = ref(false);
@@ -77,7 +76,6 @@ const RESTORED_ASSISTANT_SOURCE_CONCURRENCY = 3;
 
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const isApprover = computed(() => user.value?.role === 'APPROVER');
-const useProfessionalAssistant = computed(() => professionalMode.value);
 const assistantTaskId = computed(() => assistantTaskForSend(taskId.value, inspector.value?.task ?? null));
 const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run.kind !== 'CHAT_READONLY') ?? null);
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
@@ -838,67 +836,37 @@ async function sendMessage(): Promise<void> {
   const body = draft.value.trim();
   if (!sessionId.value || !body || !csrf.value || busy.value) return;
   busy.value = true;
-  let fallbackChatRunId: string | null = null;
+  let acceptedRunForReconnect: string | null = null;
   errorMessage.value = '';
   notice.value = '';
   chunks.value = [];
   lastChunkSeq.value = 0;
   try {
     const requestedSession = sessionId.value;
-    const professional = useProfessionalAssistant.value;
     const assistantTargetTask = assistantTaskId.value;
     const operationKey = assistantOperationKey('message', requestedSession);
-    const operation = professional ? await beginAssistantOperation(sessionStorage, operationKey, {
+    const operation = await beginAssistantOperation(sessionStorage, operationKey, {
       body, task_id: assistantTargetTask,
-    }) : null;
-    const accepted = professional && operation
-      ? await api.assistantSend(requestedSession, body, assistantTargetTask, csrf.value, operation.operationId)
-      : await api.send(requestedSession, body, taskId.value || null, csrf.value);
-    if (operation) acknowledgeAssistantOperation(sessionStorage, operationKey, operation.operationId);
-    fallbackChatRunId = taskId.value ? accepted.run_id : null;
+    });
+    const accepted = await api.assistantSend(
+      requestedSession, body, assistantTargetTask, csrf.value, operation.operationId,
+    );
+    acknowledgeAssistantOperation(sessionStorage, operationKey, operation.operationId);
+    acceptedRunForReconnect = accepted.run_id;
     draft.value = '';
     activeChatRun.value = await api.run(accepted.run_id);
     await refreshSessionMessagesOnly();
-    if (professional) {
-      // One product core owns this request; do not schedule a classification Chat sidecar.
-      fallbackChatRunId = null;
-      await watchRun(accepted.run_id);
-      if (taskId.value) await refreshInspector();
-      if (assistantTargetTask === null && accepted.input_kind === 'CHAT_READONLY') {
-        await refreshAssistantSource(accepted.run_id, null);
-      }
-    } else if (taskId.value) {
-      const assessment = await api.assessTaskUpdate(taskId.value, accepted.message_id, csrf.value);
-      investigationUpdates.value = [
-        ...investigationUpdates.value.filter((item) => item.source_message_id !== accepted.message_id),
-        assessment,
-      ];
-      if (assessment.proposal?.status === 'PENDING_CONFIRMATION') {
-        notice.value = 'OpsPilot 发现这条消息可能是 Task 关键纠错。请核对原文、当前输入和变更摘要，再决定是否重新调查。';
-      } else if (assessment.intent === 'FOLLOW_UP' && assessment.follow_up_action === 'INVESTIGATE' && assessment.investigation_run_id) {
-        activeChatRun.value = null;
-        chunks.value = [];
-        notice.value = 'OpsPilot 选择补查当前任务的可信事实；调查正在执行。';
-        await watchRun(assessment.investigation_run_id);
-        await refreshInspector();
-        const followup = inspector.value?.readonly_followups.find((item) => item.run_id === assessment.investigation_run_id);
-        notice.value = followup?.result_state === 'ANSWERED'
-          ? '只读补查已完成，答案与来源已显示在对话中。'
-          : followup?.result_state === 'PARTIAL'
-            ? '只读补查只完成了部分目标；请查看缺口和来源后继续对话。'
-            : '本次补查尚未形成完整结果；业务状态与诊断未改变。';
-      } else {
-        await watchRun(accepted.run_id);
-      }
-      await refreshInspector();
-    } else {
-      await watchRun(accepted.run_id);
+    acceptedRunForReconnect = null;
+    await watchRun(accepted.run_id);
+    if (taskId.value) await refreshInspector();
+    if (assistantTargetTask === null && accepted.input_kind === 'CHAT_READONLY') {
+      await refreshAssistantSource(accepted.run_id, null);
     }
   } catch (error) {
-    if (fallbackChatRunId) {
-      notice.value = '调查意图判断暂不可用；系统将安全降级到同一消息的普通回答，不会重复调用 Chat。';
-      await watchRun(fallbackChatRunId);
-      await refreshInspector();
+    if (acceptedRunForReconnect) {
+      notice.value = '助手运行已接收；正在恢复同一条会话回复。';
+      await watchRun(acceptedRunForReconnect);
+      if (taskId.value) await refreshInspector();
     } else {
       errorMessage.value = explainError(error);
     }
@@ -1609,14 +1577,13 @@ onBeforeUnmount(() => {
           </div>
           <div class="toolbar-actions">
             <span v-if="taskId" class="task-chip"><i></i>{{ taskId.slice(0, 16) }}</span>
-            <label class="assistant-mode"><input v-model="professionalMode" type="checkbox" data-testid="professional-assistant-mode" :disabled="busy">专业助手</label>
             <button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="toggleTaskForm">进入受控调查</button>
             <button class="inspector-toggle" type="button" aria-label="显示 Task 检查器" @click="narrowInspectorOpen = !narrowInspectorOpen">▤</button>
           </div>
         </div>
 
-        <div class="demo-notice"><span class="notice-icon">i</span><span>可以直接提问或粘贴材料，无需先创建任务。读取订单当前状态前，请确认已授权的业务对象。专业助手只做解释和只读调查；修复、审批与正式交接仍使用原有受控流程。</span></div>
-        <div v-if="sessionId && professionalMode" class="assistant-entry" data-testid="assistant-entry">
+        <div class="demo-notice"><span class="notice-icon">i</span><span>可以直接提问或粘贴材料，无需先创建任务。读取业务当前状态前，请确认已授权的对象。聊天助手进行解释和授权范围内的只读调查；正式调查、审批、修复和交接通过单独的受控流程推进。</span></div>
+        <div v-if="sessionId" class="assistant-entry" data-testid="assistant-entry">
           <label v-if="assistantScopes.items.length">资料项目
             <select :value="assistantScopes.selected_project ?? ''" data-testid="assistant-project" :disabled="busy || !csrf" @change="changeAssistantScope">
               <option v-if="!assistantScopes.selected_project" value="">请选择可访问的项目</option>
@@ -1624,7 +1591,7 @@ onBeforeUnmount(() => {
             </select>
           </label>
           <small v-if="assistantScopeNotice" role="status">{{ assistantScopeNotice }}</small>
-          <small v-if="taskId && !assistantTaskId">S1 调查使用原有专业调查核心；普通助手对话继续保存在此会话，不直接绑定 S1 任务。</small>
+          <small v-if="taskId && !assistantTaskId">当前 Task 不在助手只读绑定范围内。助手消息不会继承该 Task，请从独立的受控流程继续。</small>
           <button v-if="canCreateTask" class="outline-button" type="button" data-testid="assistant-order-open" :disabled="busy || !csrf" @click="openAssistantOrderForm">关联授权订单进行只读调查</button>
         </div>
         <form v-if="showAssistantOrderForm && canCreateTask" class="task-input-card" data-testid="assistant-order-form" @submit.prevent="bindAssistantOrder">
@@ -1775,8 +1742,8 @@ onBeforeUnmount(() => {
           <div v-if="notice" class="notice-line" role="status">{{ notice }} <button v-if="reconnectPaused" type="button" @click="reconnectEvents">重新连接事件流</button></div>
           <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}<button v-if="errorMessage.includes('登录状态')" type="button" @click="logout">重新登录</button></div>
           <form class="composer" @submit.prevent="sendMessage">
-            <textarea v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" :placeholder="useProfessionalAssistant ? '提出技术问题、粘贴日志，或接着上一轮继续…' : '询问当前证据、任务状态，或继续上一轮对话…'" @keydown.enter="submitOnEnter"></textarea>
-            <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 正式业务输入更正需要确认</span><button v-if="useProfessionalAssistant && assistantTaskId && canCreateTask" class="text-button" type="button" data-testid="assistant-critical-correction" :disabled="!draft.trim() || busy || !csrf" @click="correctionDraft = draft; submitCriticalCorrection()">将此条作为正式更正</button><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
+            <textarea v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" placeholder="提出技术问题、粘贴日志，或接着上一轮继续…" @keydown.enter="submitOnEnter"></textarea>
+            <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 正式业务输入更正需要确认</span><button v-if="assistantTaskId && canCreateTask" class="text-button" type="button" data-testid="assistant-critical-correction" :disabled="!draft.trim() || busy || !csrf" @click="correctionDraft = draft; submitCriticalCorrection()">将此条作为正式更正</button><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
           </form>
           <div class="composer-footnote">回答只解释已授权信息。审批、修复和交付需要后续的可信控制流程。</div>
         </div>

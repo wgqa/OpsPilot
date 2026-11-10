@@ -1306,7 +1306,7 @@ def claim_send(path, binding, *, call_id: str, request_key: str, request_digest:
         except TaskControlError as error:
             raise RuntimeGrantError(error.code) from error
         current_run = connection.execute(
-            """SELECT r.status,r.task_id,r.tenant_id,r.expected_control_revision,a.core
+            """SELECT r.status,r.task_id,r.tenant_id,r.expected_control_revision,r.kind,a.core
                FROM task_runs AS r JOIN assistant_runs AS a ON a.run_id=r.run_id
                WHERE r.run_id=?""",
             (expected["run_id"],),
@@ -1319,6 +1319,7 @@ def claim_send(path, binding, *, call_id: str, request_key: str, request_digest:
                     connection, str(current_run["tenant_id"]), str(current_run["task_id"]),
                     current_run["expected_control_revision"], run_id=str(expected["run_id"]),
                     allow_completed=True,
+                    allow_pending_for_readonly_chat=str(current_run["kind"]) == "CHAT_READONLY",
                 )
             except TaskControlError as error:
                 raise RuntimeGrantError(error.code) from error

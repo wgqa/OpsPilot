@@ -1796,7 +1796,6 @@ class Loop(AgentMiddleware):
             if attempt: finish_attempt(self.path,attempt,'OK',result_digest=digest_json(value))
             domain.finish(self.path,row['call_id'],'OK',value,observation=observation)
             self.trace('tool_observation',call_id=row['call_id'],name=name,arguments=args,result=value,observation=observation)
-            if os.environ.get('OPSPILOT_AR02_TEST_CRASH_AFTER_OBSERVATION')=='1': os._exit(86)
             return result
         except Exception as error:
             if campaign_reserved and not campaign_completed:
