@@ -19,6 +19,8 @@ const messages = ref<MessageItem[]>([]);
 const sessionHistoryReady = ref(false);
 const hasOlderMessages = ref(false);
 const loadingOlderMessages = ref(false);
+const revalidatingSessionId = ref('');
+const revalidatingSessionMessages = computed(() => revalidatingSessionId.value === sessionId.value);
 const taskId = ref('');
 const investigationUpdates = ref<InvestigationUpdateAssessment[]>([]);
 const investigationKind = ref<'AUTH_INCIDENT' | 'ASYNC_CALLBACK'>('AUTH_INCIDENT');
@@ -75,6 +77,9 @@ const assistantSourceRequests = new Map<string, number>();
 let assistantSourceGeneration = 0;
 let seenEventSeq = new Set<number>();
 const s3ReadResponseFence = createS3ReadResponseFence();
+let activeSessionMessageRevalidation: {
+  sessionId: string; queueIncremental: boolean; queueRevalidation: boolean;
+} | null = null;
 const RESTORED_ASSISTANT_SOURCE_LIMIT = 8;
 const RESTORED_ASSISTANT_SOURCE_CONCURRENCY = 3;
 
@@ -681,7 +686,7 @@ async function refreshInspector(): Promise<boolean> {
       inspector.value = refreshed;
       clearS3TaskResultCache(requestedTaskId);
       try {
-        await refreshSessionMessagesOnly();
+        await refreshSessionMessagesOnly(true);
         if (!s3ReadResponseFence.isCurrentInspector(deniedTicket, taskId.value)) return false;
         clearS3TaskResultCache(requestedTaskId);
       } catch {
@@ -692,14 +697,24 @@ async function refreshInspector(): Promise<boolean> {
       return true;
     }
     const isS3 = String(refreshed.task.service_id ?? '') === 'orders-async-demo';
+    const s3SourcesInvalidated = isS3
+      && (refreshed.trusted_state.s3_outcome as Record<string, unknown> | undefined)?.currentness
+        === 'INVALIDATED_BY_CURRENT_FACTS';
     const authorizationRestored = isS3 && s3ReadResponseFence.isTaskDenied(requestedTaskId);
     if (isS3 && !s3ReadResponseFence.acceptAuthorizedInspector(requestTicket)) return false;
     inspector.value = refreshed;
-    if (authorizationRestored) {
+    if (s3SourcesInvalidated) {
+      // Hide cached answers as soon as the trusted Inspector reports stale
+      // sources; a failed history revalidation must not leave them visible.
+      messages.value = clearS3RestrictedResultCache(
+        refreshed as unknown as CachedS3Inspector, messages.value, requestedTaskId,
+      ).messages;
+    }
+    if (authorizationRestored || s3SourcesInvalidated) {
       try {
-        await refreshSessionMessagesOnly();
+        await refreshSessionMessagesOnly(true);
       } catch (error) {
-        errorMessage.value = `授权恢复后会话消息刷新失败：${explainError(error)}`;
+        errorMessage.value = `会话历史重新核验失败：${explainError(error)}`;
       }
       if (!stillShowingRequestedTask()) return false;
     }
@@ -736,7 +751,7 @@ async function refreshInspector(): Promise<boolean> {
       if (!deniedTicket) return false;
       clearS3TaskResultCache(requestedTaskId);
       try {
-        await refreshSessionMessagesOnly();
+        await refreshSessionMessagesOnly(true);
         if (!s3ReadResponseFence.isCurrentInspector(deniedTicket, taskId.value)) return false;
         clearS3TaskResultCache(requestedTaskId);
       } catch {
@@ -1283,12 +1298,52 @@ function terminalRunMessage(run: RunItem): string {
   return `本次运行结束：${readableStatus(run.status)}${reason ? `（${readableRunReason(reason)}）` : ''}`;
 }
 
-async function refreshSessionMessagesOnly(): Promise<void> {
+async function refreshSessionMessagesOnly(revalidateLoaded = false): Promise<void> {
   if (!sessionId.value) return;
   const requestedSessionId = sessionId.value;
+  if (activeSessionMessageRevalidation?.sessionId === requestedSessionId) {
+    if (revalidateLoaded) activeSessionMessageRevalidation.queueRevalidation = true;
+    else activeSessionMessageRevalidation.queueIncremental = true;
+    return;
+  }
+  const revalidationState = revalidateLoaded
+    ? { sessionId: requestedSessionId, queueIncremental: false, queueRevalidation: false }
+    : null;
+  if (revalidationState) {
+    activeSessionMessageRevalidation = revalidationState;
+    revalidatingSessionId.value = requestedSessionId;
+  }
   const requestTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
+  const cachedFirstSequence = revalidateLoaded ? messages.value[0]?.sequence : undefined;
   const lastSequence = messages.value.at(-1)?.sequence;
   try {
+    if (revalidateLoaded) {
+      // Authorization and source currentness can change for any loaded page.
+      // Refetch the visible sequence window from the server, replacing the
+      // cache so sanitized or omitted historical answers cannot survive a no-op
+      // incremental response. The API page size stays bounded at 500.
+      let response = await api.messages(requestedSessionId);
+      if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+      const received = [...response.items];
+      let firstSequence = received[0]?.sequence;
+      while (cachedFirstSequence !== undefined && firstSequence !== undefined
+        && firstSequence > cachedFirstSequence && response.has_more_before) {
+        response = await api.messages(requestedSessionId, { beforeSeq: firstSequence });
+        if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+        if (!response.items.length) break;
+        received.unshift(...response.items);
+        const nextFirstSequence = response.items[0]?.sequence;
+        if (nextFirstSequence === undefined || nextFirstSequence >= firstSequence) break;
+        firstSequence = nextFirstSequence;
+      }
+      messages.value = filterDeniedS3AssistantMessages(
+        received, (requestedTaskId) => s3ReadResponseFence.isTaskDenied(requestedTaskId),
+      );
+      hasOlderMessages.value = response.has_more_before;
+      sessionHistoryReady.value = true;
+      return;
+    }
+
     let response = await api.messages(
       requestedSessionId,
       lastSequence === undefined ? {} : { afterSeq: lastSequence },
@@ -1322,11 +1377,23 @@ async function refreshSessionMessagesOnly(): Promise<void> {
     if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
       errorMessage.value = explainError(error);
     }
+  } finally {
+    if (revalidationState && activeSessionMessageRevalidation === revalidationState) {
+      const canDrainQueue = s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)
+        && sessionId.value === requestedSessionId;
+      const rerunRevalidation = canDrainQueue && revalidationState.queueRevalidation;
+      const rerunIncremental = canDrainQueue && !rerunRevalidation && revalidationState.queueIncremental;
+      activeSessionMessageRevalidation = null;
+      revalidatingSessionId.value = '';
+      if (rerunRevalidation) void refreshSessionMessagesOnly(true);
+      else if (rerunIncremental) void refreshSessionMessagesOnly();
+    }
   }
 }
 
 async function loadOlderMessages(): Promise<void> {
   if (!sessionId.value || !hasOlderMessages.value || loadingOlderMessages.value) return;
+  if (activeSessionMessageRevalidation?.sessionId === sessionId.value) return;
   const firstSequence = messages.value[0]?.sequence;
   if (firstSequence === undefined) return;
   const requestedSessionId = sessionId.value;
@@ -1753,7 +1820,7 @@ onBeforeUnmount(() => {
 
         <div ref="conversationScroll" class="conversation-scroll" data-testid="conversation" aria-live="polite">
           <div v-if="sessionId && hasOlderMessages" class="history-pagination">
-            <button class="text-button" type="button" :disabled="loadingOlderMessages || loading" @click="loadOlderMessages">
+            <button class="text-button" type="button" :disabled="loadingOlderMessages || loading || revalidatingSessionMessages" @click="loadOlderMessages">
               {{ loadingOlderMessages ? '正在加载…' : `加载更早消息（已显示 ${messages.length} 条）` }}
             </button>
           </div>
