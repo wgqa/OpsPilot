@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type ChatRunContext, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PersonalMemoryRecord, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
 import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
@@ -31,6 +31,14 @@ const taskOutcome = ref<TaskOutcome | null>(null);
 const s3HandoffOutcome = ref<Record<string, unknown> | null>(null);
 const taskMemoryContext = ref<TaskMemoryContext | null>(null);
 const taskSemanticContext = ref<SemanticMemoryContext | null>(null);
+const personalMemories = ref<PersonalMemoryRecord[]>([]);
+const selectedPersonalMemory = ref<PersonalMemoryRecord | null>(null);
+const personalMemoryRevisionTarget = ref<PersonalMemoryRecord | null>(null);
+const personalMemoryDraftKind = ref<PersonalMemoryRecord['memory_kind']>('PREFERENCE');
+const personalMemoryDraftKey = ref('');
+const personalMemoryDraftContent = ref('');
+const personalMemorySourceMessageId = ref('');
+const latestChatContext = ref<ChatRunContext | null>(null);
 const memoryCandidates = ref<MemoryRecord[]>([]);
 const selectedMemory = ref<MemoryRecord | null>(null);
 const semanticMemoryCandidates = ref<SemanticMemoryRecord[]>([]);
@@ -73,6 +81,8 @@ let reconnectTimer: number | undefined;
 let runPollTimer: number | undefined;
 let loadingChunksRunId: string | null = null;
 let assistantScopeGeneration = 0;
+let personalMemoryGeneration = 0;
+let latestChatContextGeneration = 0;
 const assistantSourceRequests = new Map<string, number>();
 let assistantSourceGeneration = 0;
 let seenEventSeq = new Set<number>();
@@ -113,6 +123,19 @@ const latestExcludedMemorySources = computed(() => Array.isArray(latestContextPr
 const latestSelectedSemanticMemories = computed(() => latestSelectedMemories.value.filter(
   (item) => item.memory_type === 'SEMANTIC',
 ));
+const personalSourceMessages = computed(() => messages.value.filter((item) =>
+  item.role === 'USER' && ['CHAT_READONLY', 'CORRECT_TASK_INPUT'].includes(item.input_kind),
+));
+const latestChatManifest = computed(() => latestChatContext.value?.attempts.at(-1)?.manifest ?? null);
+const latestPersonalMemorySelection = computed(() => {
+  if (latestChatContext.value?.attempts.at(-1)?.status !== 'SUCCEEDED') return [];
+  const refs = latestChatManifest.value?.memory_refs ?? [];
+  return refs.filter((item) => item.memory_type === 'PERSONAL');
+});
+const latestPersonalMemoryExclusions = computed(() => {
+  const refs = latestChatManifest.value?.excluded_sources ?? latestChatContext.value?.excluded_sources ?? [];
+  return refs.filter((item) => item.category === 'PERSONAL_MEMORY' || String(item.source_id ?? '').startsWith('personal-'));
+});
 const sourceMemoryExists = computed(() => (taskMemoryContext.value?.source_memories ?? []).length > 0);
 const sourceMemoryEligible = computed(() => {
   if (['DELIVERED', 'DIAGNOSED', 'SCOPE_ESCALATED'].includes(String(taskOutcome.value?.business_outcome ?? ''))) return true;
@@ -231,6 +254,12 @@ async function logout(): Promise<void> {
   taskSemanticContext.value = null;
   memoryCandidates.value = [];
   selectedMemory.value = null;
+  personalMemoryGeneration += 1;
+  latestChatContextGeneration += 1;
+  personalMemories.value = [];
+  selectedPersonalMemory.value = null;
+  personalMemoryRevisionTarget.value = null;
+  latestChatContext.value = null;
   semanticMemoryCandidates.value = [];
   selectedSemanticMemory.value = null;
   pendingApprovals.value = [];
@@ -320,6 +349,149 @@ async function loadPendingApprovals(): Promise<void> {
     selectedSemanticMemory.value = semanticMemoryCandidates.value.find((item) => item.memory_id === selectedSemanticMemory.value?.memory_id)
       ?? selectedSemanticMemory.value;
   }
+}
+
+async function loadPersonalMemories(): Promise<void> {
+  const identity = user.value;
+  if (!identity) {
+    personalMemories.value = [];
+    selectedPersonalMemory.value = null;
+    return;
+  }
+  const generation = ++personalMemoryGeneration;
+  try {
+    const response = await api.personalMemories();
+    if (generation !== personalMemoryGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemories.value = response.items;
+    if (selectedPersonalMemory.value) {
+      selectedPersonalMemory.value = response.items.find(
+        (item) => item.memory_id === selectedPersonalMemory.value?.memory_id,
+      ) ?? null;
+    }
+  } catch (error) {
+    if (generation === personalMemoryGeneration && user.value?.actor_id === identity.actor_id) {
+      personalMemories.value = [];
+      errorMessage.value = explainError(error);
+    }
+  }
+}
+
+async function refreshLatestChatContext(
+  requestedSession = sessionId.value,
+  runId: string | null = activeChatRun.value?.run_id ?? null,
+): Promise<void> {
+  const generation = ++latestChatContextGeneration;
+  if (!requestedSession || !runId) {
+    latestChatContext.value = null;
+    return;
+  }
+  try {
+    const context = await api.runContext(runId);
+    if (generation !== latestChatContextGeneration || sessionId.value !== requestedSession
+      || activeChatRun.value?.run_id !== runId) return;
+    latestChatContext.value = context;
+  } catch {
+    if (generation === latestChatContextGeneration && sessionId.value === requestedSession) {
+      latestChatContext.value = null;
+    }
+  }
+}
+
+function selectPersonalMemory(item: PersonalMemoryRecord): void {
+  selectedPersonalMemory.value = item;
+}
+
+function beginPersonalMemoryRevision(item: PersonalMemoryRecord): void {
+  if (item.state !== 'ACTIVE') return;
+  personalMemoryRevisionTarget.value = item;
+  personalMemoryDraftKind.value = item.memory_kind;
+  personalMemoryDraftKey.value = item.memory_key;
+  personalMemoryDraftContent.value = item.content;
+  selectedPersonalMemory.value = item;
+  if (!personalSourceMessages.value.some((message) => message.message_id === personalMemorySourceMessageId.value)) {
+    personalMemorySourceMessageId.value = item.source_message_id;
+  }
+}
+
+function cancelPersonalMemoryRevision(): void {
+  personalMemoryRevisionTarget.value = null;
+  personalMemoryDraftKey.value = '';
+  personalMemoryDraftContent.value = '';
+}
+
+async function createPersonalMemoryCandidate(): Promise<void> {
+  const sourceMessageId = personalMemorySourceMessageId.value
+    || personalSourceMessages.value.at(-1)?.message_id || '';
+  if (!csrf.value || !sessionId.value || busy.value || !sourceMessageId
+    || !personalMemoryDraftKey.value.trim() || !personalMemoryDraftContent.value.trim()) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const revision = personalMemoryRevisionTarget.value;
+    const payload = {
+      memory_kind: personalMemoryDraftKind.value,
+      memory_key: personalMemoryDraftKey.value.trim(),
+      content: personalMemoryDraftContent.value.trim(),
+      source_message_id: sourceMessageId,
+      ttl_days: 180,
+      ...(revision ? {
+        supersedes_memory_id: revision.memory_id,
+        expected_version: revision.version,
+      } : {}),
+    };
+    const target = [payload.memory_kind, payload.memory_key, payload.content, sourceMessageId,
+      payload.supersedes_memory_id ?? '', payload.expected_version ?? ''].join(':');
+    const operationKey = memoryOperationKey('personal-candidate', target);
+    const candidate = await api.createPersonalMemoryCandidate(payload, csrf.value, operationKey);
+    completeMemoryOperation('personal-candidate', target);
+    personalMemoryRevisionTarget.value = null;
+    personalMemoryDraftKey.value = '';
+    personalMemoryDraftContent.value = '';
+    await loadPersonalMemories();
+    selectedPersonalMemory.value = personalMemories.value.find((item) => item.memory_id === candidate.memory_id) ?? candidate;
+    notice.value = `个人记忆候选已建立并保持未生效：${candidate.memory_id}。请核对内容、来源和个人作用域后确认。`;
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function decidePersonalMemory(memory: PersonalMemoryRecord, action: 'confirm' | 'revoke'): Promise<void> {
+  if (!csrf.value || busy.value) return;
+  const message = action === 'confirm'
+    ? `确认将此内容作为个人长期记忆保存？\n\n${memory.memory_key}: ${memory.content}\n\n仅 ${memory.owner_actor_id} 可跨 Session 使用；它不会成为业务事实或项目共享约定。`
+    : `撤销这条个人记忆？后续模型请求会排除它；原始聊天消息仍保留在会话历史中。`;
+  if (!window.confirm(message)) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const operation = action === 'confirm' ? 'personal-confirm' : 'personal-revoke';
+    const key = memoryOperationKey(operation, memory.memory_id);
+    const updated = action === 'confirm'
+      ? await api.confirmPersonalMemory(memory.memory_id, csrf.value, key)
+      : await api.revokePersonalMemory(memory.memory_id, csrf.value, key);
+    completeMemoryOperation(operation, memory.memory_id);
+    await loadPersonalMemories();
+    selectedPersonalMemory.value = personalMemories.value.find((item) => item.memory_id === updated.memory_id) ?? updated;
+    if (action === 'revoke') {
+      // Force the server to revalidate already loaded answers and summaries.
+      await refreshSessionMessagesOnly(true);
+      await refreshLatestChatContext(sessionId.value, activeChatRun.value?.run_id ?? null);
+    }
+    notice.value = action === 'confirm'
+      ? '个人记忆已由本人确认并生效；后续会话仅在相关时按需检索。'
+      : '个人记忆已撤销；后续请求不会注入，原始来源消息仍保留。';
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function currentPersonalMemoryState(memoryId: string): string {
+  return personalMemories.value.find((item) => item.memory_id === memoryId)?.state ?? 'UNKNOWN';
 }
 
 async function selectMemory(item: MemoryRecord): Promise<void> {
@@ -456,6 +628,8 @@ async function selectSession(value: string): Promise<void> {
   taskMemoryContext.value = null;
   taskSemanticContext.value = null;
   messages.value = [];
+  latestChatContextGeneration += 1;
+  latestChatContext.value = null;
   inspector.value = null;
   taskOutcome.value = null;
   s3HandoffOutcome.value = null;
@@ -470,6 +644,7 @@ async function selectSession(value: string): Promise<void> {
   showAssistantOrderForm.value = false;
   stopEvents();
   await refreshSession();
+  await loadPersonalMemories();
   await refreshAssistantScopes();
 }
 
@@ -662,6 +837,8 @@ async function refreshSession(): Promise<void> {
     }
     if (!isCurrentSession()) return;
     await refreshEventHistory();
+    if (!isCurrentSession()) return;
+    await refreshLatestChatContext(requestedSessionId, activeChatRun.value?.run_id ?? null);
     if (!isCurrentSession()) return;
     connectEvents();
   } catch (error) {
@@ -1460,6 +1637,7 @@ async function watchRun(runId: string): Promise<void> {
           if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
           runPollTimer = undefined;
           await refreshSessionMessagesOnly();
+          if (run.kind === 'CHAT_READONLY') await refreshLatestChatContext(sessionId.value, runId);
           if (run.task_id) {
             taskId.value = run.task_id;
             await refreshInspector();
@@ -1495,6 +1673,9 @@ function acceptEvent(item: EventItem): void {
   sessionEvents.value = sessionEvents.value.slice(0, 60);
   if (sessionId.value) sessionStorage.setItem(`opspilot.cursor.${sessionId.value}`, String(item.event_seq));
   const runId = String(item.payload.run_id ?? '');
+  if (item.event_kind === 'CHAT_ANSWER_COMMITTED' && runId === activeChatRun.value?.run_id) {
+    void refreshLatestChatContext(sessionId.value, runId);
+  }
   if (item.event_kind === 'CHAT_CHUNK_AVAILABLE' && runId && runId === activeChatRun.value?.run_id) {
     void loadChunks(runId);
   }
@@ -1954,6 +2135,61 @@ onBeforeUnmount(() => {
 
       <aside class="inspector-panel panel" :class="{ open: narrowInspectorOpen }" aria-label="Task 检查器">
         <div class="inspector-header"><div><span class="eyebrow">LIVE CONTEXT</span><h2>Task 检查器</h2></div><button class="icon-button close-inspector" aria-label="关闭检查器" type="button" @click="narrowInspectorOpen = false">×</button></div>
+        <section v-if="user" class="inspector-section memory-section personal-memory-manager" data-testid="personal-memory-manager">
+          <div class="section-heading"><h3>个人长期记忆</h3><button class="text-button" type="button" :disabled="busy" @click="loadPersonalMemories">刷新</button></div>
+          <p class="memory-warning">作用域由登录身份确定：{{ user.tenant_id }} · {{ user.actor_id }}。只有本人确认的记忆会在相关会话中按需出现；它不是业务事实，也不会共享给同项目其他用户。撤销会阻止后续使用，但不会删除来源聊天消息。</p>
+          <div class="memory-review-grid">
+            <div class="memory-candidate-list">
+              <div v-if="personalMemories.length === 0" class="muted-card">还没有个人记忆。你可以从已保存的用户消息提议一条。</div>
+              <button v-for="item in personalMemories" :key="item.memory_id" class="memory-candidate-item" :class="{ selected: selectedPersonalMemory?.memory_id === item.memory_id }" type="button" :data-testid="`personal-memory-${item.memory_id}`" @click="selectPersonalMemory(item)">
+                <strong>{{ item.memory_kind }} · {{ item.memory_key }} · {{ item.state }} v{{ item.version }}</strong>
+                <small>{{ item.content }}</small><small>来源 {{ item.source_message_id }} · 到期 {{ dateLabel(item.expires_at) }}</small>
+              </button>
+            </div>
+            <div v-if="selectedPersonalMemory" class="memory-detail" data-testid="personal-memory-preview">
+              <div class="plan-row"><span>预览 / 状态</span><b>{{ selectedPersonalMemory.state }} · v{{ selectedPersonalMemory.version }}</b></div>
+              <div class="plan-row"><span>个人 Key</span><b>{{ selectedPersonalMemory.memory_kind }} · {{ selectedPersonalMemory.memory_key }}</b></div>
+              <div class="plan-row"><span>内容</span><b>{{ selectedPersonalMemory.content }}</b></div>
+              <div class="plan-row"><span>个人作用域</span><b>{{ selectedPersonalMemory.tenant_id }} · {{ selectedPersonalMemory.owner_actor_id }}</b></div>
+              <div class="memory-json"><strong>来源引用</strong><code>{{ JSON.stringify(selectedPersonalMemory.source_refs) }}</code></div>
+              <small>来源当前性：{{ selectedPersonalMemory.source_current ? '有效' : '无效，禁止召回' }} · {{ selectedPersonalMemory.source_message_id }}</small>
+              <small class="memory-digest">SHA-256 {{ selectedPersonalMemory.content_digest }} · 到期 {{ dateLabel(selectedPersonalMemory.expires_at) }}</small>
+              <div class="approval-buttons">
+                <button v-if="selectedPersonalMemory.state === 'CANDIDATE' && selectedPersonalMemory.source_current" class="primary-button" type="button" data-testid="confirm-personal-memory" :disabled="busy || !csrf" @click="decidePersonalMemory(selectedPersonalMemory, 'confirm')">确认并保存</button>
+                <button v-if="selectedPersonalMemory.state === 'ACTIVE'" class="outline-button" type="button" data-testid="revise-personal-memory" :disabled="busy || !csrf" @click="beginPersonalMemoryRevision(selectedPersonalMemory)">修改并提交新版本</button>
+                <button v-if="selectedPersonalMemory.state === 'ACTIVE'" class="outline-button" type="button" data-testid="revoke-personal-memory" :disabled="busy || !csrf" @click="decidePersonalMemory(selectedPersonalMemory, 'revoke')">撤销</button>
+              </div>
+            </div>
+          </div>
+          <form v-if="sessionId" class="memory-create-row semantic-proposal-form" data-testid="personal-memory-proposal" @submit.prevent="createPersonalMemoryCandidate">
+            <strong>{{ personalMemoryRevisionTarget ? `更新 ${personalMemoryRevisionTarget.memory_key} · 期望 v${personalMemoryRevisionTarget.version}` : '从当前会话提议个人记忆' }}</strong>
+            <p>候选只供预览，不会进入模型 Context，直到本人明确确认。避免保存密码、Token、凭据或临时业务事实。</p>
+            <label>来源用户消息
+              <select v-model="personalMemorySourceMessageId" :disabled="busy || !csrf || personalSourceMessages.length === 0">
+                <option value="">选择一条已持久化的用户消息</option>
+                <option v-for="item in personalSourceMessages" :key="item.message_id" :value="item.message_id">#{{ item.sequence }} · {{ item.body.slice(0, 100) }}</option>
+              </select>
+            </label>
+            <label>类型
+              <select v-model="personalMemoryDraftKind" :disabled="busy || !csrf"><option value="PREFERENCE">沟通偏好</option><option value="WORK_HABIT">工作习惯</option><option value="PROJECT_BACKGROUND">个人项目背景</option></select>
+            </label>
+            <label>记忆 Key<input v-model="personalMemoryDraftKey" maxlength="120" placeholder="例如 answer.style" :disabled="busy || !csrf" /></label>
+            <label>确认内容<textarea v-model="personalMemoryDraftContent" maxlength="800" rows="3" placeholder="写入稳定、非敏感且希望跨会话使用的信息。" :disabled="busy || !csrf"></textarea></label>
+            <small>候选来源 {{ personalMemorySourceMessageId || personalSourceMessages.at(-1)?.message_id || '尚无用户消息' }} · 保存后仍需预览和确认。</small>
+            <div class="approval-buttons">
+              <button class="outline-button" type="submit" data-testid="create-personal-memory-candidate" :disabled="busy || !csrf || !personalSourceMessages.length || !personalMemoryDraftKey.trim() || !personalMemoryDraftContent.trim()">建立待确认候选</button>
+              <button v-if="personalMemoryRevisionTarget" class="text-button" type="button" :disabled="busy" @click="cancelPersonalMemoryRevision">取消更新</button>
+            </div>
+          </form>
+          <div class="memory-applied-list" data-testid="personal-memory-context-provenance">
+            <strong>最近已完成的聊天模型调用 · 实际 Context 选择</strong>
+            <div v-if="latestPersonalMemorySelection.length === 0" class="muted-card">该次调用没有选用个人记忆，或尚未完成模型调用。</div>
+            <div v-for="item in latestPersonalMemorySelection" :key="String(item.memory_id)" class="trace-row">
+              <span class="trace-icon">↗</span><span><strong>{{ String(item.memory_id) }} · v{{ String(item.version) }} · 当前 {{ currentPersonalMemoryState(String(item.memory_id)) }}</strong><small>{{ String(item.memory_kind) }} · {{ String(item.memory_key) }} · 来源 {{ String(item.source_message_id) }}</small><small>{{ String(item.content) }} · SHA-256 {{ String(item.content_digest ?? item.digest ?? '') }}</small></span>
+            </div>
+            <div v-if="latestPersonalMemoryExclusions.length" class="evidence-footer">本轮排除个人记忆：{{ JSON.stringify(latestPersonalMemoryExclusions) }}</div>
+          </div>
+        </section>
         <template v-if="inspector">
           <div class="task-summary-card" :data-task-id="String(inspector.task.task_id ?? taskId)">
             <div class="summary-top"><span class="task-symbol">◈</span><span class="status-badge" :class="statusTone(currentTaskStatus)"><i></i>{{ readableStatus(currentTaskStatus) }}</span></div>

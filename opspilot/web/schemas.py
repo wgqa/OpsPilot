@@ -89,3 +89,13 @@ class SemanticMemoryCandidateRequest(StrictModel):
     ttl_days: int = Field(default=90, ge=1, le=365)
     supersedes_memory_id: str | None = Field(default=None, max_length=120)
     expected_version: int | None = Field(default=None, ge=1)
+
+
+class PersonalMemoryCandidateRequest(StrictModel):
+    memory_kind: Literal["PREFERENCE", "WORK_HABIT", "PROJECT_BACKGROUND"]
+    memory_key: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=1, max_length=800)
+    source_message_id: str = Field(min_length=1, max_length=120)
+    ttl_days: int = Field(default=180, ge=1, le=365)
+    supersedes_memory_id: str | None = Field(default=None, max_length=120)
+    expected_version: int | None = Field(default=None, ge=1)

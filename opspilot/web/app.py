@@ -39,7 +39,8 @@ from opspilot.web.schemas import (
     AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest, AssistantScopeRequest, AssistantOrderRequest,
     MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
     S3HandoffSubmitRequest,
-    SemanticMemoryCandidateRequest, InvestigationUpdateProposalRequest,
+    SemanticMemoryCandidateRequest, PersonalMemoryCandidateRequest,
+    InvestigationUpdateProposalRequest,
     InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest,
 )
 
@@ -82,6 +83,7 @@ _STATUS_BY_CODE = {
     "UPDATE_PROPOSAL_NOT_FOUND": 404,
     "MEMORY_SCOPE_DENIED": 403,
     "MEMORY_SOURCE_REJECTED": 409,
+    "PERSONAL_MEMORY_SOURCE_REJECTED": 409,
     "MEMORY_IDEMPOTENCY_CONFLICT": 409,
     "IDEMPOTENCY_CONFLICT": 409,
     "IDEMPOTENCY_KEY_MISMATCH": 422,
@@ -827,6 +829,20 @@ def create_app(
                         if not valid:
                             item['body']='这条历史答复的来源已失效，不能作为当前依据。请重新查询。'
                             item['source_status']=reason
+                    chat_answer = connection.execute(
+                        "SELECT 1 FROM chat_run_answers WHERE message_id = ?", (row['message_id'],),
+                    ).fetchone()
+                    if chat_answer:
+                        from opspilot.domain.chat import personal_memory_answer_is_current
+
+                        valid, reason = personal_memory_answer_is_current(
+                            connection, message_id=str(row['message_id']),
+                            tenant_id=context.identity.tenant_id,
+                            owner_actor_id=context.identity.actor_id,
+                        )
+                        if not valid:
+                            item['body'] = '这条历史答复引用的个人记忆已撤销或失效，不能继续作为有效依据。'
+                            item['source_status'] = reason
                 item["answer_run_id"] = None
                 item["answer_source_message_id"] = None
                 item["answer_kind"] = None
@@ -1117,6 +1133,116 @@ def create_app(
             raise TaskControlError("MEMORY_SCOPE_DENIED") from error
         except MemorySourceRejected as error:
             raise TaskControlError("MEMORY_SOURCE_REJECTED") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.get("/api/personal-memories")
+    async def list_personal_memories_route(
+        state: str | None = Query(default=None),
+        context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import list_personal_memories
+
+        try:
+            return {"items": list_personal_memories(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id, state=state,
+            )}
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+
+    @app.get("/api/personal-memories/{memory_id}")
+    async def get_personal_memory_route(
+        memory_id: str, context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import list_personal_memories
+
+        try:
+            items = list_personal_memories(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id, memory_id=memory_id,
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+        if not items:
+            raise TaskControlError("RESOURCE_NOT_FOUND")
+        return items[0]
+
+    @app.post("/api/personal-memories/candidates", status_code=201)
+    async def create_personal_memory_candidate_route(
+        body: PersonalMemoryCandidateRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import SemanticMemoryConflict, create_personal_candidate
+
+        try:
+            return create_personal_candidate(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+                memory_kind=body.memory_kind, memory_key=body.memory_key, content=body.content,
+                source_message_id=body.source_message_id, ttl_days=body.ttl_days,
+                supersedes_memory_id=body.supersedes_memory_id, expected_version=body.expected_version,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+        except SemanticMemoryConflict as error:
+            raise TaskControlError("PERSONAL_MEMORY_CONFLICT") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.post("/api/personal-memories/{memory_id}/confirm")
+    async def confirm_personal_memory_route(
+        memory_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import SemanticMemoryConflict, confirm_personal_memory
+
+        try:
+            return confirm_personal_memory(
+                resolved_db, context.identity.tenant_id, memory_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+        except SemanticMemoryConflict as error:
+            raise TaskControlError("PERSONAL_MEMORY_CONFLICT") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.post("/api/personal-memories/{memory_id}/revoke")
+    async def revoke_personal_memory_route(
+        memory_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import revoke_personal_memory
+
+        try:
+            return revoke_personal_memory(
+                resolved_db, context.identity.tenant_id, memory_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
         except MemoryIdempotencyConflict as error:
             raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
 

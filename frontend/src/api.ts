@@ -130,6 +130,38 @@ export interface ChatChunk {
   attempt_id: string;
 }
 
+export interface PersonalMemoryRecord extends Record<string, unknown> {
+  memory_id: string;
+  tenant_id: string;
+  owner_actor_id: string;
+  memory_kind: 'PREFERENCE' | 'WORK_HABIT' | 'PROJECT_BACKGROUND';
+  memory_key: string;
+  content: string;
+  content_digest: string;
+  source_message_id: string;
+  source_refs: Array<Record<string, unknown>>;
+  source_current: boolean;
+  state: 'CANDIDATE' | 'ACTIVE' | 'REVISED' | 'REVOKED' | 'EXPIRED';
+  version: number;
+  expires_at: string;
+}
+
+export interface ChatRunContext {
+  run_id: string;
+  attempts: Array<{
+    attempt_id: string;
+    status: string;
+    manifest: {
+      memory_refs: Array<Record<string, unknown>>;
+      excluded_sources: Array<Record<string, unknown>>;
+      summary_refs: Array<Record<string, unknown>>;
+      context_budget: Record<string, unknown>;
+    };
+  }>;
+  compression_attempts: Array<Record<string, unknown>>;
+  excluded_sources: Array<Record<string, unknown>>;
+}
+
 export interface InspectorRun {
   run_id: string;
   task_id: string;
@@ -436,6 +468,7 @@ export const api = {
   },
   runs(taskId: string) { return request<{ items: RunItem[] }>(`/api/tasks/${encodeURIComponent(taskId)}/runs`); },
   run(runId: string) { return request<RunItem>(`/api/runs/${encodeURIComponent(runId)}`); },
+  runContext(runId: string) { return request<ChatRunContext>(`/api/runs/${encodeURIComponent(runId)}/context`); },
   chunks(runId: string, afterSeq: number) {
     return request<{ items: ChatChunk[] }>(`/api/runs/${encodeURIComponent(runId)}/chunks?after_seq=${afterSeq}`);
   },
@@ -482,6 +515,39 @@ export const api = {
   },
   revokeMemory(memoryId: string, csrf: string, idempotencyKey: string) {
     return request<MemoryRecord>(`/api/memories/${encodeURIComponent(memoryId)}/revoke`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
+  personalMemories(state?: string) {
+    const query = state ? `?state=${encodeURIComponent(state)}` : '';
+    return request<{ items: PersonalMemoryRecord[] }>(`/api/personal-memories${query}`);
+  },
+  personalMemory(memoryId: string) {
+    return request<PersonalMemoryRecord>(`/api/personal-memories/${encodeURIComponent(memoryId)}`);
+  },
+  createPersonalMemoryCandidate(
+    payload: {
+      memory_kind: PersonalMemoryRecord['memory_kind'];
+      memory_key: string;
+      content: string;
+      source_message_id: string;
+      ttl_days?: number;
+      supersedes_memory_id?: string;
+      expected_version?: number;
+    }, csrf: string, idempotencyKey: string,
+  ) {
+    return request<PersonalMemoryRecord>('/api/personal-memories/candidates', {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(payload),
+    });
+  },
+  confirmPersonalMemory(memoryId: string, csrf: string, idempotencyKey: string) {
+    return request<PersonalMemoryRecord>(`/api/personal-memories/${encodeURIComponent(memoryId)}/confirm`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
+  revokePersonalMemory(memoryId: string, csrf: string, idempotencyKey: string) {
+    return request<PersonalMemoryRecord>(`/api/personal-memories/${encodeURIComponent(memoryId)}/revoke`, {
       method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
     });
   },

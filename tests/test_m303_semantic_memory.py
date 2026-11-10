@@ -264,7 +264,8 @@ def test_m303_expiry_is_audited_and_excluded_from_future_context(demo_db: Path) 
 
 def test_m303_schema_v11_migration_is_repeatable_and_scoped(demo_db: Path) -> None:
     initialize(demo_db)
-    _session_and_task(demo_db, "migration-a")
+    _, migration_task, migration_message = _session_and_task(demo_db, "migration-a")
+    legacy_memory = _candidate(demo_db, migration_task, migration_message, "migration-preserve")
     other_identity = trusted_identity(demo_db, "support-b")
     other_session = str(create_session(demo_db, other_identity)["session_id"])
     _create_task(demo_db, other_session, "migration-b", actor_id="support-b", integration_id="integration-b")
@@ -278,10 +279,20 @@ def test_m303_schema_v11_migration_is_repeatable_and_scoped(demo_db: Path) -> No
         grants = [tuple(row) for row in connection.execute(
             "SELECT tenant_id, project_id, actor_id, active FROM semantic_memory_project_approvers ORDER BY tenant_id, actor_id"
         )]
+        preserved_memory = connection.execute(
+            "SELECT memory_id, source_task_id, state FROM semantic_memories WHERE memory_id = ?",
+            (legacy_memory["memory_id"],),
+        ).fetchone()
         foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
-    assert version == 18
+    assert version == 21
+    with connect(demo_db) as connection:
+        personal_schema = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='personal_memories'"
+        ).fetchone()
+    assert personal_schema is not None
     assert grants == [
         ("tenant-a", "service:orders-demo", "approver-a", 1),
         ("tenant-b", "service:orders-demo", "approver-b", 1),
     ]
+    assert tuple(preserved_memory) == (legacy_memory["memory_id"], migration_task, "CANDIDATE")
     assert foreign_key_errors == []

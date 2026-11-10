@@ -1471,9 +1471,10 @@ class Loop(AgentMiddleware):
         memory_guidance_messages = [
             str(item.get('content', '')) for item in prepared.get('messages', [])
             if item.get('role') == 'system'
-            and str(item.get('content', '')).startswith(
-                'CONFIRMED PROJECT MEMORY GUIDANCE (non-authoritative; not current evidence): '
-            )
+            and str(item.get('content', '')).startswith((
+                'CONFIRMED PROJECT MEMORY GUIDANCE (non-authoritative; not current evidence): ',
+                'CONFIRMED PERSONAL MEMORY GUIDANCE (non-authoritative; not current facts): ',
+            ))
         ]
         prepared['memory_guidance_messages'] = memory_guidance_messages
         payload={'current_run':current,'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
@@ -1588,17 +1589,26 @@ class Loop(AgentMiddleware):
     def _assert_memories_current(self, selected_memories):
         if not selected_memories:
             return
-        task_id = self.run.get('task_id')
-        if not task_id:
-            raise TaskControlError('ASSISTANT_MEMORY_TASK_SCOPE_REQUIRED')
-        from opspilot.domain.episodic_memory import assert_selected_memories_current
+        personal = [item for item in selected_memories if str(item.get('memory_type', '')) == 'PERSONAL']
+        domain = [item for item in selected_memories if str(item.get('memory_type', '')) != 'PERSONAL']
+        task_id = str(self.run['task_id']) if self.run.get('task_id') is not None else None
+        if domain:
+            if task_id is None:
+                raise TaskControlError('ASSISTANT_MEMORY_TASK_SCOPE_REQUIRED')
+            from opspilot.domain.episodic_memory import assert_selected_memories_current
 
-        assert_selected_memories_current(self.path, str(task_id), selected_memories)
+            # Preserve the existing Task-bound revocation gate used by the
+            # provider-boundary check and its recovery tests.
+            assert_selected_memories_current(self.path, task_id, domain)
+        if personal:
+            with connect(self.path) as connection:
+                from opspilot.domain.semantic_memory import assert_selected_personal_memories_current_in_connection
+
+                assert_selected_personal_memories_current_in_connection(
+                    connection, str(self.run['tenant_id']), self.actor.actor_id, personal,
+                )
 
     def assert_manifest_memories_current(self):
-        task_id = self.run.get('task_id')
-        if not task_id:
-            return
         with connect(self.path) as connection:
             row = connection.execute(
                 """SELECT memory_refs_json FROM chat_context_manifests WHERE run_id = ?

@@ -824,6 +824,52 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_semantic_memory_active_key
     WHERE state = 'ACTIVE';
 CREATE INDEX IF NOT EXISTS ix_semantic_memory_scope
     ON semantic_memories(tenant_id, project_id, state, expires_at);
+-- Personal Memory shares the Semantic Memory lifecycle module and command
+-- idempotency ledger, but has a separate owner scope. Keeping it additive
+-- avoids rebuilding the task-bound project table or weakening its approver
+-- contract.
+CREATE TABLE IF NOT EXISTS personal_memories (
+    memory_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    owner_actor_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
+    memory_kind TEXT NOT NULL CHECK (memory_kind IN ('PREFERENCE', 'WORK_HABIT', 'PROJECT_BACKGROUND')),
+    memory_key TEXT NOT NULL,
+    content TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    source_message_id TEXT NOT NULL REFERENCES messages(message_id),
+    source_refs_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('CANDIDATE', 'ACTIVE', 'REVISED', 'REVOKED', 'EXPIRED')),
+    version INTEGER NOT NULL CHECK (version > 0),
+    supersedes_memory_id TEXT REFERENCES personal_memories(memory_id),
+    supersedes_version INTEGER,
+    created_by TEXT NOT NULL,
+    confirmed_by TEXT,
+    confirmed_at TEXT,
+    revoked_by TEXT,
+    revoked_at TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK ((supersedes_memory_id IS NULL AND supersedes_version IS NULL)
+        OR (supersedes_memory_id IS NOT NULL AND supersedes_version IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_personal_memory_active_key
+    ON personal_memories(tenant_id, owner_actor_id, memory_kind, memory_key)
+    WHERE state = 'ACTIVE';
+CREATE INDEX IF NOT EXISTS ix_personal_memory_owner_state
+    ON personal_memories(tenant_id, owner_actor_id, state, expires_at);
+CREATE TABLE IF NOT EXISTS personal_memory_events (
+    event_id TEXT PRIMARY KEY,
+    memory_id TEXT NOT NULL REFERENCES personal_memories(memory_id),
+    tenant_id TEXT NOT NULL,
+    owner_actor_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('CANDIDATE_CREATED', 'CONFIRMED', 'REVISED', 'REVOKED', 'EXPIRED')),
+    actor_id TEXT NOT NULL,
+    memory_version INTEGER NOT NULL,
+    occurred_at TEXT NOT NULL,
+    details_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_personal_memory_events_scope
+    ON personal_memory_events(memory_id, memory_version, occurred_at);
 CREATE TABLE IF NOT EXISTS semantic_memory_events (
     event_id TEXT PRIMARY KEY,
     memory_id TEXT NOT NULL REFERENCES semantic_memories(memory_id),
@@ -1106,7 +1152,7 @@ def initialize(path: str | Path) -> None:
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA + ASSISTANT_SCHEMA + ASSISTANT_KNOWLEDGE_SCHEMA + ASSISTANT_RUNTIME_GRANT_SCHEMA)
         migrate_runtime_campaign_schema(connection)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 20:
+        if version > 21:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1480,6 +1526,11 @@ def initialize(path: str | Path) -> None:
             # R1 live Campaign accounting extends the existing spend ledger;
             # it does not provision a Grant or create send authority.
             connection.execute("PRAGMA user_version = 20")
+            version = 20
+        if version < 21:
+            # Personal Memory is additive and deliberately separate in scope;
+            # the existing task-bound Semantic Memory rows and grants remain intact.
+            connection.execute("PRAGMA user_version = 21")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
