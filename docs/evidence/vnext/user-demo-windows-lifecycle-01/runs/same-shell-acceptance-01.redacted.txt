@@ -1,0 +1,96 @@
+**********************
+Windows PowerShell transcript start
+Start time: 20261110112408
+Username: [redacted]
+RunAs User: [redacted]
+Configuration Name: [default]
+Machine: [redacted]
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NoExit
+Process ID: 33672
+PSVersion: 5.1.26100.8655
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8655
+BuildVersion: 10.0.26100.8655
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01\docs\evidence\vnext\user-demo-windows-lifecycle-01\runs\same-shell-acceptance-01.txt
+
+Name               Source
+----               ------
+python.exe         D:\学习\agent新项目\.venv\Scripts\python.exe
+node.exe           D:\node.js\node.exe
+domain.sqlite3
+checkpoint.sqlite3
+
+
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> $listeners = Get-NetTCPConnection -State Listen -LocalPort 8000,5173 -ErrorAction SilentlyContinue; if ($listeners) { $listeners | Select-Object LocalPort,OwningProcess; throw 'Required ports are still occupied.' }; & .\scripts\user-demo\Start-UserDemo.ps1 -Profile S1 -Mode Offline
+
+Security Warning: Script Execution Risk
+Invoke-WebRequest parses the content of the web page. Script code in the web page might be run when the page is parsed.
+      RECOMMENDED ACTION:
+      Use the -UseBasicParsing switch to avoid script code execution.
+
+      Do you want to continue?
+&Yes  Yes to &All  &No  No to A&ll  &Suspend
+A
+API and Worker ready at http://127.0.0.1:8000; frontend HTTP is ready at http://127.0.0.1:5173.
+Profile S1 uses orders-demo / integration-a for new synchronous investigations.
+Offline mode: real Provider and all legacy Provider paths were forced off for these processes.
+Logs: D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01\.runtime\user-demo\logs
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> Write-Host 'INPUT_OK'
+INPUT_OK
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> $opBrowserOut = Join-Path $opTestRun 'browser-sse-acceptance-01.log'; $opBrowserErr = Join-Path $opTestRun 'browser-sse-acceptance-01.stderr.log'; $opNode = (Get-Command node).Source; $opE2ePath = Join-Path (Get-Location).Path 'frontend\e2e\user-demo-shutdown-sse.mjs'; $opE2e = Start-Process -FilePath $opNode -ArgumentList ('"' + $opE2ePath + '"') -WorkingDirectory (Join-Path (Get-Location).Path 'frontend') -WindowStyle Hidden -PassThru -RedirectStandardInput (Join-Path (Get-Location).Path '.runtime\user-demo\logs\empty.stdin') -RedirectStandardOutput $opBrowserOut -RedirectStandardError $opBrowserErr; $opDeadline = (Get-Date).AddSeconds(35); $opSseOpen = $false; do { Start-Sleep -Milliseconds 250; if (Test-Path $opBrowserOut) { $opSseText = Get-Content -LiteralPath $opBrowserOut -Raw; if ($opSseText -match 'BROWSER_SSE_OPEN') { $opSseOpen = $true; break } }; $opE2e.Refresh() } while (-not $opE2e.HasExited -and (Get-Date) -lt $opDeadline); if (-not $opSseOpen) { if (Test-Path $opBrowserOut) { Get-Content $opBrowserOut }; if (Test-Path $opBrowserErr) { Get-Content $opBrowserErr }; throw 'Browser SSE did not reach OPEN state.' }; Get-Content -LiteralPath $opBrowserOut; Write-Host 'BROWSER_SSE_OPEN_CONFIRMED'
+BROWSER_SESSION_CREATED session-98baffc3-82d9-4001-9498-63a435fa3fad
+BROWSER_SSE_OPEN
+BROWSER_SSE_OPEN_CONFIRMED
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> $opSessionId = 'session-98baffc3-82d9-4001-9498-63a435fa3fad'; Write-Host 'INPUT_OK'; Write-Host "SSE_SESSION=$opSessionId"
+INPUT_OK
+SSE_SESSION=session-98baffc3-82d9-4001-9498-63a435fa3fad
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> & .\scripts\user-demo\Stop-UserDemo.ps1
+OpsPilot API, Worker and local frontend completed graceful shutdown.
+Sessions, messages, Domain DB, Checkpoint DB and logs were retained.
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> $opE2e.Refresh(); if (-not $opE2e.HasExited) { [void]$opE2e.WaitForExit(10000) }; Write-Host "BROWSER_E2E_EXITED=$($opE2e.HasExited) EXIT_CODE=$($opE2e.ExitCode)"; Get-Content -LiteralPath $opBrowserOut; Write-Host 'LISTENERS_AFTER_STOP:'; Get-NetTCPConnection -State Listen -LocalPort 8000,5173 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,OwningProcess; Write-Host "MANIFEST_REMAINS=$(Test-Path '.runtime\user-demo\processes.json')"; Get-Item .runtime\user-demo\domain.sqlite3,.runtime\user-demo\checkpoint.sqlite3 | Select-Object Name,Length,LastWriteTime
+BROWSER_E2E_EXITED=True EXIT_CODE=
+BROWSER_SESSION_CREATED session-98baffc3-82d9-4001-9498-63a435fa3fad
+BROWSER_SSE_OPEN
+BROWSER_SSE_CLOSED
+LISTENERS_AFTER_STOP:
+MANIFEST_REMAINS=False
+
+Name                Length LastWriteTime
+----                ------ -------------
+domain.sqlite3     1294336 2026/11/10 11:25:33
+checkpoint.sqlite3   20480 2026/11/10 10:54:55
+
+
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> $listeners = Get-NetTCPConnection -State Listen -LocalPort 8000,5173 -ErrorAction SilentlyContinue; if ($listeners) { throw 'A port remained busy after the first Stop.' }; if (-not (Test-Path '.runtime\user-demo\domain.sqlite3') -or -not (Test-Path '.runtime\user-demo\checkpoint.sqlite3')) { throw 'Session or Checkpoint data was missing after Stop.' }; Write-Host 'RESTART_WITH_EXISTING_SESSION'; & .\scripts\user-demo\Start-UserDemo.ps1 -Profile S1 -Mode Offline
+RESTART_WITH_EXISTING_SESSION
+
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> TerminatingError(Invoke-RestMethod): "The operation has timed out."
+API and Worker ready at http://127.0.0.1:8000; frontend HTTP is ready at http://127.0.0.1:5173.
+Profile S1 uses orders-demo / integration-a for new synchronous investigations.
+Offline mode: real Provider and all legacy Provider paths were forced off for these processes.
+Logs: D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01\.runtime\user-demo\logs
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> $opBrowserOut2 = Join-Path $opTestRun 'browser-session-restart-01.log'; $opBrowserErr2 = Join-Path $opTestRun 'browser-session-restart-01.stderr.log'; $env:OPSPILOT_TEST_EXPECT_SESSION_ID = $opSessionId; $opE2e2 = Start-Process -FilePath $opNode -ArgumentList ('"' + $opE2ePath + '"') -WorkingDirectory (Join-Path (Get-Location).Path 'frontend') -WindowStyle Hidden -PassThru -RedirectStandardInput (Join-Path (Get-Location).Path '.runtime\user-demo\logs\empty.stdin') -RedirectStandardOutput $opBrowserOut2 -RedirectStandardError $opBrowserErr2; Remove-Item Env:\OPSPILOT_TEST_EXPECT_SESSION_ID -ErrorAction SilentlyContinue; $opDeadline2 = (Get-Date).AddSeconds(35); $opSseOpen2 = $false; do { Start-Sleep -Milliseconds 250; if (Test-Path $opBrowserOut2) { $opSseText2 = Get-Content -LiteralPath $opBrowserOut2 -Raw; if ($opSseText2 -match 'BROWSER_SSE_OPEN') { $opSseOpen2 = $true; break } }; $opE2e2.Refresh() } while (-not $opE2e2.HasExited -and (Get-Date) -lt $opDeadline2); if (-not $opSseOpen2) { Get-Content $opBrowserOut2 -ErrorAction SilentlyContinue; Get-Content $opBrowserErr2 -ErrorAction SilentlyContinue; throw 'Restart session browser verification did not reach SSE OPEN.' }; Get-Content $opBrowserOut2; Write-Host 'RESTART_SESSION_AND_SSE_CONFIRMED'
+BROWSER_SESSION_PERSISTED session-98baffc3-82d9-4001-9498-63a435fa3fad
+BROWSER_SSE_OPEN
+RESTART_SESSION_AND_SSE_CONFIRMED
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> Write-Host 'INPUT_OK'; Write-Host "RESTART_SESSION=$opSessionId"; & .\scripts\user-demo\Stop-UserDemo.ps1
+INPUT_OK
+RESTART_SESSION=session-98baffc3-82d9-4001-9498-63a435fa3fad
+OpsPilot API, Worker and local frontend completed graceful shutdown.
+Sessions, messages, Domain DB, Checkpoint DB and logs were retained.
+PS D:\学习\agent新项目\.worktrees\windows-user-demo-lifecycle-01> $opE2e2.Refresh(); if (-not $opE2e2.HasExited) { [void]$opE2e2.WaitForExit(10000) }; Write-Host "RESTART_BROWSER_EXITED=$($opE2e2.HasExited)"; Get-Content -LiteralPath $opBrowserOut2; Write-Host 'FINAL_LISTENERS:'; Get-NetTCPConnection -State Listen -LocalPort 8000,5173 -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,OwningProcess; Write-Host "MANIFEST_REMAINS=$(Test-Path '.runtime\user-demo\processes.json')"; Get-Item .runtime\user-demo\domain.sqlite3,.runtime\user-demo\checkpoint.sqlite3 | Select-Object Name,Length,LastWriteTime; [Environment]::SetEnvironmentVariable('OPSPILOT_TEST_EXPECT_SESSION_ID',$null,'Process'); $env:PATH = $opSavedPath; Stop-Transcript
+RESTART_BROWSER_EXITED=True
+BROWSER_SESSION_PERSISTED session-98baffc3-82d9-4001-9498-63a435fa3fad
+BROWSER_SSE_OPEN
+FINAL_LISTENERS:
+MANIFEST_REMAINS=False
+
+**********************
+Windows PowerShell transcript end
+End time: 20261110113045
+**********************

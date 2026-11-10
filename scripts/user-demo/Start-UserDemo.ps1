@@ -58,6 +58,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Python dependencies are missing. Install the p
 $node = (Get-Command node -ErrorAction Stop).Source
 $vite = Join-Path $root 'frontend\node_modules\vite\bin\vite.js'
 if (-not (Test-Path -LiteralPath $vite)) { throw 'Frontend dependencies are missing. Run npm ci in frontend.' }
+$webLauncher = Join-Path $root 'frontend\user-demo-server.mjs'
+if (-not (Test-Path -LiteralPath $webLauncher)) { throw 'The user-demo Vite lifecycle launcher is missing.' }
 
 if ($Mode -eq 'Live') {
     $runtimeAdmin = Join-Path $PSScriptRoot 'runtime_admin.py'
@@ -83,6 +85,8 @@ $apiOut = Join-Path $logs 'api.stdout.log'
 $apiErr = Join-Path $logs 'api.stderr.log'
 $webOut = Join-Path $logs 'web.stdout.log'
 $webErr = Join-Path $logs 'web.stderr.log'
+$emptyStdin = Join-Path $logs 'empty.stdin'
+[System.IO.File]::WriteAllBytes($emptyStdin, [byte[]]::new(0))
 $apiLauncher = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'run_api.py')).Path
 $profileService = if ($Profile -eq 'S2') { 'orders-demo-s2' } else { 'orders-demo' }
 $profileIntegration = if ($Profile -eq 'S2') { 'integration-s2-a' } else { 'integration-a' }
@@ -95,6 +99,7 @@ $overrides = @{
     OPSPILOT_CHECKPOINT_DB_PATH = $checkpoint
     OPSPILOT_WEB_ORIGIN = 'http://127.0.0.1:5173'
     OPSPILOT_API_ORIGIN = 'http://127.0.0.1:8000'
+    OPSPILOT_USER_DEMO_WEB_PORT = '5173'
     OPSPILOT_DEMO_SERVICE_ID = $profileService
     OPSPILOT_DEMO_INTEGRATION_ID = $profileIntegration
     OPSPILOT_ASSISTANT_RUNTIME_ENABLED = $runtimeEnabled
@@ -122,10 +127,12 @@ $apiProcess = $null
 $webProcess = $null
 try {
     $apiProcess = Start-Process -FilePath $python -ArgumentList @('"' + $apiLauncher + '"') -WorkingDirectory $root `
-        -WindowStyle Hidden -PassThru -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr
-    $viteArgs = '"' + $vite + '" --host 127.0.0.1 --port 5173 --strictPort'
-    $webProcess = Start-Process -FilePath $node -ArgumentList $viteArgs -WorkingDirectory (Join-Path $root 'frontend') `
-        -WindowStyle Hidden -PassThru -RedirectStandardOutput $webOut -RedirectStandardError $webErr
+        -WindowStyle Hidden -PassThru -RedirectStandardInput $emptyStdin `
+        -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr
+    $webArgs = '"' + $webLauncher + '"'
+    $webProcess = Start-Process -FilePath $node -ArgumentList $webArgs -WorkingDirectory (Join-Path $root 'frontend') `
+        -WindowStyle Hidden -PassThru -RedirectStandardInput $emptyStdin `
+        -RedirectStandardOutput $webOut -RedirectStandardError $webErr
 } finally {
     foreach ($name in $overrides.Keys) {
         [Environment]::SetEnvironmentVariable($name, $oldEnvironment[$name], 'Process')
@@ -136,7 +143,7 @@ $record = [ordered]@{
     root = $root
     profile = $Profile
     api = [ordered]@{ pid = $apiProcess.Id; executable = $python; commandMarker = $apiLauncher }
-    frontend = [ordered]@{ pid = $webProcess.Id; executable = $node; commandMarker = $vite }
+    frontend = [ordered]@{ pid = $webProcess.Id; executable = $node; commandMarker = $webLauncher }
     startedAt = (Get-Date).ToUniversalTime().ToString('o')
 }
 $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -151,7 +158,7 @@ for ($i = 0; $i -lt 60; $i++) {
         } catch { }
     }
     if (-not $webReady) {
-        try { $page = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -TimeoutSec 2; $webReady = ($page.StatusCode -eq 200) }
+        try { $page = Invoke-WebRequest -Uri 'http://127.0.0.1:5173/' -TimeoutSec 2 -UseBasicParsing; $webReady = ($page.StatusCode -eq 200) }
         catch { }
     }
     if ($apiReady -and $webReady) { break }

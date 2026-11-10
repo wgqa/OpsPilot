@@ -23,8 +23,11 @@ function Get-VerifiedProcess($Entry, [string]$Label) {
 }
 
 $api = Get-VerifiedProcess $manifest.api 'API'
-if ($api) {
+$frontend = Get-VerifiedProcess $manifest.frontend 'Frontend'
+if ($api -or $frontend) {
     Set-Content -LiteralPath $stopRequest -Value 'graceful-shutdown' -Encoding ASCII
+}
+if ($api) {
     $deadline = (Get-Date).AddSeconds(30)
     do {
         Start-Sleep -Milliseconds 250
@@ -35,18 +38,18 @@ if ($api) {
     }
 }
 
-$frontend = Get-VerifiedProcess $manifest.frontend 'Frontend'
-if ($frontend) {
-    Stop-Process -Id ([int]$manifest.frontend.pid) -Force
-    $deadline = (Get-Date).AddSeconds(10)
+if ($manifest.frontend) {
+    $deadline = (Get-Date).AddSeconds(30)
     do {
         Start-Sleep -Milliseconds 250
         $frontend = Get-VerifiedProcess $manifest.frontend 'Frontend'
     } while ($frontend -and (Get-Date) -lt $deadline)
-    if ($frontend) { throw 'Vite process is still running; manifest retained for safe recovery.' }
+    if ($frontend) {
+        throw 'Frontend did not complete graceful shutdown within 30 seconds. It was left running; inspect web.stderr.log before retrying.'
+    }
 }
 
 if (Test-Path -LiteralPath $stopRequest) { Remove-Item -LiteralPath $stopRequest -Force }
 Remove-Item -LiteralPath $manifestPath -Force
-Write-Host 'OpsPilot API completed graceful shutdown; local frontend process stopped.'
+Write-Host 'OpsPilot API, Worker and local frontend completed graceful shutdown.'
 Write-Host 'Sessions, messages, Domain DB, Checkpoint DB and logs were retained.'
