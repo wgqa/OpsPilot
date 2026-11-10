@@ -759,18 +759,46 @@ def create_app(
     @app.get("/api/sessions/{session_id}/messages")
     async def get_messages(
         session_id: str,
-        after_seq: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=500),
+        after_seq: int = Query(default=0, ge=0),
+        before_seq: int | None = Query(default=None, ge=1),
+        latest: bool = Query(default=False),
+        limit: int = Query(default=100, ge=1, le=500),
         context: AuthContext = Depends(current_user),
     ) -> dict[str, Any]:
         require_session_owner(context.identity, session_id)
+        if before_seq is not None and (latest or after_seq > 0):
+            raise HTTPException(status_code=422, detail="Choose one message page cursor.")
+        if latest and after_seq > 0:
+            raise HTTPException(status_code=422, detail="Choose one message page cursor.")
         with connect(resolved_db) as connection:
-            rows = connection.execute(
-                """SELECT message_id, task_id, sequence, role, input_kind, body, created_at, command_id,
-                          application_state, applied_run_id
-                   FROM messages WHERE session_id = ? AND tenant_id = ? AND sequence > ?
-                   ORDER BY sequence LIMIT ?""",
-                (session_id, context.identity.tenant_id, after_seq, limit),
-            ).fetchall()
+            select = """SELECT message_id, task_id, sequence, role, input_kind, body, created_at, command_id,
+                              application_state, applied_run_id
+                       FROM messages WHERE session_id = ? AND tenant_id = ?"""
+            params: tuple[Any, ...]
+            if before_seq is not None:
+                rows = connection.execute(
+                    select + " AND sequence < ? ORDER BY sequence DESC LIMIT ?",
+                    (session_id, context.identity.tenant_id, before_seq, limit + 1),
+                ).fetchall()
+                has_more_before = len(rows) > limit
+                has_more_after = True
+                rows = list(reversed(rows[:limit]))
+            elif latest:
+                rows = connection.execute(
+                    select + " ORDER BY sequence DESC LIMIT ?",
+                    (session_id, context.identity.tenant_id, limit + 1),
+                ).fetchall()
+                has_more_before = len(rows) > limit
+                has_more_after = False
+                rows = list(reversed(rows[:limit]))
+            else:
+                rows = connection.execute(
+                    select + " AND sequence > ? ORDER BY sequence LIMIT ?",
+                    (session_id, context.identity.tenant_id, after_seq, limit + 1),
+                ).fetchall()
+                has_more_before = after_seq > 0
+                has_more_after = len(rows) > limit
+                rows = rows[:limit]
             items = []
             for row in rows:
                 item = {key: row[key] for key in row.keys()}
@@ -872,7 +900,7 @@ def create_app(
                             item["answer_kind"] = None
                 item.pop("command_id", None)
                 items.append(item)
-        return {"items": items}
+        return {"items": items, "has_more_before": has_more_before, "has_more_after": has_more_after}
 
     @app.post("/api/tasks/{task_id}/investigation-updates/proposals")
     async def assess_investigation_update(

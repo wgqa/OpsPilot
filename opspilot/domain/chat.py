@@ -25,7 +25,6 @@ from opspilot.domain.task_control import TaskControlError, TrustedIdentity, _ver
 MAX_CHAT_ATTEMPTS = 3
 MAX_CHAT_MESSAGES = 20
 MAX_CHAT_CONTEXT_CHARS = 24_000
-MAX_CHAT_HISTORY_MESSAGES = 500
 CHAT_RECENT_WINDOW_MESSAGES = 12
 MAX_COMPRESSION_INPUT_TOKENS = 6_000
 MAX_COMPRESSION_OUTPUT_TOKENS = 512
@@ -473,7 +472,37 @@ def _message_source_valid(
     memories_by_id: dict[str, dict[str, Any]],
     summary_seen: set[str] | None = None,
     message_seen: set[str] | None = None,
-    model_source_cache: dict[str, tuple[bool, str | None]] | None = None,
+    source_validation_cache: dict[str, tuple[bool, str | None]] | None = None,
+) -> tuple[bool, str | None]:
+    cache = source_validation_cache if source_validation_cache is not None else {}
+    message_id = str(row["message_id"])
+    if message_id in cache:
+        return cache[message_id]
+    result = _message_source_valid_uncached(
+        connection, row, session_id=session_id, tenant_id=tenant_id, task_id=task_id,
+        state_digest=state_digest, evidence_by_id=evidence_by_id,
+        evidence_exclusion_reasons=evidence_exclusion_reasons,
+        memories_by_id=memories_by_id, summary_seen=summary_seen,
+        message_seen=message_seen, source_validation_cache=cache,
+    )
+    cache[message_id] = result
+    return result
+
+
+def _message_source_valid_uncached(
+    connection: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    session_id: str,
+    tenant_id: str,
+    task_id: str | None,
+    state_digest: str | None,
+    evidence_by_id: dict[str, dict[str, Any]],
+    evidence_exclusion_reasons: dict[str, str],
+    memories_by_id: dict[str, dict[str, Any]],
+    summary_seen: set[str] | None = None,
+    message_seen: set[str] | None = None,
+    source_validation_cache: dict[str, tuple[bool, str | None]] | None = None,
 ) -> tuple[bool, str | None]:
     from opspilot.domain.assistant import sources_current as assistant_sources_current
     assistant_run = connection.execute("SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?",(row["message_id"],)).fetchone()
@@ -486,7 +515,7 @@ def _message_source_valid(
     if message_id in visiting_messages:
         return False, "MESSAGE_DEPENDENCY_CYCLE"
     visiting_messages.add(message_id)
-    source_cache = model_source_cache if model_source_cache is not None else {}
+    source_cache = source_validation_cache if source_validation_cache is not None else {}
     sources = connection.execute(
         """SELECT source_kind, source_ref, source_version, source_digest FROM chat_message_sources
            WHERE message_id = ?
@@ -553,7 +582,7 @@ def _message_source_valid(
                         evidence_by_id=evidence_by_id,
                         evidence_exclusion_reasons=evidence_exclusion_reasons,
                         memories_by_id=memories_by_id, summary_seen=summary_seen,
-                        message_seen=visiting_messages, model_source_cache=source_cache,
+                        message_seen=visiting_messages, source_validation_cache=source_cache,
                     )
                 valid, reason = source_cache[ancestor_id]
                 if not valid:
@@ -577,6 +606,7 @@ def _message_source_valid(
                 evidence_by_id=evidence_by_id,
                 evidence_exclusion_reasons=evidence_exclusion_reasons,
                 memories_by_id=memories_by_id, seen=summary_seen, allow_superseded=True,
+                source_validation_cache=source_cache,
             )[0]
         ):
             return False, "SUMMARY_DEPENDENCY_INVALID"
@@ -645,6 +675,7 @@ def _summary_is_current(
     memories_by_id: dict[str, dict[str, Any]],
     seen: set[str] | None = None,
     allow_superseded: bool = False,
+    source_validation_cache: dict[str, tuple[bool, str | None]] | None = None,
 ) -> tuple[bool, str | None]:
     visiting = set(seen or ())
     if summary_id in visiting:
@@ -701,6 +732,7 @@ def _summary_is_current(
                 evidence_by_id=evidence_by_id,
                 evidence_exclusion_reasons=evidence_exclusion_reasons,
                 memories_by_id=memories_by_id, summary_seen=visiting,
+                source_validation_cache=source_validation_cache,
             )
             if not valid:
                 return False, reason or "SUMMARY_ASSISTANT_DEPENDENCY_INVALID"
@@ -733,6 +765,7 @@ def _summary_is_current(
                 task_id=task_id, state_digest=state_digest, evidence_by_id=evidence_by_id,
                 evidence_exclusion_reasons=evidence_exclusion_reasons,
                 memories_by_id=memories_by_id, seen=visiting, allow_superseded=True,
+                source_validation_cache=source_validation_cache,
             )
             if not valid:
                 return False, reason or "SUMMARY_PARENT_INVALID"
@@ -780,6 +813,7 @@ def _latest_current_summary(
     evidence_exclusion_reasons: dict[str, str],
     memories_by_id: dict[str, dict[str, Any]],
     excluded: list[dict[str, Any]],
+    source_validation_cache: dict[str, tuple[bool, str | None]] | None = None,
 ) -> dict[str, Any] | None:
     rows = connection.execute(
         """SELECT * FROM context_summaries WHERE tenant_id = ? AND session_id = ?
@@ -794,6 +828,7 @@ def _latest_current_summary(
             evidence_by_id=evidence_by_id,
             evidence_exclusion_reasons=evidence_exclusion_reasons,
             memories_by_id=memories_by_id,
+            source_validation_cache=source_validation_cache,
         )
         if valid:
             return dict(row)
@@ -1136,16 +1171,31 @@ def _prepare_context(
     # Keep active Memory available to source validation even when this exact
     # experiment condition intentionally withholds it from model input.
     memories_by_id = {str(item["memory_id"]): item for item in available_memories}
+    source_validation_cache: dict[str, tuple[bool, str | None]] = {}
+
+    # A current summary is the lower cursor for source-valid history. When no
+    # summary is usable (including after source invalidation), read the full
+    # unsummarized history so an old goal cannot disappear behind a fixed row
+    # limit before the summary builder sees it.
+    summary = _latest_current_summary(
+        connection, session_id=session_id, tenant_id=tenant_id, task_id=task_id,
+        before_sequence=int(source_message["sequence"]), state_digest=state_digest,
+        evidence_by_id=evidence_by_id,
+        evidence_exclusion_reasons=evidence_exclusion_reasons,
+        memories_by_id=memories_by_id, excluded=excluded,
+        source_validation_cache=source_validation_cache,
+    )
+    summarized_through = int(summary["covered_to_seq"]) if summary is not None else 0
 
     user_rows = connection.execute(
         """SELECT * FROM messages WHERE session_id = ? AND tenant_id = ? AND role = 'USER'
-           AND input_kind = 'CHAT_READONLY' AND sequence <= ? ORDER BY sequence DESC LIMIT ?""",
-        (session_id, tenant_id, int(source_message["sequence"]), MAX_CHAT_HISTORY_MESSAGES),
+           AND input_kind = 'CHAT_READONLY' AND sequence > ? AND sequence <= ? ORDER BY sequence""",
+        (session_id, tenant_id, summarized_through, int(source_message["sequence"])),
     ).fetchall()
     history: list[dict[str, Any]] = [{
         "message_id": str(item["message_id"]), "role": "user", "sequence": int(item["sequence"]),
         "body": str(item["body"]), "body_digest": str(item["body_digest"]),
-    } for item in reversed(user_rows)]
+    } for item in user_rows]
     # Preserve task intent verbatim independently of lossy summaries/windows.
     # Accepted correction text remains untrusted and never becomes Evidence.
     task_input_anchors: dict[str, dict[str, Any]] = {}
@@ -1173,10 +1223,10 @@ def _prepare_context(
                   a.manifest_id AS answer_manifest_id
            FROM chat_run_answers a JOIN messages m ON m.message_id = a.message_id
            JOIN task_runs r ON r.run_id = a.run_id
-           WHERE r.session_id = ? AND r.tenant_id = ? AND m.sequence < ? AND m.role = 'ASSISTANT'
+           WHERE r.session_id = ? AND r.tenant_id = ? AND m.sequence > ? AND m.sequence < ? AND m.role = 'ASSISTANT'
              AND ((r.task_id = ?) OR (r.task_id IS NULL AND ? IS NULL))
-           ORDER BY m.sequence DESC LIMIT ?""",
-        (session_id, tenant_id, int(source_message["sequence"]), task_id, task_id, MAX_CHAT_HISTORY_MESSAGES),
+           ORDER BY m.sequence""",
+        (session_id, tenant_id, summarized_through, int(source_message["sequence"]), task_id, task_id),
     ).fetchall()
     for message in assistant_rows:
         valid, reason = _message_source_valid(
@@ -1185,6 +1235,7 @@ def _prepare_context(
             evidence_by_id=evidence_by_id,
             evidence_exclusion_reasons=evidence_exclusion_reasons,
             memories_by_id=memories_by_id,
+            source_validation_cache=source_validation_cache,
         )
         if valid:
             history.append({
@@ -1208,6 +1259,7 @@ def _prepare_context(
                     evidence_by_id=evidence_by_id,
                     evidence_exclusion_reasons=evidence_exclusion_reasons,
                     memories_by_id=memories_by_id, allow_superseded=True,
+                    source_validation_cache=source_validation_cache,
                 )
                 if not summary_valid:
                     excluded.append({
@@ -1223,13 +1275,6 @@ def _prepare_context(
         })
         history.sort(key=lambda item: (int(item["sequence"]), 0 if item["role"] == "user" else 1))
 
-    summary = _latest_current_summary(
-        connection, session_id=session_id, tenant_id=tenant_id, task_id=task_id,
-        before_sequence=int(source_message["sequence"]), state_digest=state_digest,
-        evidence_by_id=evidence_by_id,
-        evidence_exclusion_reasons=evidence_exclusion_reasons,
-        memories_by_id=memories_by_id, excluded=excluded,
-    )
     summary_ref: dict[str, Any] | None = None
     summary_message: dict[str, Any] | None = None
     if summary is not None:

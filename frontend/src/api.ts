@@ -7,6 +7,8 @@ export interface SessionItem {
 
 export interface SessionDetail {
   session_id: string;
+  created_at: string;
+  updated_at: string;
   tasks: Array<{ task_id: string; linked_at: string; is_primary: number }>;
   s1_demo_resource: { service_id: string; integration_id: string; principal_id: string } | null;
 }
@@ -343,7 +345,17 @@ export const api = {
   createSession(csrf: string) {
     return request<SessionItem>('/api/sessions', { method: 'POST', headers: writeHeaders(csrf) });
   },
-  messages(sessionId: string) { return request<{ items: MessageItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=500`); },
+  messages(sessionId: string, page: { afterSeq?: number; beforeSeq?: number; limit?: number } = {}) {
+    const query = new URLSearchParams({ limit: String(page.limit ?? 500) });
+    if (page.beforeSeq !== undefined) query.set('before_seq', String(page.beforeSeq));
+    else if (page.afterSeq !== undefined) query.set('after_seq', String(page.afterSeq));
+    else query.set('latest', 'true');
+    return request<{
+      items: MessageItem[];
+      has_more_before: boolean;
+      has_more_after: boolean;
+    }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${query.toString()}`);
+  },
   sessionRuns(sessionId: string) { return request<{ items: RunItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`); },
   send(sessionId: string, body: string, taskId: string | null, csrf: string, inputKind: 'CHAT_READONLY' | 'CORRECT_TASK_INPUT' = 'CHAT_READONLY') {
     return request<AcceptedMessage>(

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
@@ -17,6 +17,8 @@ const sessions = ref<SessionItem[]>([]);
 const sessionId = ref('');
 const messages = ref<MessageItem[]>([]);
 const sessionHistoryReady = ref(false);
+const hasOlderMessages = ref(false);
+const loadingOlderMessages = ref(false);
 const taskId = ref('');
 const investigationUpdates = ref<InvestigationUpdateAssessment[]>([]);
 const investigationKind = ref<'AUTH_INCIDENT' | 'ASYNC_CALLBACK'>('AUTH_INCIDENT');
@@ -61,6 +63,8 @@ const reconnectCount = ref(0);
 const reconnectPaused = ref(false);
 const narrowInspectorOpen = ref(false);
 const conversationEnd = ref<HTMLElement | null>(null);
+const conversationScroll = ref<HTMLElement | null>(null);
+let olderScrollPosition: { top: number; height: number } | null = null;
 
 let eventSource: EventSource | null = null;
 let reconnectTimer: number | undefined;
@@ -231,9 +235,51 @@ async function logout(): Promise<void> {
 
 async function loadSessions(): Promise<void> {
   const response = await api.sessions();
-  sessions.value = response.items;
-  if (sessions.value.length > 0 && !sessions.value.some((item) => item.session_id === sessionId.value)) {
-    await selectSession(sessions.value[0].session_id);
+  const items = [...response.items];
+  const saved = savedSessionId();
+  if (saved && !items.some((item) => item.session_id === saved)) {
+    try {
+      const detail = await api.session(saved);
+      items.unshift({
+        session_id: detail.session_id,
+        created_at: detail.created_at,
+        updated_at: detail.updated_at,
+        task_count: detail.tasks.length,
+      });
+    } catch {
+      // A stale or no-longer-accessible browser selection falls back to an owned Session.
+    }
+  }
+  sessions.value = items;
+  const available = new Set(sessions.value.map((item) => item.session_id));
+  const selected = (saved && available.has(saved) ? saved : null)
+    ?? (available.has(sessionId.value) ? sessionId.value : null)
+    ?? sessions.value[0]?.session_id
+    ?? '';
+  rememberSelectedSession(selected);
+  if (selected !== sessionId.value) await selectSession(selected);
+  else if (!selected) await selectSession('');
+}
+
+function selectedSessionKey(): string | null {
+  if (!user.value) return null;
+  return `opspilot.selected-session.${user.value.tenant_id}.${user.value.actor_id}`;
+}
+
+function savedSessionId(): string | null {
+  const key = selectedSessionKey();
+  if (!key) return null;
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+
+function rememberSelectedSession(value: string): void {
+  const key = selectedSessionKey();
+  if (!key) return;
+  try {
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Session restoration remains available through the current page if browser storage is disabled.
   }
 }
 
@@ -392,7 +438,11 @@ async function createSession(): Promise<void> {
 
 async function selectSession(value: string): Promise<void> {
   sessionId.value = value;
+  rememberSelectedSession(value);
+  olderScrollPosition = null;
   sessionHistoryReady.value = false;
+  hasOlderMessages.value = false;
+  loadingOlderMessages.value = false;
   taskId.value = '';
   investigationOriginMessageId.value = '';
   s1DemoResource.value = null;
@@ -572,6 +622,7 @@ async function refreshSession(): Promise<void> {
     const response = await api.messages(requestedSessionId);
     if (!s3ReadResponseFence.isCurrentSessionMessages(messageTicket, sessionId.value)) return;
     messages.value = response.items;
+    hasOlderMessages.value = response.has_more_before;
     // The messages endpoint revalidates and sanitizes persisted answers. Their
     // explicit source IDs make the conversation safe to project before the
     // parallel Task Inspector refresh finishes.
@@ -1236,10 +1287,78 @@ async function refreshSessionMessagesOnly(): Promise<void> {
   if (!sessionId.value) return;
   const requestedSessionId = sessionId.value;
   const requestTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
-  const response = await api.messages(requestedSessionId);
-  if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
-    messages.value = filterDeniedS3AssistantMessages(response.items, (taskId) => s3ReadResponseFence.isTaskDenied(taskId));
+  const lastSequence = messages.value.at(-1)?.sequence;
+  try {
+    let response = await api.messages(
+      requestedSessionId,
+      lastSequence === undefined ? {} : { afterSeq: lastSequence },
+    );
+    if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+    const received = [...response.items];
+    let afterSequence = received.at(-1)?.sequence ?? lastSequence ?? 0;
+    // A delayed tab may have missed more than one page of events. Drain forward
+    // pages so the latest answer is visible while preserving any older pages.
+    while (response.has_more_after && afterSequence > 0) {
+      response = await api.messages(requestedSessionId, { afterSeq: afterSequence });
+      if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+      received.push(...response.items);
+      const nextSequence = received.at(-1)?.sequence ?? afterSequence;
+      if (nextSequence <= afterSequence) break;
+      afterSequence = nextSequence;
+    }
+    const safeItems = filterDeniedS3AssistantMessages(
+      received, (requestedTaskId) => s3ReadResponseFence.isTaskDenied(requestedTaskId),
+    );
+    if (safeItems.length) {
+      const merged = new Map(messages.value.map((item) => [item.message_id, item]));
+      for (const item of safeItems) merged.set(item.message_id, item);
+      messages.value = [...merged.values()].sort((left, right) => left.sequence - right.sequence);
+    } else if (lastSequence === undefined) {
+      messages.value = [];
+      hasOlderMessages.value = response.has_more_before;
+    }
     sessionHistoryReady.value = true;
+  } catch (error) {
+    if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
+      errorMessage.value = explainError(error);
+    }
+  }
+}
+
+async function loadOlderMessages(): Promise<void> {
+  if (!sessionId.value || !hasOlderMessages.value || loadingOlderMessages.value) return;
+  const firstSequence = messages.value[0]?.sequence;
+  if (firstSequence === undefined) return;
+  const requestedSessionId = sessionId.value;
+  const requestTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
+  loadingOlderMessages.value = true;
+  errorMessage.value = '';
+  try {
+    const response = await api.messages(requestedSessionId, { beforeSeq: firstSequence });
+    if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+    olderScrollPosition = conversationScroll.value
+      ? { top: conversationScroll.value.scrollTop, height: conversationScroll.value.scrollHeight }
+      : null;
+    const safeItems = filterDeniedS3AssistantMessages(
+      response.items, (requestedTaskId) => s3ReadResponseFence.isTaskDenied(requestedTaskId),
+    );
+    const merged = new Map(messages.value.map((item) => [item.message_id, item]));
+    for (const item of safeItems) merged.set(item.message_id, item);
+    messages.value = [...merged.values()].sort((left, right) => left.sequence - right.sequence);
+    hasOlderMessages.value = response.has_more_before;
+    await nextTick();
+    if (conversationScroll.value && olderScrollPosition) {
+      conversationScroll.value.scrollTop = olderScrollPosition.top
+        + conversationScroll.value.scrollHeight - olderScrollPosition.height;
+    }
+    olderScrollPosition = null;
+  } catch (error) {
+    if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
+      errorMessage.value = explainError(error);
+    }
+  } finally {
+    olderScrollPosition = null;
+    loadingOlderMessages.value = false;
   }
 }
 
@@ -1381,7 +1500,19 @@ function submitOnEnter(event: KeyboardEvent): void {
 }
 
 watch(taskId, () => { void refreshInspector(); });
-watch([messages, chunks], () => conversationEnd.value?.scrollIntoView({ behavior: 'smooth', block: 'end' }));
+watch([messages, chunks], async () => {
+  if (olderScrollPosition) {
+    const previous = olderScrollPosition;
+    await nextTick();
+    if (conversationScroll.value) {
+      conversationScroll.value.scrollTop = previous.top
+        + conversationScroll.value.scrollHeight - previous.height;
+    }
+    olderScrollPosition = null;
+    return;
+  }
+  conversationEnd.value?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+}, { flush: 'post' });
 onMounted(() => { void restoreLogin(); });
 onBeforeUnmount(() => {
   stopEvents();
@@ -1620,7 +1751,12 @@ onBeforeUnmount(() => {
           <div class="task-input-actions"><span>输入会以未验证用户来源加入 Investigator 上下文。</span><button class="primary-button" type="submit" :disabled="!initialSymptom.trim() || busy || !csrf || (investigationKind === 'ASYNC_CALLBACK' && !selectedS3OrderId) || (investigationKind === 'AUTH_INCIDENT' && !s1DemoResource)">{{ investigationKind === 'ASYNC_CALLBACK' ? '确认订单并启动调查' : '确认并启动调查' }} <span>→</span></button></div>
         </form>
 
-        <div class="conversation-scroll" data-testid="conversation" aria-live="polite">
+        <div ref="conversationScroll" class="conversation-scroll" data-testid="conversation" aria-live="polite">
+          <div v-if="sessionId && hasOlderMessages" class="history-pagination">
+            <button class="text-button" type="button" :disabled="loadingOlderMessages || loading" @click="loadOlderMessages">
+              {{ loadingOlderMessages ? '正在加载…' : `加载更早消息（已显示 ${messages.length} 条）` }}
+            </button>
+          </div>
           <div v-if="!sessionId" class="welcome-state">
             <div class="orbit-illustration"><span class="orbit-core">OP</span><i></i><b></b></div>
             <span class="eyebrow">PROFESSIONAL SUPPORT, WITH EVIDENCE</span>

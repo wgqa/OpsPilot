@@ -37,7 +37,11 @@ from opspilot.domain.chat import (
     prepare_chat_attempt, complete_chat_attempt, fail_chat_attempt,
     _prepare_context, record_chat_limit_in_transaction, MAX_COMPRESSION_OUTPUT_TOKENS,
 )
-from opspilot.domain.context_engineering import investigator_context_budget, estimate_text_tokens
+from opspilot.domain.context_engineering import (
+    ContextBudgetExceeded,
+    investigator_context_budget,
+    estimate_text_tokens,
+)
 from opspilot.domain.task_control import TaskControlError
 from opspilot.config import ROOT
 
@@ -1159,6 +1163,177 @@ def assistant_memory_enabled_for_experiment(experiment_id):
         raise RuntimeError("AR04C_MEMORY_MODE_REQUIRED")
     return mode == "ON"
 
+_TOOL_SOURCE_ID_KEYS = {
+    "attempt_id", "call_id", "document_id", "event_id", "evidence_id",
+    "memory_id", "observation_id", "request_id", "resource_id", "run_id",
+    "source_id", "source_message_id", "task_id",
+}
+
+
+def _tool_message_text(content: object) -> str:
+    return content if isinstance(content, str) else canonical_json(content)
+
+
+def _tool_message_provenance(message: ToolMessage) -> dict[str, object]:
+    content = _tool_message_text(message.content)
+    source_material = canonical_json({"content": content, "artifact": message.artifact})
+    roots: list[object] = []
+    try:
+        roots.append(json.loads(content))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    if isinstance(message.artifact, (dict, list)):
+        roots.append(message.artifact)
+    refs: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def visit(item: object) -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                if key in _TOOL_SOURCE_ID_KEYS and isinstance(child, str) and child:
+                    pair = (str(key), child)
+                    if pair not in seen:
+                        seen.add(pair)
+                        refs.append({"kind": pair[0], "id": pair[1]})
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    for root in roots:
+        visit(root)
+    return {
+        "original_text": content,
+        "original_sha256": hashlib.sha256(source_material.encode("utf-8")).hexdigest(),
+        "original_estimated_tokens": estimate_text_tokens(source_material),
+        "source_refs": refs,
+        "source_refs_truncated": False,
+    }
+
+
+def _project_tool_message(
+    message: ToolMessage, retained_chars: int, provenance: dict[str, object],
+) -> ToolMessage:
+    original = str(provenance["original_text"])
+    retained_chars = max(0, min(len(original), int(retained_chars)))
+    excerpt = None
+    if retained_chars:
+        prefix_size = (retained_chars + 1) // 2
+        suffix_size = retained_chars - prefix_size
+        excerpt = original[:prefix_size]
+        if suffix_size:
+            excerpt += "\n… omitted for context budget …\n" + original[-suffix_size:]
+    projection = {
+        "context_projection": "LOSSY_TOOL_RESULT_EXCERPT",
+        "tool_call_id": message.tool_call_id,
+        "original_sha256": provenance["original_sha256"],
+        "original_estimated_tokens": provenance["original_estimated_tokens"],
+        "retained_characters": retained_chars,
+        "source_refs": provenance["source_refs"],
+        "source_refs_truncated": provenance["source_refs_truncated"],
+        "retained_text_is_excerpt": excerpt is not None,
+        "retained_text": excerpt,
+        "notice": (
+            "This is a request-only context projection. The original checkpoint ToolMessage "
+            "and persisted MCP result were not changed; re-query the source for omitted detail."
+        ),
+    }
+    # Artifact contains the same full structured MCP value for content-and-artifact
+    # tools. Drop it only from this outbound copy so it cannot bypass the bound.
+    return message.model_copy(update={"content": canonical_json(projection), "artifact": None})
+
+
+def _fit_tool_messages_to_budget(
+    messages: list[object], model_id: str, tool_specs: list[dict[str, object]], metadata: dict[str, object],
+) -> tuple[list[object], list[dict[str, object]], dict[str, object]]:
+    """Keep every ToolMessage paired, projecting old result text only when needed.
+
+    Checkpoint messages are never mutated. Newest tool results get first claim on
+    remaining context after each older result has a source-linked digest envelope.
+    """
+    def budget_for(candidate: list[object]) -> dict[str, object] | None:
+        try:
+            return investigator_context_budget(candidate, model_id, tool_specs, metadata)
+        except ContextBudgetExceeded:
+            return None
+
+    full_budget = budget_for(messages)
+    if full_budget is not None:
+        return list(messages), [], full_budget
+
+    tool_indices = [
+        index for index, message in enumerate(messages)
+        if isinstance(message, ToolMessage)
+    ]
+    if not tool_indices:
+        # The non-tool context itself is over budget; preserve the existing
+        # fail-closed behavior instead of cutting user or trusted context.
+        investigator_context_budget(messages, model_id, tool_specs, metadata)
+        raise AssertionError("unreachable")
+
+    projected = list(messages)
+    originals: dict[int, str] = {}
+    source_provenance: dict[int, dict[str, object]] = {}
+    for index in tool_indices:
+        message = projected[index]
+        assert isinstance(message, ToolMessage)
+        source_provenance[index] = _tool_message_provenance(message)
+        originals[index] = str(source_provenance[index]["original_text"])
+        projected[index] = _project_tool_message(message, 0, source_provenance[index])
+
+    if budget_for(projected) is None:
+        # Tool calls, the current question, system context, and source references
+        # alone exceed the budget. Do not break protocol by dropping a pair.
+        investigator_context_budget(projected, model_id, tool_specs, metadata)
+        raise AssertionError("unreachable")
+
+    projections: list[dict[str, object]] = []
+    for index in reversed(tool_indices):
+        original_message = messages[index]
+        assert isinstance(original_message, ToolMessage)
+        full_candidate = list(projected)
+        full_candidate[index] = original_message
+        full_candidate_budget = budget_for(full_candidate)
+        if full_candidate_budget is not None:
+            projected = full_candidate
+            continue
+
+        original_text = originals[index]
+        low, high = 1, max(0, len(original_text) - 1)
+        best = projected[index]
+        best_chars = 0
+        while low <= high:
+            middle = (low + high) // 2
+            candidate = list(projected)
+            candidate[index] = _project_tool_message(original_message, middle, source_provenance[index])
+            candidate_budget = budget_for(candidate)
+            if candidate_budget is None:
+                high = middle - 1
+            else:
+                best = candidate[index]
+                best_chars = middle
+                low = middle + 1
+        projected[index] = best
+        provenance_for_message = source_provenance[index]
+        projections.append({
+            "tool_call_id": original_message.tool_call_id,
+            "original_sha256": provenance_for_message["original_sha256"],
+            "original_estimated_tokens": provenance_for_message["original_estimated_tokens"],
+            "retained_characters": best_chars,
+            "source_refs": provenance_for_message["source_refs"],
+            "source_refs_truncated": provenance_for_message["source_refs_truncated"],
+            "status": "PROJECTED_FOR_CONTEXT_BUDGET",
+        })
+
+    final_budget = budget_for(projected)
+    if final_budget is None:
+        # Defensive check: no partial result may be sent if its envelope still
+        # cannot satisfy the same budget that guards the Provider wire.
+        investigator_context_budget(projected, model_id, tool_specs, metadata)
+        raise AssertionError("unreachable")
+    return projected, projections, final_budget
+
+
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,
                  reserved_tokens=0,runtime_grant_binding=None,worker_epoch=None):
@@ -1500,8 +1675,9 @@ class Loop(AgentMiddleware):
 
     async def awrap_model_call(self,request,handler):
         prepared,payload=self.context()
-        # Revalidate and rebuild historical context for the actual outbound
-        # messages. Native current-Run tool messages remain byte-for-byte intact.
+        # Revalidate history and rebuild the outbound prefix. Current-Run tool
+        # call/result pairs stay present; only oversized result text may receive
+        # a source-linked, request-only projection to fit the existing budget.
         messages=self._messages_for_dispatch(prepared, request.messages)
         memory_guidance = list(prepared.get('memory_guidance_messages', []))
         system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(domain.source_context_for_model(payload))
@@ -1528,17 +1704,23 @@ class Loop(AgentMiddleware):
                 'external_guidance':sum(estimate_text_tokens(item)+4 for item in memory_guidance),
             },
         }
-        provenance=investigator_context_budget(sent,self.model_id,self.specs,provenance_metadata)
+        sent, tool_result_projections, provenance = _fit_tool_messages_to_budget(
+            sent, self.model_id, self.specs, provenance_metadata,
+        )
+        system = sent[0]
+        messages = sent[1:]
         wire_source_refs = {
             **payload,
             'selected_memory_refs': memory_refs,
             'selected_memory_guidance': memory_guidance,
             'excluded_sources': excluded_sources,
+            'tool_result_projections': tool_result_projections,
         }
         wire={'messages':messages_to_dict(sent),'tools':self.specs,'context_budget':provenance,
               'context_blocks':provenance_metadata.get('context_blocks',[]),
               'excluded_sources':provenance_metadata.get('excluded_sources',[]),
-              'source_refs':wire_source_refs,'selected_message_ids':prepared['selected_message_ids'],'model_id':self.model_id}
+              'source_refs':wire_source_refs,'selected_message_ids':prepared['selected_message_ids'],
+              'tool_result_projections':tool_result_projections,'model_id':self.model_id}
         step=get_config().get('metadata',{}).get('langgraph_step',0)
         if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS:
             _ar04c_bind_campaign_database(
