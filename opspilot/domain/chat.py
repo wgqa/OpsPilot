@@ -903,6 +903,7 @@ def _latest_current_summary(
     evidence_exclusion_reasons: dict[str, str],
     memories_by_id: dict[str, dict[str, Any]],
     excluded: list[dict[str, Any]],
+    exclude_personal_memory_dependent: bool = False,
     source_validation_cache: dict[str, tuple[bool, str | None]] | None = None,
 ) -> dict[str, Any] | None:
     rows = connection.execute(
@@ -921,6 +922,15 @@ def _latest_current_summary(
             source_validation_cache=source_validation_cache,
         )
         if valid:
+            if exclude_personal_memory_dependent and _summary_depends_on_personal_memory(
+                connection, str(row["summary_id"]),
+            ):
+                excluded.append({
+                    "source_id": str(row["summary_id"]),
+                    "reason": "PERSONAL_MEMORY_RECALL_DISABLED",
+                    "category": "HISTORICAL_SUMMARY",
+                })
+                continue
             return dict(row)
         exclusion_reason = _summary_exclusion_reason(reason)
         excluded.append({"source_id": str(row["summary_id"]), "reason": exclusion_reason})
@@ -1011,6 +1021,95 @@ def _summary_source_message_ids(value: Any) -> list[str]:
         for item in value:
             results.extend(_summary_source_message_ids(item))
     return list(dict.fromkeys(results))
+
+
+def _message_depends_on_personal_memory(
+    connection: sqlite3.Connection,
+    message_id: str,
+    *,
+    seen_messages: set[str] | None = None,
+    seen_summaries: set[str] | None = None,
+) -> bool:
+    visiting = set(seen_messages or ())
+    if message_id in visiting:
+        return False
+    visiting.add(message_id)
+    direct = connection.execute(
+        """SELECT 1 FROM chat_message_sources s JOIN personal_memories p
+           ON p.memory_id=s.source_ref WHERE s.message_id=? AND s.source_kind='MEMORY' LIMIT 1""",
+        (message_id,),
+    ).fetchone()
+    if direct is not None:
+        return True
+    for source in connection.execute(
+        "SELECT summary_id FROM chat_message_summary_sources WHERE message_id=?",
+        (message_id,),
+    ):
+        if _summary_depends_on_personal_memory(
+            connection, str(source["summary_id"]), seen_summaries=seen_summaries,
+            seen_messages=visiting,
+        ):
+            return True
+    for source in connection.execute(
+        "SELECT source_ref FROM chat_message_sources WHERE message_id=? AND source_kind='MODEL_ATTEMPT'",
+        (message_id,),
+    ):
+        ancestor = connection.execute(
+            "SELECT message_id FROM chat_run_answers WHERE attempt_id=?",
+            (str(source["source_ref"]),),
+        ).fetchone()
+        if (
+            ancestor is not None and str(ancestor["message_id"]) != message_id
+            and _message_depends_on_personal_memory(
+                connection, str(ancestor["message_id"]), seen_messages=visiting,
+                seen_summaries=seen_summaries,
+            )
+        ):
+            return True
+    return False
+
+
+def _summary_depends_on_personal_memory(
+    connection: sqlite3.Connection,
+    summary_id: str,
+    *,
+    seen_summaries: set[str] | None = None,
+    seen_messages: set[str] | None = None,
+) -> bool:
+    visiting = set(seen_summaries or ())
+    if summary_id in visiting:
+        return False
+    visiting.add(summary_id)
+    dependencies = connection.execute(
+        """SELECT dependency_kind,dependency_ref FROM context_summary_dependencies
+           WHERE summary_id=?""",
+        (summary_id,),
+    ).fetchall()
+    for dependency in dependencies:
+        kind, ref = str(dependency["dependency_kind"]), str(dependency["dependency_ref"])
+        if kind == "MEMORY":
+            if connection.execute(
+                "SELECT 1 FROM personal_memories WHERE memory_id=?", (ref,),
+            ).fetchone() is not None:
+                return True
+        elif kind == "SUMMARY" and _summary_depends_on_personal_memory(
+            connection, ref, seen_summaries=visiting, seen_messages=seen_messages,
+        ):
+            return True
+        elif kind == "ASSISTANT_MESSAGE" and _message_depends_on_personal_memory(
+            connection, ref, seen_messages=seen_messages, seen_summaries=visiting,
+        ):
+            return True
+        elif kind == "MODEL_ATTEMPT":
+            answer = connection.execute(
+                "SELECT message_id FROM chat_run_answers WHERE attempt_id=?", (ref,),
+            ).fetchone()
+            if answer is not None and _message_depends_on_personal_memory(
+                connection, str(answer["message_id"]), seen_messages=seen_messages,
+                seen_summaries=visiting,
+            ):
+                return True
+    return False
 
 
 def _summary_prompt_projection(value: Any, sequence_by_message: dict[str, int]) -> Any:
@@ -1252,12 +1351,14 @@ def _prepare_context(
     )
 
     personal_owner = str(session["owner_id"])
+    personal_recall_enabled = True
     try:
         recall_setting = personal_memory_recall_setting(connection, tenant_id, personal_owner)
+        personal_recall_enabled = bool(recall_setting["recall_enabled"])
         revision_turn = user_message_has_explicit_memory_revision_intent(str(source_message["body"]))
         selected_personal, personal_excluded, all_personal = personal_memory_context(
             connection, tenant_id, personal_owner, str(source_message["body"]),
-            recall_enabled=bool(recall_setting["recall_enabled"]),
+            recall_enabled=personal_recall_enabled,
             suppress_recall_reason=("PERSONAL_MEMORY_UPDATE_TURN" if revision_turn else None),
             exclude_source_message_id=source_message_id,
         )
@@ -1298,6 +1399,7 @@ def _prepare_context(
         evidence_by_id=evidence_by_id,
         evidence_exclusion_reasons=evidence_exclusion_reasons,
         memories_by_id=memories_by_id, excluded=excluded,
+        exclude_personal_memory_dependent=not personal_recall_enabled,
         source_validation_cache=source_validation_cache,
     )
     summarized_through = int(summary["covered_to_seq"]) if summary is not None else 0
@@ -1352,6 +1454,14 @@ def _prepare_context(
             memories_by_id=memories_by_id,
             source_validation_cache=source_validation_cache,
         )
+        if valid and not personal_recall_enabled and _message_depends_on_personal_memory(
+            connection, str(message["message_id"]),
+        ):
+            excluded.append({
+                "message_id": str(message["message_id"]),
+                "reason": "PERSONAL_MEMORY_RECALL_DISABLED",
+            })
+            continue
         if valid:
             history.append({
                 "message_id": str(message["message_id"]), "role": "assistant",

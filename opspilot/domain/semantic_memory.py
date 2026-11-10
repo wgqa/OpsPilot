@@ -767,17 +767,33 @@ def _validate_personal_proposal(
     return kind, key, value, mode
 
 
-_EXPLICIT_MEMORY_INTENT = re.compile(
-    r"(?i)(?:记住|记下|记着|帮我记|请记|保存到.{0,8}记忆|长期保留|个人长期记忆|"
-    r"以后.{0,24}(?:都|每次|总是|先|优先)|今后|从现在起|往后都|每次都|长期偏好|"
-    r"from now on|going forward|in the future|remember (?:this|that|my)|keep (?:this|that|my) .* in mind|"
-    r"save .* (?:as|to) (?:my )?(?:long[- ]term )?memory|store .* in (?:my )?memory|always|every time)"
+_EXPLICIT_MEMORY_SAVE = re.compile(
+    r"(?i)(?:(?:请|麻烦|帮我|请你)\s*(?:记住|记下|记着|记得)|"
+    r"记住\s*[:：，,]|我希望你.{0,12}记住)|"
+    r"(?:请|麻烦|帮我|请你)\s*(?:把|将)?.{0,40}(?:保存|存储|保留).{0,16}(?:记忆|偏好|背景)|"
+    r"remember (?:this|that|my)|keep (?:this|that|my) .{1,80} in mind|"
+    r"save .{1,100} (?:as|to) (?:my )?(?:long[- ]term )?memory|store .{1,100} in (?:my )?memory"
+)
+_DURABLE_PERSONAL_DIRECTIVE = re.compile(
+    r"(?i)(?:以后|今后|从现在起|往后|每次|from now on|going forward|in the future)"
+    r".{0,80}(?:回答我|回复我|跟我|为我|对我|我希望|我偏好|我喜欢|我习惯|"
+    r"请你.{0,20}(?:回答|解释|使用|采用)|(?:回答|解释).{0,40}(?:先|优先|总是|都|用|采用)|"
+    r"reply to me|answer me|explain to me|I prefer|I like|my preference)"
+)
+_DURABLE_PERSONAL_CUE = re.compile(
+    r"(?i)(?:以后|今后|从现在起|往后|长期|稳定偏好|个人偏好|我(?:更)?(?:喜欢|偏好|习惯|希望)|"
+    r"我的.{0,12}(?:偏好|习惯|背景)|我叫|我的名字|I prefer|I like|my preference|my name is)"
+)
+_MEMORY_SAVE_NEGATION = re.compile(
+    r"(?i)(?:不要|别|不需要|不用).{0,12}(?:记住|记下|记着|保存|存储|保留|记忆)|"
+    r"(?:don't|do not|never)\s+(?:remember|save|store|retain)"
+)
+_MEMORY_QUESTION = re.compile(
+    r"(?i)(?:[?？]|(?:吗|么|呢|如何|怎样|怎么|是否|为什么|哪个|哪种|能否|可否|要不要|该不该)\s*[?？]?)"
 )
 _ONE_SHOT_MEMORY_INTENT = re.compile(
     r"(?i)(?:这次|本次|当前这轮|这一次|临时|只在今天|仅(?:限)?这次|仅(?:限)?本次|"
-    r"for this (?:time|answer|turn) only|just this time|temporarily|don't (?:remember|save|store)|"
-    r"do not (?:remember|save|store)|不要(?:记住|记下|保存|长期保留)|别(?:记住|保存)|"
-    r"不需要(?:记住|记下|保存|长期保留)|不用(?:记住|记下|保存|长期保留))"
+    r"for this (?:time|answer|turn) only|just this time|temporarily)"
 )
 _EXPLICIT_MEMORY_REVISION_INTENT = re.compile(
     r"(?i)(?:更新|修改|更正|改成|替换|修订|update|revise|correct|replace|change)"
@@ -785,11 +801,13 @@ _EXPLICIT_MEMORY_REVISION_INTENT = re.compile(
 
 
 def _personal_memory_intent_prose(text: str) -> str:
-    user_prose = re.sub(r"(?s)```.*?```|~~~.*?~~~", " ", text)
+    user_prose = re.sub(r"(?s)```.*?```|~~~.*?~~~|`[^`\n]*`|'[^'\n]*'", " ", text)
     user_prose = re.sub(r"(?m)^\s*>.*$", " ", user_prose)
     user_prose = re.sub(r"(?s)[\"“‘][^\"”’]*[\"”’]", " ", user_prose)
     material_marker = re.search(
-        r"(?i)(?:日志|文档|材料|工具输出|错误输出|邮件|报告)(?:内容|如下|摘录)?\s*[:：]\s*",
+        r"(?i)(?:日志|文档|材料|工具输出|错误输出|邮件|报告|\blogs?\b|\bdocuments?\b|"
+        r"\btool output\b|\berror output\b|\bpasted material\b|\bemail\b|\breports?\b)"
+        r"(?:内容|如下|摘录)?\s*[:：]\s*",
         user_prose,
     )
     if material_marker:
@@ -798,12 +816,38 @@ def _personal_memory_intent_prose(text: str) -> str:
 
 
 def user_message_has_explicit_memory_intent(text: str) -> bool:
-    """Require durable-save intent in user prose, excluding quoted/tool material."""
+    """Require a save request or a personal durable directive in user prose."""
     user_prose = _personal_memory_intent_prose(text)
-    return bool(
-        _EXPLICIT_MEMORY_INTENT.search(user_prose)
-        and not _ONE_SHOT_MEMORY_INTENT.search(user_prose)
-    )
+    if _MEMORY_SAVE_NEGATION.search(user_prose):
+        return False
+    save_request = bool(_EXPLICIT_MEMORY_SAVE.search(user_prose))
+    durable_directive = bool(_DURABLE_PERSONAL_DIRECTIVE.search(user_prose)) and not bool(_MEMORY_QUESTION.search(user_prose))
+    if not save_request and not durable_directive:
+        return False
+    if _ONE_SHOT_MEMORY_INTENT.search(user_prose) and not _DURABLE_PERSONAL_CUE.search(user_prose):
+        return False
+    return True
+
+
+def user_message_supports_personal_memory_content(text: str, content: str) -> bool:
+    """Accept literal content only from a durable, unquoted part of this user message."""
+    if not user_message_has_explicit_memory_intent(text):
+        return False
+    candidate = " ".join(content.split())
+    if not candidate or _ONE_SHOT_MEMORY_INTENT.search(candidate) or _MEMORY_SAVE_NEGATION.search(candidate):
+        return False
+    prose = _personal_memory_intent_prose(text)
+    clauses = re.split(r"(?<=[。.!?！？;；\n])", prose)
+    durable_parts: list[str] = []
+    for clause in clauses:
+        if _MEMORY_SAVE_NEGATION.search(clause):
+            continue
+        one_shot = _ONE_SHOT_MEMORY_INTENT.search(clause)
+        if one_shot:
+            clause = clause[:one_shot.start()]
+        if clause and user_message_has_explicit_memory_intent(clause):
+            durable_parts.append(" ".join(clause.split()))
+    return any(candidate in part for part in durable_parts)
 
 
 def user_message_has_explicit_memory_revision_intent(text: str) -> bool:
@@ -1079,6 +1123,8 @@ def remember_personal_memory(
             raise MemorySourceRejected("Explicit Personal Memory requires the owner's persisted ordinary chat message.")
         if not user_message_has_explicit_memory_intent(str(source["body"])):
             raise MemorySourceRejected("The current user message does not explicitly request durable memory.")
+        if not user_message_supports_personal_memory_content(str(source["body"]), value):
+            raise MemorySourceRejected("PERSONAL_MEMORY_SOURCE_NOT_SUPPORTED")
         explicit_revision = user_message_has_explicit_memory_revision_intent(str(source["body"]))
         _expire_personal_scope(connection, tenant_id, actor_id)
         refs = [{"kind": "MESSAGE", "id": source_message_id, "digest": str(source["body_digest"])}]
