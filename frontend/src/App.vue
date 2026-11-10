@@ -32,9 +32,14 @@ const s3HandoffOutcome = ref<Record<string, unknown> | null>(null);
 const taskMemoryContext = ref<TaskMemoryContext | null>(null);
 const taskSemanticContext = ref<SemanticMemoryContext | null>(null);
 const personalMemories = ref<PersonalMemoryRecord[]>([]);
+const personalMemoryRecallEnabled = ref(true);
+const personalMemorySettingsReady = ref(false);
+const personalMemorySettingsSaving = ref(false);
+const personalMemorySettingsError = ref('');
 const selectedPersonalMemory = ref<PersonalMemoryRecord | null>(null);
 const personalMemoryRevisionTarget = ref<PersonalMemoryRecord | null>(null);
 const personalMemoryDraftKind = ref<PersonalMemoryRecord['memory_kind']>('PREFERENCE');
+const personalMemoryDraftMode = ref<PersonalMemoryRecord['memory_mode']>('RELEVANT');
 const personalMemoryDraftKey = ref('');
 const personalMemoryDraftContent = ref('');
 const personalMemorySourceMessageId = ref('');
@@ -82,6 +87,7 @@ let runPollTimer: number | undefined;
 let loadingChunksRunId: string | null = null;
 let assistantScopeGeneration = 0;
 let personalMemoryGeneration = 0;
+let personalMemorySettingsGeneration = 0;
 let latestChatContextGeneration = 0;
 const assistantSourceRequests = new Map<string, number>();
 let assistantSourceGeneration = 0;
@@ -206,7 +212,7 @@ async function login(): Promise<void> {
     password.value = '';
     if (result.role === 'APPROVER') await loadPendingApprovals();
     else {
-      await loadSessions();
+      await Promise.all([loadSessions(), loadPersonalMemorySettings()]);
       await loadS3OrderResources();
     }
     notice.value = '已通过本地可信身份登录。';
@@ -223,7 +229,7 @@ async function restoreLogin(): Promise<void> {
     if (!csrf.value) notice.value = '登录已恢复；请重新登录一次以继续发送或创建会话。';
     if (user.value.role === 'APPROVER') await loadPendingApprovals();
     else {
-      await loadSessions();
+      await Promise.all([loadSessions(), loadPersonalMemorySettings()]);
       await loadS3OrderResources();
     }
   } catch {
@@ -255,8 +261,13 @@ async function logout(): Promise<void> {
   memoryCandidates.value = [];
   selectedMemory.value = null;
   personalMemoryGeneration += 1;
+  personalMemorySettingsGeneration += 1;
   latestChatContextGeneration += 1;
   personalMemories.value = [];
+  personalMemoryRecallEnabled.value = true;
+  personalMemorySettingsReady.value = false;
+  personalMemorySettingsSaving.value = false;
+  personalMemorySettingsError.value = '';
   selectedPersonalMemory.value = null;
   personalMemoryRevisionTarget.value = null;
   latestChatContext.value = null;
@@ -377,6 +388,58 @@ async function loadPersonalMemories(): Promise<void> {
   }
 }
 
+async function loadPersonalMemorySettings(): Promise<void> {
+  const identity = user.value;
+  const generation = ++personalMemorySettingsGeneration;
+  personalMemorySettingsReady.value = false;
+  personalMemorySettingsError.value = '';
+  if (!identity || identity.role !== 'SUPPORT') return;
+  try {
+    const setting = await api.personalMemorySettings();
+    if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemoryRecallEnabled.value = setting.recall_enabled;
+    personalMemorySettingsReady.value = true;
+  } catch {
+    if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
+      && user.value?.tenant_id === identity.tenant_id) {
+      personalMemorySettingsError.value = '当前无法读取个人记忆设置；本轮不会把未确认状态显示为已生效。';
+    }
+  }
+}
+
+async function updatePersonalMemoryRecall(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const identity = user.value;
+  const generation = personalMemorySettingsGeneration;
+  const previous = personalMemoryRecallEnabled.value;
+  const requested = input.checked;
+  if (!identity || !csrf.value || !personalMemorySettingsReady.value || personalMemorySettingsSaving.value) {
+    input.checked = previous;
+    return;
+  }
+  personalMemorySettingsSaving.value = true;
+  personalMemorySettingsError.value = '';
+  try {
+    const setting = await api.updatePersonalMemorySettings(requested, csrf.value);
+    if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemoryRecallEnabled.value = setting.recall_enabled;
+    notice.value = setting.recall_enabled
+      ? '个人记忆召回已开启；后续聊天会按固定偏好和问题相关性选择。'
+      : '个人记忆召回已关闭；记忆仍保留，可再次开启。';
+  } catch (error) {
+    if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemoryRecallEnabled.value = previous;
+    input.checked = previous;
+    personalMemorySettingsError.value = explainError(error);
+  } finally {
+    if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
+      && user.value?.tenant_id === identity.tenant_id) personalMemorySettingsSaving.value = false;
+  }
+}
+
 async function refreshLatestChatContext(
   requestedSession = sessionId.value,
   runId: string | null = activeChatRun.value?.run_id ?? null,
@@ -406,6 +469,7 @@ function beginPersonalMemoryRevision(item: PersonalMemoryRecord): void {
   if (item.state !== 'ACTIVE') return;
   personalMemoryRevisionTarget.value = item;
   personalMemoryDraftKind.value = item.memory_kind;
+  personalMemoryDraftMode.value = item.memory_mode;
   personalMemoryDraftKey.value = item.memory_key;
   personalMemoryDraftContent.value = item.content;
   selectedPersonalMemory.value = item;
@@ -431,6 +495,7 @@ async function createPersonalMemoryCandidate(): Promise<void> {
     const revision = personalMemoryRevisionTarget.value;
     const payload = {
       memory_kind: personalMemoryDraftKind.value,
+      memory_mode: personalMemoryDraftMode.value,
       memory_key: personalMemoryDraftKey.value.trim(),
       content: personalMemoryDraftContent.value.trim(),
       source_message_id: sourceMessageId,
@@ -440,7 +505,7 @@ async function createPersonalMemoryCandidate(): Promise<void> {
         expected_version: revision.version,
       } : {}),
     };
-    const target = [payload.memory_kind, payload.memory_key, payload.content, sourceMessageId,
+    const target = [payload.memory_kind, payload.memory_mode, payload.memory_key, payload.content, sourceMessageId,
       payload.supersedes_memory_id ?? '', payload.expected_version ?? ''].join(':');
     const operationKey = memoryOperationKey('personal-candidate', target);
     const candidate = await api.createPersonalMemoryCandidate(payload, csrf.value, operationKey);
@@ -492,6 +557,23 @@ async function decidePersonalMemory(memory: PersonalMemoryRecord, action: 'confi
 
 function currentPersonalMemoryState(memoryId: string): string {
   return personalMemories.value.find((item) => item.memory_id === memoryId)?.state ?? 'UNKNOWN';
+}
+
+function personalMemoryModeLabel(mode: PersonalMemoryRecord['memory_mode']): string {
+  return mode === 'PINNED' ? '固定偏好' : '相关时召回';
+}
+
+function personalMemoryCreationSourceLabel(source: PersonalMemoryRecord['creation_source']): string {
+  if (source === 'USER_EXPLICIT') return '用户在聊天中明确要求记住';
+  if (source === 'USER_CONFIRMED') return '用户确认候选';
+  if (source === 'AUTO_LEARNED') return '自动学习（当前未启用）';
+  return '尚未生效的候选';
+}
+
+function adjustPersonalMemoryModeForKind(): void {
+  if (personalMemoryDraftKind.value === 'PROJECT_BACKGROUND' && personalMemoryDraftMode.value === 'PINNED') {
+    personalMemoryDraftMode.value = 'RELEVANT';
+  }
 }
 
 async function selectMemory(item: MemoryRecord): Promise<void> {
@@ -2137,18 +2219,24 @@ onBeforeUnmount(() => {
         <div class="inspector-header"><div><span class="eyebrow">LIVE CONTEXT</span><h2>Task 检查器</h2></div><button class="icon-button close-inspector" aria-label="关闭检查器" type="button" @click="narrowInspectorOpen = false">×</button></div>
         <section v-if="user" class="inspector-section memory-section personal-memory-manager" data-testid="personal-memory-manager">
           <div class="section-heading"><h3>个人长期记忆</h3><button class="text-button" type="button" :disabled="busy" @click="loadPersonalMemories">刷新</button></div>
-          <p class="memory-warning">作用域由登录身份确定：{{ user.tenant_id }} · {{ user.actor_id }}。只有本人确认的记忆会在相关会话中按需出现；它不是业务事实，也不会共享给同项目其他用户。撤销会阻止后续使用，但不会删除来源聊天消息。</p>
+          <p class="memory-warning">作用域由登录身份确定：{{ user.tenant_id }} · {{ user.actor_id }}。记忆只作为个人背景，不是业务事实或授权，也不会共享给同项目其他用户。个人记忆目前会在创建后 180 天到期；到期后需重新确认或保存。</p>
+          <label v-if="user.role === 'SUPPORT'" class="personal-memory-recall-toggle" data-testid="personal-memory-recall-setting">
+            <input type="checkbox" :checked="personalMemoryRecallEnabled" :disabled="!personalMemorySettingsReady || personalMemorySettingsSaving || !csrf" @change="updatePersonalMemoryRecall" />
+            <span><strong>使用个人长期记忆</strong><small>关闭后只影响后续 Provider 请求；已保存记忆和 Session 历史仍保留。</small></span>
+          </label>
+          <small v-if="personalMemorySettingsError" class="memory-settings-error" role="status">{{ personalMemorySettingsError }}</small>
           <div class="memory-review-grid">
             <div class="memory-candidate-list">
               <div v-if="personalMemories.length === 0" class="muted-card">还没有个人记忆。你可以从已保存的用户消息提议一条。</div>
               <button v-for="item in personalMemories" :key="item.memory_id" class="memory-candidate-item" :class="{ selected: selectedPersonalMemory?.memory_id === item.memory_id }" type="button" :data-testid="`personal-memory-${item.memory_id}`" @click="selectPersonalMemory(item)">
-                <strong>{{ item.memory_kind }} · {{ item.memory_key }} · {{ item.state }} v{{ item.version }}</strong>
-                <small>{{ item.content }}</small><small>来源 {{ item.source_message_id }} · 到期 {{ dateLabel(item.expires_at) }}</small>
+                <strong>{{ item.memory_kind }} · {{ personalMemoryModeLabel(item.memory_mode) }} · {{ item.memory_key }} · {{ item.state }} v{{ item.version }}</strong>
+                <small>{{ item.content }}</small><small>{{ personalMemoryCreationSourceLabel(item.creation_source) }} · 来源 {{ item.source_message_id }} · 到期 {{ dateLabel(item.expires_at) }}</small>
               </button>
             </div>
             <div v-if="selectedPersonalMemory" class="memory-detail" data-testid="personal-memory-preview">
               <div class="plan-row"><span>预览 / 状态</span><b>{{ selectedPersonalMemory.state }} · v{{ selectedPersonalMemory.version }}</b></div>
               <div class="plan-row"><span>个人 Key</span><b>{{ selectedPersonalMemory.memory_kind }} · {{ selectedPersonalMemory.memory_key }}</b></div>
+              <div class="plan-row"><span>召回方式 / 来源</span><b>{{ personalMemoryModeLabel(selectedPersonalMemory.memory_mode) }} · {{ personalMemoryCreationSourceLabel(selectedPersonalMemory.creation_source) }}</b></div>
               <div class="plan-row"><span>内容</span><b>{{ selectedPersonalMemory.content }}</b></div>
               <div class="plan-row"><span>个人作用域</span><b>{{ selectedPersonalMemory.tenant_id }} · {{ selectedPersonalMemory.owner_actor_id }}</b></div>
               <div class="memory-json"><strong>来源引用</strong><code>{{ JSON.stringify(selectedPersonalMemory.source_refs) }}</code></div>
@@ -2171,7 +2259,10 @@ onBeforeUnmount(() => {
               </select>
             </label>
             <label>类型
-              <select v-model="personalMemoryDraftKind" :disabled="busy || !csrf"><option value="PREFERENCE">沟通偏好</option><option value="WORK_HABIT">工作习惯</option><option value="PROJECT_BACKGROUND">个人项目背景</option></select>
+              <select v-model="personalMemoryDraftKind" :disabled="busy || !csrf" @change="adjustPersonalMemoryModeForKind"><option value="PREFERENCE">沟通偏好</option><option value="WORK_HABIT">工作习惯</option><option value="PROJECT_BACKGROUND">个人项目背景</option></select>
+            </label>
+            <label>召回方式
+              <select v-model="personalMemoryDraftMode" :disabled="busy || !csrf"><option value="RELEVANT">问题相关时召回</option><option value="PINNED" :disabled="personalMemoryDraftKind === 'PROJECT_BACKGROUND'">固定个人偏好（最多 3 条 / 约 250 Tokens）</option></select>
             </label>
             <label>记忆 Key<input v-model="personalMemoryDraftKey" maxlength="120" placeholder="例如 answer.style" :disabled="busy || !csrf" /></label>
             <label>确认内容<textarea v-model="personalMemoryDraftContent" maxlength="800" rows="3" placeholder="写入稳定、非敏感且希望跨会话使用的信息。" :disabled="busy || !csrf"></textarea></label>

@@ -31,6 +31,9 @@ _SENSITIVE_TEXT = re.compile(
 )
 PERSONAL_MEMORY_KINDS = {"PREFERENCE", "WORK_HABIT", "PROJECT_BACKGROUND"}
 PERSONAL_MEMORY_LIMIT = 3
+PERSONAL_MEMORY_PINNED_LIMIT = 3
+PERSONAL_MEMORY_PINNED_TOKEN_BUDGET = 250
+PERSONAL_MEMORY_MODES = {"PINNED", "RELEVANT"}
 _MEMORY_TOKEN = re.compile(r"[a-z0-9]{2,}|[\u4e00-\u9fff]+", re.IGNORECASE)
 _MEMORY_STOPWORDS = {
     "about", "also", "answer", "answers", "can", "could", "for", "from", "have",
@@ -745,18 +748,69 @@ def _personal_event(
 
 
 def _validate_personal_proposal(
-    memory_kind: str, memory_key: str, content: str,
-) -> tuple[str, str, str]:
+    memory_kind: str, memory_key: str, content: str, memory_mode: str = "RELEVANT",
+) -> tuple[str, str, str, str]:
     kind = memory_kind.strip().upper()
+    mode = memory_mode.strip().upper()
     key = " ".join(memory_key.split())
     value = " ".join(content.split())
     if kind not in PERSONAL_MEMORY_KINDS:
         raise MemorySourceRejected("Unsupported Personal Memory kind.")
+    if mode not in PERSONAL_MEMORY_MODES:
+        raise MemorySourceRejected("Unsupported Personal Memory use mode.")
+    if mode == "PINNED" and kind == "PROJECT_BACKGROUND":
+        raise MemorySourceRejected("Project background cannot be marked as a global pinned preference.")
     if not key or len(key) > 120 or not value or len(value) > 800:
         raise MemorySourceRejected("Personal Memory key or content is outside the allowed length.")
     if _SENSITIVE_TEXT.search(key + " " + value):
         raise MemorySourceRejected("Secret-like content cannot be stored as Personal Memory.")
-    return kind, key, value
+    return kind, key, value, mode
+
+
+_EXPLICIT_MEMORY_INTENT = re.compile(
+    r"(?i)(?:记住|记下|记着|帮我记|请记|保存到.{0,8}记忆|长期保留|个人长期记忆|"
+    r"以后.{0,24}(?:都|每次|总是|先|优先)|今后|从现在起|往后都|每次都|长期偏好|"
+    r"from now on|going forward|in the future|remember (?:this|that|my)|keep (?:this|that|my) .* in mind|"
+    r"save .* (?:as|to) (?:my )?(?:long[- ]term )?memory|store .* in (?:my )?memory|always|every time)"
+)
+_ONE_SHOT_MEMORY_INTENT = re.compile(
+    r"(?i)(?:这次|本次|当前这轮|这一次|临时|只在今天|仅(?:限)?这次|仅(?:限)?本次|"
+    r"for this (?:time|answer|turn) only|just this time|temporarily|don't (?:remember|save|store)|"
+    r"do not (?:remember|save|store)|不要(?:记住|记下|保存|长期保留)|别(?:记住|保存)|"
+    r"不需要(?:记住|记下|保存|长期保留)|不用(?:记住|记下|保存|长期保留))"
+)
+_EXPLICIT_MEMORY_REVISION_INTENT = re.compile(
+    r"(?i)(?:更新|修改|更正|改成|替换|修订|update|revise|correct|replace|change)"
+)
+
+
+def _personal_memory_intent_prose(text: str) -> str:
+    user_prose = re.sub(r"(?s)```.*?```|~~~.*?~~~", " ", text)
+    user_prose = re.sub(r"(?m)^\s*>.*$", " ", user_prose)
+    user_prose = re.sub(r"(?s)[\"“‘][^\"”’]*[\"”’]", " ", user_prose)
+    material_marker = re.search(
+        r"(?i)(?:日志|文档|材料|工具输出|错误输出|邮件|报告)(?:内容|如下|摘录)?\s*[:：]\s*",
+        user_prose,
+    )
+    if material_marker:
+        user_prose = user_prose[:material_marker.start()]
+    return user_prose
+
+
+def user_message_has_explicit_memory_intent(text: str) -> bool:
+    """Require durable-save intent in user prose, excluding quoted/tool material."""
+    user_prose = _personal_memory_intent_prose(text)
+    return bool(
+        _EXPLICIT_MEMORY_INTENT.search(user_prose)
+        and not _ONE_SHOT_MEMORY_INTENT.search(user_prose)
+    )
+
+
+def user_message_has_explicit_memory_revision_intent(text: str) -> bool:
+    """Identify an explicit version correction; ordinary saves cannot overwrite an active key."""
+    if not user_message_has_explicit_memory_intent(text):
+        return False
+    return bool(_EXPLICIT_MEMORY_REVISION_INTENT.search(_personal_memory_intent_prose(text)))
 
 
 def _expire_personal_scope(
@@ -783,7 +837,7 @@ def create_personal_candidate(
     path: str | Path,
     tenant_id: str,
     actor_id: str,
-    *, memory_kind: str, memory_key: str, content: str,
+    *, memory_kind: str, memory_key: str, content: str, memory_mode: str = "RELEVANT",
     source_message_id: str, ttl_days: int = 180,
     idempotency_key: str, supersedes_memory_id: str | None = None,
     expected_version: int | None = None,
@@ -792,7 +846,7 @@ def create_personal_candidate(
         raise MemoryIdempotencyConflict("IDEMPOTENCY_KEY_REQUIRED")
     if not 1 <= ttl_days <= 365:
         raise MemorySourceRejected("Personal Memory lifetime must be between 1 and 365 days.")
-    kind, key, value = _validate_personal_proposal(memory_kind, memory_key, content)
+    kind, key, value, mode = _validate_personal_proposal(memory_kind, memory_key, content, memory_mode)
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         operator = _require_memory_operator(connection, actor_id, tenant_id)
@@ -812,7 +866,7 @@ def create_personal_candidate(
         _expire_personal_scope(connection, tenant_id, actor_id)
         refs = [{"kind": "MESSAGE", "id": source_message_id, "digest": str(source["body_digest"])}]
         request_payload = {
-            "memory_kind": kind, "memory_key": key, "content": value,
+            "memory_kind": kind, "memory_mode": mode, "memory_key": key, "content": value,
             "source_message_id": source_message_id, "source_digest": str(source["body_digest"]),
             "ttl_days": ttl_days, "supersedes_memory_id": supersedes_memory_id,
             "expected_version": expected_version,
@@ -840,7 +894,7 @@ def create_personal_candidate(
                 or not _personal_source_is_current(connection, prior)
             ):
                 raise MemorySourceRejected("Personal Memory revision target is stale, expired, or outside this owner scope.")
-            if str(prior["content"]) == value:
+            if str(prior["content"]) == value and str(prior["memory_mode"]) == mode:
                 raise MemorySourceRejected("A Personal Memory revision must change the proposed content.")
             version = int(prior["version"]) + 1
         else:
@@ -858,11 +912,11 @@ def create_personal_candidate(
         content_digest = _digest(_personal_payload(kind, key, value, refs))
         connection.execute(
             """INSERT INTO personal_memories
-               (memory_id, tenant_id, owner_actor_id, memory_kind, memory_key, content,
+               (memory_id, tenant_id, owner_actor_id, memory_kind, memory_mode, memory_key, content,
                 content_digest, source_message_id, source_refs_json, state, version,
                 supersedes_memory_id, supersedes_version, created_by, expires_at, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'CANDIDATE', ?, ?, ?, ?, ?, ?)""",
-            (memory_id, tenant_id, actor_id, kind, key, value, content_digest,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CANDIDATE', ?, ?, ?, ?, ?, ?)""",
+            (memory_id, tenant_id, actor_id, kind, mode, key, value, content_digest,
              source_message_id, _canonical(refs), version, supersedes_memory_id,
              expected_version, actor_id, expires_at, created_at),
         )
@@ -870,7 +924,8 @@ def create_personal_candidate(
         _personal_event(
             connection, row, event_type="CANDIDATE_CREATED", actor_id=actor_id, version=version,
             details={"source_message_id": source_message_id, "content_digest": content_digest,
-                     "supersedes_memory_id": supersedes_memory_id, "scope": "PERSONAL"},
+                     "supersedes_memory_id": supersedes_memory_id, "memory_mode": mode,
+                     "scope": "PERSONAL", "creation_source": None},
         )
         result = _personal_row_dict(row)
         _record_command(
@@ -955,13 +1010,14 @@ def confirm_personal_memory(
                 raise SemanticMemoryConflict("An active Personal Memory already uses this key.")
         now = _now_text()
         connection.execute(
-            """UPDATE personal_memories SET state = 'ACTIVE', confirmed_by = ?, confirmed_at = ?
+            """UPDATE personal_memories SET state = 'ACTIVE', creation_source = 'USER_CONFIRMED',
+               confirmed_by = ?, confirmed_at = ?
                WHERE memory_id = ? AND state = 'CANDIDATE'""",
             (actor_id, now, memory_id),
         )
         _personal_event(
             connection, row, event_type="CONFIRMED", actor_id=actor_id,
-            version=int(row["version"]), details={"scope": "PERSONAL"},
+            version=int(row["version"]), details={"scope": "PERSONAL", "creation_source": "USER_CONFIRMED"},
         )
         updated = connection.execute("SELECT * FROM personal_memories WHERE memory_id = ?", (memory_id,)).fetchone()
         result = _personal_row_dict(updated)
@@ -969,6 +1025,175 @@ def confirm_personal_memory(
             connection, tenant_id=tenant_id, actor_id=actor_id,
             idempotency_key=idempotency_key, command_kind="PERSONAL_CONFIRM",
             target_ref=memory_id, request_digest=request_digest, result=result,
+        )
+    return result
+
+
+def _explicit_memory_receipt(row: sqlite3.Row | dict[str, Any], *, replayed: bool = False) -> dict[str, Any]:
+    item = dict(row)
+    return {
+        "saved": True,
+        "replayed": replayed,
+        "memory_id": str(item["memory_id"]),
+        "memory_kind": str(item["memory_kind"]),
+        "memory_mode": str(item["memory_mode"]),
+        "memory_key": str(item["memory_key"]),
+        "version": int(item["version"]),
+        "creation_source": str(item["creation_source"]),
+        "content_digest": str(item["content_digest"]),
+        "source_message_id": str(item["source_message_id"]),
+        "expires_at": str(item["expires_at"]),
+        "authority": "PERSONAL_BACKGROUND_ONLY_NOT_BUSINESS_FACT",
+    }
+
+
+def remember_personal_memory(
+    path: str | Path,
+    tenant_id: str,
+    actor_id: str,
+    *, memory_kind: str, memory_mode: str, memory_key: str, content: str,
+    source_message_id: str, idempotency_key: str,
+    supersedes_memory_id: str | None = None, expected_version: int | None = None,
+) -> dict[str, Any]:
+    """Immediately save a user-explicit request, with owner, source and version checks."""
+    if not idempotency_key.strip() or len(idempotency_key) > 200:
+        raise MemoryIdempotencyConflict("IDEMPOTENCY_KEY_REQUIRED")
+    if (supersedes_memory_id is None) != (expected_version is None):
+        raise MemorySourceRejected("A versioned Personal Memory revision requires both target ID and expected version.")
+    kind, key, value, mode = _validate_personal_proposal(memory_kind, memory_key, content, memory_mode)
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        operator = _require_memory_operator(connection, actor_id, tenant_id)
+        source = connection.execute(
+            """SELECT m.message_id, m.tenant_id, m.role, m.input_kind, m.body, m.body_digest,
+                      s.owner_id
+               FROM messages m JOIN sessions s ON s.session_id = m.session_id AND s.tenant_id = m.tenant_id
+               WHERE m.message_id = ?""",
+            (source_message_id,),
+        ).fetchone()
+        if (
+            source is None or str(source["tenant_id"]) != tenant_id
+            or str(source["owner_id"]) != actor_id or str(source["role"]) != "USER"
+            or str(source["input_kind"]) != "CHAT_READONLY"
+        ):
+            raise MemorySourceRejected("Explicit Personal Memory requires the owner's persisted ordinary chat message.")
+        if not user_message_has_explicit_memory_intent(str(source["body"])):
+            raise MemorySourceRejected("The current user message does not explicitly request durable memory.")
+        explicit_revision = user_message_has_explicit_memory_revision_intent(str(source["body"]))
+        _expire_personal_scope(connection, tenant_id, actor_id)
+        refs = [{"kind": "MESSAGE", "id": source_message_id, "digest": str(source["body_digest"])}]
+        request_payload = {
+            "creation_source": "USER_EXPLICIT", "memory_kind": kind, "memory_mode": mode,
+            "memory_key": key, "content": value, "source_message_id": source_message_id,
+            "source_digest": str(source["body_digest"]), "supersedes_memory_id": supersedes_memory_id,
+            "expected_version": expected_version,
+        }
+        request_digest = _digest(request_payload)
+        replay = _find_command(
+            connection, tenant_id=str(operator["tenant_id"]), actor_id=actor_id,
+            idempotency_key=idempotency_key, command_kind="PERSONAL_EXPLICIT_REMEMBER",
+            target_ref=actor_id, request_digest=request_digest,
+        )
+        if replay is not None:
+            replay["replayed"] = True
+            return replay
+
+        active = connection.execute(
+            """SELECT * FROM personal_memories WHERE tenant_id = ? AND owner_actor_id = ?
+               AND memory_kind = ? AND memory_key = ? AND state = 'ACTIVE'""",
+            (tenant_id, actor_id, kind, key),
+        ).fetchone()
+        prior = None
+        effective_supersedes_memory_id = supersedes_memory_id
+        effective_expected_version = expected_version
+        if active is not None:
+            same_value = str(active["content"]) == value and str(active["memory_mode"]) == mode
+            if same_value and effective_supersedes_memory_id in {None, str(active["memory_id"])} \
+                    and (expected_version is None or int(active["version"]) == expected_version) \
+                    and _personal_source_is_current(connection, active):
+                result = _explicit_memory_receipt(active)
+                _record_command(
+                    connection, tenant_id=tenant_id, actor_id=actor_id,
+                    idempotency_key=idempotency_key, command_kind="PERSONAL_EXPLICIT_REMEMBER",
+                    target_ref=actor_id, request_digest=request_digest, result=result,
+                )
+                return result
+            if effective_supersedes_memory_id is None and explicit_revision:
+                # Under BEGIN IMMEDIATE the active row/version cannot change
+                # between this lookup and the versioned replacement below.
+                effective_supersedes_memory_id = str(active["memory_id"])
+                effective_expected_version = int(active["version"])
+            if (effective_supersedes_memory_id != str(active["memory_id"])
+                    or effective_expected_version != int(active["version"])):
+                raise SemanticMemoryConflict(
+                    "An active Personal Memory differs; an explicit versioned correction is required."
+                )
+            prior = active
+        elif effective_supersedes_memory_id is not None:
+            prior = connection.execute(
+                """SELECT * FROM personal_memories WHERE memory_id = ? AND tenant_id = ?
+                   AND owner_actor_id = ?""",
+                (effective_supersedes_memory_id, tenant_id, actor_id),
+            ).fetchone()
+            if (
+                prior is None or int(prior["version"]) != effective_expected_version
+                or str(prior["memory_kind"]) != kind or str(prior["memory_key"]) != key
+                or str(prior["state"]) not in {"REVOKED", "EXPIRED", "REVISED"}
+            ):
+                raise MemorySourceRejected("Personal Memory revision target is stale or outside this owner scope.")
+        else:
+            # An explicit new save after revocation or expiry may establish a
+            # fresh source and version for the same owner/key. This does not
+            # overwrite an ACTIVE revision and cannot cross owner scope.
+            prior = connection.execute(
+                """SELECT * FROM personal_memories WHERE tenant_id = ? AND owner_actor_id = ?
+                   AND memory_kind = ? AND memory_key = ? AND state IN ('REVOKED', 'EXPIRED', 'REVISED')
+                   ORDER BY version DESC, created_at DESC, memory_id DESC LIMIT 1""",
+                (tenant_id, actor_id, kind, key),
+            ).fetchone()
+
+        version = int(prior["version"]) + 1 if prior is not None else 1
+        memory_id = f"personal-{uuid.uuid4()}"
+        created_at = _now_text()
+        expires_at = (_now() + timedelta(days=180)).isoformat(timespec="milliseconds")
+        content_digest = _digest(_personal_payload(kind, key, value, refs))
+        if prior is not None and str(prior["state"]) == "ACTIVE":
+            connection.execute(
+                "UPDATE personal_memories SET state = 'REVISED' WHERE memory_id = ? AND state = 'ACTIVE'",
+                (str(prior["memory_id"]),),
+            )
+            _personal_event(
+                connection, prior, event_type="REVISED", actor_id=actor_id,
+                version=int(prior["version"]),
+                details={"superseded_by": memory_id, "new_version": version,
+                         "previous_content_digest": str(prior["content_digest"]),
+                         "new_content_digest": content_digest, "creation_source": "USER_EXPLICIT"},
+            )
+        connection.execute(
+            """INSERT INTO personal_memories
+               (memory_id, tenant_id, owner_actor_id, memory_kind, memory_mode, memory_key, content,
+                content_digest, source_message_id, source_refs_json, state, version,
+                supersedes_memory_id, supersedes_version, created_by, creation_source, expires_at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?, 'USER_EXPLICIT', ?, ?)""",
+            (memory_id, tenant_id, actor_id, kind, mode, key, value, content_digest,
+             source_message_id, _canonical(refs), version,
+             str(prior["memory_id"]) if prior is not None else None,
+             int(prior["version"]) if prior is not None else None,
+             actor_id, expires_at, created_at),
+        )
+        row = connection.execute("SELECT * FROM personal_memories WHERE memory_id = ?", (memory_id,)).fetchone()
+        _personal_event(
+            connection, row, event_type="USER_EXPLICIT_CREATED", actor_id=actor_id, version=version,
+            details={"source_message_id": source_message_id, "content_digest": content_digest,
+                     "memory_mode": mode, "creation_source": "USER_EXPLICIT", "scope": "PERSONAL",
+                     "supersedes_memory_id": str(prior["memory_id"]) if prior is not None else None,
+                     "supersedes_version": int(prior["version"]) if prior is not None else None},
+        )
+        result = _explicit_memory_receipt(row)
+        _record_command(
+            connection, tenant_id=tenant_id, actor_id=actor_id,
+            idempotency_key=idempotency_key, command_kind="PERSONAL_EXPLICIT_REMEMBER",
+            target_ref=actor_id, request_digest=request_digest, result=result,
         )
     return result
 
@@ -1056,6 +1281,55 @@ def list_personal_memories(
     return results
 
 
+def get_personal_memory_settings(
+    path: str | Path, tenant_id: str, actor_id: str,
+) -> dict[str, Any]:
+    with connect(path) as connection:
+        setting = personal_memory_recall_setting(connection, tenant_id, actor_id)
+    return {
+        "tenant_id": tenant_id, "owner_actor_id": actor_id,
+        **setting,
+    }
+
+
+def personal_memory_recall_setting(
+    connection: sqlite3.Connection, tenant_id: str, actor_id: str,
+) -> dict[str, Any]:
+    _require_memory_operator(connection, actor_id, tenant_id)
+    row = connection.execute(
+        """SELECT recall_enabled, updated_at FROM personal_memory_settings
+           WHERE tenant_id = ? AND owner_actor_id = ?""",
+        (tenant_id, actor_id),
+    ).fetchone()
+    return {
+        "recall_enabled": bool(row["recall_enabled"]) if row is not None else True,
+        "is_default": row is None,
+        "updated_at": str(row["updated_at"]) if row is not None else None,
+    }
+
+
+def set_personal_memory_recall(
+    path: str | Path, tenant_id: str, actor_id: str, *, recall_enabled: bool,
+) -> dict[str, Any]:
+    if type(recall_enabled) is not bool:
+        raise MemorySourceRejected("Personal Memory recall setting must be a boolean.")
+    updated_at = _now_text()
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _require_memory_operator(connection, actor_id, tenant_id)
+        connection.execute(
+            """INSERT INTO personal_memory_settings (tenant_id, owner_actor_id, recall_enabled, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT (tenant_id, owner_actor_id) DO UPDATE SET
+                 recall_enabled = excluded.recall_enabled, updated_at = excluded.updated_at""",
+            (tenant_id, actor_id, int(recall_enabled), updated_at),
+        )
+    return {
+        "tenant_id": tenant_id, "owner_actor_id": actor_id,
+        "recall_enabled": recall_enabled, "is_default": False, "updated_at": updated_at,
+    }
+
+
 def _memory_terms(text: str) -> set[str]:
     terms: set[str] = set()
     for match in _MEMORY_TOKEN.findall(text.casefold()):
@@ -1075,13 +1349,21 @@ def personal_memory_context(
     tenant_id: str,
     owner_actor_id: str,
     query: str,
-    *, limit: int = PERSONAL_MEMORY_LIMIT,
+    *, limit: int = PERSONAL_MEMORY_LIMIT, recall_enabled: bool = True,
+    suppress_recall_reason: str | None = None,
+    exclude_source_message_id: str | None = None,
+    pinned_limit: int = PERSONAL_MEMORY_PINNED_LIMIT,
+    pinned_token_budget: int = PERSONAL_MEMORY_PINNED_TOKEN_BUDGET,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[dict[str, Any]]]:
-    """Return relevant active Personal Memory, excluded reasons, and all current records.
+    """Return bounded PINNED plus relevant Personal Memory and all current records.
 
-    Retrieval is deliberately lexical and conservative. `all_current` is used
-    only to validate prior summaries/answers; only `selected` enters the prompt.
+    Retrieval is deliberately lexical and conservative for RELEVANT memories.
+    PINNED preferences bypass term matching but stay under a small item and
+    token cap. `all_current` validates prior summaries/answers; only selected
+    records enter the prompt.
     """
+    from opspilot.domain.context_engineering import estimate_text_tokens
+
     _require_memory_operator(connection, owner_actor_id, tenant_id)
     _expire_personal_scope(connection, tenant_id, owner_actor_id)
     rows = connection.execute(
@@ -1119,9 +1401,49 @@ def personal_memory_context(
                            "limitations": ["Personal background only; it is not current business evidence or authorization."]},
         })
         valid_active.append(item)
+    if not recall_enabled or suppress_recall_reason:
+        reason = "PERSONAL_MEMORY_RECALL_DISABLED" if not recall_enabled else suppress_recall_reason
+        excluded.extend({
+            "source_id": str(memory["memory_id"]), "reason": reason,
+            "category": "PERSONAL_MEMORY",
+        } for memory in valid_active)
+        return [], excluded, valid_active
+
+    selected_pinned: list[dict[str, Any]] = []
+    pinned_tokens = 0
+    pinned_candidates = sorted(
+        (memory for memory in valid_active if str(memory.get("memory_mode", "RELEVANT")) == "PINNED"),
+        key=lambda memory: (str(memory.get("created_at", "")), str(memory["memory_id"])),
+        reverse=True,
+    )
+    for memory in pinned_candidates:
+        if exclude_source_message_id and str(memory["source_message_id"]) == exclude_source_message_id:
+            excluded.append({"source_id": str(memory["memory_id"]), "reason": "PERSONAL_MEMORY_CREATED_IN_CURRENT_RUN", "category": "PERSONAL_MEMORY"})
+            continue
+        estimate = estimate_text_tokens(_canonical({
+            "memory_id": memory["memory_id"], "version": memory["version"],
+            "memory_kind": memory["memory_kind"], "memory_key": memory["memory_key"],
+            "content": memory["content"],
+        })) + 20
+        if len(selected_pinned) >= max(0, min(pinned_limit, PERSONAL_MEMORY_PINNED_LIMIT)):
+            excluded.append({"source_id": str(memory["memory_id"]), "reason": "PINNED_MEMORY_ITEM_LIMIT", "category": "PERSONAL_MEMORY"})
+            continue
+        if pinned_tokens + estimate > max(0, min(pinned_token_budget, PERSONAL_MEMORY_PINNED_TOKEN_BUDGET)):
+            excluded.append({"source_id": str(memory["memory_id"]), "reason": "PINNED_MEMORY_TOKEN_BUDGET", "category": "PERSONAL_MEMORY"})
+            continue
+        memory["selection_reason"] = "PINNED_PERSONAL_PREFERENCE"
+        memory["estimated_tokens"] = estimate
+        selected_pinned.append(memory)
+        pinned_tokens += estimate
+
     query_terms = _memory_terms(query)
     scored: list[tuple[float, dict[str, Any]]] = []
     for memory in valid_active:
+        if str(memory.get("memory_mode", "RELEVANT")) == "PINNED":
+            continue
+        if exclude_source_message_id and str(memory["source_message_id"]) == exclude_source_message_id:
+            excluded.append({"source_id": str(memory["memory_id"]), "reason": "PERSONAL_MEMORY_CREATED_IN_CURRENT_RUN", "category": "PERSONAL_MEMORY"})
+            continue
         document_terms = _memory_terms(str(memory["memory_key"]) + " " + str(memory["content"]))
         key_terms = _memory_terms(str(memory["memory_key"]))
         overlap = query_terms & document_terms
@@ -1142,7 +1464,8 @@ def personal_memory_context(
         memory["selection_reason"] = "LEXICAL_RELEVANCE"
         scored.append((score, memory))
     scored.sort(key=lambda pair: (-pair[0], str(pair[1]["memory_id"])))
-    selected = [item for _, item in scored[:max(0, min(limit, PERSONAL_MEMORY_LIMIT))]]
+    selected_relevant = [item for _, item in scored[:max(0, min(limit, PERSONAL_MEMORY_LIMIT))]]
+    selected = [*selected_pinned, *selected_relevant]
     selected_ids = {str(item["memory_id"]) for item in selected}
     for _, item in scored:
         if str(item["memory_id"]) not in selected_ids:

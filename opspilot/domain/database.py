@@ -833,6 +833,7 @@ CREATE TABLE IF NOT EXISTS personal_memories (
     tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
     owner_actor_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
     memory_kind TEXT NOT NULL CHECK (memory_kind IN ('PREFERENCE', 'WORK_HABIT', 'PROJECT_BACKGROUND')),
+    memory_mode TEXT NOT NULL DEFAULT 'RELEVANT' CHECK (memory_mode IN ('PINNED', 'RELEVANT')),
     memory_key TEXT NOT NULL,
     content TEXT NOT NULL,
     content_digest TEXT NOT NULL,
@@ -843,6 +844,7 @@ CREATE TABLE IF NOT EXISTS personal_memories (
     supersedes_memory_id TEXT REFERENCES personal_memories(memory_id),
     supersedes_version INTEGER,
     created_by TEXT NOT NULL,
+    creation_source TEXT CHECK (creation_source IN ('USER_EXPLICIT', 'USER_CONFIRMED', 'AUTO_LEARNED')),
     confirmed_by TEXT,
     confirmed_at TEXT,
     revoked_by TEXT,
@@ -862,7 +864,7 @@ CREATE TABLE IF NOT EXISTS personal_memory_events (
     memory_id TEXT NOT NULL REFERENCES personal_memories(memory_id),
     tenant_id TEXT NOT NULL,
     owner_actor_id TEXT NOT NULL,
-    event_type TEXT NOT NULL CHECK (event_type IN ('CANDIDATE_CREATED', 'CONFIRMED', 'REVISED', 'REVOKED', 'EXPIRED')),
+    event_type TEXT NOT NULL CHECK (event_type IN ('CANDIDATE_CREATED', 'USER_EXPLICIT_CREATED', 'CONFIRMED', 'REVISED', 'REVOKED', 'EXPIRED')),
     actor_id TEXT NOT NULL,
     memory_version INTEGER NOT NULL,
     occurred_at TEXT NOT NULL,
@@ -870,6 +872,13 @@ CREATE TABLE IF NOT EXISTS personal_memory_events (
 );
 CREATE INDEX IF NOT EXISTS ix_personal_memory_events_scope
     ON personal_memory_events(memory_id, memory_version, occurred_at);
+CREATE TABLE IF NOT EXISTS personal_memory_settings (
+    tenant_id TEXT NOT NULL REFERENCES tenants(tenant_id),
+    owner_actor_id TEXT NOT NULL REFERENCES trusted_operators(actor_id),
+    recall_enabled INTEGER NOT NULL CHECK (recall_enabled IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, owner_actor_id)
+);
 CREATE TABLE IF NOT EXISTS semantic_memory_events (
     event_id TEXT PRIMARY KEY,
     memory_id TEXT NOT NULL REFERENCES semantic_memories(memory_id),
@@ -1152,7 +1161,7 @@ def initialize(path: str | Path) -> None:
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA + ASSISTANT_SCHEMA + ASSISTANT_KNOWLEDGE_SCHEMA + ASSISTANT_RUNTIME_GRANT_SCHEMA)
         migrate_runtime_campaign_schema(connection)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 21:
+        if version > 22:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1531,6 +1540,62 @@ def initialize(path: str | Path) -> None:
             # Personal Memory is additive and deliberately separate in scope;
             # the existing task-bound Semantic Memory rows and grants remain intact.
             connection.execute("PRAGMA user_version = 21")
+            version = 21
+        if version < 22:
+            personal_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(personal_memories)").fetchall()
+            }
+            if "memory_mode" not in personal_columns:
+                connection.execute(
+                    "ALTER TABLE personal_memories ADD COLUMN memory_mode TEXT NOT NULL DEFAULT 'RELEVANT' "
+                    "CHECK (memory_mode IN ('PINNED', 'RELEVANT'))"
+                )
+            if "creation_source" not in personal_columns:
+                connection.execute(
+                    "ALTER TABLE personal_memories ADD COLUMN creation_source TEXT "
+                    "CHECK (creation_source IN ('USER_EXPLICIT', 'USER_CONFIRMED', 'AUTO_LEARNED'))"
+                )
+            connection.execute(
+                """UPDATE personal_memories SET creation_source = 'USER_CONFIRMED'
+                   WHERE creation_source IS NULL AND EXISTS (
+                       SELECT 1 FROM personal_memory_events e
+                       WHERE e.memory_id = personal_memories.memory_id AND e.event_type = 'CONFIRMED'
+                   )"""
+            )
+            event_schema = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='personal_memory_events'"
+            ).fetchone()
+            if event_schema is not None and "USER_EXPLICIT_CREATED" not in str(event_schema["sql"]):
+                connection.execute(
+                    """CREATE TABLE personal_memory_events_c01b2a (
+                       event_id TEXT PRIMARY KEY,
+                       memory_id TEXT NOT NULL REFERENCES personal_memories(memory_id),
+                       tenant_id TEXT NOT NULL,
+                       owner_actor_id TEXT NOT NULL,
+                       event_type TEXT NOT NULL CHECK (event_type IN (
+                           'CANDIDATE_CREATED', 'USER_EXPLICIT_CREATED', 'CONFIRMED',
+                           'REVISED', 'REVOKED', 'EXPIRED')),
+                       actor_id TEXT NOT NULL,
+                       memory_version INTEGER NOT NULL,
+                       occurred_at TEXT NOT NULL,
+                       details_json TEXT NOT NULL
+                    )"""
+                )
+                connection.execute(
+                    """INSERT INTO personal_memory_events_c01b2a
+                       (event_id, memory_id, tenant_id, owner_actor_id, event_type, actor_id,
+                        memory_version, occurred_at, details_json)
+                       SELECT event_id, memory_id, tenant_id, owner_actor_id, event_type, actor_id,
+                              memory_version, occurred_at, details_json FROM personal_memory_events"""
+                )
+                connection.execute("DROP TABLE personal_memory_events")
+                connection.execute("ALTER TABLE personal_memory_events_c01b2a RENAME TO personal_memory_events")
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_personal_memory_events_scope "
+                    "ON personal_memory_events(memory_id, memory_version, occurred_at)"
+                )
+            connection.execute("PRAGMA user_version = 22")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:

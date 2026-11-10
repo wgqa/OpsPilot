@@ -135,6 +135,7 @@ export interface PersonalMemoryRecord extends Record<string, unknown> {
   tenant_id: string;
   owner_actor_id: string;
   memory_kind: 'PREFERENCE' | 'WORK_HABIT' | 'PROJECT_BACKGROUND';
+  memory_mode: 'PINNED' | 'RELEVANT';
   memory_key: string;
   content: string;
   content_digest: string;
@@ -142,8 +143,17 @@ export interface PersonalMemoryRecord extends Record<string, unknown> {
   source_refs: Array<Record<string, unknown>>;
   source_current: boolean;
   state: 'CANDIDATE' | 'ACTIVE' | 'REVISED' | 'REVOKED' | 'EXPIRED';
+  creation_source: 'USER_EXPLICIT' | 'USER_CONFIRMED' | 'AUTO_LEARNED' | null;
   version: number;
   expires_at: string;
+}
+
+export interface PersonalMemorySettings {
+  tenant_id: string;
+  owner_actor_id: string;
+  recall_enabled: boolean;
+  is_default: boolean;
+  updated_at: string | null;
 }
 
 export interface ChatRunContext {
@@ -525,9 +535,19 @@ export const api = {
   personalMemory(memoryId: string) {
     return request<PersonalMemoryRecord>(`/api/personal-memories/${encodeURIComponent(memoryId)}`);
   },
+  personalMemorySettings() {
+    return request<PersonalMemorySettings>('/api/personal-memory-settings');
+  },
+  updatePersonalMemorySettings(recallEnabled: boolean, csrf: string) {
+    return request<PersonalMemorySettings>('/api/personal-memory-settings', {
+      method: 'PUT', headers: writeHeaders(csrf),
+      body: JSON.stringify({ recall_enabled: recallEnabled }),
+    });
+  },
   createPersonalMemoryCandidate(
     payload: {
       memory_kind: PersonalMemoryRecord['memory_kind'];
+      memory_mode?: PersonalMemoryRecord['memory_mode'];
       memory_key: string;
       content: string;
       source_message_id: string;

@@ -17,6 +17,7 @@ let memoryState = 'ACTIVE';
 let candidateCreated = false;
 let revoked = false;
 let selectedRefs = [];
+let recallEnabled = true;
 
 const userMessage = {
   message_id: sourceMessageId, task_id: null, sequence: 1, role: 'USER', input_kind: 'CHAT_READONLY',
@@ -35,6 +36,15 @@ async function installApiMocks(page) {
 
     if (url.pathname === '/api/auth/me') {
       return json({ actor_id: 'support-a', tenant_id: 'tenant-a', role: 'SUPPORT' });
+    }
+    if (url.pathname === '/api/personal-memory-settings' && request.method() === 'GET') {
+      return json({ tenant_id: 'tenant-a', owner_actor_id: 'support-a', recall_enabled: recallEnabled,
+        is_default: recallEnabled, updated_at: null });
+    }
+    if (url.pathname === '/api/personal-memory-settings' && request.method() === 'PUT') {
+      recallEnabled = request.postDataJSON().recall_enabled;
+      return json({ tenant_id: 'tenant-a', owner_actor_id: 'support-a', recall_enabled: recallEnabled,
+        is_default: false, updated_at: '2026-11-10T00:00:01Z' });
     }
     if (url.pathname === '/api/sessions' && request.method() === 'GET') {
       return json({ items: [{ session_id: sessionId, created_at: '2026-11-10T00:00:00Z',
@@ -70,10 +80,11 @@ async function installApiMocks(page) {
     if (url.pathname === '/api/personal-memories' && request.method() === 'GET') {
       const items = candidateCreated ? [{
         memory_id: memoryId, tenant_id: 'tenant-a', owner_actor_id: 'support-a',
-        memory_kind: 'PREFERENCE', memory_key: 'callback.acceptance', content: memoryContent,
+        memory_kind: 'PREFERENCE', memory_mode: 'RELEVANT', memory_key: 'callback.acceptance', content: memoryContent,
         content_digest: 'a'.repeat(64), source_message_id: sourceMessageId,
         source_refs: [{ kind: 'MESSAGE', id: sourceMessageId, digest: 'b'.repeat(64) }],
-        source_current: true, state: memoryState, version: 1, expires_at: '2027-05-09T00:00:00.000+00:00',
+        source_current: true, state: memoryState, creation_source: memoryState === 'CANDIDATE' ? null : 'USER_CONFIRMED',
+        version: 1, expires_at: '2027-05-09T00:00:00.000+00:00',
       }] : [];
       return json({ items });
     }
@@ -86,10 +97,10 @@ async function installApiMocks(page) {
       memoryState = 'CANDIDATE';
       return json({
         memory_id: memoryId, tenant_id: 'tenant-a', owner_actor_id: 'support-a',
-        memory_kind: body.memory_kind, memory_key: body.memory_key, content: body.content,
+        memory_kind: body.memory_kind, memory_mode: body.memory_mode ?? 'RELEVANT', memory_key: body.memory_key, content: body.content,
         content_digest: 'a'.repeat(64), source_message_id: sourceMessageId,
         source_refs: [{ kind: 'MESSAGE', id: sourceMessageId, digest: 'b'.repeat(64) }],
-        source_current: true, state: 'CANDIDATE', version: 1,
+        source_current: true, state: 'CANDIDATE', creation_source: null, version: 1,
         expires_at: '2027-05-09T00:00:00.000+00:00',
       }, 201);
     }
@@ -101,10 +112,10 @@ async function installApiMocks(page) {
       }
       return json({
         memory_id: memoryId, tenant_id: 'tenant-a', owner_actor_id: 'support-a',
-        memory_kind: 'PREFERENCE', memory_key: 'callback.acceptance', content: memoryContent,
+        memory_kind: 'PREFERENCE', memory_mode: 'RELEVANT', memory_key: 'callback.acceptance', content: memoryContent,
         content_digest: 'a'.repeat(64), source_message_id: sourceMessageId,
         source_refs: [{ kind: 'MESSAGE', id: sourceMessageId, digest: 'b'.repeat(64) }],
-        source_current: true, state: memoryState, version: 1,
+        source_current: true, state: memoryState, creation_source: memoryState === 'ACTIVE' ? 'USER_CONFIRMED' : null, version: 1,
         expires_at: '2027-05-09T00:00:00.000+00:00',
       });
     }
@@ -139,16 +150,26 @@ try {
   await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('personal-memory-manager')).toBeVisible();
   await expect(page.getByText('还没有个人记忆。')).toBeVisible();
+  const recallToggle = page.getByTestId('personal-memory-recall-setting').locator('input');
+  await expect(recallToggle).toBeChecked();
+  await recallToggle.uncheck();
+  await expect(recallToggle).not.toBeChecked();
+  await expect(page.getByText('个人记忆召回已关闭；记忆仍保留，可再次开启。')).toBeVisible();
+  await recallToggle.check();
+  await expect(recallToggle).toBeChecked();
+  if (!recallEnabled) throw new Error('Recall setting did not persist the enabled state.');
 
   const form = page.getByTestId('personal-memory-proposal');
   await form.locator('select').nth(0).selectOption(sourceMessageId);
   await form.locator('select').nth(1).selectOption('PREFERENCE');
+  await form.locator('select').nth(2).selectOption('RELEVANT');
   await form.locator('input').fill('callback.acceptance');
   await form.locator('textarea').fill(memoryContent);
   await page.getByTestId('create-personal-memory-candidate').click();
   await expect(page.getByTestId('personal-memory-preview')).toContainText('CANDIDATE');
   await expect(page.getByTestId('personal-memory-preview')).toContainText('tenant-a · support-a');
   await expect(page.getByText('候选只供预览，不会进入模型 Context')).toBeVisible();
+  await expect(page.getByText('创建后 180 天到期')).toBeVisible();
 
   await page.getByTestId('confirm-personal-memory').click();
   await expect(page.getByTestId('personal-memory-preview')).toContainText('ACTIVE');
@@ -161,7 +182,8 @@ try {
   if (!revoked || selectedRefs.length !== 0) throw new Error('Revocation unexpectedly left Personal Memory in the mocked context.');
 
   console.log(JSON.stringify({ status: 'PASS', candidate_previewed: true, owner_scope_visible: true,
-    confirmation_required: true, no_auto_injection_before_a_new_run: true, revoke_refreshed_context: true }));
+    confirmation_required: true, recall_toggle_off_and_on_persisted: true,
+    ttl_disclosed: true, no_auto_injection_before_a_new_run: true, revoke_refreshed_context: true }));
   await context.close();
 } finally {
   if (browser) await browser.close();

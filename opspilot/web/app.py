@@ -39,7 +39,7 @@ from opspilot.web.schemas import (
     AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest, AssistantScopeRequest, AssistantOrderRequest,
     MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
     S3HandoffSubmitRequest,
-    SemanticMemoryCandidateRequest, PersonalMemoryCandidateRequest,
+    SemanticMemoryCandidateRequest, PersonalMemoryCandidateRequest, PersonalMemorySettingsRequest,
     InvestigationUpdateProposalRequest,
     InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest,
 )
@@ -84,6 +84,7 @@ _STATUS_BY_CODE = {
     "MEMORY_SCOPE_DENIED": 403,
     "MEMORY_SOURCE_REJECTED": 409,
     "PERSONAL_MEMORY_SOURCE_REJECTED": 409,
+    "PERSONAL_MEMORY_CONFLICT": 409,
     "MEMORY_IDEMPOTENCY_CONFLICT": 409,
     "IDEMPOTENCY_CONFLICT": 409,
     "IDEMPOTENCY_KEY_MISMATCH": 422,
@@ -1136,6 +1137,35 @@ def create_app(
         except MemoryIdempotencyConflict as error:
             raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
 
+    @app.get("/api/personal-memory-settings")
+    async def get_personal_memory_settings_route(
+        context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied
+        from opspilot.domain.semantic_memory import get_personal_memory_settings
+
+        try:
+            return get_personal_memory_settings(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+
+    @app.put("/api/personal-memory-settings")
+    async def set_personal_memory_settings_route(
+        body: PersonalMemorySettingsRequest, context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied
+        from opspilot.domain.semantic_memory import set_personal_memory_recall
+
+        try:
+            return set_personal_memory_recall(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+                recall_enabled=body.recall_enabled,
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+
     @app.get("/api/personal-memories")
     async def list_personal_memories_route(
         state: str | None = Query(default=None),
@@ -1184,7 +1214,8 @@ def create_app(
         try:
             return create_personal_candidate(
                 resolved_db, context.identity.tenant_id, context.identity.actor_id,
-                memory_kind=body.memory_kind, memory_key=body.memory_key, content=body.content,
+                memory_kind=body.memory_kind, memory_mode=body.memory_mode,
+                memory_key=body.memory_key, content=body.content,
                 source_message_id=body.source_message_id, ttl_days=body.ttl_days,
                 supersedes_memory_id=body.supersedes_memory_id, expected_version=body.expected_version,
                 idempotency_key=require_idempotency_key(idempotency_key),
