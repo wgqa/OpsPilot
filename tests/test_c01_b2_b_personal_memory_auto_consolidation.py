@@ -1150,7 +1150,7 @@ def test_crash_after_send_grant_is_unknown_and_never_reissued(demo_db, tmp_path,
         assert provider_sends == []
 
 
-def test_persistent_memory_commit_failure_has_bounded_local_replay(demo_db, tmp_path, monkeypatch):
+def test_persistent_memory_commit_failure_is_bounded_in_worker(demo_db, tmp_path, monkeypatch):
     from opspilot.domain.assistant_runtime_grant import bind_run, runtime_config_from_env
     from opspilot.domain import personal_memory_consolidation
 
@@ -1176,21 +1176,51 @@ def test_persistent_memory_commit_failure_has_bounded_local_replay(demo_db, tmp_
         try:
             with pytest.raises(Exception, match="RUNTIME_RESPONSE_DURABLE_REPLAY_REQUIRED"):
                 _run_runtime_consolidation(demo_db, app, job, binding, model)
-            while True:
-                recovered = _claim(app, demo_db, minimum_interval_seconds=0)
-                if recovered is None:
-                    break
-                with pytest.raises(Exception, match="RUNTIME_RESPONSE_DURABLE_REPLAY_REQUIRED"):
-                    _run_runtime_consolidation(demo_db, app, recovered, binding, model)
         finally:
             asyncio.run(model.http_async_client.aclose())
             model.http_client.close()
 
+        worker_factory_calls = 0
+
+        def replay_model_factory(*, runtime_grant_binding):
+            nonlocal worker_factory_calls
+            worker_factory_calls += 1
+            return _runtime_fixture_model(runtime_grant_binding, sends)
+
+        def read_job_state():
+            with connect(demo_db) as connection:
+                return connection.execute(
+                    "SELECT status,failure_code,replay_attempt_count FROM personal_memory_consolidation_jobs WHERE job_id=?",
+                    (job["job_id"],),
+                ).fetchone()
+
+        async def run_worker_until_terminal():
+            from opspilot.web.worker import run_worker
+
+            worker_task = asyncio.create_task(run_worker(
+                demo_db, tmp_path / "chat-checkpoints.sqlite3", worker_id=app.state.worker_id,
+                executor_id="hf01-replay-executor", poll_interval=0.005,
+                worker_epoch=app.state.worker_epoch, assistant_model_factory=replay_model_factory,
+                assistant_runtime_enabled=True,
+            ))
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    state = await asyncio.to_thread(read_job_state)
+                    if str(state["status"]) == "FAILED":
+                        return state
+                    await asyncio.sleep(0.01)
+                raise AssertionError("Worker did not terminate the persistent local replay failure")
+            finally:
+                worker_task.cancel()
+                try:
+                    await worker_task
+                except asyncio.CancelledError:
+                    pass
+
+        terminal_state = asyncio.run(run_worker_until_terminal())
+
         with connect(demo_db) as connection:
-            state = connection.execute(
-                "SELECT status,failure_code,replay_attempt_count FROM personal_memory_consolidation_jobs WHERE job_id=?",
-                (job["job_id"],),
-            ).fetchone()
             spend = connection.execute(
                 "SELECT status,settled_usd_micro,response_body,usage_json FROM assistant_runtime_spends WHERE run_id=? AND logical_key LIKE 'personal-memory-consolidation:%'",
                 (job["source_run_id"],),
@@ -1198,8 +1228,8 @@ def test_persistent_memory_commit_failure_has_bounded_local_replay(demo_db, tmp_
             memory_events = connection.execute(
                 "SELECT COUNT(*) FROM personal_memory_events WHERE event_type LIKE 'AUTO_LEARNED_%'",
             ).fetchone()[0]
-        assert len(sends) == 1 and attempts == 3
-        assert tuple(state) == ("FAILED", "RUNTIME_RESPONSE_REPLAY_EXHAUSTED", 2)
+        assert len(sends) == 1 and attempts == 3 and worker_factory_calls == 2
+        assert tuple(terminal_state) == ("FAILED", "RUNTIME_RESPONSE_REPLAY_EXHAUSTED", 2)
         assert spend["status"] == "DELIVERED" and int(spend["settled_usd_micro"]) > 0
         assert spend["response_body"] is not None and spend["usage_json"] is not None
         assert memory_events == 0
