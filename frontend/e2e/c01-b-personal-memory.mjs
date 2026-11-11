@@ -19,6 +19,7 @@ let revoked = false;
 let selectedRefs = [];
 let recallEnabled = true;
 let autoLearnEnabled = false;
+let consolidationLatestJob = null;
 
 const userMessage = {
   message_id: sourceMessageId, task_id: null, sequence: 1, role: 'USER', input_kind: 'CHAT_READONLY',
@@ -41,15 +42,22 @@ async function installApiMocks(page) {
     if (url.pathname === '/api/personal-memory-settings' && request.method() === 'GET') {
       return json({ tenant_id: 'tenant-a', owner_actor_id: 'support-a', recall_enabled: recallEnabled,
         auto_learn_enabled: autoLearnEnabled, auto_learn_available: true,
-        consolidation_status: {}, is_default: recallEnabled, updated_at: null });
+        consolidation_status: {}, consolidation_latest_job: consolidationLatestJob,
+        is_default: recallEnabled, updated_at: null });
     }
     if (url.pathname === '/api/personal-memory-settings' && request.method() === 'PUT') {
       const body = request.postDataJSON();
       recallEnabled = body.recall_enabled;
       autoLearnEnabled = recallEnabled && body.auto_learn_enabled;
+      consolidationLatestJob = autoLearnEnabled ? {
+        job_id: 'job-c01-b-e2e', status: 'PENDING', proposal_count: 0, written_count: 0,
+        duplicate_count: 0, skipped_count: 0, rejected_count: 0, failure_code: null,
+        updated_at: '2026-11-10T00:00:01Z',
+      } : null;
       return json({ tenant_id: 'tenant-a', owner_actor_id: 'support-a', recall_enabled: recallEnabled,
         auto_learn_enabled: autoLearnEnabled, auto_learn_available: true,
-        consolidation_status: {}, is_default: false, updated_at: '2026-11-10T00:00:01Z' });
+        consolidation_status: {}, consolidation_latest_job: consolidationLatestJob,
+        is_default: false, updated_at: '2026-11-10T00:00:01Z' });
     }
     if (url.pathname === '/api/sessions' && request.method() === 'GET') {
       return json({ items: [{ session_id: sessionId, created_at: '2026-11-10T00:00:00Z',
@@ -168,6 +176,7 @@ try {
   await autoLearnToggle.check();
   await expect(autoLearnToggle).toBeChecked();
   if (!autoLearnEnabled) throw new Error('Automatic learning setting did not persist the enabled state.');
+  await expect(page.getByTestId('personal-memory-auto-learn-status')).toContainText('自动整理已排队');
 
   const form = page.getByTestId('personal-memory-proposal');
   await form.locator('select').nth(0).selectOption(sourceMessageId);

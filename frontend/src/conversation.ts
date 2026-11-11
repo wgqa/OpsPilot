@@ -481,7 +481,9 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     if (!attach(effectiveSource, run.task_id, item)) orphan(item);
   }
 
-  if (active?.status === 'RUNNING' && active.source_message_id && (input.chunks?.length ?? 0) > 0) {
+  if (active?.source_message_id && !answeredRuns.has(active.run_id)
+    && ['RUNNING', 'FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE'].includes(active.status)
+    && (input.chunks?.length ?? 0) > 0) {
     const chunks = [...new Map((input.chunks ?? []).map((chunk) => [chunk.chunk_id, chunk])).values()]
       .sort((left, right) => left.chunk_seq - right.chunk_seq);
     const item: ConversationItem = {

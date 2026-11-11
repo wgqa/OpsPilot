@@ -130,6 +130,20 @@ export interface ChatChunk {
   attempt_id: string;
 }
 
+export interface RunActivity {
+  event_seq: number;
+  event_kind: 'ASSISTANT_ACTIVITY';
+  happened_at: string;
+  payload: {
+    run_id: string;
+    stage: string;
+    activity_status: 'STARTED' | 'SUCCEEDED' | 'FAILED';
+    tool_name?: string;
+    duration_ms?: number;
+    memory_count?: number;
+  };
+}
+
 export interface PersonalMemoryRecord extends Record<string, unknown> {
   memory_id: string;
   tenant_id: string;
@@ -155,6 +169,17 @@ export interface PersonalMemorySettings {
   auto_learn_enabled: boolean;
   auto_learn_available: boolean;
   consolidation_status: Record<string, number>;
+  consolidation_latest_job: {
+    job_id: string;
+    status: string;
+    proposal_count: number;
+    written_count: number;
+    duplicate_count: number;
+    skipped_count: number;
+    rejected_count: number;
+    failure_code: string | null;
+    updated_at: string;
+  } | null;
   is_default: boolean;
   updated_at: string | null;
 }
@@ -484,6 +509,9 @@ export const api = {
   runContext(runId: string) { return request<ChatRunContext>(`/api/runs/${encodeURIComponent(runId)}/context`); },
   chunks(runId: string, afterSeq: number) {
     return request<{ items: ChatChunk[] }>(`/api/runs/${encodeURIComponent(runId)}/chunks?after_seq=${afterSeq}`);
+  },
+  runActivity(runId: string) {
+    return request<{ items: RunActivity[] }>(`/api/runs/${encodeURIComponent(runId)}/activity`);
   },
   inspector(taskId: string) { return request<Inspector>(`/api/tasks/${encodeURIComponent(taskId)}/inspector`); },
   pendingApprovals() { return request<{ items: PendingApproval[] }>('/api/approvals/pending'); },

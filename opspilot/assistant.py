@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from urllib.parse import urlparse
@@ -23,7 +24,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage, messages_to_dict, messages_from_dict
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage, messages_to_dict, messages_from_dict, message_chunk_to_message
 from langchain_core.tools import StructuredTool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.config import get_config
@@ -38,6 +39,7 @@ from opspilot.domain.d2 import canonical_json, digest_json, reserve_attempt, fin
 from opspilot.domain.chat import (
     prepare_chat_attempt, complete_chat_attempt, fail_chat_attempt,
     _prepare_context, record_chat_limit_in_transaction, MAX_COMPRESSION_OUTPUT_TOKENS,
+    ensure_chat_stream_matches_answer, publish_assistant_activity,
 )
 from opspilot.domain.context_engineering import (
     ContextBudgetExceeded,
@@ -1371,7 +1373,7 @@ def _fit_tool_messages_to_budget(
 
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,
-                 reserved_tokens=0,runtime_grant_binding=None,worker_epoch=None):
+                 reserved_tokens=0,runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False):
         self.path,self.run_id,self.worker_id,self.client,self.specs,self.trace=path,run_id,worker_id,client,specs,trace
         self.run,self.actor=domain.read_run(path,run_id,worker_id=worker_id)
         self.model_id=model_id
@@ -1379,7 +1381,109 @@ class Loop(AgentMiddleware):
         self.reserved_tokens=int(reserved_tokens)
         self.runtime_grant_binding=runtime_grant_binding
         self.worker_epoch=worker_epoch
+        self.streaming_enabled=bool(streaming_enabled)
+        self.streaming_started=False
         self.personal_memory_was_sent=False
+
+    def _activity(self, stage, **fields):
+        from opspilot.domain.chat import publish_assistant_activity
+
+        try:
+            publish_assistant_activity(
+                self.path, self.worker_id, self.run_id, stage, **fields,
+            )
+        except Exception as error:
+            self.trace("assistant_activity_persist_failed", stage=stage, error_class=type(error).__name__)
+
+    def _delivery_attempt_id(self):
+        with connect(self.path) as connection:
+            row = connection.execute(
+                "SELECT delivery_attempt_id FROM assistant_runs WHERE run_id=?",
+                (self.run_id,),
+            ).fetchone()
+        if row is None or not row["delivery_attempt_id"]:
+            raise TaskControlError("CHAT_ATTEMPT_NOT_ACTIVE")
+        return str(row["delivery_attempt_id"])
+
+    async def _stream_provider_model(self, request, *, delivery_attempt_id, replay=False):
+        from langchain.agents.middleware.types import ModelResponse
+        from opspilot.domain.chat import persist_chat_chunk, reset_chat_stream_chunks
+
+        if request.tools:
+            bound_model = request.model.bind_tools(
+                request.tools, tool_choice=request.tool_choice, **request.model_settings,
+            )
+        else:
+            bound_model = request.model.bind(**request.model_settings)
+        model_messages = ([request.system_message] if request.system_message is not None else []) + list(request.messages)
+        iterator = bound_model.astream(model_messages).__aiter__()
+        aggregate = None
+        buffered: list[str] = []
+        buffered_chars = 0
+        last_flush = time.monotonic()
+        first_part = True
+        if replay:
+            self._activity("MODEL_RESPONSE_REPLAYING")
+
+        async def flush():
+            nonlocal buffered_chars, last_flush
+            if not buffered:
+                return
+            value = "".join(buffered)
+            buffered.clear()
+            buffered_chars = 0
+            last_flush = time.monotonic()
+            if not replay and value:
+                await asyncio.to_thread(
+                    persist_chat_chunk, self.path, self.worker_id,
+                    delivery_attempt_id, 0, value,
+                )
+
+        try:
+            while True:
+                next_part = asyncio.create_task(iterator.__anext__())
+                while not next_part.done():
+                    done, _ = await asyncio.wait({next_part}, timeout=0.075)
+                    if not done and buffered:
+                        await flush()
+                try:
+                    part = next_part.result()
+                except StopAsyncIteration:
+                    break
+                aggregate = part if aggregate is None else aggregate + part
+                if first_part:
+                    first_part = False
+                    if not replay:
+                        self.streaming_started=True
+                        self._activity("MODEL_STREAMING")
+                content = getattr(part, "content", None)
+                if isinstance(content, str) and content:
+                    buffered.append(content)
+                    buffered_chars += len(content)
+                if buffered_chars >= 96:
+                    await flush()
+            await flush()
+        except BaseException:
+            await flush()
+            raise
+        if aggregate is None:
+            raise TaskControlError("ASSISTANT_PROVIDER_EMPTY_STREAM")
+        final = message_chunk_to_message(aggregate)
+        finish_reason = (getattr(final, "response_metadata", None) or {}).get("finish_reason")
+        if finish_reason == "aborted":
+            raise TaskControlError("ASSISTANT_PROVIDER_STREAM_ABORTED")
+        if final.tool_calls:
+            # Provider content emitted before a completed tool call is only a
+            # transient draft. Keep its audit event and stable sequence, but
+            # exclude it from the visible/final chunk projection.
+            await asyncio.to_thread(
+                reset_chat_stream_chunks, self.path, self.worker_id, delivery_attempt_id,
+            )
+        self._activity(
+            "MODEL_RESPONSE_REPLAYING" if replay else "MODEL_STREAMING",
+            activity_status="SUCCEEDED",
+        )
+        return ModelResponse(result=[final])
 
     @staticmethod
     def _usage_from_messages(messages):
@@ -1721,6 +1825,8 @@ class Loop(AgentMiddleware):
         )
 
     async def awrap_model_call(self,request,handler):
+        self.streaming_started=False
+        self.streaming_enabled=bool(getattr(self,'streaming_enabled',False))
         prepared,payload=self.context()
         # Revalidate history and rebuild the outbound prefix. Current-Run tool
         # call/result pairs stay present; only oversized result text may receive
@@ -1778,6 +1884,10 @@ class Loop(AgentMiddleware):
               'excluded_sources':provenance_metadata.get('excluded_sources',[]),
               'source_refs':wire_source_refs,'selected_message_ids':prepared['selected_message_ids'],
               'tool_result_projections':tool_result_projections,'model_id':self.model_id}
+        if any(str(item.get('memory_type', '')) == 'PERSONAL' for item in memory_refs if isinstance(item, dict)):
+            self._activity('MEMORY_SELECTED', activity_status='SUCCEEDED',
+                           memory_count=sum(1 for item in memory_refs if isinstance(item, dict)
+                                            and str(item.get('memory_type', '')) == 'PERSONAL'))
         step=get_config().get('metadata',{}).get('langgraph_step',0)
         if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS:
             _ar04c_bind_campaign_database(
@@ -1841,6 +1951,7 @@ class Loop(AgentMiddleware):
             provider_request=request.override(
                 messages=messages,system_message=system,tool_choice=tool_choice,model_settings=model_settings,
             )
+            self._activity('MODEL_REQUESTING')
             if self.runtime_grant_binding is not None:
                 dispatch_context = _runtime_provider_dispatch_context(
                     self.runtime_grant_binding, runtime_dispatch, str(call['call_id']),
@@ -1851,7 +1962,17 @@ class Loop(AgentMiddleware):
                     self.experiment_id, self.path, self.run_id, call["logical_key"],
                 )
             with dispatch_context:
-                result=await asyncio.wait_for(handler(provider_request),30)
+                if self.streaming_enabled:
+                    result=await asyncio.wait_for(
+                        self._stream_provider_model(
+                            provider_request,
+                            delivery_attempt_id=self._delivery_attempt_id(),
+                            replay=bool(runtime_dispatch and runtime_dispatch.get('replay')),
+                        ),
+                        60,
+                    )
+                else:
+                    result=await asyncio.wait_for(handler(provider_request),30)
             messages_result = messages_to_dict(result.result)
             usage_result = [getattr(m,'usage_metadata',None) for m in result.result]
             runtime_result = None
@@ -1898,6 +2019,10 @@ class Loop(AgentMiddleware):
             )
             return result
         except Exception as error:
+            self._activity(
+                'MODEL_STREAMING' if self.streaming_started else 'MODEL_REQUESTING',
+                activity_status='FAILED',
+            )
             from opspilot.domain.episodic_memory import ContextAssetInvalidated
             if self.runtime_grant_binding is not None:
                 self._record_runtime_model_failure(call, runtime_dispatch, error)
@@ -1933,6 +2058,10 @@ class Loop(AgentMiddleware):
                 _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
             raise
         except BaseException as error:
+            self._activity(
+                'MODEL_STREAMING' if self.streaming_started else 'MODEL_REQUESTING',
+                activity_status='FAILED',
+            )
             if self.runtime_grant_binding is not None:
                 self._record_runtime_model_failure(call, runtime_dispatch, error)
             else:
@@ -1951,6 +2080,8 @@ class Loop(AgentMiddleware):
     async def awrap_tool_call(self,request,handler):
         call=request.tool_call; name=call['name']; args=call['args']
         domain.read_run(self.path,self.run_id,worker_id=self.worker_id)
+        tool_started = time.monotonic()
+        self._activity('TOOL_RUNNING', activity_status='STARTED', tool_name=name)
         exposed_names = {
             item.get('function', {}).get('name')
             for item in self.specs
@@ -1962,6 +2093,8 @@ class Loop(AgentMiddleware):
                     'personal_memory_tool_rejected', tool_call_id=call['id'],
                     reason='ASSISTANT_TOOL_NOT_EXPOSED',
                 )
+                self._activity('TOOL_COMPLETED', activity_status='FAILED', tool_name=name,
+                               duration_ms=int((time.monotonic() - tool_started) * 1000))
                 return ToolMessage(
                     content=canonical_json({'saved': False, 'reason_code': 'ASSISTANT_TOOL_NOT_EXPOSED'}),
                     tool_call_id=call['id'],
@@ -1982,6 +2115,8 @@ class Loop(AgentMiddleware):
                     expires_at=receipt.get('expires_at'),
                     authority=receipt.get('authority'),
                 )
+                self._activity('TOOL_COMPLETED', activity_status='SUCCEEDED', tool_name=name,
+                               duration_ms=int((time.monotonic() - tool_started) * 1000))
                 return result
             except Exception as error:
                 reason_code = 'PERSONAL_MEMORY_TOOL_FAILED'
@@ -1989,6 +2124,8 @@ class Loop(AgentMiddleware):
                     'personal_memory_tool', tool_call_id=call['id'], saved=False,
                     reason_code=reason_code, error_class=type(error).__name__,
                 )
+                self._activity('TOOL_COMPLETED', activity_status='FAILED', tool_name=name,
+                               duration_ms=int((time.monotonic() - tool_started) * 1000))
                 return ToolMessage(
                     content=canonical_json({'saved': False, 'reason_code': reason_code}),
                     tool_call_id=call['id'],
@@ -1998,11 +2135,15 @@ class Loop(AgentMiddleware):
         except TaskControlError as error:
             reason = getattr(error, 'code', None) or getattr(error, 'reason_code', None) or str(error).rsplit(':', 1)[-1]
             if reason != 'ASSISTANT_RUN_MCP_LIMIT':
+                self._activity('TOOL_COMPLETED', activity_status='FAILED', tool_name=name,
+                               duration_ms=int((time.monotonic() - tool_started) * 1000))
                 raise
             self.trace(
                 'tool_not_dispatched', tool_call_id=call['id'], name=name, arguments=args,
                 reason=reason, dispatch_started=False,
             )
+            self._activity('TOOL_COMPLETED', activity_status='FAILED', tool_name=name,
+                           duration_ms=int((time.monotonic() - tool_started) * 1000))
             return ToolMessage(
                 content=canonical_json({
                     'error': reason,
@@ -2025,6 +2166,8 @@ class Loop(AgentMiddleware):
                 'tool_rejected', call_id=row['call_id'], tool_call_id=call['id'],
                 name=name, reason='ASSISTANT_TOOL_NOT_EXPOSED', dispatch_started=False,
             )
+            self._activity('TOOL_COMPLETED', activity_status='FAILED', tool_name=name,
+                           duration_ms=int((time.monotonic() - tool_started) * 1000))
             return ToolMessage(
                 content=canonical_json({
                     'error': 'ASSISTANT_TOOL_NOT_EXPOSED',
@@ -2036,7 +2179,11 @@ class Loop(AgentMiddleware):
             self._settle_cached_campaign_dispatch('MCP', row['logical_key'])
             with connect(self.path) as c:
                 if not domain.sources_current(c,self.run_id)[0]:
+                    self._activity('TOOL_COMPLETED', activity_status='FAILED', tool_name=name,
+                                   duration_ms=int((time.monotonic() - tool_started) * 1000))
                     raise TaskControlError('ASSISTANT_CACHED_SOURCE_INVALIDATED')
+            self._activity('TOOL_COMPLETED', activity_status='SUCCEEDED', tool_name=name,
+                           duration_ms=int((time.monotonic() - tool_started) * 1000))
             return ToolMessage(content=canonical_json(json.loads(row['result_json'])),tool_call_id=call['id'])
         attempt=None
         campaign_reserved=False
@@ -2072,6 +2219,8 @@ class Loop(AgentMiddleware):
             if attempt: finish_attempt(self.path,attempt,'OK',result_digest=digest_json(value))
             domain.finish(self.path,row['call_id'],'OK',value,observation=observation)
             self.trace('tool_observation',call_id=row['call_id'],name=name,arguments=args,result=value,observation=observation)
+            self._activity('TOOL_COMPLETED', activity_status='SUCCEEDED', tool_name=name,
+                           duration_ms=int((time.monotonic() - tool_started) * 1000))
             return result
         except Exception as error:
             if campaign_reserved and not campaign_completed:
@@ -2085,10 +2234,12 @@ class Loop(AgentMiddleware):
                 record_tool_observation(self.path,task_id=self.run['task_id'],call_id=row['call_id'],attempt_id=attempt,tool_call_id=call['id'],tool_name=name,arguments=args,status='ERROR',result=None,error_class=type(error).__name__)
             domain.finish(self.path,row['call_id'],'FAILED',{'error':type(error).__name__,'reason':str(error)[:400]})
             self.trace('tool_error',name=name,arguments=args,error=type(error).__name__,reason=str(error)[:400])
+            self._activity('TOOL_COMPLETED', activity_status='FAILED', tool_name=name,
+                           duration_ms=int((time.monotonic() - tool_started) * 1000))
             return ToolMessage(content=canonical_json({'error':str(error),'authority':'TOOL_REFUSAL_NOT_FACT'}),tool_call_id=call['id'])
 
 async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None,
-                        runtime_grant_binding=None,worker_epoch=None):
+                        runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False):
     from opspilot.domain.execution_budget import begin_execution_interval,end_execution_interval
     from opspilot.web.worker import _heartbeat_budget
     run,_=domain.read_run(path,run_id,worker_id=worker_id)
@@ -2096,7 +2247,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
         return await _run_assistant(
             path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
             experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
-            worker_epoch=worker_epoch,
+            worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
         )
     remaining=begin_execution_interval(path,run['task_id'])
     stopped=asyncio.Event()
@@ -2107,7 +2258,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
             _run_assistant(
                 path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
                 experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
-                worker_epoch=worker_epoch,
+                worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
             ),min(60,remaining/1000),
         )
     except (asyncio.TimeoutError,TaskControlError) as error:
@@ -2328,6 +2479,7 @@ async def _prepare_assistant_context_impl(
             )
         if compression.get("error"):
             return compression
+        publish_assistant_activity(path, worker_id, run_id, "CONTEXT_COMPACTION")
         attempt_id = str(compression["attempt_id"])
         # Each compression attempt owns its own dispatch identity. Without this
         # reset, a second batch in the same Run would inherit the previous
@@ -2548,7 +2700,8 @@ async def _prepare_assistant_context_impl(
 
 
 async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,
-                         experiment_id=None,runtime_grant_binding=None,worker_epoch=None):
+                         experiment_id=None,runtime_grant_binding=None,worker_epoch=None,
+                         streaming_enabled=False):
     trace=trace or (lambda event,**values:None)
     run,actor=domain.read_run(path,run_id,worker_id=worker_id)
     if model is None:
@@ -2559,6 +2712,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
     with connect(path) as c:
         existing=c.execute('SELECT * FROM assistant_runs WHERE run_id=?',(run_id,)).fetchone()
         delivery=existing['delivery_attempt_id']
+    publish_assistant_activity(path, worker_id, run_id, "PREPARING_CONTEXT")
     if delivery:
         with connect(path) as c:
             c.execute("UPDATE chat_attempts SET status='STREAMING' WHERE attempt_id=? AND status='INTERRUPTED'",(delivery,))
@@ -2672,7 +2826,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         probe=Loop(
             path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
             reserved_tokens=base_reserved,runtime_grant_binding=runtime_grant_binding,
-            worker_epoch=worker_epoch,
+            worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
         )
         _,probe_payload=probe.context()
         reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(domain.source_context_for_model(probe_payload)))+4
@@ -2690,7 +2844,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         loop=Loop(
             path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
             reserved_tokens=reserved_tokens,runtime_grant_binding=runtime_grant_binding,
-            worker_epoch=worker_epoch,
+            worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
         )
         prepared,_=loop.context()
         initial,_,_=loop._fresh_context_prefix(prepared)
@@ -2716,6 +2870,9 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
                     if not _personal_memory_tool_calls_are_paired(answer['messages']):
                         raise TaskControlError('PERSONAL_MEMORY_CHECKPOINT_CALL_RESULT_UNPAIRED')
                 loop.context()  # commit-time source recheck as well as pre-dispatch.
+                if streaming_enabled:
+                    ensure_chat_stream_matches_answer(path, worker_id, delivery, text)
+                    publish_assistant_activity(path, worker_id, run_id, "SAVING_ANSWER")
                 usage=final.usage_metadata or {}
                 result=complete_chat_attempt(path,worker_id,delivery,text,provider_response_id=final.id,input_tokens=usage.get('input_tokens'),output_tokens=usage.get('output_tokens'),total_tokens=usage.get('total_tokens'))
                 personal_context_used = bool(

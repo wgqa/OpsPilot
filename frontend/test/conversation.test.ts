@@ -213,6 +213,21 @@ test('deduplicates replayed stable ids and renders only the active source run ch
   assert.deepEqual(projection.threads[0]?.items[0]?.chunks?.map((chunk) => chunk.body), ['hello', ' world']);
 });
 
+test('keeps persisted partial Provider text visibly incomplete after a terminal failure', () => {
+  const projection = projectConversation({
+    messages: [user('q-failed-stream', 1, '2026-01-01T00:00:00Z')],
+    activeChatRun: { run_id: 'chat-r-failed', task_id: 'task-a', source_message_id: 'q-failed-stream',
+      kind: 'CHAT_READONLY', status: 'FAILED', created_at: '2026-01-01T00:00:01Z' },
+    chunks: [{ chunk_id: 'chunk-partial', chunk_seq: 1, body: 'partial Provider draft', body_digest: 'd1',
+      created_at: '2026-01-01T00:00:02Z', attempt_id: 'attempt-1' }],
+  });
+
+  const draft = projection.threads[0]?.items.find((item) => item.kind === 'STREAM');
+  assert.ok(draft);
+  assert.deepEqual(draft.chunks?.map((chunk) => chunk.body), ['partial Provider draft']);
+  assert.equal(draft.run?.status, 'FAILED');
+});
+
 test('keeps waiting and failed outcomes visible without duplicating an ordinary Follow-up card', () => {
   const projection = projectConversation({
     messages: [

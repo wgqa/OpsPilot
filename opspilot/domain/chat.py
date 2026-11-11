@@ -2424,6 +2424,163 @@ def persist_chat_chunk(path: str | Path, worker_id: str, attempt_id: str, chunk_
         return {"chunk_id": chunk_id, "chunk_seq": global_chunk_seq, "body_digest": body_digest}
 
 
+_ASSISTANT_ACTIVITY_STAGES = {
+    "PREPARING_CONTEXT", "CONTEXT_COMPACTION", "MEMORY_SELECTED",
+    "MODEL_REQUESTING", "MODEL_RESPONSE_REPLAYING", "MODEL_STREAMING", "TOOL_RUNNING", "TOOL_COMPLETED",
+    "SAVING_ANSWER",
+}
+
+
+def publish_assistant_activity(
+    path: str | Path, worker_id: str, run_id: str, stage: str, *,
+    activity_status: str = "STARTED", tool_name: str | None = None,
+    duration_ms: int | None = None, memory_count: int | None = None,
+) -> None:
+    """Persist a safe, owner-scoped real execution stage through the existing Outbox."""
+    if stage not in _ASSISTANT_ACTIVITY_STAGES or activity_status not in {"STARTED", "SUCCEEDED", "FAILED"}:
+        raise TaskControlError("ASSISTANT_ACTIVITY_INVALID")
+    if tool_name is not None and (
+        not isinstance(tool_name, str) or not tool_name or len(tool_name) > 96
+        or any(not (char.isalnum() or char in "_.-") for char in tool_name)
+    ):
+        tool_name = "tool"
+    if duration_ms is not None:
+        duration_ms = max(0, min(int(duration_ms), 600_000))
+    if memory_count is not None:
+        memory_count = max(0, min(int(memory_count), 100))
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _check_worker_fence(connection, worker_id)
+        run = connection.execute(
+            "SELECT * FROM task_runs WHERE run_id=? AND kind='CHAT_READONLY' AND status='RUNNING'",
+            (run_id,),
+        ).fetchone()
+        registered = connection.execute(
+            "SELECT 1 FROM assistant_runs WHERE run_id=?", (run_id,),
+        ).fetchone()
+        if run is None or registered is None:
+            raise TaskControlError("ASSISTANT_RUN_NOT_ACTIVE")
+        payload: dict[str, Any] = {
+            "run_id": run_id, "stage": stage, "activity_status": activity_status,
+        }
+        if tool_name is not None:
+            payload["tool_name"] = tool_name
+        if duration_ms is not None:
+            payload["duration_ms"] = duration_ms
+        if memory_count is not None:
+            payload["memory_count"] = memory_count
+        write_outbox_event(
+            connection, tenant_id=str(run["tenant_id"]),
+            task_id=str(run["task_id"]) if run["task_id"] else None,
+            session_id=str(run["session_id"]), source_kind="RUN_ACTIVITY",
+            source_id=f"{run_id}:{uuid.uuid4()}", event_kind="ASSISTANT_ACTIVITY",
+            payload=payload,
+        )
+
+
+def reset_chat_stream_chunks(path: str | Path, worker_id: str, attempt_id: str) -> int:
+    """Mark an intermediate tool-call draft as superseded without rewriting history."""
+    with connect(path) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        _check_worker_fence(connection, worker_id)
+        attempt = connection.execute(
+            "SELECT * FROM chat_attempts WHERE attempt_id=? AND status='STREAMING'",
+            (attempt_id,),
+        ).fetchone()
+        if attempt is None:
+            raise TaskControlError("CHAT_ATTEMPT_NOT_ACTIVE")
+        last = connection.execute(
+            "SELECT payload_json FROM session_events WHERE run_id=? AND event_kind='CHAT_CHUNKS_RESET' "
+            "ORDER BY event_seq DESC LIMIT 1", (str(attempt["run_id"]),),
+        ).fetchone()
+        previous_reset = 0
+        if last is not None:
+            try:
+                previous_reset = int(json.loads(str(last["payload_json"])).get("reset_before_chunk_seq", 0))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                previous_reset = 0
+        max_chunk = int(connection.execute(
+            "SELECT COALESCE(MAX(chunk_seq),0) FROM chat_answer_chunks WHERE attempt_id=?",
+            (attempt_id,),
+        ).fetchone()[0])
+        if max_chunk <= previous_reset:
+            return previous_reset
+        write_outbox_event(
+            connection, tenant_id=str(attempt["tenant_id"]),
+            task_id=str(attempt["task_id"]) if attempt["task_id"] else None,
+            session_id=str(attempt["session_id"]), source_kind="CHAT_STREAM",
+            source_id=f"{attempt['run_id']}:{uuid.uuid4()}", event_kind="CHAT_CHUNKS_RESET",
+            payload={"run_id": str(attempt["run_id"]), "model_attempt_id": attempt_id,
+                     "reset_before_chunk_seq": max_chunk},
+        )
+        return max_chunk
+
+
+def ensure_chat_stream_matches_answer(
+    path: str | Path, worker_id: str, attempt_id: str, answer: str,
+) -> None:
+    """Repair only transient stream projection so it equals the committed answer."""
+    with connect(path) as connection:
+        attempt = connection.execute(
+            "SELECT run_id FROM chat_attempts WHERE attempt_id=? AND status='STREAMING'",
+            (attempt_id,),
+        ).fetchone()
+        if attempt is None:
+            raise TaskControlError("CHAT_ATTEMPT_NOT_ACTIVE")
+        reset_before = _latest_stream_reset_seq(connection, str(attempt["run_id"]))
+        rows = connection.execute(
+            "SELECT body FROM chat_answer_chunks WHERE attempt_id=? AND chunk_seq>? ORDER BY chunk_seq",
+            (attempt_id, reset_before),
+        ).fetchall()
+    streamed = "".join(str(row["body"]) for row in rows)
+    if streamed == answer:
+        return
+    if answer.startswith(streamed):
+        missing = answer[len(streamed):]
+        if missing:
+            persist_chat_chunk(path, worker_id, attempt_id, 0, missing)
+        return
+    reset_chat_stream_chunks(path, worker_id, attempt_id)
+    persist_chat_chunk(path, worker_id, attempt_id, 0, answer)
+
+
+def _latest_stream_reset_seq(connection: sqlite3.Connection, run_id: str) -> int:
+    row = connection.execute(
+        "SELECT payload_json FROM session_events WHERE run_id=? AND event_kind='CHAT_CHUNKS_RESET' "
+        "ORDER BY event_seq DESC LIMIT 1", (run_id,),
+    ).fetchone()
+    if row is None:
+        return 0
+    try:
+        return max(0, int(json.loads(str(row["payload_json"])).get("reset_before_chunk_seq", 0)))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return 0
+
+
+def list_run_activity(path: str | Path, identity: TrustedIdentity, run_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+    with connect(path) as connection:
+        _verify_identity(connection, identity)
+        run = connection.execute(
+            """SELECT r.session_id,r.tenant_id,r.task_id FROM task_runs r JOIN sessions s
+               ON s.session_id=r.session_id AND s.tenant_id=r.tenant_id
+               JOIN assistant_runs a ON a.run_id=r.run_id
+               WHERE r.run_id=? AND r.tenant_id=? AND r.kind='CHAT_READONLY' AND s.owner_id=?""",
+            (run_id, identity.tenant_id, identity.actor_id),
+        ).fetchone()
+        if run is None:
+            raise TaskControlError("TASK_RUN_SCOPE_DENIED")
+        _authorize_s3_chat_read(connection, identity, str(run["task_id"]) if run["task_id"] else None)
+        rows = connection.execute(
+            """SELECT event_seq,event_kind,happened_at,payload_json FROM session_events
+               WHERE run_id=? AND session_id=? AND tenant_id=? AND event_kind='ASSISTANT_ACTIVITY'
+               ORDER BY event_seq DESC LIMIT ?""",
+            (run_id, str(run["session_id"]), identity.tenant_id, max(1, min(int(limit), 200))),
+        ).fetchall()
+    return [{"event_seq": int(row["event_seq"]), "event_kind": str(row["event_kind"]),
+             "happened_at": str(row["happened_at"]), "payload": json.loads(str(row["payload_json"]))}
+            for row in reversed(rows)]
+
+
 def _record_provider_metadata(
     path: str | Path, worker_id: str, attempt_id: str, *, provider_response_id: str | None,
     input_tokens: int | None, output_tokens: int | None, total_tokens: int | None,
@@ -2763,11 +2920,13 @@ def get_chat_chunks(path: str | Path, identity: TrustedIdentity, run_id: str, *,
         if run is None:
             raise TaskControlError("TASK_RUN_SCOPE_DENIED")
         _authorize_s3_chat_read(connection, identity, str(run["task_id"]) if run["task_id"] else None)
+        reset_before = _latest_stream_reset_seq(connection, run_id)
         rows = connection.execute(
             """SELECT c.chunk_id, c.chunk_seq, c.body, c.body_digest, c.created_at, c.attempt_id
                FROM chat_answer_chunks c JOIN chat_attempts a ON a.attempt_id = c.attempt_id
-               WHERE a.run_id = ? AND c.chunk_seq > ? ORDER BY a.attempt_no, c.chunk_seq LIMIT ?""",
-            (run_id, max(0, after_seq), max(1, min(limit, 1000))),
+               WHERE a.run_id = ? AND c.chunk_seq > ? AND c.chunk_seq > ?
+               ORDER BY a.attempt_no, c.chunk_seq LIMIT ?""",
+            (run_id, max(0, after_seq), reset_before, max(1, min(limit, 1000))),
         ).fetchall()
     return [{key: row[key] for key in row.keys()} for row in rows]
 

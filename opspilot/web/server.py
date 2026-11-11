@@ -26,6 +26,7 @@ def main() -> int:
     app = create_app(
         expected_origin=expected_origin,
         assistant_model_factory=create_assistant_model,
+        assistant_streaming_enabled=True,
     )
     uvicorn.run(app, host=args.host, port=args.port, workers=1, reload=False, log_level="info")
     return 0

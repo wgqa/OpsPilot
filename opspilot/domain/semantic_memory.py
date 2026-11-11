@@ -34,6 +34,16 @@ PERSONAL_MEMORY_LIMIT = 3
 PERSONAL_MEMORY_PINNED_LIMIT = 3
 PERSONAL_MEMORY_PINNED_TOKEN_BUDGET = 250
 PERSONAL_MEMORY_MODES = {"PINNED", "RELEVANT"}
+_GLOBAL_LEARNING_WORKFLOW_CUE = re.compile(
+    r"(?is)(?:学习|学会|learning|studying).{0,45}(?:技术|新技术|新知识|technology|technical|new concepts?)?"
+    r".{0,70}(?:先|首先|优先|first|before).{0,35}(?:理解|掌握|分析|梳理|understand|learn)"
+    r".{0,35}(?:原理|机制|流程|执行过程|fundamentals?|principles?|mechanisms?|process|flow)"
+    r".{0,55}(?:再|然后|之后|before|then|after).{0,30}(?:代码|实现|coding|code|implementation)"
+)
+_LEARNING_WORKFLOW_QUERY_CUE = re.compile(
+    r"(?i)(?:学习|技术|代码|程序|算法|原理|机制|实现|系统|接口|协议|数据库|模型|框架|"
+    r"\b(?:api|http|python|java|typescript|javascript|langgraph|checkpoint|mcp|sql|code|software|programming)\b)"
+)
 _MEMORY_TOKEN = re.compile(r"[a-z0-9]{2,}|[\u4e00-\u9fff]+", re.IGNORECASE)
 _MEMORY_STOPWORDS = {
     "about", "also", "answer", "answers", "can", "could", "for", "from", "have",
@@ -1499,7 +1509,10 @@ def personal_memory_context(
     selected_pinned: list[dict[str, Any]] = []
     pinned_tokens = 0
     pinned_candidates = sorted(
-        (memory for memory in valid_active if str(memory.get("memory_mode", "RELEVANT")) == "PINNED"),
+        (memory for memory in valid_active
+         if (str(memory.get("memory_mode", "RELEVANT")) == "PINNED"
+             and not _is_global_learning_preference(memory))
+         or (_is_global_learning_preference(memory) and _learning_workflow_query_applies(query))),
         key=lambda memory: (
             1 if str(memory.get("creation_source") or "") in {"USER_EXPLICIT", "USER_CONFIRMED"} else 0,
             str(memory.get("created_at", "")), str(memory["memory_id"]),
@@ -1521,7 +1534,11 @@ def personal_memory_context(
         if pinned_tokens + estimate > max(0, min(pinned_token_budget, PERSONAL_MEMORY_PINNED_TOKEN_BUDGET)):
             excluded.append({"source_id": str(memory["memory_id"]), "reason": "PINNED_MEMORY_TOKEN_BUDGET", "category": "PERSONAL_MEMORY"})
             continue
-        memory["selection_reason"] = "PINNED_PERSONAL_PREFERENCE"
+        memory["selection_reason"] = (
+            "GLOBAL_LEARNING_PREFERENCE"
+            if str(memory.get("memory_mode", "RELEVANT")) != "PINNED"
+            else "PINNED_PERSONAL_PREFERENCE"
+        )
         memory["estimated_tokens"] = estimate
         selected_pinned.append(memory)
         pinned_tokens += estimate
@@ -1529,7 +1546,9 @@ def personal_memory_context(
     query_terms = _memory_terms(query)
     scored: list[tuple[float, dict[str, Any]]] = []
     for memory in valid_active:
-        if str(memory.get("memory_mode", "RELEVANT")) == "PINNED":
+        if str(memory.get("memory_mode", "RELEVANT")) == "PINNED" or _is_global_learning_preference(memory):
+            if _is_global_learning_preference(memory) and not _learning_workflow_query_applies(query):
+                excluded.append({"source_id": str(memory["memory_id"]), "reason": "NOT_RELEVANT_TO_QUERY", "category": "PERSONAL_MEMORY"})
             continue
         if exclude_source_message_id and str(memory["source_message_id"]) == exclude_source_message_id:
             excluded.append({"source_id": str(memory["memory_id"]), "reason": "PERSONAL_MEMORY_CREATED_IN_CURRENT_RUN", "category": "PERSONAL_MEMORY"})
@@ -1561,6 +1580,18 @@ def personal_memory_context(
         if str(item["memory_id"]) not in selected_ids:
             excluded.append({"source_id": str(item["memory_id"]), "reason": "PERSONAL_MEMORY_SELECTION_LIMIT", "category": "PERSONAL_MEMORY"})
     return selected, excluded, valid_active
+
+
+def _is_global_learning_preference(memory: dict[str, Any]) -> bool:
+    """Recognize only the tested cross-topic principle/process-before-code preference."""
+    if str(memory.get("memory_kind", "")).upper() not in {"PREFERENCE", "WORK_HABIT"}:
+        return False
+    text = str(memory.get("memory_key", "")) + " " + str(memory.get("content", ""))
+    return bool(_GLOBAL_LEARNING_WORKFLOW_CUE.search(text))
+
+
+def _learning_workflow_query_applies(query: str) -> bool:
+    return bool(_LEARNING_WORKFLOW_QUERY_CUE.search(query))
 
 
 def assert_selected_personal_memories_current_in_connection(

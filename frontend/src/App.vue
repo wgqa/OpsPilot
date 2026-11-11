@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type ChatRunContext, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PersonalMemoryRecord, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type ChatRunContext, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PersonalMemoryRecord, type PersonalMemorySettings, type PlanReview, type RunActivity, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
 import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
@@ -36,6 +36,8 @@ const personalMemoryRecallEnabled = ref(true);
 const personalMemoryAutoLearnEnabled = ref(false);
 const personalMemoryAutoLearnAvailable = ref(false);
 const personalMemoryConsolidationStatus = ref<Record<string, number>>({});
+const personalMemoryLatestJob = ref<PersonalMemorySettings['consolidation_latest_job']>(null);
+const personalMemoryAutoLearnProgress = ref('');
 const personalMemorySettingsReady = ref(false);
 const personalMemorySettingsSaving = ref(false);
 const personalMemorySettingsError = ref('');
@@ -77,16 +79,26 @@ const notice = ref('');
 const activeChatRun = ref<RunItem | null>(null);
 const chunks = ref<ChatChunk[]>([]);
 const lastChunkSeq = ref(0);
+const chatActivities = ref<RunActivity[]>([]);
+const activeChatActivities = computed(() => chatActivities.value.filter(
+  (item) => item.payload.run_id === activeChatRun.value?.run_id,
+));
 const reconnectCount = ref(0);
 const reconnectPaused = ref(false);
 const narrowInspectorOpen = ref(false);
-const conversationEnd = ref<HTMLElement | null>(null);
 const conversationScroll = ref<HTMLElement | null>(null);
+const conversationPinned = ref(true);
 let olderScrollPosition: { top: number; height: number } | null = null;
 
 let eventSource: EventSource | null = null;
 let reconnectTimer: number | undefined;
 let runPollTimer: number | undefined;
+let finishRunPoll: (() => void) | null = null;
+let runPollGeneration = 0;
+let memoryStatusPollTimer: number | undefined;
+let memoryStatusPollPending = false;
+let chunkProjectionGeneration = 0;
+let loadingChunksTicket = 0;
 let loadingChunksRunId: string | null = null;
 let assistantScopeGeneration = 0;
 let personalMemoryGeneration = 0;
@@ -247,12 +259,17 @@ async function logout(): Promise<void> {
     errorMessage.value = explainError(error);
   }
   stopEvents();
+  stopRunPolling();
+  stopPersonalMemoryStatusPolling();
   user.value = null;
   csrf.value = '';
   sessionStorage.removeItem('opspilot.csrf');
   sessions.value = [];
   sessionId.value = '';
   messages.value = [];
+  chunks.value = [];
+  chatActivities.value = [];
+  lastChunkSeq.value = 0;
   inspector.value = null;
   taskOutcome.value = null;
   s3HandoffOutcome.value = null;
@@ -271,6 +288,8 @@ async function logout(): Promise<void> {
   personalMemoryAutoLearnEnabled.value = false;
   personalMemoryAutoLearnAvailable.value = false;
   personalMemoryConsolidationStatus.value = {};
+  personalMemoryLatestJob.value = null;
+  personalMemoryAutoLearnProgress.value = '';
   personalMemorySettingsReady.value = false;
   personalMemorySettingsSaving.value = false;
   personalMemorySettingsError.value = '';
@@ -408,13 +427,56 @@ async function loadPersonalMemorySettings(): Promise<void> {
     personalMemoryAutoLearnEnabled.value = setting.auto_learn_enabled;
     personalMemoryAutoLearnAvailable.value = setting.auto_learn_available;
     personalMemoryConsolidationStatus.value = setting.consolidation_status ?? {};
+    personalMemoryLatestJob.value = setting.consolidation_latest_job ?? null;
     personalMemorySettingsReady.value = true;
+    ensurePersonalMemoryStatusPolling();
   } catch {
     if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
       && user.value?.tenant_id === identity.tenant_id) {
       personalMemorySettingsError.value = '当前无法读取个人记忆设置；本轮不会把未确认状态显示为已生效。';
     }
   }
+}
+
+async function refreshPersonalMemoryProgress(): Promise<void> {
+  const identity = user.value;
+  if (!identity || identity.role !== 'SUPPORT' || memoryStatusPollPending || personalMemorySettingsSaving.value) return;
+  memoryStatusPollPending = true;
+  const generation = personalMemorySettingsGeneration;
+  try {
+    const setting = await api.personalMemorySettings();
+    if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemoryConsolidationStatus.value = setting.consolidation_status ?? {};
+    personalMemoryLatestJob.value = setting.consolidation_latest_job ?? null;
+    personalMemoryAutoLearnAvailable.value = setting.auto_learn_available;
+    personalMemoryAutoLearnProgress.value = '';
+  } catch {
+    if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
+      && user.value?.tenant_id === identity.tenant_id) {
+      personalMemoryAutoLearnProgress.value = '后台整理状态暂时无法读取';
+    }
+  } finally {
+    memoryStatusPollPending = false;
+  }
+}
+
+function ensurePersonalMemoryStatusPolling(): void {
+  if (!user.value || user.value.role !== 'SUPPORT' || !personalMemorySettingsReady.value
+    || !personalMemoryAutoLearnEnabled.value || !personalMemoryAutoLearnAvailable.value) {
+    stopPersonalMemoryStatusPolling();
+    return;
+  }
+  if (memoryStatusPollTimer === undefined) {
+    void refreshPersonalMemoryProgress();
+    memoryStatusPollTimer = window.setInterval(() => void refreshPersonalMemoryProgress(), 2500);
+  }
+}
+
+function stopPersonalMemoryStatusPolling(): void {
+  if (memoryStatusPollTimer !== undefined) window.clearInterval(memoryStatusPollTimer);
+  memoryStatusPollTimer = undefined;
+  memoryStatusPollPending = false;
 }
 
 async function updatePersonalMemorySetting(event: Event, settingName: 'recall' | 'auto-learn'): Promise<void> {
@@ -443,6 +505,8 @@ async function updatePersonalMemorySetting(event: Event, settingName: 'recall' |
     personalMemoryAutoLearnEnabled.value = setting.auto_learn_enabled;
     personalMemoryAutoLearnAvailable.value = setting.auto_learn_available;
     personalMemoryConsolidationStatus.value = setting.consolidation_status ?? {};
+    personalMemoryLatestJob.value = setting.consolidation_latest_job ?? null;
+    ensurePersonalMemoryStatusPolling();
     notice.value = settingName === 'auto-learn'
       ? setting.auto_learn_enabled
         ? '自动学习已开启；后台按批次调用一次模型，费用受 Runtime Grant 约束。'
@@ -607,9 +671,24 @@ function personalMemoryAutoLearnStatusText(): string {
   const completed = personalMemoryConsolidationStatus.value.SUCCEEDED ?? 0;
   const failed = (personalMemoryConsolidationStatus.value.FAILED ?? 0)
     + (personalMemoryConsolidationStatus.value.UNKNOWN ?? 0);
-  const pending = (personalMemoryConsolidationStatus.value.PENDING ?? 0)
-    + (personalMemoryConsolidationStatus.value.RUNNING ?? 0);
-  return `已完成 ${completed} 批 · 失败或结果未知 ${failed} 批 · 等待处理 ${pending} 批。`;
+  const queued = personalMemoryConsolidationStatus.value.PENDING ?? 0;
+  const running = personalMemoryConsolidationStatus.value.RUNNING ?? 0;
+  const latest = personalMemoryLatestJob.value;
+  if (personalMemoryAutoLearnProgress.value) return `${personalMemoryAutoLearnProgress.value}；已完成 ${completed} 批。`;
+  if (latest?.status === 'RUNNING') return `正在整理本批聊天 · 已新增 ${latest.written_count} 条记忆。`;
+  if (latest?.status === 'PENDING') return `自动整理已排队 · 等待 Worker 处理。`;
+  if (latest?.status === 'SUCCEEDED') {
+    return latest.written_count > 0
+      ? `最近一批新增 ${latest.written_count} 条记忆 · 跳过 ${latest.duplicate_count} 条重复项。`
+      : `最近一批没有新增记忆 · 跳过 ${latest.duplicate_count} 条重复项。`;
+  }
+  if (latest?.status === 'FAILED' || latest?.status === 'UNKNOWN') {
+    return `最近一批整理${latest.status === 'FAILED' ? '失败' : '结果未知'}${latest.failure_code ? ` · ${latest.failure_code}` : ''}。`;
+  }
+  if (running > 0) return `后台正在整理 ${running} 批 · 已完成 ${completed} 批 · 失败或结果未知 ${failed} 批。`;
+  if (queued > 0) return `自动整理已排队 ${queued} 批 · 已完成 ${completed} 批 · 失败或结果未知 ${failed} 批。`;
+  if (completed === 0 && failed === 0) return '等待累计至少 6 条成功的普通聊天消息后自动整理。';
+  return `已完成 ${completed} 批 · 失败或结果未知 ${failed} 批 · 等待新一批成功聊天。`;
 }
 
 function adjustPersonalMemoryModeForKind(): void {
@@ -738,6 +817,10 @@ async function createSession(): Promise<void> {
 }
 
 async function selectSession(value: string): Promise<void> {
+  stopRunPolling();
+  chunkProjectionGeneration += 1;
+  loadingChunksTicket += 1;
+  loadingChunksRunId = null;
   sessionId.value = value;
   rememberSelectedSession(value);
   olderScrollPosition = null;
@@ -758,7 +841,11 @@ async function selectSession(value: string): Promise<void> {
   taskOutcome.value = null;
   s3HandoffOutcome.value = null;
   sessionEvents.value = [];
+  seenEventSeq = new Set<number>();
   chunks.value = [];
+  lastChunkSeq.value = 0;
+  chatActivities.value = [];
+  conversationPinned.value = true;
   activeChatRun.value = null;
   errorMessage.value = '';
   assistantScopes.value = { items: [], selected_project: null };
@@ -943,13 +1030,21 @@ async function refreshSession(): Promise<void> {
     const latestChat = chatRuns.at(-1) ?? null;
     const recoverable = [...chatRuns].reverse().find((run) => ['QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE'].includes(run.status));
     activeChatRun.value = recoverable ?? latestChat;
+    if (activeChatRun.value) void refreshRunActivity(activeChatRun.value.run_id, requestedSessionId);
     if (recoverable) {
+      const chunkGeneration = ++chunkProjectionGeneration;
       chunks.value = await api.chunks(recoverable.run_id, 0).then((result) => result.items);
-      if (!isCurrentSession()) return;
+      if (!isCurrentSession() || chunkGeneration !== chunkProjectionGeneration) return;
       lastChunkSeq.value = chunks.value.reduce((max, item) => Math.max(max, item.chunk_seq), 0);
       void watchRun(recoverable.run_id);
-    } else if (latestChat && ['FAILED', 'BLOCKED'].includes(latestChat.status)) {
-      errorMessage.value = `上次只读回答结束：${readableStatus(latestChat.status)}${latestChat.waiting_reason ? `（${latestChat.waiting_reason}）` : ''}`;
+    } else if (latestChat) {
+      const chunkGeneration = ++chunkProjectionGeneration;
+      chunks.value = await api.chunks(latestChat.run_id, 0).then((result) => result.items);
+      if (!isCurrentSession() || chunkGeneration !== chunkProjectionGeneration) return;
+      lastChunkSeq.value = chunks.value.reduce((max, item) => Math.max(max, item.chunk_seq), 0);
+      if (['FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE'].includes(latestChat.status)) {
+        errorMessage.value = `上次只读回答结束：${readableStatus(latestChat.status)}${latestChat.waiting_reason ? `（${latestChat.waiting_reason}）` : ''}`;
+      }
     }
     if (!linkedTask) {
       linkedTask = [...linkedTasks.tasks].reverse().find((item) => item.task_id)?.task_id ?? null;
@@ -1733,9 +1828,14 @@ async function loadOlderMessages(): Promise<void> {
 async function loadChunks(runId: string): Promise<void> {
   if (loadingChunksRunId === runId) return;
   loadingChunksRunId = runId;
+  const requestTicket = ++loadingChunksTicket;
+  const generation = chunkProjectionGeneration;
+  const requestedSession = sessionId.value;
+  const afterSeq = lastChunkSeq.value;
   try {
-    const response = await api.chunks(runId, lastChunkSeq.value);
-    if (activeChatRun.value?.run_id !== runId || response.items.length === 0) return;
+    const response = await api.chunks(runId, afterSeq);
+    if (sessionId.value !== requestedSession || chunkProjectionGeneration !== generation
+      || activeChatRun.value?.run_id !== runId || response.items.length === 0) return;
     const merged = new Map(chunks.value.map((chunk) => [chunk.chunk_seq, chunk]));
     for (const chunk of response.items) {
       if (!merged.has(chunk.chunk_seq)) merged.set(chunk.chunk_seq, chunk);
@@ -1743,40 +1843,70 @@ async function loadChunks(runId: string): Promise<void> {
     chunks.value = [...merged.values()].sort((left, right) => left.chunk_seq - right.chunk_seq);
     lastChunkSeq.value = Math.max(lastChunkSeq.value, ...response.items.map((item) => item.chunk_seq));
   } finally {
-    if (loadingChunksRunId === runId) loadingChunksRunId = null;
+    if (loadingChunksTicket === requestTicket && loadingChunksRunId === runId) loadingChunksRunId = null;
   }
 }
 
-async function watchRun(runId: string): Promise<void> {
+async function refreshRunActivity(runId: string, requestedSession = sessionId.value): Promise<void> {
+  try {
+    const response = await api.runActivity(runId);
+    if (sessionId.value !== requestedSession || activeChatRun.value?.run_id !== runId) return;
+    const merged = new Map(chatActivities.value.map((item) => [item.event_seq, item]));
+    for (const item of response.items) merged.set(item.event_seq, item);
+    chatActivities.value = [...merged.values()].sort((left, right) => left.event_seq - right.event_seq);
+  } catch {
+    // Persisted Session events remain available if this run-scoped read fails.
+  }
+}
+
+function stopRunPolling(): void {
+  runPollGeneration += 1;
   if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
+  runPollTimer = undefined;
+  const finish = finishRunPoll;
+  finishRunPoll = null;
+  finish?.();
+}
+
+async function watchRun(runId: string): Promise<void> {
+  stopRunPolling();
+  const requestedSession = sessionId.value;
+  const pollGeneration = ++runPollGeneration;
   let polls = 0;
   await new Promise<void>((resolve) => {
+    finishRunPoll = resolve;
     runPollTimer = window.setInterval(async () => {
+      if (runPollGeneration !== pollGeneration) return;
       polls += 1;
       try {
         const run = await api.run(runId);
+        if (runPollGeneration !== pollGeneration) return;
+        if (sessionId.value !== requestedSession || run.session_id !== requestedSession) {
+          stopRunPolling();
+          return;
+        }
         if (run.kind === 'CHAT_READONLY') activeChatRun.value = run;
-        if (run.kind === 'CHAT_READONLY') await loadChunks(runId);
-        if (['SUCCEEDED', 'FAILED', 'BLOCKED', 'WAITING_APPROVAL', 'WAITING_INPUT'].includes(run.status) || polls >= 240) {
-          if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
-          runPollTimer = undefined;
+        if (run.kind === 'CHAT_READONLY') {
+          await Promise.all([loadChunks(runId), refreshRunActivity(runId, requestedSession)]);
+        }
+        if (runPollGeneration !== pollGeneration) return;
+        if (['SUCCEEDED', 'FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE', 'WAITING_APPROVAL', 'WAITING_INPUT'].includes(run.status) || polls >= 240) {
+          stopRunPolling();
           await refreshSessionMessagesOnly();
           if (run.kind === 'CHAT_READONLY') await refreshLatestChatContext(sessionId.value, runId);
           if (run.task_id) {
             taskId.value = run.task_id;
             await refreshInspector();
           }
-          if (run.status === 'FAILED' || run.status === 'BLOCKED') {
+          if (run.status === 'FAILED' || run.status === 'BLOCKED' || run.status === 'CANCELLED' || run.status === 'INTERRUPTED_RECOVERABLE') {
             if (notice.value.startsWith('正在提交关键更正；')) notice.value = '';
             errorMessage.value = terminalRunMessage(run);
           }
           resolve();
         }
       } catch (error) {
-        if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
-        runPollTimer = undefined;
-        errorMessage.value = explainError(error);
-        resolve();
+        if (sessionId.value === requestedSession) errorMessage.value = explainError(error);
+        stopRunPolling();
       }
     }, 500);
   });
@@ -1784,19 +1914,35 @@ async function watchRun(runId: string): Promise<void> {
 
 async function refreshEventHistory(): Promise<void> {
   if (!sessionId.value) return;
-  const key = `opspilot.cursor.${sessionId.value}`;
+  const requestedSession = sessionId.value;
+  const key = `opspilot.cursor.${requestedSession}`;
   const cursor = Number(sessionStorage.getItem(key) ?? '0');
-  const response = await api.eventHistory(sessionId.value, Number.isFinite(cursor) ? cursor : 0);
-  for (const item of response.items) acceptEvent(item as unknown as EventItem);
+  const response = await api.eventHistory(requestedSession, Number.isFinite(cursor) ? cursor : 0);
+  if (sessionId.value !== requestedSession) return;
+  for (const item of response.items) acceptEvent(item as unknown as EventItem, requestedSession);
 }
 
-function acceptEvent(item: EventItem): void {
+function acceptEvent(item: EventItem, requestedSession = sessionId.value): void {
+  if (!requestedSession || sessionId.value !== requestedSession) return;
   if (seenEventSeq.has(item.event_seq)) return;
   seenEventSeq.add(item.event_seq);
   sessionEvents.value.unshift(item);
   sessionEvents.value = sessionEvents.value.slice(0, 60);
   if (sessionId.value) sessionStorage.setItem(`opspilot.cursor.${sessionId.value}`, String(item.event_seq));
   const runId = String(item.payload.run_id ?? '');
+  if (item.event_kind === 'ASSISTANT_ACTIVITY' && runId === activeChatRun.value?.run_id) {
+    const activity = item as unknown as RunActivity;
+    if (!chatActivities.value.some((entry) => entry.event_seq === item.event_seq)) {
+      chatActivities.value = [...chatActivities.value, activity].slice(-100);
+    }
+  }
+  if (item.event_kind === 'CHAT_CHUNKS_RESET' && runId === activeChatRun.value?.run_id) {
+    chunkProjectionGeneration += 1;
+    loadingChunksTicket += 1;
+    loadingChunksRunId = null;
+    chunks.value = [];
+    lastChunkSeq.value = Number(item.payload.reset_before_chunk_seq ?? 0);
+  }
   if (item.event_kind === 'CHAT_ANSWER_COMMITTED' && runId === activeChatRun.value?.run_id) {
     void refreshLatestChatContext(sessionId.value, runId);
   }
@@ -1813,17 +1959,22 @@ function acceptEvent(item: EventItem): void {
 
 function connectEvents(): void {
   if (!sessionId.value || reconnectPaused.value || eventSource) return;
-  const cursor = sessionStorage.getItem(`opspilot.cursor.${sessionId.value}`) ?? '0';
-  const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId.value)}/events?after=${encodeURIComponent(cursor)}`);
+  const requestedSession = sessionId.value;
+  const cursor = sessionStorage.getItem(`opspilot.cursor.${requestedSession}`) ?? '0';
+  const source = new EventSource(`/api/sessions/${encodeURIComponent(requestedSession)}/events?after=${encodeURIComponent(cursor)}`);
   eventSource = source;
-  source.onopen = () => { reconnectCount.value = 0; notice.value = ''; };
+  source.onopen = () => {
+    if (sessionId.value !== requestedSession || eventSource !== source) return;
+    reconnectCount.value = 0; notice.value = '';
+  };
   const listener = (event: Event): void => {
+    if (sessionId.value !== requestedSession || eventSource !== source) return;
     const message = event as MessageEvent<string>;
     const sequence = Number(message.lastEventId);
     if (!Number.isFinite(sequence) || sequence <= 0 || seenEventSeq.has(sequence)) return;
     try {
       acceptEvent({ event_seq: sequence, event_kind: message.type, happened_at: new Date().toISOString(),
-                    payload: JSON.parse(message.data) as Record<string, unknown> });
+                    payload: JSON.parse(message.data) as Record<string, unknown> }, requestedSession);
     } catch {
       errorMessage.value = '收到无法解析的事件，已保留持久历史供刷新恢复。';
     }
@@ -1832,12 +1983,14 @@ function connectEvents(): void {
     'SESSION_CREATED', 'MESSAGE_ACCEPTED', 'TASK_CREATED', 'RUN_STATUS_QUEUED', 'RUN_STATUS_RUNNING',
     'RUN_STATUS_SUCCEEDED', 'RUN_STATUS_FAILED', 'RUN_STATUS_BLOCKED', 'RUN_STATUS_WAITING_APPROVAL',
     'RUN_STATUS_WAITING_INPUT', 'RUN_STATUS_INTERRUPTED_RECOVERABLE', 'CHAT_CHUNK_AVAILABLE',
+    'ASSISTANT_ACTIVITY', 'CHAT_CHUNKS_RESET',
     'CHAT_ANSWER_COMMITTED', 'CHAT_ATTEMPT_FAILED', 'RUN_RETRY_INTERRUPTED_RECOVERABLE', 'RUN_RETRY_BLOCKED',
     'PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED',
     'REPORT_FROZEN', 'DELIVERY_COMMITTED', 'S3_DIAGNOSIS_FROZEN',
     'CHAT_ROUTE_RESOLVED',
   ]) source.addEventListener(name, listener);
   source.onerror = () => {
+    if (sessionId.value !== requestedSession || eventSource !== source) return;
     source.close();
     if (eventSource === source) eventSource = null;
     reconnectCount.value += 1;
@@ -1864,6 +2017,26 @@ function stopEvents(): void {
   reconnectTimer = undefined;
 }
 
+function updateConversationPinned(): void {
+  const element = conversationScroll.value;
+  conversationPinned.value = !element
+    || element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+}
+
+function activityLabel(item: RunActivity): string {
+  const stage = item.payload.stage;
+  const tool = item.payload.tool_name ? ` · ${item.payload.tool_name}` : '';
+  const duration = typeof item.payload.duration_ms === 'number' ? ` · ${item.payload.duration_ms} ms` : '';
+  const labels: Record<string, string> = {
+    PREPARING_CONTEXT: '正在准备上下文', CONTEXT_COMPACTION: '正在压缩历史上下文',
+    MEMORY_SELECTED: `已选择 ${item.payload.memory_count ?? 0} 条有效个人记忆`,
+    MODEL_REQUESTING: '正在请求模型', MODEL_RESPONSE_REPLAYING: '正在恢复已持久化的模型响应', MODEL_STREAMING: '模型正在生成',
+    TOOL_RUNNING: `正在执行工具${tool}`, TOOL_COMPLETED: `${item.payload.activity_status === 'SUCCEEDED' ? '工具已返回' : '工具执行失败'}${tool}${duration}`,
+    SAVING_ANSWER: '正在保存最终回答',
+  };
+  return labels[stage] ?? stage;
+}
+
 function submitOnEnter(event: KeyboardEvent): void {
   if (!event.shiftKey) {
     event.preventDefault();
@@ -1883,12 +2056,16 @@ watch([messages, chunks], async () => {
     olderScrollPosition = null;
     return;
   }
-  conversationEnd.value?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  if (!conversationPinned.value) return;
+  await nextTick();
+  if (!conversationPinned.value || !conversationScroll.value) return;
+  conversationScroll.value.scrollTop = conversationScroll.value.scrollHeight;
 }, { flush: 'post' });
 onMounted(() => { void restoreLogin(); });
 onBeforeUnmount(() => {
   stopEvents();
-  if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
+  stopRunPolling();
+  stopPersonalMemoryStatusPolling();
 });
 </script>
 
@@ -2123,7 +2300,7 @@ onBeforeUnmount(() => {
           <div class="task-input-actions"><span>输入会以未验证用户来源加入 Investigator 上下文。</span><button class="primary-button" type="submit" :disabled="!initialSymptom.trim() || busy || !csrf || (investigationKind === 'ASYNC_CALLBACK' && !selectedS3OrderId) || (investigationKind === 'AUTH_INCIDENT' && !s1DemoResource)">{{ investigationKind === 'ASYNC_CALLBACK' ? '确认订单并启动调查' : '确认并启动调查' }} <span>→</span></button></div>
         </form>
 
-        <div ref="conversationScroll" class="conversation-scroll" data-testid="conversation" aria-live="polite">
+        <div ref="conversationScroll" class="conversation-scroll" data-testid="conversation" aria-live="polite" @scroll="updateConversationPinned">
           <div v-if="sessionId && hasOlderMessages" class="history-pagination">
             <button class="text-button" type="button" :disabled="loadingOlderMessages || loading || revalidatingSessionMessages" @click="loadOlderMessages">
               {{ loadingOlderMessages ? '正在加载…' : `加载更早消息（已显示 ${messages.length} 条）` }}
@@ -2220,8 +2397,8 @@ onBeforeUnmount(() => {
                 <details class="followup-sources"><summary>查看运行详情</summary><small>Run {{ item.run.run_id }} · {{ dateLabel(item.run.started_at ?? item.run.created_at) }} · 来源问题 {{ thread.anchor.message_id }}<template v-if="item.run.blocked_reason || item.run.waiting_reason"> · 原因代码 {{ item.run.blocked_reason ?? item.run.waiting_reason }}</template></small></details>
               </article>
               <div v-else-if="item.kind === 'STREAM' && item.run" class="streaming-row" data-testid="live-stream" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
-                <div class="message-avatar assistant-avatar">✳</div><div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label"><i></i>正在生成 · 暂存片段</span></div>
-                  <div class="stream-bubble" data-testid="stream-chunk"><div class="markdown-body" v-html="renderAssistantMarkdown((item.chunks ?? []).map((chunk) => chunk.body).join(''))"></div><span class="typing-cursor"></span></div>
+                <div class="message-avatar assistant-avatar">✳</div><div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label" :class="{ 'streaming-label-incomplete': item.run.status !== 'RUNNING' }"><i v-if="item.run.status === 'RUNNING'"></i>{{ item.run.status === 'RUNNING' ? '正在生成 · 暂存片段' : `未完成草稿 · ${readableStatus(item.run.status)}` }}</span></div>
+                  <div class="stream-bubble" :data-testid="item.run.status === 'RUNNING' ? 'stream-chunk' : 'incomplete-stream-draft'"><div class="markdown-body" v-html="renderAssistantMarkdown((item.chunks ?? []).map((chunk) => chunk.body).join(''))"></div><span v-if="item.run.status === 'RUNNING'" class="typing-cursor"></span></div>
                 </div>
               </div>
             </template>
@@ -2233,6 +2410,14 @@ onBeforeUnmount(() => {
               <details><summary>查看调查来源和运行详情</summary><p>Task {{ taskId }} · Run {{ latestBusinessRun?.run_id ?? '尚未读取' }} · 当前 Evidence {{ inspector.evidence.length }} 条。</p><div v-for="evidence in inspector.evidence" :key="String(evidence.evidence_id)"><small>{{ String(evidence.fact_type) }} · {{ String(evidence.evidence_id) }} · {{ dateLabel(String(evidence.fetched_at)) }}</small></div></details>
             </article>
           </section>
+          <details v-if="activeChatRun && activeChatActivities.length" class="assistant-run-activity" data-testid="assistant-run-activity">
+            <summary>本轮实际执行步骤 · {{ readableStatus(activeChatRun.status) }}</summary>
+            <ol>
+              <li v-for="item in activeChatActivities" :key="item.event_seq" :class="statusTone(item.payload.activity_status)">
+                <span>{{ activityLabel(item) }}</span><time>{{ dateLabel(item.happened_at) }}</time>
+              </li>
+            </ol>
+          </details>
           <section v-if="conversationProjection.unassociatedItems.length" class="unassociated-results" data-testid="unassociated-results">
             <h3>未能关联到已加载问题的记录</h3><p>系统保留这些持久记录，但没有根据相邻消息猜测归属。</p>
             <article v-for="item in conversationProjection.unassociatedItems" :key="item.id" class="readonly-followup-card" :data-record-id="item.id">
@@ -2243,7 +2428,6 @@ onBeforeUnmount(() => {
               <details v-if="item.run || item.runId || item.answer" class="followup-sources"><summary>查看未关联记录详情</summary><small v-if="item.run || item.runId">Run {{ item.run?.run_id ?? item.runId }} · {{ readableStatus(item.run?.status ?? item.kind) }} · {{ readableRunReason(item.run?.blocked_reason ?? item.run?.waiting_reason ?? '来源问题暂不可见') }}</small><small v-if="item.answer">来源 {{ item.answer.source_message_id }} · Run {{ item.answer.run_id }}</small></details>
             </article>
           </section>
-          <div ref="conversationEnd"></div>
         </div>
 
         <div class="composer-wrap">

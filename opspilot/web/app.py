@@ -159,6 +159,7 @@ def create_app(
     assistant_model_factory=None,
     assistant_experiment_id: str | None = None,
     assistant_runtime_enabled: bool | None = None,
+    assistant_streaming_enabled: bool = False,
 ) -> FastAPI:
     from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
 
@@ -236,6 +237,7 @@ def create_app(
                     assistant_model_factory=assistant_model_factory,
                     assistant_experiment_id=resolved_experiment,
                     assistant_runtime_enabled=resolved_runtime_enabled,
+                    assistant_streaming_enabled=assistant_streaming_enabled,
                 ),
                 name="opspilot-domain-run-worker",
             )
@@ -266,6 +268,7 @@ def create_app(
     app.state.worker_configured = bool(start_worker)
     app.state.assistant_experiment_id = resolved_experiment
     app.state.assistant_runtime_enabled = resolved_runtime_enabled
+    app.state.assistant_streaming_enabled = assistant_streaming_enabled
     app.state.assistant_model_factory = assistant_model_factory
     app.state.worker_task = None
     app.state.worker_id = None
@@ -680,6 +683,12 @@ def create_app(
 
         return {"items": get_chat_chunks(resolved_db, context.identity, run_id, after_seq=after_seq, limit=limit),
                 "after_seq": after_seq}
+
+    @app.get("/api/runs/{run_id}/activity")
+    async def get_run_activity(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+        from opspilot.domain.chat import list_run_activity
+
+        return {"items": list_run_activity(resolved_db, context.identity, run_id)}
 
     @app.get("/api/runs/{run_id}/context")
     async def get_run_context(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
@@ -1160,9 +1169,11 @@ def create_app(
                 resolved_db, context.identity.tenant_id, context.identity.actor_id,
             )
             settings["auto_learn_available"] = personal_memory_auto_learn_available()
-            settings["consolidation_status"] = personal_memory_consolidation_status(
+            consolidation = personal_memory_consolidation_status(
                 resolved_db, context.identity.tenant_id, context.identity.actor_id,
-            )["statuses"]
+            )
+            settings["consolidation_status"] = consolidation["statuses"]
+            settings["consolidation_latest_job"] = consolidation["latest_job"]
             return settings
         except MemoryScopeDenied as error:
             raise TaskControlError("MEMORY_SCOPE_DENIED") from error
@@ -1185,9 +1196,11 @@ def create_app(
             settings["auto_learn_available"] = personal_memory_auto_learn_available()
             from opspilot.domain.personal_memory_consolidation import personal_memory_consolidation_status
 
-            settings["consolidation_status"] = personal_memory_consolidation_status(
+            consolidation = personal_memory_consolidation_status(
                 resolved_db, context.identity.tenant_id, context.identity.actor_id,
-            )["statuses"]
+            )
+            settings["consolidation_status"] = consolidation["statuses"]
+            settings["consolidation_latest_job"] = consolidation["latest_job"]
             return settings
         except MemoryScopeDenied as error:
             raise TaskControlError("MEMORY_SCOPE_DENIED") from error

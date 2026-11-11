@@ -1236,8 +1236,15 @@ def validate_http_request(request_url: str, method: str, body: bytes, binding: d
         raise RuntimeGrantError("RUNTIME_PROVIDER_REQUEST_OUTPUT_BOUND_INVALID")
     if parsed.get("thinking") != {"type": "disabled"}:
         raise RuntimeGrantError("RUNTIME_PROVIDER_REQUEST_MODE_MISMATCH")
-    if parsed.get("stream", False) is not False:
-        raise RuntimeGrantError("RUNTIME_PROVIDER_STREAMING_NOT_ALLOWED")
+    stream = parsed.get("stream", False)
+    if type(stream) is not bool:
+        raise RuntimeGrantError("RUNTIME_PROVIDER_STREAM_MODE_INVALID")
+    if stream:
+        stream_options = parsed.get("stream_options")
+        if not isinstance(stream_options, dict) or stream_options.get("include_usage") is not True:
+            raise RuntimeGrantError("RUNTIME_PROVIDER_STREAM_USAGE_REQUIRED")
+    elif parsed.get("stream_options") is not None:
+        raise RuntimeGrantError("RUNTIME_PROVIDER_STREAM_OPTIONS_WITHOUT_STREAM")
     if tools:
         if parsed.get("parallel_tool_calls", False) is not False:
             raise RuntimeGrantError("RUNTIME_PROVIDER_PARALLEL_TOOLS_NOT_ALLOWED")
