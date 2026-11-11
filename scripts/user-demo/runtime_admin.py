@@ -275,6 +275,12 @@ def preflight(path: str | Path, values: dict[str, str]) -> dict[str, object]:
             used = _effective_spend(connection)
             total = int(pool["total_limit_usd_micro"])
             remaining = max(0, total - used)
+            provider_sends = int(connection.execute(
+                "SELECT COUNT(*) FROM assistant_runtime_spends WHERE send_granted_at IS NOT NULL"
+            ).fetchone()[0])
+            unknown_requests = int(connection.execute(
+                "SELECT COUNT(*) FROM assistant_runtime_spends WHERE status='UNKNOWN'"
+            ).fetchone()[0])
             reserve = _cost_micro(
                 MAX_INPUT_TOKENS, MAX_OUTPUT_TOKENS,
                 int(settings["input_rate_micro_per_million"]),
@@ -290,6 +296,8 @@ def preflight(path: str | Path, values: dict[str, str]) -> dict[str, object]:
                 "committed_or_reserved_usd_micro": used,
                 "remaining_usd_micro": remaining,
                 "one_max_request_reserve_usd_micro": reserve,
+                "provider_sends": provider_sends,
+                "unknown_requests": unknown_requests,
                 "grant_expires_at": str(grant["expires_at"]),
                 "api_key_present": True,
             }
@@ -314,6 +322,12 @@ def spend_summary(path: str | Path) -> dict[str, object]:
             "SELECT COALESCE(SUM(reserved_usd_micro),0) FROM assistant_runtime_spends "
             "WHERE status IN ('RESERVED','SEND_GRANTED','UNKNOWN')"
         ).fetchone()[0]
+        provider_sends = connection.execute(
+            "SELECT COUNT(*) FROM assistant_runtime_spends WHERE send_granted_at IS NOT NULL"
+        ).fetchone()[0]
+        unknown_requests = connection.execute(
+            "SELECT COUNT(*) FROM assistant_runtime_spends WHERE status='UNKNOWN'"
+        ).fetchone()[0]
         grant = connection.execute(
             "SELECT status,expires_at FROM assistant_runtime_default_grant WHERE singleton=1"
         ).fetchone()
@@ -321,6 +335,8 @@ def spend_summary(path: str | Path) -> dict[str, object]:
         **summary,
         "settled_usd_micro": int(settled),
         "open_reserved_usd_micro": int(reserved),
+        "provider_sends": int(provider_sends),
+        "unknown_requests": int(unknown_requests),
         "grant_status": str(grant["status"]) if grant else "MISSING",
         "grant_expires_at": str(grant["expires_at"]) if grant else None,
     }
@@ -380,6 +396,8 @@ def _print_summary() -> None:
     print(f"Open / UNKNOWN reservations: {_usd(int(summary['open_reserved_usd_micro']))}")
     print(f"Committed or reserved: {_usd(int(summary['committed_or_reserved_usd_micro']))}")
     print(f"Available: {_usd(int(summary['remaining_usd_micro']))}")
+    print(f"Provider sends granted: {summary['provider_sends']}")
+    print(f"UNKNOWN requests: {summary['unknown_requests']}")
     if summary.get("pause_reason"):
         print(f"Pool paused: {summary['pause_reason']}")
     if summary.get("grant_expires_at"):
@@ -400,6 +418,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"Live preflight passed: model={result['model_id']}, pool={result['status']}, "
                 f"available={_usd(int(result['remaining_usd_micro']))}, "
                 f"max-request reserve={_usd(int(result['one_max_request_reserve_usd_micro']))}, "
+                f"provider-sends={result['provider_sends']}, unknown={result['unknown_requests']}, "
                 f"grant-expires={result['grant_expires_at']}; API key present (value hidden)."
             )
             return 0
