@@ -896,6 +896,7 @@ CREATE TABLE IF NOT EXISTS personal_memory_consolidation_jobs (
         'PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'SKIPPED_DISABLED')),
     assistant_call_id TEXT REFERENCES assistant_calls(call_id),
     attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count BETWEEN 0 AND 1),
+    replay_attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (replay_attempt_count BETWEEN 0 AND 2),
     proposal_count INTEGER NOT NULL DEFAULT 0 CHECK (proposal_count BETWEEN 0 AND 4),
     written_count INTEGER NOT NULL DEFAULT 0 CHECK (written_count >= 0),
     duplicate_count INTEGER NOT NULL DEFAULT 0 CHECK (duplicate_count >= 0),
@@ -1196,7 +1197,7 @@ def initialize(path: str | Path) -> None:
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA + ASSISTANT_SCHEMA + ASSISTANT_KNOWLEDGE_SCHEMA + ASSISTANT_RUNTIME_GRANT_SCHEMA)
         migrate_runtime_campaign_schema(connection)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 23:
+        if version > 24:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1675,6 +1676,19 @@ def initialize(path: str | Path) -> None:
                     "ON personal_memory_events(memory_id, memory_version, occurred_at)"
                 )
             connection.execute("PRAGMA user_version = 23")
+            version = 23
+        if version < 24:
+            job_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(personal_memory_consolidation_jobs)").fetchall()
+            }
+            if "replay_attempt_count" not in job_columns:
+                connection.execute(
+                    "ALTER TABLE personal_memory_consolidation_jobs ADD COLUMN replay_attempt_count "
+                    "INTEGER NOT NULL DEFAULT 0 CHECK (replay_attempt_count BETWEEN 0 AND 2)"
+                )
+            connection.execute("PRAGMA user_version = 24")
+            version = 24
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:
