@@ -678,7 +678,7 @@ def semantic_memory_context(
 def _personal_row_dict(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     item = dict(row)
     item["source_refs"] = json.loads(str(item.pop("source_refs_json")))
-    item["source_authority"] = "CONFIRMED_PERSONAL_CONTEXT_ONLY"
+    item["source_authority"] = "PERSONAL_BACKGROUND_ONLY"
     item["memory_type"] = "PERSONAL"
     item["digest"] = str(item["content_digest"])
     item["summary"] = str(item["content"])
@@ -702,30 +702,43 @@ def _personal_source_is_current(
         refs = json.loads(str(item["source_refs_json"]))
     except (KeyError, TypeError, json.JSONDecodeError):
         return False
-    if (
-        not isinstance(refs, list) or len(refs) != 1
-        or not isinstance(refs[0], dict)
-        or refs[0].get("kind") != "MESSAGE"
-        or str(refs[0].get("id", "")) != str(item.get("source_message_id", ""))
-    ):
+    if not isinstance(refs, list) or not 1 <= len(refs) <= 3:
         return False
-    source = connection.execute(
-        """SELECT m.tenant_id, m.role, m.input_kind, m.body_digest, s.owner_id
-           FROM messages m JOIN sessions s ON s.session_id = m.session_id AND s.tenant_id = m.tenant_id
-           WHERE m.message_id = ?""",
-        (str(item["source_message_id"]),),
-    ).fetchone()
+    source_ids: list[str] = []
+    sources: list[sqlite3.Row] = []
+    for ref in refs:
+        if not isinstance(ref, dict) or ref.get("kind") != "MESSAGE":
+            return False
+        source_id = str(ref.get("id", ""))
+        if not source_id or source_id in source_ids or not str(ref.get("digest", "")):
+            return False
+        source_ids.append(source_id)
+        source = connection.execute(
+            """SELECT m.tenant_id, m.session_id, m.role, m.input_kind, m.body, m.body_digest, s.owner_id
+               FROM messages m JOIN sessions s ON s.session_id = m.session_id AND s.tenant_id = m.tenant_id
+               WHERE m.message_id = ?""",
+            (source_id,),
+        ).fetchone()
+        if (
+            source is None
+            or str(source["tenant_id"]) != str(item["tenant_id"])
+            or str(source["owner_id"]) != str(item["owner_actor_id"])
+            or str(source["role"]) != "USER"
+            or str(source["input_kind"]) not in {"CHAT_READONLY", "CORRECT_TASK_INPUT"}
+            or str(source["body_digest"]) != str(ref["digest"])
+            or _digest(str(source["body"])) != str(ref["digest"])
+        ):
+            return False
+        sources.append(source)
+    if source_ids[0] != str(item.get("source_message_id", "")):
+        return False
+    if len({str(source["session_id"]) for source in sources}) != 1:
+        return False
     content_payload = _personal_payload(
         str(item["memory_kind"]), str(item["memory_key"]), str(item["content"]), refs,
     )
     return bool(
-        source is not None
-        and str(source["tenant_id"]) == str(item["tenant_id"])
-        and str(source["owner_id"]) == str(item["owner_actor_id"])
-        and str(source["role"]) == "USER"
-        and str(source["input_kind"]) in {"CHAT_READONLY", "CORRECT_TASK_INPUT"}
-        and str(source["body_digest"]) == str(refs[0].get("digest", ""))
-        and str(item.get("content_digest", "")) == _digest(content_payload)
+        str(item.get("content_digest", "")) == _digest(content_payload)
     )
 
 
@@ -1343,12 +1356,13 @@ def personal_memory_recall_setting(
 ) -> dict[str, Any]:
     _require_memory_operator(connection, actor_id, tenant_id)
     row = connection.execute(
-        """SELECT recall_enabled, updated_at FROM personal_memory_settings
+        """SELECT recall_enabled, auto_learn_enabled, updated_at FROM personal_memory_settings
            WHERE tenant_id = ? AND owner_actor_id = ?""",
         (tenant_id, actor_id),
     ).fetchone()
     return {
         "recall_enabled": bool(row["recall_enabled"]) if row is not None else True,
+        "auto_learn_enabled": bool(row["auto_learn_enabled"]) if row is not None else False,
         "is_default": row is None,
         "updated_at": str(row["updated_at"]) if row is not None else None,
     }
@@ -1356,6 +1370,7 @@ def personal_memory_recall_setting(
 
 def set_personal_memory_recall(
     path: str | Path, tenant_id: str, actor_id: str, *, recall_enabled: bool,
+    auto_learn_enabled: bool | None = None,
 ) -> dict[str, Any]:
     if type(recall_enabled) is not bool:
         raise MemorySourceRejected("Personal Memory recall setting must be a boolean.")
@@ -1363,16 +1378,42 @@ def set_personal_memory_recall(
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         _require_memory_operator(connection, actor_id, tenant_id)
-        connection.execute(
-            """INSERT INTO personal_memory_settings (tenant_id, owner_actor_id, recall_enabled, updated_at)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT (tenant_id, owner_actor_id) DO UPDATE SET
-                 recall_enabled = excluded.recall_enabled, updated_at = excluded.updated_at""",
-            (tenant_id, actor_id, int(recall_enabled), updated_at),
+        current = personal_memory_recall_setting(connection, tenant_id, actor_id)
+        if auto_learn_enabled is not None and type(auto_learn_enabled) is not bool:
+            raise MemorySourceRejected("Personal Memory auto-learn setting must be a boolean.")
+        next_auto_learn = (
+            bool(current["auto_learn_enabled"])
+            if auto_learn_enabled is None else auto_learn_enabled
         )
+        if not recall_enabled:
+            next_auto_learn = False
+        connection.execute(
+            """INSERT INTO personal_memory_settings
+               (tenant_id, owner_actor_id, recall_enabled, auto_learn_enabled, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT (tenant_id, owner_actor_id) DO UPDATE SET
+                 recall_enabled = excluded.recall_enabled,
+                 auto_learn_enabled = excluded.auto_learn_enabled,
+                 updated_at = excluded.updated_at""",
+            (tenant_id, actor_id, int(recall_enabled), int(next_auto_learn), updated_at),
+        )
+        from opspilot.domain.personal_memory_consolidation import (
+            advance_disabled_personal_memory_watermarks,
+            skip_pending_personal_memory_jobs,
+        )
+
+        old_enabled = bool(current["recall_enabled"] and current["auto_learn_enabled"])
+        new_enabled = bool(recall_enabled and next_auto_learn)
+        if old_enabled and not new_enabled:
+            skip_pending_personal_memory_jobs(connection, tenant_id, actor_id)
+            advance_disabled_personal_memory_watermarks(connection, tenant_id, actor_id)
+        elif not old_enabled and new_enabled:
+            # Messages created while learning was disabled are never backfilled.
+            advance_disabled_personal_memory_watermarks(connection, tenant_id, actor_id)
     return {
         "tenant_id": tenant_id, "owner_actor_id": actor_id,
-        "recall_enabled": recall_enabled, "is_default": False, "updated_at": updated_at,
+        "recall_enabled": recall_enabled, "auto_learn_enabled": next_auto_learn,
+        "is_default": False, "updated_at": updated_at,
     }
 
 
@@ -1459,7 +1500,10 @@ def personal_memory_context(
     pinned_tokens = 0
     pinned_candidates = sorted(
         (memory for memory in valid_active if str(memory.get("memory_mode", "RELEVANT")) == "PINNED"),
-        key=lambda memory: (str(memory.get("created_at", "")), str(memory["memory_id"])),
+        key=lambda memory: (
+            1 if str(memory.get("creation_source") or "") in {"USER_EXPLICIT", "USER_CONFIRMED"} else 0,
+            str(memory.get("created_at", "")), str(memory["memory_id"]),
+        ),
         reverse=True,
     )
     for memory in pinned_candidates:

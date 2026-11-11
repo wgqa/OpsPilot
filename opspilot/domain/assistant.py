@@ -587,16 +587,32 @@ def run_limits_for_experiment(experiment_id):
     return 8, 6
 
 
-def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None,runtime_recovery=False):
+def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None,runtime_recovery=False,
+            personal_memory_job_id=None):
     """Count durable dispatches, including unknown results, before external I/O."""
     from opspilot.domain.execution_budget import auxiliary_budget_in_transaction
     with connect(path) as c:
         c.execute('BEGIN IMMEDIATE')
-        run,_=state(c,run_id,worker_id=worker_id)
+        if personal_memory_job_id is None:
+            run,_=state(c,run_id,worker_id=worker_id)
+        else:
+            run,_=state(c,run_id,active=False,worker_id=worker_id)
+            if kind != 'MODEL' or run['kind'] != 'CHAT_READONLY' or run['task_id'] is not None:
+                raise TaskControlError('PERSONAL_MEMORY_CONSOLIDATION_RUN_INVALID')
+            from opspilot.domain.personal_memory_consolidation import consolidation_job_is_current
+            if not consolidation_job_is_current(c,str(personal_memory_job_id),run_id=str(run_id)):
+                raise TaskControlError('PERSONAL_MEMORY_CONSOLIDATION_JOB_NOT_CURRENT')
         old=c.execute('SELECT * FROM assistant_calls WHERE run_id=? AND kind=? AND logical_key=?',(run_id,kind,logical_key)).fetchone()
         if old:
             if old['request_digest']!=digest_json(request): raise TaskControlError('ASSISTANT_REPLAY_CONTEXT_CHANGED')
             if old['status']!='OK':
+                if personal_memory_job_id is not None and runtime_recovery and old['status'] in {'RESERVED','UNKNOWN'}:
+                    from opspilot.domain.assistant_runtime_grant import recoverable_response
+                    spend=c.execute('SELECT status FROM assistant_runtime_spends WHERE assistant_call_id=?',(str(old['call_id']),)).fetchone()
+                    if old['status']=='RESERVED' and (spend is None or spend['status']=='RESERVED'):
+                        return dict(old),False
+                    if recoverable_response(path,str(old['call_id']),str(old['request_digest'])) is not None:
+                        return dict(old),False
                 if runtime_recovery and kind == 'MODEL' and old['status'] in {'RESERVED','UNKNOWN'}:
                     from opspilot.domain.assistant_runtime_grant import recoverable_response
                     if recoverable_response(path, str(old['call_id']), str(old['request_digest'])) is not None:
@@ -613,7 +629,8 @@ def reserve(path,run_id,kind,logical_key,request,worker_id,*,experiment_id=None,
         used=c.execute('SELECT COUNT(*) FROM assistant_calls WHERE run_id=? AND kind=?',(run_id,kind)).fetchone()[0]
         model_limit,mcp_limit=run_limits_for_experiment(experiment_id)
         limit = model_limit if kind=='MODEL' else mcp_limit
-        if limit is not None and used >= limit: raise TaskControlError('ASSISTANT_RUN_'+kind+'_LIMIT')
+        if personal_memory_job_id is None and limit is not None and used >= limit:
+            raise TaskControlError('ASSISTANT_RUN_'+kind+'_LIMIT')
         if kind=='MODEL' and run['task_id']:
             budget=auxiliary_budget_in_transaction(c,run['task_id'])
             if budget['reason_code']: raise TaskControlError(budget['reason_code'])

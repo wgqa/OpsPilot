@@ -152,6 +152,9 @@ export interface PersonalMemorySettings {
   tenant_id: string;
   owner_actor_id: string;
   recall_enabled: boolean;
+  auto_learn_enabled: boolean;
+  auto_learn_available: boolean;
+  consolidation_status: Record<string, number>;
   is_default: boolean;
   updated_at: string | null;
 }
@@ -538,10 +541,10 @@ export const api = {
   personalMemorySettings() {
     return request<PersonalMemorySettings>('/api/personal-memory-settings');
   },
-  updatePersonalMemorySettings(recallEnabled: boolean, csrf: string) {
+  updatePersonalMemorySettings(recallEnabled: boolean, autoLearnEnabled: boolean, csrf: string) {
     return request<PersonalMemorySettings>('/api/personal-memory-settings', {
       method: 'PUT', headers: writeHeaders(csrf),
-      body: JSON.stringify({ recall_enabled: recallEnabled }),
+      body: JSON.stringify({ recall_enabled: recallEnabled, auto_learn_enabled: autoLearnEnabled }),
     });
   },
   createPersonalMemoryCandidate(

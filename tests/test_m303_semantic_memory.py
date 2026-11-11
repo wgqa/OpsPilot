@@ -284,7 +284,7 @@ def test_m303_schema_v11_migration_is_repeatable_and_scoped(demo_db: Path) -> No
             (legacy_memory["memory_id"],),
         ).fetchone()
         foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
-    assert version == 22
+    assert version == 23
     with connect(demo_db) as connection:
         personal_schema = connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='personal_memories'"

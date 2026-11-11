@@ -10,7 +10,7 @@
 
 1. **Ragent 复用运行时，Pi 自研轻量循环，两者不是同一种“没手写循环”。** Ragent 把循环交给 AgentScope 的 `ReActAgent`，自己写中间件；Pi 在 `packages/agent/src/agent-loop.ts` 自行实现模型—工具循环，并把压缩、Session、Skills 等应用层能力通过 hook 和组件扩展。OpsPilot 借鉴其职责划分，继续使用现有 LangChain/LangGraph Loop，不因此重写循环。
 2. **Context 策略可以放在应用层，但事实与授权不能。** Pi 的压缩在 `agent-session.ts` 里挂 `prepareNextTurn`；Ragent 的压缩是 `onReasoning` 中间件。两者都让核心循环不知道“摘要”这件事。OpsPilot 应保持同样方向：循环用框架，Context 装配和摘要账本在现有 Domain，不把摘要塞进 Agent Core。
-3. **外部项目的“记忆”比 OpsPilot 宽松。** Ragent 会从用户发言自动学习长期记忆，Pi 不做跨任务长期记忆。OpsPilot 的 Memory 必须经过来源、候选、独立确认、撤销和派生失效检查，不能照搬“自动记住”。
+3. **外部项目的“记忆”比 OpsPilot 宽松。** Ragent 会从用户发言自动学习长期记忆，Pi 不做跨任务长期记忆。C01-B2-B 只授权同一 Owner 的 Personal Memory 从已完成的本人对话中自动学习；仍要求可验证来源、有限有效期、版本、去重、撤销与当前性检查。Business / Episodic Memory 继续依赖既有来源合同和独立确认，不自动升级。
 4. **外部项目的“取消”只到进程内。** Ragent 有会话闸门、SSE 断开取消和收尾补存；Pi 有 `abort()`，文档说明中止会把排队消息交回编辑器。它们都没有 OpsPilot 这种“模型调用已外发但结果未知”的持久账本问题。取消后的 `UNKNOWN` 收口、禁止盲目重发必须留在 OpsPilot Domain。
 5. **不要因为参考项目有某个部件就扩建。** Pi 明确不做 sub-agent 和 plan mode；Ragent 的 middleware 链也不是通用插件平台。OpsPilot 只在出现**重复实现、职责冲突，或单模块职责膨胀已造成可验证维护/测试/变更风险**时提出有界解耦，不能把“别人有”当成阶段授权。
 
@@ -104,7 +104,7 @@
 | Pi `session-manager.ts` L91-L104 | 压缩=一条 `CompactionEntry` + `firstKeptEntryId`，原历史不删 | [`opspilot/domain/database.py` L910-L965](../../opspilot/domain/database.py#L910-L965) 的 `context_compression_attempts` / `context_summaries` / `context_summary_dependencies`；`_summary_is_current` 在 [`chat.py` L635](../../opspilot/domain/chat.py#L635) | **裁剪**：不引入会话树/分支 UI；**拒绝**：把摘要简化成单条不可追溯文本 | `tests/test_m302_context.py`、`tests/test_ar02_context_continuity_01.py` |
 | Ragent `AgentContextCompactor` L62-L147 | 摘要替换早期原文，切点只在用户轮；摘要以 `USER` 角色回填并声明“有损背景” | `context_summaries` 保存结构化摘要、版本、覆盖范围、来源依赖；`context_summary_dependencies` 记录 MESSAGE/MODEL_ATTEMPT/MEMORY/EVIDENCE/SKILL/SUMMARY | **采纳**：摘要必须声明派生与非权威；**拒绝**：单一审计表代替依赖失效 | `tests/test_m302_context.py` |
 | Ragent `AgentContextTrimmer` L68-L140 | 超水位后把旧工具结果换成短占位，保护最近循环 | 当前以 `RECENT_WINDOW`/`ROLLING_SUMMARY`/`HYBRID` 控制窗口与摘要；压缩输入会对助手历史做有界截断（[`chat.py` L995](../../opspilot/domain/chat.py#L995)），但没有独立的工具结果逐条驱逐器 | **暂缓**：先不新增第二套裁剪器；若真实长工具结果造成预算问题，再评估并入现有 Context 装配 | 现有 `tests/test_m302_context.py`；新能力尚无证据 |
-| Ragent `AgentUserMemoryMiddleware` L65-L106 + `AgentMemoryLearner` L89-L134 | 长期记忆按用户自动学习；模型调用在事务外，游标 CAS 提交，异常返回 `UNKNOWN` | Episodic/Semantic Memory 在 [`opspilot/domain/episodic_memory.py`](../../opspilot/domain/episodic_memory.py#L29)、[`semantic_memory.py`](../../opspilot/domain/semantic_memory.py#L199)；候选需独立确认，可撤销 | **采纳**：事务只包提交、未知不重试；**拒绝**：从用户发言自动生效的长期记忆 | `tests/test_m301_memory.py`、`tests/test_m303_semantic_memory.py`、`tests/test_d5_context.py` |
+| Ragent `AgentUserMemoryMiddleware` L65-L106 + `AgentMemoryLearner` L89-L134 | 长期记忆按用户自动学习；模型调用在事务外，游标 CAS 提交，异常返回 `UNKNOWN` | C01-B2-B 在既有 Personal Memory 表与用户作用域中自动写入，来源绑定多条本人消息；Business/Episodic 继续使用既有候选与确认 | **采纳（裁剪）**：个人记忆只限同 Owner、180 天、可撤销的非权威背景；模型调用走 Runtime Grant 且未知不重发；**拒绝**：跨用户或业务记忆自动升级 | `tests/test_c01_b2_b_personal_memory_auto_consolidation.py`、`tests/test_m301_memory.py`、`tests/test_m303_semantic_memory.py`、`tests/test_d5_context.py` |
 | Ragent `SkillLoadTool` L39-L124 + `AgentSkillMaskingMiddleware` L74-L113 | 先给技能清单，模型按需加载正文；未加载时隐藏相关工具，压缩后重新隐藏 | Skill 由 [`opspilot/skill_assets.py` L26](../../opspilot/skill_assets.py#L26) 按问题类型装载，内容作为方法提示进入上下文（[`investigator.py` L687-L739](../../opspilot/investigator.py#L687-L739)） | **采纳**：Skill 只给方法、不定义权限；**裁剪**：暂不引入 `load_skill` 工具和工具遮蔽；**拒绝**：用工具可见性当授权 | `tests/test_d5_context.py`、`tests/test_m1_chat.py` |
 | Ragent `AgentChatServiceImpl` L221-L283、L343-L372 | 会话闸门、SSE 断开取消、收尾补存、再调度后台任务 | 任务/Run 的 worker fence 在 [`chat.py` L66](../../opspilot/domain/chat.py#L66)；Assistant 调用账本在 [`domain/assistant.py` L299-L330](../../opspilot/domain/assistant.py#L299-L330)；实验账本在 [`assistant_experiment.py` L216-L260](../../opspilot/domain/assistant_experiment.py#L216-L260) | **采纳**：取消必须收口、收尾顺序明确；**保留差异**：OpsPilot 还要持久化 `UNKNOWN` 并禁止盲目重发 | `tests/test_ar02_assistant.py`、`tests/test_ar04a_compression_cancel_hf_01.py`；AR-04A 已合并离线 RED/GREEN，真实 Provider 取消质量 `NOT_RUN` |
 | Ragent `AgentToolBatchMiddleware` L56-L97 | 工具批边界与“执行前短路”事实，不依赖追踪开关 | `assistant.py` 的 `awrap_tool_call`（L683）在 MCP 调用前后持久登记 `assistant_calls`；实验账本在 `reserve_dispatch`/`complete_dispatch`/`mark_unknown` | **采纳**：执行事实与可观测性解耦；**裁剪**：不新建 batch 表，复用现有调用记录 | `tests/test_ar02_assistant.py` |
@@ -198,7 +198,7 @@ Ragent 的中间件默认不规定工具顺序，Pi 的 `finishTurn` 把继续/�
 - 在 `assistant.py` 新增一张 `*_calls` / `*_budget` 表或新的 `try/except` 取消分支；
 - 在 Prompt 里写死“必须先调用 X，再调用 Y”，但没有对应不变量；
 - 为 Skill 增加“加载后才可见”的工具，并把这套可见性当成权限；
-- 为 Memory 增加自动写入，绕过候选/确认/撤销；
+- 为 Business / Episodic Memory 增加自动写入，绕过既有候选、确认和撤销合同；Personal Memory 只有在明确授权的 C01-B2-B 范围内可从可信本人消息自动学习，并继续保留来源、期限和撤销保护；
 - 为压缩增加第二套摘要存储，绕过 `context_summary_dependencies`；
 - 用框架 checkpoint 证明外部副作用已经发生。
 

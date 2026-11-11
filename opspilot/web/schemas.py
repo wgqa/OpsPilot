@@ -104,3 +104,4 @@ class PersonalMemoryCandidateRequest(StrictModel):
 
 class PersonalMemorySettingsRequest(StrictModel):
     recall_enabled: bool
+    auto_learn_enabled: bool | None = None

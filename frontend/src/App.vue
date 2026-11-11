@@ -33,6 +33,9 @@ const taskMemoryContext = ref<TaskMemoryContext | null>(null);
 const taskSemanticContext = ref<SemanticMemoryContext | null>(null);
 const personalMemories = ref<PersonalMemoryRecord[]>([]);
 const personalMemoryRecallEnabled = ref(true);
+const personalMemoryAutoLearnEnabled = ref(false);
+const personalMemoryAutoLearnAvailable = ref(false);
+const personalMemoryConsolidationStatus = ref<Record<string, number>>({});
 const personalMemorySettingsReady = ref(false);
 const personalMemorySettingsSaving = ref(false);
 const personalMemorySettingsError = ref('');
@@ -265,6 +268,9 @@ async function logout(): Promise<void> {
   latestChatContextGeneration += 1;
   personalMemories.value = [];
   personalMemoryRecallEnabled.value = true;
+  personalMemoryAutoLearnEnabled.value = false;
+  personalMemoryAutoLearnAvailable.value = false;
+  personalMemoryConsolidationStatus.value = {};
   personalMemorySettingsReady.value = false;
   personalMemorySettingsSaving.value = false;
   personalMemorySettingsError.value = '';
@@ -399,6 +405,9 @@ async function loadPersonalMemorySettings(): Promise<void> {
     if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
       || user.value?.tenant_id !== identity.tenant_id) return;
     personalMemoryRecallEnabled.value = setting.recall_enabled;
+    personalMemoryAutoLearnEnabled.value = setting.auto_learn_enabled;
+    personalMemoryAutoLearnAvailable.value = setting.auto_learn_available;
+    personalMemoryConsolidationStatus.value = setting.consolidation_status ?? {};
     personalMemorySettingsReady.value = true;
   } catch {
     if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
@@ -408,36 +417,58 @@ async function loadPersonalMemorySettings(): Promise<void> {
   }
 }
 
-async function updatePersonalMemoryRecall(event: Event): Promise<void> {
+async function updatePersonalMemorySetting(event: Event, settingName: 'recall' | 'auto-learn'): Promise<void> {
   const input = event.target as HTMLInputElement;
   const identity = user.value;
   const generation = personalMemorySettingsGeneration;
-  const previous = personalMemoryRecallEnabled.value;
+  const previous = settingName === 'recall'
+    ? personalMemoryRecallEnabled.value : personalMemoryAutoLearnEnabled.value;
+  const previousRecall = personalMemoryRecallEnabled.value;
+  const previousAutoLearn = personalMemoryAutoLearnEnabled.value;
   const requested = input.checked;
   if (!identity || !csrf.value || !personalMemorySettingsReady.value || personalMemorySettingsSaving.value) {
     input.checked = previous;
     return;
   }
+  const recallEnabled = settingName === 'recall' ? requested : previousRecall;
+  const autoLearnEnabled = settingName === 'auto-learn'
+    ? requested && recallEnabled : requested ? previousAutoLearn : false;
   personalMemorySettingsSaving.value = true;
   personalMemorySettingsError.value = '';
   try {
-    const setting = await api.updatePersonalMemorySettings(requested, csrf.value);
+    const setting = await api.updatePersonalMemorySettings(recallEnabled, autoLearnEnabled, csrf.value);
     if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
       || user.value?.tenant_id !== identity.tenant_id) return;
     personalMemoryRecallEnabled.value = setting.recall_enabled;
-    notice.value = setting.recall_enabled
-      ? '个人记忆召回已开启；后续聊天会按固定偏好和问题相关性选择。'
-      : '个人记忆召回已关闭；记忆仍保留，可再次开启。';
+    personalMemoryAutoLearnEnabled.value = setting.auto_learn_enabled;
+    personalMemoryAutoLearnAvailable.value = setting.auto_learn_available;
+    personalMemoryConsolidationStatus.value = setting.consolidation_status ?? {};
+    notice.value = settingName === 'auto-learn'
+      ? setting.auto_learn_enabled
+        ? '自动学习已开启；后台按批次调用一次模型，费用受 Runtime Grant 约束。'
+        : '自动学习已关闭；已保存记忆仍保留。'
+      : setting.recall_enabled
+        ? '个人记忆召回已开启；后续聊天会按固定偏好和问题相关性选择。'
+        : '个人记忆召回已关闭；自动学习同步暂停，已保存记忆仍保留。';
   } catch (error) {
     if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
       || user.value?.tenant_id !== identity.tenant_id) return;
-    personalMemoryRecallEnabled.value = previous;
+    personalMemoryRecallEnabled.value = previousRecall;
+    personalMemoryAutoLearnEnabled.value = previousAutoLearn;
     input.checked = previous;
     personalMemorySettingsError.value = explainError(error);
   } finally {
     if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
       && user.value?.tenant_id === identity.tenant_id) personalMemorySettingsSaving.value = false;
   }
+}
+
+function updatePersonalMemoryRecall(event: Event): Promise<void> {
+  return updatePersonalMemorySetting(event, 'recall');
+}
+
+function updatePersonalMemoryAutoLearn(event: Event): Promise<void> {
+  return updatePersonalMemorySetting(event, 'auto-learn');
 }
 
 async function refreshLatestChatContext(
@@ -566,8 +597,19 @@ function personalMemoryModeLabel(mode: PersonalMemoryRecord['memory_mode']): str
 function personalMemoryCreationSourceLabel(source: PersonalMemoryRecord['creation_source']): string {
   if (source === 'USER_EXPLICIT') return '用户在聊天中明确要求记住';
   if (source === 'USER_CONFIRMED') return '用户确认候选';
-  if (source === 'AUTO_LEARNED') return '自动学习（当前未启用）';
+  if (source === 'AUTO_LEARNED') return '自动从对话学习';
   return '尚未生效的候选';
+}
+
+function personalMemoryAutoLearnStatusText(): string {
+  if (!personalMemoryAutoLearnEnabled.value) return '自动学习未启用；现有记忆不会被删除。';
+  if (!personalMemoryAutoLearnAvailable.value) return '自动学习当前不可用；不会发起提取请求。';
+  const completed = personalMemoryConsolidationStatus.value.SUCCEEDED ?? 0;
+  const failed = (personalMemoryConsolidationStatus.value.FAILED ?? 0)
+    + (personalMemoryConsolidationStatus.value.UNKNOWN ?? 0);
+  const pending = (personalMemoryConsolidationStatus.value.PENDING ?? 0)
+    + (personalMemoryConsolidationStatus.value.RUNNING ?? 0);
+  return `已完成 ${completed} 批 · 失败或结果未知 ${failed} 批 · 等待处理 ${pending} 批。`;
 }
 
 function adjustPersonalMemoryModeForKind(): void {
@@ -2224,6 +2266,11 @@ onBeforeUnmount(() => {
             <input type="checkbox" :checked="personalMemoryRecallEnabled" :disabled="!personalMemorySettingsReady || personalMemorySettingsSaving || !csrf" @change="updatePersonalMemoryRecall" />
             <span><strong>使用个人长期记忆</strong><small>关闭后只影响后续 Provider 请求；已保存记忆和 Session 历史仍保留。</small></span>
           </label>
+          <label v-if="user.role === 'SUPPORT'" class="personal-memory-recall-toggle" data-testid="personal-memory-auto-learn-setting">
+            <input type="checkbox" :checked="personalMemoryAutoLearnEnabled" :disabled="!personalMemorySettingsReady || personalMemorySettingsSaving || !csrf || !personalMemoryRecallEnabled || !personalMemoryAutoLearnAvailable" @change="updatePersonalMemoryAutoLearn" />
+            <span><strong>自动从对话中学习</strong><small>累计至少 6 条已完成用户消息后，后台最多每 10 分钟整理一批，每批最多 12 条、4 条记忆、1 次提取模型调用。可能产生额外费用，调用受 Runtime Grant 预算约束。</small></span>
+          </label>
+          <small v-if="user.role === 'SUPPORT'" class="memory-settings-status" data-testid="personal-memory-auto-learn-status">{{ personalMemoryAutoLearnStatusText() }} {{ personalMemoryAutoLearnAvailable ? '已配置后台模型入口；每次调用仍须通过有效 Runtime Grant 和可用预算检查。' : '此环境未开放 Runtime Grant 自动学习。' }}</small>
           <small v-if="personalMemorySettingsError" class="memory-settings-error" role="status">{{ personalMemorySettingsError }}</small>
           <div class="memory-review-grid">
             <div class="memory-candidate-list">

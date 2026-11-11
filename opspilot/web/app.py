@@ -266,6 +266,7 @@ def create_app(
     app.state.worker_configured = bool(start_worker)
     app.state.assistant_experiment_id = resolved_experiment
     app.state.assistant_runtime_enabled = resolved_runtime_enabled
+    app.state.assistant_model_factory = assistant_model_factory
     app.state.worker_task = None
     app.state.worker_id = None
     app.state.worker_epoch = None
@@ -280,6 +281,15 @@ def create_app(
         check_origin(request.headers.get("origin"), origin)
         verify_csrf(context, request.headers.get("x-csrf-token"))
         return context
+
+    def personal_memory_auto_learn_available() -> bool:
+        return bool(
+            app.state.worker_configured
+            and app.state.assistant_runtime_enabled
+            and app.state.assistant_experiment_id is None
+            and callable(app.state.assistant_model_factory)
+            and os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "").strip() == "1"
+        )
 
     @app.exception_handler(TaskControlError)
     async def task_control_error(_request: Request, error: TaskControlError) -> JSONResponse:
@@ -1142,12 +1152,18 @@ def create_app(
         context: AuthContext = Depends(current_user),
     ) -> dict[str, Any]:
         from opspilot.domain.episodic_memory import MemoryScopeDenied
+        from opspilot.domain.personal_memory_consolidation import personal_memory_consolidation_status
         from opspilot.domain.semantic_memory import get_personal_memory_settings
 
         try:
-            return get_personal_memory_settings(
+            settings = get_personal_memory_settings(
                 resolved_db, context.identity.tenant_id, context.identity.actor_id,
             )
+            settings["auto_learn_available"] = personal_memory_auto_learn_available()
+            settings["consolidation_status"] = personal_memory_consolidation_status(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+            )["statuses"]
+            return settings
         except MemoryScopeDenied as error:
             raise TaskControlError("MEMORY_SCOPE_DENIED") from error
 
@@ -1158,11 +1174,21 @@ def create_app(
         from opspilot.domain.episodic_memory import MemoryScopeDenied
         from opspilot.domain.semantic_memory import set_personal_memory_recall
 
+        if body.auto_learn_enabled is True and not personal_memory_auto_learn_available():
+            raise HTTPException(status_code=409, detail="PERSONAL_MEMORY_AUTO_LEARN_UNAVAILABLE")
         try:
-            return set_personal_memory_recall(
+            settings = set_personal_memory_recall(
                 resolved_db, context.identity.tenant_id, context.identity.actor_id,
                 recall_enabled=body.recall_enabled,
+                auto_learn_enabled=body.auto_learn_enabled,
             )
+            settings["auto_learn_available"] = personal_memory_auto_learn_available()
+            from opspilot.domain.personal_memory_consolidation import personal_memory_consolidation_status
+
+            settings["consolidation_status"] = personal_memory_consolidation_status(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+            )["statuses"]
+            return settings
         except MemoryScopeDenied as error:
             raise TaskControlError("MEMORY_SCOPE_DENIED") from error
 

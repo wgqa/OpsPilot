@@ -602,7 +602,7 @@ def test_v21_personal_memory_migration_preserves_candidate_confirmation_and_even
                FROM personal_memory_events ORDER BY occurred_at,event_id""",
         )]
         foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
-    assert version == 22
+    assert version == 23
     assert confirmed_after["state"] == "ACTIVE"
     assert confirmed_after["creation_source"] == "USER_CONFIRMED"
     assert confirmed_after["memory_mode"] == "RELEVANT"

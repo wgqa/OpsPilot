@@ -608,6 +608,62 @@ async def run_worker(
             raise TaskControlError("WORKER_FENCE_STALE")
         run = await asyncio.to_thread(next_worker_run, str(resolved_db))
         if run is None:
+            if (
+                assistant_runtime_enabled and assistant_experiment_id is None
+                and assistant_model_factory is not None
+            ):
+                from opspilot.domain.personal_memory_consolidation import (
+                    claim_next_personal_memory_job,
+                    finish_personal_memory_job,
+                    process_personal_memory_job,
+                )
+
+                job = await asyncio.to_thread(
+                    claim_next_personal_memory_job, resolved_db, worker_id,
+                )
+                if job is not None:
+                    model = None
+                    try:
+                        from opspilot.domain.assistant_runtime_grant import bind_run, runtime_config_from_env
+
+                        binding = await asyncio.to_thread(
+                            bind_run, resolved_db, str(job["source_run_id"]), runtime_config_from_env(),
+                        )
+                        model = assistant_model_factory(runtime_grant_binding=binding)
+                        if model is None:
+                            raise RuntimeError("RUNTIME_PROVIDER_FACTORY_DISABLED")
+                        await process_personal_memory_job(
+                            resolved_db, worker_id, str(job["job_id"]), model,
+                            runtime_binding=binding, worker_epoch=worker_epoch,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
+                        with connect(resolved_db) as connection:
+                            current = connection.execute(
+                                "SELECT status FROM personal_memory_consolidation_jobs WHERE job_id=?",
+                                (str(job["job_id"]),),
+                            ).fetchone()
+                        if current is not None and str(current["status"]) == "RUNNING":
+                            code = getattr(error, "code", type(error).__name__)
+                            if str(code) != "RUNTIME_RESPONSE_DURABLE_REPLAY_REQUIRED":
+                                terminal = "UNKNOWN" if "UNKNOWN" in str(code) else "FAILED"
+                                await asyncio.to_thread(
+                                    finish_personal_memory_job, resolved_db, str(job["job_id"]),
+                                    status=terminal, failure_code=str(code)[:120],
+                                )
+                    finally:
+                        from contextlib import suppress
+
+                        async_client = getattr(model, "http_async_client", None)
+                        if async_client is not None:
+                            with suppress(Exception):
+                                await async_client.aclose()
+                        sync_client = getattr(model, "http_client", None)
+                        if sync_client is not None:
+                            with suppress(Exception):
+                                sync_client.close()
+                    continue
             await asyncio.sleep(poll_interval)
             continue
         try:

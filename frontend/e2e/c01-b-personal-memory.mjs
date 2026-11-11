@@ -18,6 +18,7 @@ let candidateCreated = false;
 let revoked = false;
 let selectedRefs = [];
 let recallEnabled = true;
+let autoLearnEnabled = false;
 
 const userMessage = {
   message_id: sourceMessageId, task_id: null, sequence: 1, role: 'USER', input_kind: 'CHAT_READONLY',
@@ -39,12 +40,16 @@ async function installApiMocks(page) {
     }
     if (url.pathname === '/api/personal-memory-settings' && request.method() === 'GET') {
       return json({ tenant_id: 'tenant-a', owner_actor_id: 'support-a', recall_enabled: recallEnabled,
-        is_default: recallEnabled, updated_at: null });
+        auto_learn_enabled: autoLearnEnabled, auto_learn_available: true,
+        consolidation_status: {}, is_default: recallEnabled, updated_at: null });
     }
     if (url.pathname === '/api/personal-memory-settings' && request.method() === 'PUT') {
-      recallEnabled = request.postDataJSON().recall_enabled;
+      const body = request.postDataJSON();
+      recallEnabled = body.recall_enabled;
+      autoLearnEnabled = recallEnabled && body.auto_learn_enabled;
       return json({ tenant_id: 'tenant-a', owner_actor_id: 'support-a', recall_enabled: recallEnabled,
-        is_default: false, updated_at: '2026-11-10T00:00:01Z' });
+        auto_learn_enabled: autoLearnEnabled, auto_learn_available: true,
+        consolidation_status: {}, is_default: false, updated_at: '2026-11-10T00:00:01Z' });
     }
     if (url.pathname === '/api/sessions' && request.method() === 'GET') {
       return json({ items: [{ session_id: sessionId, created_at: '2026-11-10T00:00:00Z',
@@ -154,10 +159,15 @@ try {
   await expect(recallToggle).toBeChecked();
   await recallToggle.uncheck();
   await expect(recallToggle).not.toBeChecked();
-  await expect(page.getByText('个人记忆召回已关闭；记忆仍保留，可再次开启。')).toBeVisible();
+  await expect(page.getByText('个人记忆召回已关闭；自动学习同步暂停，已保存记忆仍保留。')).toBeVisible();
+  await expect(page.getByTestId('personal-memory-auto-learn-setting').locator('input')).not.toBeChecked();
   await recallToggle.check();
   await expect(recallToggle).toBeChecked();
   if (!recallEnabled) throw new Error('Recall setting did not persist the enabled state.');
+  const autoLearnToggle = page.getByTestId('personal-memory-auto-learn-setting').locator('input');
+  await autoLearnToggle.check();
+  await expect(autoLearnToggle).toBeChecked();
+  if (!autoLearnEnabled) throw new Error('Automatic learning setting did not persist the enabled state.');
 
   const form = page.getByTestId('personal-memory-proposal');
   await form.locator('select').nth(0).selectOption(sourceMessageId);
@@ -183,6 +193,7 @@ try {
 
   console.log(JSON.stringify({ status: 'PASS', candidate_previewed: true, owner_scope_visible: true,
     confirmation_required: true, recall_toggle_off_and_on_persisted: true,
+    automatic_learning_toggle_persisted: true, cost_and_runtime_grant_disclosed: true,
     ttl_disclosed: true, no_auto_injection_before_a_new_run: true, revoke_refreshed_context: true }));
   await context.close();
 } finally {

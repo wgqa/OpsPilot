@@ -1324,7 +1324,22 @@ def claim_send(path, binding, *, call_id: str, request_key: str, request_digest:
             except TaskControlError as error:
                 raise RuntimeGrantError(error.code) from error
         elif str(current_run["status"]) != "RUNNING":
-            raise RuntimeGrantError("RUNTIME_RUN_NOT_ACTIVE")
+            # CHAT answers are committed before Worker schedules Personal Memory
+            # consolidation. Permit this one extra call only while a durable,
+            # source-current consolidation job is RUNNING and owns this call.
+            job = connection.execute(
+                """SELECT job_id FROM personal_memory_consolidation_jobs
+                   WHERE assistant_call_id=? AND source_run_id=? AND status='RUNNING'""",
+                (call_id, expected["run_id"]),
+            ).fetchone()
+            if job is None:
+                raise RuntimeGrantError("RUNTIME_RUN_NOT_ACTIVE")
+            from opspilot.domain.personal_memory_consolidation import consolidation_job_is_current
+
+            if not consolidation_job_is_current(
+                connection, str(job["job_id"]), run_id=str(expected["run_id"]),
+            ):
+                raise RuntimeGrantError("RUNTIME_PERSONAL_MEMORY_JOB_NOT_CURRENT")
         try:
             _, _, grant = _current_grant(connection, path, runtime_config_from_env())
         except RuntimeGrantError as error:
