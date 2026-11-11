@@ -769,9 +769,9 @@ def _validate_personal_proposal(
 
 _EXPLICIT_MEMORY_SAVE = re.compile(
     r"(?i)(?:(?:请|麻烦|帮我|请你)\s*(?:记住|记下|记着|记得)|"
-    r"记住\s*[:：，,]|我希望你.{0,12}记住)|"
+    r"记住\s*[:：，,]|记住(?:我的)?(?:偏好|背景)\s*[:：]|我希望你.{0,12}记住)|"
     r"(?:请|麻烦|帮我|请你)\s*(?:把|将)?.{0,40}(?:保存|存储|保留).{0,16}(?:记忆|偏好|背景)|"
-    r"remember (?:this|that|my)|keep (?:this|that|my) .{1,80} in mind|"
+    r"please\s+remember\s*[:：,]|remember (?:this|that|my)|keep (?:this|that|my) .{1,80} in mind|"
     r"save .{1,100} (?:as|to) (?:my )?(?:long[- ]term )?memory|store .{1,100} in (?:my )?memory"
 )
 _DURABLE_PERSONAL_DIRECTIVE = re.compile(

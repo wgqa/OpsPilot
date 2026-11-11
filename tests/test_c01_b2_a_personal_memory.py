@@ -720,6 +720,56 @@ def test_personal_memory_write_is_bound_to_explicit_current_user_text(demo_db):
         )
 
 
+@pytest.mark.parametrize(("body", "content"), [
+    ("请帮我记住：我喜欢 Java。", "我喜欢 Java"),
+    ("记住我的偏好：我比较喜欢 Java。", "我比较喜欢 Java"),
+    ("Please remember: I prefer Java.", "I prefer Java"),
+])
+def test_normal_explicit_memory_requests_are_persisted(demo_db, body, content):
+    from opspilot.domain.semantic_memory import list_personal_memories, remember_personal_memory
+    from opspilot.domain.task_control import create_session, trusted_identity
+
+    session_id = str(create_session(demo_db, trusted_identity(demo_db, "support-a"))["session_id"])
+    message_id = "c01-b2-a-normal-save"
+    _insert_user_message(demo_db, session_id, message_id, body)
+
+    saved = remember_personal_memory(
+        demo_db, "tenant-a", "support-a", memory_kind="PREFERENCE", memory_mode="PINNED",
+        memory_key="fixture.normal-language-preference", content=content,
+        source_message_id=message_id, idempotency_key="c01-b2-a-normal-save",
+    )
+
+    assert saved["saved"] is True
+    persisted = list_personal_memories(demo_db, "tenant-a", "support-a", state="ACTIVE")
+    assert len(persisted) == 1
+    assert persisted[0]["memory_key"] == "fixture.normal-language-preference"
+    assert persisted[0]["content"] == content
+    assert persisted[0]["source_message_id"] == message_id
+
+
+@pytest.mark.parametrize("body", [
+    '这句话“请帮我记住”是什么意思？',
+    '“记住我的偏好”是什么意思？',
+    'What does "Please remember: I prefer Java" mean?',
+])
+def test_explaining_normal_memory_phrases_does_not_persist(demo_db, body):
+    from opspilot.domain.semantic_memory import MemorySourceRejected, list_personal_memories, remember_personal_memory
+    from opspilot.domain.task_control import create_session, trusted_identity
+
+    session_id = str(create_session(demo_db, trusted_identity(demo_db, "support-a"))["session_id"])
+    message_id = "c01-b2-a-explain-save-phrase"
+    _insert_user_message(demo_db, session_id, message_id, body)
+
+    with pytest.raises(MemorySourceRejected):
+        remember_personal_memory(
+            demo_db, "tenant-a", "support-a", memory_kind="PREFERENCE", memory_mode="PINNED",
+            memory_key="fixture.explained-phrase", content=body,
+            source_message_id=message_id, idempotency_key="c01-b2-a-explain-save-phrase",
+        )
+
+    assert list_personal_memories(demo_db, "tenant-a", "support-a", state="ACTIVE") == []
+
+
 def test_disabling_personal_memory_reassembles_same_session_history_and_summary(demo_db, tmp_path, monkeypatch):
     monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "HYBRID")
     monkeypatch.setenv("OPSPILOT_CONTEXT_WINDOW_TOKENS", "16384")
