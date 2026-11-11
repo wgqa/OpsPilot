@@ -905,6 +905,49 @@ TaskBinding 定义可信租户、服务、集成和订单范围，不把某一�
 用自然语言回答用户问题，保留具体来源、事实形成时间和未知事项。准确区分已完成、正在发生和建议后续执行：只可依据当前 Run 的实际工具结果或可信 Domain 回执描述已经发生的动作；只有可信状态显示动作仍在进行时才说正在进行。没有实际动作回执时，后续核查、联系接收方或创建工单必须写成建议，不得声称已经启动、正在执行、已指派人员或承诺反馈。可整理说明或交接草稿，但不能声称已提交、已修复、已正式诊断或创建回执。所有正式修复/审批/交接继续由原有 Domain 协议负责。不要输出内部思维链。'''
 
 
+class _ProviderStreamCompletionError(TaskControlError):
+    """The Provider ended the stream without a usable answer or tool call."""
+
+
+_STREAM_FINISH_ERRORS = {
+    "length": "ASSISTANT_PROVIDER_STREAM_OUTPUT_TRUNCATED",
+    "content_filter": "ASSISTANT_PROVIDER_STREAM_CONTENT_FILTERED",
+    "insufficient_system_resource": "ASSISTANT_PROVIDER_STREAM_INSUFFICIENT_RESOURCES",
+    "aborted": "ASSISTANT_PROVIDER_STREAM_ABORTED",
+}
+
+
+def _stream_finish_reason(message):
+    reason = message.response_metadata.get("finish_reason")
+    if reason not in {"stop", "tool_calls"}:
+        raise _ProviderStreamCompletionError(_STREAM_FINISH_ERRORS.get(
+            reason, "ASSISTANT_PROVIDER_STREAM_FINISH_REASON_UNSUPPORTED",
+        ))
+    if message.invalid_tool_calls or (reason == "tool_calls") != bool(message.tool_calls):
+        raise _ProviderStreamCompletionError("ASSISTANT_PROVIDER_STREAM_TOOL_CALL_INVALID")
+    return reason
+
+
+def _assert_stream_completion(aggregate, final):
+    reason = _stream_finish_reason(final)
+    chunks = aggregate.tool_call_chunks
+    if reason == "stop" and not chunks:
+        return
+    # LangChain assembles the deltas and parses partial JSON for live previews.
+    # Require a complete JSON object before giving those calls to the agent.
+    if reason == "tool_calls" and len(chunks) == len(final.tool_calls):
+        try:
+            arguments = [json.loads(chunk["args"]) for chunk in chunks]
+            if all(
+                chunk.get("id") and chunk.get("name") and isinstance(args, dict) and args == call["args"]
+                for chunk, args, call in zip(chunks, arguments, final.tool_calls)
+            ) and len({call["id"] for call in final.tool_calls}) == len(chunks):
+                return
+        except (TypeError, ValueError):
+            pass
+    raise _ProviderStreamCompletionError("ASSISTANT_PROVIDER_STREAM_TOOL_CALL_INVALID")
+
+
 def _assistant_failure_notice(error: BaseException) -> str | None:
     """Describe provider dispatch outcomes without confusing known usage with UNKNOWN."""
     code = getattr(error, "_opspilot_failure_code", None) or getattr(error, "code", None)
@@ -912,6 +955,15 @@ def _assistant_failure_notice(error: BaseException) -> str | None:
         return "模型请求未越过发送授权边界，本次没有发送 Provider 请求，解释未完成；系统不会自动重试。"
     if code == "ASSISTANT_PROVIDER_RESPONSE_PROCESSING_FAILED":
         return "Provider 响应已保存且 Usage 已记账，但 Assistant 未能处理该响应，本次解释未完成；系统不会自动重试。"
+    if isinstance(error, _ProviderStreamCompletionError) and code == getattr(error, "_opspilot_failure_code", None):
+        detail = {
+            "ASSISTANT_PROVIDER_STREAM_OUTPUT_TRUNCATED": "模型输出达到长度上限",
+            "ASSISTANT_PROVIDER_STREAM_CONTENT_FILTERED": "模型因内容过滤结束",
+            "ASSISTANT_PROVIDER_STREAM_INSUFFICIENT_RESOURCES": "模型服务资源不足",
+            "ASSISTANT_PROVIDER_STREAM_ABORTED": "模型生成已中止",
+            "ASSISTANT_PROVIDER_STREAM_TOOL_CALL_INVALID": "模型返回的工具调用不完整或无效",
+        }.get(code, "模型返回了不支持的结束原因")
+        return f"{detail}，本次解释未完成。响应与 Usage 已记账，系统不会自动重试。"
     if code == "ASSISTANT_PROVIDER_USAGE_VIOLATION":
         return "Provider 已返回响应，但 Usage 超出已批准费用边界；系统已停止并保留账本记录，本次解释未完成，且不会自动重试。"
     if code == "ASSISTANT_PROVIDER_RESULT_UNKNOWN":
@@ -1420,19 +1472,18 @@ class Loop(AgentMiddleware):
         aggregate = None
         buffered: list[str] = []
         buffered_chars = 0
-        last_flush = time.monotonic()
         first_part = True
+        next_part = None
         if replay:
             self._activity("MODEL_RESPONSE_REPLAYING")
 
         async def flush():
-            nonlocal buffered_chars, last_flush
+            nonlocal buffered_chars
             if not buffered:
                 return
             value = "".join(buffered)
             buffered.clear()
             buffered_chars = 0
-            last_flush = time.monotonic()
             if not replay and value:
                 await asyncio.to_thread(
                     persist_chat_chunk, self.path, self.worker_id,
@@ -1440,38 +1491,44 @@ class Loop(AgentMiddleware):
                 )
 
         try:
-            while True:
-                next_part = asyncio.create_task(iterator.__anext__())
-                while not next_part.done():
-                    done, _ = await asyncio.wait({next_part}, timeout=0.075)
-                    if not done and buffered:
+            try:
+                while True:
+                    next_part = asyncio.create_task(iterator.__anext__())
+                    while not next_part.done():
+                        done, _ = await asyncio.wait({next_part}, timeout=0.075)
+                        if not done and buffered:
+                            await flush()
+                    try:
+                        part = next_part.result()
+                    except StopAsyncIteration:
+                        break
+                    finally:
+                        next_part = None
+                    aggregate = part if aggregate is None else aggregate + part
+                    if first_part:
+                        first_part = False
+                        if not replay:
+                            self.streaming_started = True
+                            self._activity("MODEL_STREAMING")
+                    content = getattr(part, "content", None)
+                    if isinstance(content, str) and content:
+                        buffered.append(content)
+                        buffered_chars += len(content)
+                    if buffered_chars >= 96:
                         await flush()
-                try:
-                    part = next_part.result()
-                except StopAsyncIteration:
-                    break
-                aggregate = part if aggregate is None else aggregate + part
-                if first_part:
-                    first_part = False
-                    if not replay:
-                        self.streaming_started=True
-                        self._activity("MODEL_STREAMING")
-                content = getattr(part, "content", None)
-                if isinstance(content, str) and content:
-                    buffered.append(content)
-                    buffered_chars += len(content)
-                if buffered_chars >= 96:
-                    await flush()
-            await flush()
+            finally:
+                if next_part is not None:
+                    next_part.cancel()
+                    await asyncio.gather(next_part, return_exceptions=True)
+                await iterator.aclose()
         except BaseException:
             await flush()
             raise
+        await flush()
         if aggregate is None:
             raise TaskControlError("ASSISTANT_PROVIDER_EMPTY_STREAM")
         final = message_chunk_to_message(aggregate)
-        finish_reason = (getattr(final, "response_metadata", None) or {}).get("finish_reason")
-        if finish_reason == "aborted":
-            raise TaskControlError("ASSISTANT_PROVIDER_STREAM_ABORTED")
+        _assert_stream_completion(aggregate, final)
         if final.tool_calls:
             # Provider content emitted before a completed tool call is only a
             # transient draft. Keep its audit event and stable sequence, but
@@ -1767,7 +1824,7 @@ class Loop(AgentMiddleware):
         self._assert_memories_current(selected_memories)
 
     def _record_runtime_model_failure(self, call, runtime_dispatch, error):
-        from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch
+        from opspilot.domain.assistant_runtime_grant import close_unfinished_dispatch, require_stored_response
 
         state = (
             close_unfinished_dispatch(
@@ -1796,19 +1853,25 @@ class Loop(AgentMiddleware):
             response_known = False
             usage_state = "UNKNOWN"
 
-        domain.finish(
-            self.path,
-            call["call_id"],
-            call_status,
-            {
-                "error": failure_code,
-                "runtime_dispatch_state": state,
-                "provider_response_known": response_known,
-                "usage_state": usage_state,
-                "provider_error_type": type(error).__name__,
-                "cause_types": _exception_type_chain(error),
-            },
-        )
+        stream_failure = isinstance(error, _ProviderStreamCompletionError) and state in {"RESPONSE_STORED", "DELIVERED"}
+        if stream_failure:
+            failure_code = error.code
+        failure = {
+            "error": failure_code,
+            "runtime_dispatch_state": state,
+            "provider_response_known": response_known,
+            "usage_state": usage_state,
+            "provider_error_type": type(error).__name__,
+            "cause_types": _exception_type_chain(error),
+        }
+        if stream_failure:
+            stored = require_stored_response(
+                self.path, str(runtime_dispatch["request_key"]),
+                call_id=str(call["call_id"]), request_digest=str(call["request_digest"]),
+            )
+            domain.finish_runtime_replay(self.path, call["call_id"], failure, [stored["usage"]], status="FAILED")
+        else:
+            domain.finish(self.path, call["call_id"], call_status, failure)
         try:
             setattr(error, "_opspilot_failure_code", failure_code)
         except Exception:
@@ -1905,7 +1968,11 @@ class Loop(AgentMiddleware):
                 'MODEL', call['logical_key'], self._campaign_usage_for_cached_call(call)
             )
             from langchain.agents.middleware.types import ModelResponse
-            return ModelResponse(result=messages_from_dict(json.loads(call['result_json'])))
+            cached = messages_from_dict(json.loads(call['result_json']))
+            if self.streaming_enabled:
+                for message in cached:
+                    _stream_finish_reason(message)
+            return ModelResponse(result=cached)
         runtime_dispatch = None
         if self.runtime_grant_binding is not None:
             from opspilot.domain.assistant_runtime_grant import reserve_dispatch
@@ -2064,6 +2131,11 @@ class Loop(AgentMiddleware):
             )
             if self.runtime_grant_binding is not None:
                 self._record_runtime_model_failure(call, runtime_dispatch, error)
+                if (self.streaming_enabled and isinstance(error, asyncio.CancelledError)
+                    and getattr(error, "_opspilot_failure_code", None) == "ASSISTANT_PROVIDER_RESULT_UNKNOWN"):
+                    _close_terminal_assistant_failure(
+                        self.path, self.worker_id, self.run_id, error, "ASSISTANT_PROVIDER_RESULT_UNKNOWN",
+                    )
             else:
                 if self.experiment_id in CLAIM_GUARDED_EXPERIMENT_IDS and send_started:
                     _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
@@ -2860,6 +2932,8 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
                 loop.assert_manifest_memories_current()
                 answer=await asyncio.wait_for(graph.ainvoke(None if saved.values else {'messages':initial},config),60)
                 final=answer['messages'][-1]
+                if streaming_enabled:
+                    _stream_finish_reason(final)
                 text=final.content if isinstance(final.content,str) else canonical_json(final.content)
                 if final.tool_calls or not text.strip():raise TaskControlError('ASSISTANT_NO_FINAL_ANSWER')
                 memory_tool_calls = [

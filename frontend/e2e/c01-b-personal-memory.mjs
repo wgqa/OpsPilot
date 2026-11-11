@@ -176,7 +176,14 @@ try {
   await autoLearnToggle.check();
   await expect(autoLearnToggle).toBeChecked();
   if (!autoLearnEnabled) throw new Error('Automatic learning setting did not persist the enabled state.');
-  await expect(page.getByTestId('personal-memory-auto-learn-status')).toContainText('自动整理已排队');
+  const jobStatus = page.getByTestId('personal-memory-auto-learn-status');
+  await expect(jobStatus).toContainText('自动整理已排队');
+  consolidationLatestJob = { ...consolidationLatestJob, status: 'RUNNING' };
+  await expect(jobStatus).toContainText('正在整理本批聊天');
+  consolidationLatestJob = {
+    ...consolidationLatestJob, status: 'UNKNOWN', failure_code: 'PROVIDER_TIMEOUT_RESULT_UNKNOWN',
+  };
+  await expect(jobStatus).toContainText('最近一批整理结果未知 · PROVIDER_TIMEOUT_RESULT_UNKNOWN');
 
   const form = page.getByTestId('personal-memory-proposal');
   await form.locator('select').nth(0).selectOption(sourceMessageId);
@@ -202,7 +209,7 @@ try {
 
   console.log(JSON.stringify({ status: 'PASS', candidate_previewed: true, owner_scope_visible: true,
     confirmation_required: true, recall_toggle_off_and_on_persisted: true,
-    automatic_learning_toggle_persisted: true, cost_and_runtime_grant_disclosed: true,
+    automatic_learning_toggle_persisted: true, consolidation_status_from_polling: true, cost_and_runtime_grant_disclosed: true,
     ttl_disclosed: true, no_auto_injection_before_a_new_run: true, revoke_refreshed_context: true }));
   await context.close();
 } finally {

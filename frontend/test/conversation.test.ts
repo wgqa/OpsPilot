@@ -215,7 +215,11 @@ test('deduplicates replayed stable ids and renders only the active source run ch
 
 test('keeps persisted partial Provider text visibly incomplete after a terminal failure', () => {
   const projection = projectConversation({
-    messages: [user('q-failed-stream', 1, '2026-01-01T00:00:00Z')],
+    messages: [
+      user('q-failed-stream', 1, '2026-01-01T00:00:00Z'),
+      { ...user('failure-notice', 2, '2026-01-01T00:00:03Z'), role: 'ASSISTANT',
+        answer_run_id: 'chat-r-failed', answer_source_message_id: 'q-failed-stream', answer_kind: 'PROGRAM_LIMIT' },
+    ],
     activeChatRun: { run_id: 'chat-r-failed', task_id: 'task-a', source_message_id: 'q-failed-stream',
       kind: 'CHAT_READONLY', status: 'FAILED', created_at: '2026-01-01T00:00:01Z' },
     chunks: [{ chunk_id: 'chunk-partial', chunk_seq: 1, body: 'partial Provider draft', body_digest: 'd1',

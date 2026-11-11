@@ -461,8 +461,15 @@ export function projectConversation(input: ProjectConversationInput): Conversati
 
   const active = input.activeChatRun;
   const answeredRuns = new Set<string>();
+  const answerRunsBeyondProgramNotice = new Set<string>();
   for (const thread of threads) {
-    for (const item of thread.items) if (item.runId) answeredRuns.add(item.runId);
+    for (const item of thread.items) {
+      if (!item.runId) continue;
+      answeredRuns.add(item.runId);
+      if (item.kind !== 'CHAT_MESSAGE' || !item.messages?.every((message) => message.answer_kind === 'PROGRAM_LIMIT')) {
+        answerRunsBeyondProgramNotice.add(item.runId);
+      }
+    }
   }
 
   for (const run of allRuns.values()) {
@@ -481,7 +488,7 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     if (!attach(effectiveSource, run.task_id, item)) orphan(item);
   }
 
-  if (active?.source_message_id && !answeredRuns.has(active.run_id)
+  if (active?.source_message_id && !answerRunsBeyondProgramNotice.has(active.run_id)
     && ['RUNNING', 'FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE'].includes(active.status)
     && (input.chunks?.length ?? 0) > 0) {
     const chunks = [...new Map((input.chunks ?? []).map((chunk) => [chunk.chunk_id, chunk])).values()]

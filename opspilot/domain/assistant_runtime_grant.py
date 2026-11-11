@@ -1335,18 +1335,26 @@ def claim_send(path, binding, *, call_id: str, request_key: str, request_digest:
             # consolidation. Permit this one extra call only while a durable,
             # source-current consolidation job is RUNNING and owns this call.
             job = connection.execute(
-                """SELECT job_id FROM personal_memory_consolidation_jobs
-                   WHERE assistant_call_id=? AND source_run_id=? AND status='RUNNING'""",
+                """SELECT j.job_id,j.tenant_id,j.owner_actor_id,c.request_json
+                   FROM personal_memory_consolidation_jobs j
+                   JOIN assistant_calls c ON c.call_id=j.assistant_call_id
+                   WHERE j.assistant_call_id=? AND j.source_run_id=? AND j.status='RUNNING'""",
                 (call_id, expected["run_id"]),
             ).fetchone()
             if job is None:
                 raise RuntimeGrantError("RUNTIME_RUN_NOT_ACTIVE")
-            from opspilot.domain.personal_memory_consolidation import consolidation_job_is_current
+            from opspilot.domain.personal_memory_consolidation import (
+                consolidation_job_is_current, consolidation_request_memories_are_current,
+            )
 
             if not consolidation_job_is_current(
                 connection, str(job["job_id"]), run_id=str(expected["run_id"]),
             ):
                 raise RuntimeGrantError("RUNTIME_PERSONAL_MEMORY_JOB_NOT_CURRENT")
+            if not consolidation_request_memories_are_current(
+                connection, job["tenant_id"], job["owner_actor_id"], job["request_json"],
+            ):
+                raise RuntimeGrantError("RUNTIME_PERSONAL_MEMORY_CONTEXT_CHANGED")
         try:
             _, _, grant = _current_grant(connection, path, runtime_config_from_env())
         except RuntimeGrantError as error:

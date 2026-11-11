@@ -642,8 +642,10 @@ def finish(path,call_id,status,result=None,usage=None,observation=None):
     with connect(path) as c:
         c.execute("UPDATE assistant_calls SET status=?,result_json=?,usage_json=?,observation_id=?,evidence_id=?,completed_at=? WHERE call_id=? AND status='RESERVED'",(status,canonical_json(result),canonical_json(usage), (observation or {}).get('observation_id'),(observation or {}).get('evidence_id'),utc_now(),call_id))
 
-def finish_runtime_replay(path,call_id,result,usage=None):
-    """Complete an Assistant call only from a Runtime Grant's stored HTTP response."""
+def finish_runtime_replay(path,call_id,result,usage=None,*,status='OK'):
+    """Close an Assistant call using a Runtime Grant's stored HTTP response."""
+    if status not in {'OK','FAILED'}:
+        raise TaskControlError('ASSISTANT_RUNTIME_REPLAY_STATE_INVALID')
     with connect(path) as c:
         c.execute('BEGIN IMMEDIATE')
         row=c.execute("SELECT * FROM assistant_calls WHERE call_id=? AND kind='MODEL'",(call_id,)).fetchone()
@@ -657,8 +659,8 @@ def finish_runtime_replay(path,call_id,result,usage=None):
         if replay is None:
             raise TaskControlError('ASSISTANT_RUNTIME_REPLAY_EVIDENCE_MISSING')
         c.execute(
-            "UPDATE assistant_calls SET status='OK',result_json=?,usage_json=?,completed_at=? WHERE call_id=? AND status IN ('RESERVED','UNKNOWN')",
-            (canonical_json(result),canonical_json(usage),utc_now(),call_id),
+            "UPDATE assistant_calls SET status=?,result_json=?,usage_json=?,completed_at=? WHERE call_id=? AND status IN ('RESERVED','UNKNOWN')",
+            (status,canonical_json(result),canonical_json(usage),utc_now(),call_id),
         )
 
 def sources_current(connection, run_id, *, allow_failed_chat_observations=False):

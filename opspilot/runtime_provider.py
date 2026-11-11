@@ -242,7 +242,10 @@ def wrap_transports(binding, async_transport, sync_transport):
                         request=request,
                     )
                     return response
-                response_body = await response.aread()
+                try:
+                    response_body = await response.aread()
+                finally:
+                    await response.aclose()
                 result = runtime_grant.store_response(
                     binding["db_path"], context["dispatch"]["request_key"],
                     status_code=response.status_code, headers=dict(response.headers),
@@ -253,7 +256,6 @@ def wrap_transports(binding, async_transport, sync_transport):
                 # to decode the already-decoded body again (and can surface
                 # as an SDK connection error after a real HTTP 200).
                 response_headers = _decoded_body_headers(response.headers)
-                await response.aclose()
             except BaseException as error:
                 runtime_grant.mark_unknown(
                     binding["db_path"], context["dispatch"]["request_key"],

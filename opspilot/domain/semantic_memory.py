@@ -752,6 +752,28 @@ def _personal_source_is_current(
     )
 
 
+def _personal_memory_exclusion(connection: sqlite3.Connection, row: sqlite3.Row) -> str | None:
+    """Check a Personal Memory fetched inside its trusted tenant/owner scope."""
+    state = str(row["state"])
+    if state != "ACTIVE":
+        return {
+            "CANDIDATE": "PERSONAL_MEMORY_PENDING_CONFIRMATION",
+            "REVISED": "PERSONAL_MEMORY_REVISED",
+            "REVOKED": "PERSONAL_MEMORY_REVOKED",
+            "EXPIRED": "PERSONAL_MEMORY_EXPIRED",
+        }.get(state, "PERSONAL_MEMORY_INACTIVE")
+    if row["revoked_at"] is not None:
+        return "PERSONAL_MEMORY_REVOKED"
+    try:
+        if _parse_time(str(row["expires_at"])) <= _now():
+            return "PERSONAL_MEMORY_EXPIRED"
+    except ValueError:
+        return "PERSONAL_MEMORY_SOURCE_INVALID"
+    if not _personal_source_is_current(connection, row):
+        return "PERSONAL_MEMORY_SOURCE_INVALID"
+    return None
+
+
 def _personal_event(
     connection: sqlite3.Connection,
     row: sqlite3.Row | dict[str, Any],
@@ -1471,22 +1493,10 @@ def personal_memory_context(
     valid_active: list[dict[str, Any]] = []
     excluded: list[dict[str, str]] = []
     for row in rows:
-        state = str(row["state"])
         memory_id = str(row["memory_id"])
-        if state != "ACTIVE":
-            reason = {
-                "CANDIDATE": "PERSONAL_MEMORY_PENDING_CONFIRMATION",
-                "REVISED": "PERSONAL_MEMORY_REVISED",
-                "REVOKED": "PERSONAL_MEMORY_REVOKED",
-                "EXPIRED": "PERSONAL_MEMORY_EXPIRED",
-            }.get(state, "PERSONAL_MEMORY_INACTIVE")
+        reason = _personal_memory_exclusion(connection, row)
+        if reason is not None:
             excluded.append({"source_id": memory_id, "reason": reason, "category": "PERSONAL_MEMORY"})
-            continue
-        if _parse_time(str(row["expires_at"])) <= _now():
-            excluded.append({"source_id": memory_id, "reason": "PERSONAL_MEMORY_EXPIRED", "category": "PERSONAL_MEMORY"})
-            continue
-        if not _personal_source_is_current(connection, row):
-            excluded.append({"source_id": memory_id, "reason": "PERSONAL_MEMORY_SOURCE_INVALID", "category": "PERSONAL_MEMORY"})
             continue
         item = _personal_row_dict(row)
         item.update({
@@ -1613,10 +1623,9 @@ def assert_selected_personal_memories_current_in_connection(
             (str(selected.get("memory_id", "")), tenant_id, owner_actor_id),
         ).fetchone()
         if (
-            row is None or str(row["state"]) != "ACTIVE"
+            row is None
             or int(row["version"]) != int(selected.get("version", 0))
             or str(row["content_digest"]) != str(selected.get("content_digest", ""))
-            or not _personal_source_is_current(connection, row)
-            or _parse_time(str(row["expires_at"])) <= _now()
+            or _personal_memory_exclusion(connection, row) is not None
         ):
             raise MemorySourceRejected("PERSONAL_MEMORY_REVOKED_EXPIRED_OR_CHANGED")
