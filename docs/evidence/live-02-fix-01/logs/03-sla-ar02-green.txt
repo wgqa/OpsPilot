@@ -1,0 +1,47 @@
+HTTP Request: GET http://127.0.0.1:62405/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+queued-before: QUEUED, WITHIN_SLA, source/Observation/Event/versions match
+HTTP Request: GET http://127.0.0.1:62416/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.queued-next-day: QUEUED, OVERDUE, source/Observation/Event/versions match
+HTTP Request: GET http://127.0.0.1:52925/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.processed: PROCESSED, PROCESSED, source/Observation/Event/versions match
+HTTP Request: GET http://127.0.0.1:52937/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.transport-exhausted: NOT_RECEIVED, NOT_APPLICABLE, source/Observation/Event/versions match
+HTTP Request: GET http://127.0.0.1:63856/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+Tool 'get_callback_transport_history' failed: 'Error executing tool get_callback_transport_history: S3_EVENT_NOT_AVAILABLE_WITHIN_BOUND_ORDER'
+HTTP Request: GET http://127.0.0.1:63869/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+..........OS BEFORE 86  HTTP Request: GET http://127.0.0.1:63888/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+
+OS AFTER 0 {'status': 'SUCCEEDED', 'run_id': 'run-59840d99-d358-4341-9dae-c2e2815cbd86', 'message_id': 'message-751bacf2-fa38-4244-9fe0-4bdd25b85ce6', 'attempt_id': 'chat-attempt-77813113-6868-42bc-aeaa-db340dc16c65', 'manifest_id': 'chat-manifest-4aeb6afb-3a1f-4b5b-b2b5-09811803bea0', 'body_digest': '2aec801bfdd00f782c37516ad47a61ceac0f4c261446cdba1c5cd14f9c2350bb'}
+ 
+HTTP Request: GET http://127.0.0.1:63935/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:54857/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:54864/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:54880/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:54890/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+..........
+=================================== PASSES ====================================
+=========================== short test summary info ===========================
+PASSED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[queued-before-QUEUED-WITHIN_SLA]
+PASSED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[queued-next-day-QUEUED-OVERDUE]
+PASSED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[processed-PROCESSED-PROCESSED]
+PASSED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[transport-exhausted-NOT_RECEIVED-NOT_APPLICABLE]
+PASSED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:18:25.999Z-WITHIN_SLA]
+PASSED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:18:26Z-OVERDUE]
+PASSED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-12T15:13:26Z-OVERDUE]
+PASSED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:13:25Z-UNKNOWN]
+PASSED tests/test_ar02_runtime.py::test_concept_without_task_and_reopen_history
+PASSED tests/test_ar02_runtime.py::test_knowledge_then_bound_investigation_same_session
+PASSED tests/test_ar02_runtime.py::test_mixed_scope_denial_retains_legal_query
+PASSED tests/test_ar02_runtime.py::test_order_binding_change_requires_a_trusted_new_order_command
+PASSED tests/test_ar02_runtime.py::test_worker_default_does_not_construct_paid_provider
+PASSED tests/test_ar02_runtime.py::test_os_crash_after_observation_resumes_same_run_without_duplicate_answer
+PASSED tests/test_ar02_runtime.py::test_commit_transaction_rechecks_abort_after_model_answer
+PASSED tests/test_ar02_runtime.py::test_existing_task_active_time_limit_is_preserved
+PASSED tests/test_ar02_runtime.py::test_unknown_model_result_stops_and_same_operation_has_no_new_call
+PASSED tests/test_ar02_runtime.py::test_real_api_worker_session_journey_and_refresh_no_extra_dispatch
+PASSED tests/test_ar02_runtime.py::test_old_core_sources_revoke_and_ordinary_chat_cannot_borrow_observation
+PASSED tests/test_ar02_runtime.py::test_revocation_between_tool_and_model_stops_and_source_api_denies
+PASSED tests/test_ar02_runtime.py::test_two_connections_preserve_run_reservation_limit
+PASSED tests/test_ar02_runtime.py::test_same_wording_different_real_observation_is_delivered[DELIVERED_PENDING-QUEUED]
+PASSED tests/test_ar02_runtime.py::test_same_wording_different_real_observation_is_delivered[DELIVERY_FAILED-NOT_RECEIVED]
+23 passed in 51.65s

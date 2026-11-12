@@ -1,0 +1,66 @@
+HTTP Request: GET http://127.0.0.1:55231/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:55247/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:55265/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:55279/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:55293/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:55307/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:55332/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:55348/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+FFFFFFFF
+================================== FAILURES ===================================
+__________ test_ttl_allows_owner_snapshot_but_never_new_model_input ___________
+tests\test_live_02_fix_01_history.py:61: in test_ttl_allows_owner_snapshot_but_never_new_model_input
+    assert stale["body"] == original
+E   assert '这条历史答复的来源已失效，不能作为当前依据。请重新查询。' == 'captured rec...不是 PROCESSED。'
+E     
+E     + 这条历史答复的来源已失效，不能作为当前依据。请重新查询。
+E     - captured receiver snapshot
+E     - 本 Run 当前事实：{"accepted_at": "2026-11-12T15:56:11.943365Z", "delivery_version": 1, "event_id": "event-95447539-a182-4ea4-8558-8b1b69d888aa", "order_id": "ar02-order", "processing_sla_seconds": 300, "service_id": "orders-async-demo", "status": "QUEUED", "tenant_id": "tenant-a", "version": 1}；同事件 202 不是 PROCESSED。
+_________ test_business_version_change_keeps_snapshot_and_fresh_query _________
+tests\test_live_02_fix_01_history.py:117: in test_business_version_change_keeps_snapshot_and_fresh_query
+    assert old["body"] == original
+E   assert '这条历史答复的来源已失效，不能作为当前依据。请重新查询。' == 'captured rec...不是 PROCESSED。'
+E     
+E     + 这条历史答复的来源已失效，不能作为当前依据。请重新查询。
+E     - captured receiver snapshot
+E     - 本 Run 当前事实：{"accepted_at": "2026-11-12T15:56:15.421488Z", "delivery_version": 1, "event_id": "event-b2b64cb6-be2b-4734-beb2-6b160fdb3095", "order_id": "ar02-order", "processing_sla_seconds": 300, "service_id": "orders-async-demo", "status": "QUEUED", "tenant_id": "tenant-a", "version": 1}；同事件 202 不是 PROCESSED。
+___ test_stale_snapshot_fails_closed[revoked-S3_AUTHORIZATION_UNAVAILABLE] ____
+tests\test_live_02_fix_01_history.py:160: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+__ test_stale_snapshot_fails_closed[grant-version-S3_AUTHORIZATION_CHANGED] ___
+tests\test_live_02_fix_01_history.py:160: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+_ test_stale_snapshot_fails_closed[corrupt-result-ASSISTANT_SOURCE_RESULT_INVALID] _
+tests\test_live_02_fix_01_history.py:160: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+_ test_stale_snapshot_fails_closed[source-message-changed-S3_HISTORY_SOURCE_UNVERIFIED] _
+tests\test_live_02_fix_01_history.py:160: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+_ test_stale_snapshot_fails_closed[unversioned-fact-S3_CURRENT_FACT_MISMATCH] _
+tests\test_live_02_fix_01_history.py:160: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+__ test_stale_snapshot_fails_closed[sensitive-S3_HISTORY_SENSITIVE_CONTENT] ___
+tests\test_live_02_fix_01_history.py:160: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+=========================== short test summary info ===========================
+FAILED tests/test_live_02_fix_01_history.py::test_ttl_allows_owner_snapshot_but_never_new_model_input
+FAILED tests/test_live_02_fix_01_history.py::test_business_version_change_keeps_snapshot_and_fresh_query
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[revoked-S3_AUTHORIZATION_UNAVAILABLE]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[grant-version-S3_AUTHORIZATION_CHANGED]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[corrupt-result-ASSISTANT_SOURCE_RESULT_INVALID]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[source-message-changed-S3_HISTORY_SOURCE_UNVERIFIED]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[unversioned-fact-S3_CURRENT_FACT_MISMATCH]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[sensitive-S3_HISTORY_SENSITIVE_CONTENT]
+8 failed in 26.79s

@@ -1,0 +1,124 @@
+HTTP Request: GET http://127.0.0.1:64667/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:64700/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:49783/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:49813/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:49849/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:51645/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:51675/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:51708/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:56671/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:57566/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:57615/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:57655/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+FFFFFFFFFFFFFFFFF
+================================== FAILURES ===================================
+__________ test_ttl_allows_owner_snapshot_but_never_new_model_input ___________
+tests\test_live_02_fix_01_history.py:56: in test_ttl_allows_owner_snapshot_but_never_new_model_input
+    assert stale["body"] == original
+E   assert '这条历史答复的来源已失效，不能作为当前依据。请重新查询。' == 'captured rec...不是 PROCESSED。'
+E     
+E     + 这条历史答复的来源已失效，不能作为当前依据。请重新查询。
+E     - captured receiver snapshot
+E     - 本 Run 当前事实：{"accepted_at": "2026-11-12T15:47:45.290513Z", "delivery_version": 1, "event_id": "event-9bf02748-ffba-4018-9074-0471bd645fac", "order_id": "ar02-order", "processing_sla_seconds": 300, "service_id": "orders-async-demo", "status": "QUEUED", "tenant_id": "tenant-a", "version": 1}；同事件 202 不是 PROCESSED。
+_________ test_business_version_change_keeps_snapshot_and_fresh_query _________
+tests\test_live_02_fix_01_history.py:112: in test_business_version_change_keeps_snapshot_and_fresh_query
+    assert old["body"] == original
+E   assert '这条历史答复的来源已失效，不能作为当前依据。请重新查询。' == 'captured rec...不是 PROCESSED。'
+E     
+E     + 这条历史答复的来源已失效，不能作为当前依据。请重新查询。
+E     - captured receiver snapshot
+E     - 本 Run 当前事实：{"accepted_at": "2026-11-12T15:47:49.224300Z", "delivery_version": 1, "event_id": "event-32072ffb-588a-43a4-b038-627426d469ae", "order_id": "ar02-order", "processing_sla_seconds": 300, "service_id": "orders-async-demo", "status": "QUEUED", "tenant_id": "tenant-a", "version": 1}；同事件 202 不是 PROCESSED。
+___ test_stale_snapshot_fails_closed[revoked-S3_AUTHORIZATION_UNAVAILABLE] ____
+tests\test_live_02_fix_01_history.py:155: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+__ test_stale_snapshot_fails_closed[grant-version-S3_AUTHORIZATION_CHANGED] ___
+tests\test_live_02_fix_01_history.py:155: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+_ test_stale_snapshot_fails_closed[corrupt-result-ASSISTANT_SOURCE_RESULT_INVALID] _
+tests\test_live_02_fix_01_history.py:155: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+_ test_stale_snapshot_fails_closed[source-message-changed-S3_HISTORY_SOURCE_UNVERIFIED] _
+tests\test_live_02_fix_01_history.py:155: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+_ test_stale_snapshot_fails_closed[unversioned-fact-S3_CURRENT_FACT_MISMATCH] _
+tests\test_live_02_fix_01_history.py:155: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+__ test_stale_snapshot_fails_closed[sensitive-S3_HISTORY_SENSITIVE_CONTENT] ___
+tests\test_live_02_fix_01_history.py:155: in test_stale_snapshot_fails_closed
+    assert answer["answer_visibility"] == "HIDDEN"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'answer_visibility'
+_____ test_auto_learned_project_background_uses_bilingual_topic_evidence ______
+tests\test_live_02_fix_01_memory.py:58: in test_auto_learned_project_background_uses_bilingual_topic_evidence
+    assert (memory_id in request) is expected, case_id
+E   AssertionError: zh-backend
+E   assert ('personal-b4acfbad-35af-41f7-9c78-d3883b410101' in '你是专业技术支持助手。保留用户的工作目标、日志材料和更正。按需要解释、查询合法资料、选择只读业务工具、根据观察继续、澄清或结束；简单问题可以零工具回答。不规定工具顺序。若你判断需要旧有专业调查，可以提出受控调查建议；该工具只记录建议并...取得的业务观察。没有新观察时，可以解释旧结果或说明当前未知，不能声称本轮已重读。","summary_refs":[],"task_id":null}\n我准备面试，能不能结合SpringBoot讲讲线程池和数据库连接池各解决什么问题？') is True
+_ test_assistant_receives_sla_from_current_real_mcp_observation[queued-before-QUEUED-WITHIN_SLA] _
+tests\test_live_02_fix_01_sla.py:43: in test_assistant_receives_sla_from_current_real_mcp_observation
+    sla = link["receiver_sla"]
+          ^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'receiver_sla'
+_ test_assistant_receives_sla_from_current_real_mcp_observation[queued-next-day-QUEUED-OVERDUE] _
+tests\test_live_02_fix_01_sla.py:43: in test_assistant_receives_sla_from_current_real_mcp_observation
+    sla = link["receiver_sla"]
+          ^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'receiver_sla'
+_ test_assistant_receives_sla_from_current_real_mcp_observation[processed-PROCESSED-PROCESSED] _
+tests\test_live_02_fix_01_sla.py:43: in test_assistant_receives_sla_from_current_real_mcp_observation
+    sla = link["receiver_sla"]
+          ^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'receiver_sla'
+_ test_assistant_receives_sla_from_current_real_mcp_observation[transport-exhausted-NOT_RECEIVED-NOT_APPLICABLE] _
+tests\test_live_02_fix_01_sla.py:43: in test_assistant_receives_sla_from_current_real_mcp_observation
+    sla = link["receiver_sla"]
+          ^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'receiver_sla'
+_ test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:18:25.999Z-WITHIN_SLA] _
+tests\test_live_02_fix_01_sla.py:72: in test_receiver_sla_uses_observation_time_at_the_exact_deadline
+    assert s3.receiver_sla_at_observation(fact)["assessment"] == expected
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'opspilot.domain.s3' has no attribute 'receiver_sla_at_observation'
+_ test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:18:26Z-OVERDUE] _
+tests\test_live_02_fix_01_sla.py:72: in test_receiver_sla_uses_observation_time_at_the_exact_deadline
+    assert s3.receiver_sla_at_observation(fact)["assessment"] == expected
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'opspilot.domain.s3' has no attribute 'receiver_sla_at_observation'
+_ test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-12T15:13:26Z-OVERDUE] _
+tests\test_live_02_fix_01_sla.py:72: in test_receiver_sla_uses_observation_time_at_the_exact_deadline
+    assert s3.receiver_sla_at_observation(fact)["assessment"] == expected
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'opspilot.domain.s3' has no attribute 'receiver_sla_at_observation'
+_ test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:13:25Z-UNKNOWN] _
+tests\test_live_02_fix_01_sla.py:72: in test_receiver_sla_uses_observation_time_at_the_exact_deadline
+    assert s3.receiver_sla_at_observation(fact)["assessment"] == expected
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: module 'opspilot.domain.s3' has no attribute 'receiver_sla_at_observation'
+=========================== short test summary info ===========================
+FAILED tests/test_live_02_fix_01_history.py::test_ttl_allows_owner_snapshot_but_never_new_model_input
+FAILED tests/test_live_02_fix_01_history.py::test_business_version_change_keeps_snapshot_and_fresh_query
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[revoked-S3_AUTHORIZATION_UNAVAILABLE]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[grant-version-S3_AUTHORIZATION_CHANGED]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[corrupt-result-ASSISTANT_SOURCE_RESULT_INVALID]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[source-message-changed-S3_HISTORY_SOURCE_UNVERIFIED]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[unversioned-fact-S3_CURRENT_FACT_MISMATCH]
+FAILED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[sensitive-S3_HISTORY_SENSITIVE_CONTENT]
+FAILED tests/test_live_02_fix_01_memory.py::test_auto_learned_project_background_uses_bilingual_topic_evidence
+FAILED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[queued-before-QUEUED-WITHIN_SLA]
+FAILED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[queued-next-day-QUEUED-OVERDUE]
+FAILED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[processed-PROCESSED-PROCESSED]
+FAILED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[transport-exhausted-NOT_RECEIVED-NOT_APPLICABLE]
+FAILED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:18:25.999Z-WITHIN_SLA]
+FAILED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:18:26Z-OVERDUE]
+FAILED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-12T15:13:26Z-OVERDUE]
+FAILED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:13:25Z-UNKNOWN]
+17 failed in 53.41s
