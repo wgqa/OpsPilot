@@ -70,6 +70,8 @@ export interface MessageItem {
   answer_run_id?: string | null;
   answer_source_message_id?: string | null;
   answer_kind?: 'CHAT_MODEL' | 'PROGRAM_LIMIT' | null;
+  answer_visibility?: 'CURRENT' | 'HISTORICAL_SNAPSHOT' | 'HIDDEN';
+  source_status?: string | null;
   investigation_origin_message_id?: string | null;
 }
 
@@ -424,7 +426,7 @@ export const api = {
       items: MessageItem[];
       has_more_before: boolean;
       has_more_after: boolean;
-    }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${query.toString()}`);
+    }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${query.toString()}`, { cache: 'no-store' });
   },
   sessionRuns(sessionId: string) { return request<{ items: RunItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`); },
   send(sessionId: string, body: string, taskId: string | null, csrf: string, inputKind: 'CHAT_READONLY' | 'CORRECT_TASK_INPUT' = 'CHAT_READONLY') {

@@ -665,22 +665,35 @@ def finish_runtime_replay(path,call_id,result,usage=None,*,status='OK'):
 
 def sources_current(connection, run_id, *, allow_failed_chat_observations=False):
     """Revalidate actual persisted sources; never trust a saved Prompt/answer."""
+    return _check_sources(connection, run_id, allow_failed_chat_observations=allow_failed_chat_observations)
+
+
+def s3_answer_sources_for_display(connection, run_id):
+    """Check every tool source. A stale result is eligible only for Web history."""
+    return _check_sources(connection, run_id, answer_view=True)
+
+
+def _check_sources(connection, run_id, *, allow_failed_chat_observations=False, answer_view=False):
     from opspilot.domain.assistant_knowledge import sources_current as knowledge_current
+    from opspilot.domain.d2 import ScopeDenied
     from opspilot.domain.scoped_protocol_comparison import (
         scoped_comparison_is_current,
         scoped_discovery_is_current,
         scoped_protocol_excerpt_is_current,
     )
-    from opspilot.domain.s3 import current_s3_evidence, get_s3_binding
+    from opspilot.domain.s3 import FACT_TO_TOOL, current_s3_evidence, get_s3_binding, s3_answer_source_visibility
     try:
         run,identity=state(connection,run_id,active=False)
+        staleness = None
         failed_chat_source_view = bool(
             allow_failed_chat_observations
             and run['kind'] == 'CHAT_READONLY'
             and run['status'] == 'FAILED'
         )
         if run['task_id']:
-            get_s3_binding(connection,run['task_id'])
+            binding = get_s3_binding(connection, run['task_id'])
+            if answer_view and (binding['tenant_id'], binding['actor_id']) != (identity.tenant_id, identity.actor_id):
+                return False, 'S3_AUTHORIZATION_UNAVAILABLE'
             control=connection.execute('SELECT control_revision,terminal_state FROM task_controls WHERE task_id=?',(run['task_id'],)).fetchone()
             if control['terminal_state']!='ACTIVE' or control['control_revision']!=run['expected_control_revision']:
                 return False,'TASK_CONTROL_CHANGED'
@@ -697,6 +710,8 @@ def sources_current(connection, run_id, *, allow_failed_chat_observations=False)
             except (TypeError, json.JSONDecodeError):
                 return False, 'ASSISTANT_SOURCE_REQUEST_INVALID'
             tool_name = request.get('name') if isinstance(request, dict) else None
+            if answer_view and (not tool_name or digest_json(request) != row['request_digest']):
+                return False, 'ASSISTANT_SOURCE_REQUEST_INVALID'
             if tool_name == 'propose_controlled_auth_investigation':
                 if not _proposal_source_is_current(connection, run, identity, value, request):
                     return False, 'ASSISTANT_INVESTIGATION_PROPOSAL_SOURCE_INVALID'
@@ -704,12 +719,22 @@ def sources_current(connection, run_id, *, allow_failed_chat_observations=False)
                 if not _professional_outcome_source_is_current(connection, run_id, value):
                     return False, 'ASSISTANT_PROFESSIONAL_OUTCOME_SOURCE_INVALID'
             elif row['evidence_id']:
-                facts,excluded=current_s3_evidence(
-                    connection, run['task_id'], [row['evidence_id']], run_id=run_id,
-                    observation_ids={row['evidence_id']:row['observation_id']},
-                    allow_failed_chat_run=failed_chat_source_view,
-                )
-                if excluded or not facts: return False,'BUSINESS_SOURCE_INVALIDATED'
+                if answer_view:
+                    valid, reason = s3_answer_source_visibility(connection, run['task_id'], run_id, row, request, value)
+                    if not valid:
+                        return False, reason
+                    if staleness is None or reason == 'S3_BUSINESS_VERSION_CHANGED':
+                        staleness = reason
+                else:
+                    facts, excluded = current_s3_evidence(
+                        connection, run['task_id'], [row['evidence_id']], run_id=run_id,
+                        observation_ids={row['evidence_id']: row['observation_id']},
+                        allow_failed_chat_run=failed_chat_source_view,
+                    )
+                    if excluded or not facts:
+                        return False, 'BUSINESS_SOURCE_INVALIDATED'
+            elif answer_view and (tool_name in FACT_TO_TOOL.values() or 'fact_type' in value):
+                return False, 'S3_HISTORY_SOURCE_UNVERIFIED'
             elif 'protocol_documents' in value:
                 if value.get('success') is not True:
                     return False, 'PROTOCOL_DISCOVERY_RESULT_INVALID'
@@ -749,7 +774,11 @@ def sources_current(connection, run_id, *, allow_failed_chat_observations=False)
             elif isinstance(value,dict) and 'documents' in value:
                 ok,reason=knowledge_current(connection,identity,run['session_id'],value)
                 if not ok:return False,reason
-        return True,None
+            elif answer_view:
+                return False, 'S3_HISTORY_SOURCE_UNVERIFIED'
+        return True, staleness
+    except ScopeDenied:
+        return False, 'S3_AUTHORIZATION_UNAVAILABLE' if answer_view else 'ASSISTANT_SOURCE_SCOPE_INVALID'
     except Exception:
         return False,'ASSISTANT_SOURCE_SCOPE_INVALID'
 

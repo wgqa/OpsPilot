@@ -549,6 +549,73 @@ def personal_memory_answer_is_current(
     return True, None
 
 
+def s3_snapshot_dependencies_are_current(
+    connection: sqlite3.Connection, message_id: str, identity: TrustedIdentity,
+) -> bool:
+    """Check the rest of a saved answer's lineage after its direct S3 sources were checked."""
+    from opspilot.domain.assistant import sources_current
+    from opspilot.domain.semantic_memory import _personal_memory_exclusion
+
+    row = connection.execute(
+        """SELECT m.*, a.run_id AS answer_run_id, a.attempt_id AS answer_attempt_id,
+                  a.body_digest AS saved_answer_digest
+           FROM chat_run_answers a JOIN messages m ON m.message_id=a.message_id
+           JOIN task_runs r ON r.run_id=a.run_id AND r.tenant_id=m.tenant_id
+             AND r.session_id=m.session_id AND r.task_id=m.task_id
+           JOIN sessions s ON s.session_id=m.session_id AND s.tenant_id=m.tenant_id
+           JOIN chat_attempts ca ON ca.attempt_id=a.attempt_id AND ca.run_id=r.run_id
+           JOIN chat_context_manifests cm ON cm.manifest_id=a.manifest_id AND cm.attempt_id=ca.attempt_id
+             AND cm.run_id=r.run_id AND cm.tenant_id=r.tenant_id
+             AND cm.session_id=r.session_id AND cm.task_id=r.task_id
+           WHERE m.message_id=? AND m.tenant_id=? AND s.owner_id=? AND r.status='SUCCEEDED'
+             AND ca.status='SUCCEEDED' AND ca.actor_id=s.owner_id""",
+        (message_id, identity.tenant_id, identity.actor_id),
+    ).fetchone()
+    if row is None or _digest(str(row["body"])) != row["body_digest"] or row["body_digest"] != row["saved_answer_digest"]:
+        return False
+
+    # Earlier scoped tool results can also appear in WORK_CONTEXT. Do not
+    # restore a stale body if another source used by the model is now invalid.
+    model_calls = connection.execute(
+        "SELECT request_json,request_digest FROM assistant_calls WHERE run_id=? AND kind='MODEL' AND status='OK'",
+        (row["answer_run_id"],),
+    ).fetchall()
+    prior_runs = set()
+    if not model_calls:
+        return False
+    try:
+        for call in model_calls:
+            request = json.loads(call["request_json"])
+            if _digest(_canonical(request)) != call["request_digest"]:
+                return False
+            refs = request["source_refs"]
+            prior_runs.update(item["run_id"] for item in refs["history_sources"] if item["sources"])
+            prior_runs.update(item["run_id"] for item in refs["prior_answers"])
+    except (TypeError, KeyError, ValueError):
+        return False
+    if any(not sources_current(connection, run_id)[0] for run_id in prior_runs):
+        return False
+
+    task_id = str(row["task_id"])
+    state, state_digest = _trusted_state(connection, task_id)
+    evidence = _current_evidence(connection, task_id, state or {})
+    memories = {str(item["memory_id"]): item for item in _current_memories(connection, task_id, state, evidence)}
+    for memory in connection.execute(
+        "SELECT * FROM personal_memories WHERE tenant_id=? AND owner_actor_id=? AND state='ACTIVE'",
+        (identity.tenant_id, identity.actor_id),
+    ):
+        if _personal_memory_exclusion(connection, memory) is None:
+            memories[str(memory["memory_id"])] = {"digest": memory["content_digest"], "version": memory["version"]}
+    # Only the direct S3 freshness check is replaced for this display. Message,
+    # formal Evidence, TaskState, Memory, Summary and ancestor checks stay strict.
+    return _message_source_valid_uncached(
+        connection, row, session_id=str(row["session_id"]), tenant_id=identity.tenant_id,
+        task_id=task_id, state_digest=state_digest,
+        evidence_by_id={str(item["evidence_id"]): item for item in evidence},
+        evidence_exclusion_reasons={}, memories_by_id=memories,
+    )[0]
+
+
 def _message_source_valid(
     connection: sqlite3.Connection,
     row: sqlite3.Row,
@@ -568,6 +635,17 @@ def _message_source_valid(
     message_id = str(row["message_id"])
     if message_id in cache:
         return cache[message_id]
+    from opspilot.domain.assistant import sources_current as assistant_sources_current
+
+    assistant_run = connection.execute(
+        "SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?",
+        (message_id,),
+    ).fetchone()
+    if assistant_run:
+        valid, reason = assistant_sources_current(connection, assistant_run["run_id"])
+        if not valid:
+            cache[message_id] = (False, reason)
+            return cache[message_id]
     result = _message_source_valid_uncached(
         connection, row, session_id=session_id, tenant_id=tenant_id, task_id=task_id,
         state_digest=state_digest, evidence_by_id=evidence_by_id,
@@ -594,12 +672,6 @@ def _message_source_valid_uncached(
     message_seen: set[str] | None = None,
     source_validation_cache: dict[str, tuple[bool, str | None]] | None = None,
 ) -> tuple[bool, str | None]:
-    from opspilot.domain.assistant import sources_current as assistant_sources_current
-    assistant_run = connection.execute("SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?",(row["message_id"],)).fetchone()
-    if assistant_run:
-        valid, reason = assistant_sources_current(connection, assistant_run["run_id"])
-        if not valid:
-            return False, reason
     visiting_messages = set(message_seen or ())
     message_id = str(row["message_id"])
     if message_id in visiting_messages:
@@ -620,11 +692,11 @@ def _message_source_valid_uncached(
         digest = str(source["source_digest"])
         if kind == "MESSAGE":
             source_message = connection.execute(
-                """SELECT body_digest, task_id, input_kind FROM messages WHERE message_id = ? AND session_id = ?
+                """SELECT body, body_digest, task_id, input_kind FROM messages WHERE message_id = ? AND session_id = ?
                    AND tenant_id = ? AND role = 'USER' AND input_kind IN ('CHAT_READONLY', 'CORRECT_TASK_INPUT')""",
                 (ref, session_id, tenant_id),
             ).fetchone()
-            if source_message is None or str(source_message["body_digest"]) != digest:
+            if source_message is None or str(source_message["body_digest"]) != digest or _digest(str(source_message["body"])) != digest:
                 return False, "USER_MESSAGE_SOURCE_CHANGED"
             if str(source_message["input_kind"]) == "CORRECT_TASK_INPUT" and str(source_message["task_id"]) != task_id:
                 return False, "USER_MESSAGE_TASK_SCOPE_CHANGED"
@@ -2910,9 +2982,10 @@ def _authorize_s3_chat_read(connection: sqlite3.Connection, identity: TrustedIde
 
 def get_chat_chunks(path: str | Path, identity: TrustedIdentity, run_id: str, *, after_seq: int = 0, limit: int = 500) -> list[dict[str, Any]]:
     with connect(path) as connection:
+        connection.execute("BEGIN")
         _verify_identity(connection, identity)
         run = connection.execute(
-            """SELECT r.session_id, r.tenant_id, r.task_id FROM task_runs r JOIN sessions s
+            """SELECT r.session_id, r.tenant_id, r.task_id, r.status FROM task_runs r JOIN sessions s
                ON s.session_id = r.session_id AND s.tenant_id = r.tenant_id
                WHERE r.run_id = ? AND r.tenant_id = ? AND s.owner_id = ? AND r.kind = 'CHAT_READONLY'""",
             (run_id, identity.tenant_id, identity.actor_id),
@@ -2920,6 +2993,13 @@ def get_chat_chunks(path: str | Path, identity: TrustedIdentity, run_id: str, *,
         if run is None:
             raise TaskControlError("TASK_RUN_SCOPE_DENIED")
         _authorize_s3_chat_read(connection, identity, str(run["task_id"]) if run["task_id"] else None)
+        if run["task_id"] and run["status"] == "SUCCEEDED":
+            from opspilot.domain.assistant import selected, sources_current
+
+            # A successful stale S3 answer is read through the Web history
+            # projection, never by reconstructing its old streaming draft.
+            if selected(connection, run_id) and not sources_current(connection, run_id)[0]:
+                return []
         reset_before = _latest_stream_reset_seq(connection, run_id)
         rows = connection.execute(
             """SELECT c.chunk_id, c.chunk_seq, c.body, c.body_digest, c.created_at, c.attempt_id

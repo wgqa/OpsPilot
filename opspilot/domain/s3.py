@@ -44,6 +44,11 @@ def _now() -> datetime:
 
 S3_EVIDENCE_TTL_SECONDS = 300
 S3_OBSERVATION_CLOCK_SKEW_SECONDS = 30
+_S3_FACT_VERSION = {
+    "s3_order": "order_version", "s3_delivery": "delivery_version",
+    "s3_receiver": "receiver_version", "s3_transport_history": "transport_history_version",
+}
+_S3_BUSINESS_VERSIONS = frozenset(_S3_FACT_VERSION.values())
 
 
 def _parse_s3_time(value):
@@ -624,6 +629,37 @@ def current_s3_evidence(
     observed_before=None, historical=False, allow_failed_chat_run=False,
 ):
     """Revalidate facts and the exact successful Observation for one trusted Run."""
+    return _validated_s3_evidence(
+        connection, task_id, evidence_ids, run_id=run_id, observation_ids=observation_ids,
+        observed_before=observed_before, historical=historical,
+        allow_failed_chat_run=allow_failed_chat_run,
+    )
+
+
+def s3_answer_source_visibility(connection, task_id, run_id, call, request, result):
+    """Return display eligibility only, never Evidence for a model or Gate."""
+    evidence_id, observation_id = call["evidence_id"], call["observation_id"]
+    facts, excluded = _validated_s3_evidence(
+        connection, task_id, [evidence_id], run_id=run_id,
+        observation_ids={evidence_id: observation_id}, answer_view=True,
+    )
+    if not facts or excluded:
+        return False, excluded[0]["reason"] if excluded else "S3_HISTORY_SOURCE_UNVERIFIED"
+    observation = facts[0]["_observation"]
+    if (
+        observation["call_id"] != call["call_id"]
+        or observation["tool_call_id"] != call["logical_key"]
+        or observation["tool_name"] != request.get("name")
+        or observation["result_digest"] != digest_json(result)
+    ):
+        return False, "ASSISTANT_SOURCE_RESULT_INVALID"
+    return True, facts[0].get("_answer_staleness")
+
+
+def _validated_s3_evidence(
+    connection, task_id, evidence_ids=None, *, run_id=None, observation_ids=None,
+    observed_before=None, historical=False, allow_failed_chat_run=False, answer_view=False,
+):
     params: list[object] = [task_id]
     query = "SELECT * FROM d2_evidence WHERE task_id=?"
     no_evidence_selected = False
@@ -664,6 +700,7 @@ def current_s3_evidence(
     for row in rows:
         e = dict(row)
         reason = None
+        staleness = None
         try:
             facts, versions = json.loads(e["facts_json"]), json.loads(e["observed_versions_json"])
             fact_type = str(e["fact_type"])
@@ -721,14 +758,28 @@ def current_s3_evidence(
                 if age < 0:
                     reason = "S3_OBSERVATION_TIME_INVALID"
                 elif age > S3_EVIDENCE_TTL_SECONDS:
-                    reason = "S3_EVIDENCE_EXPIRED"
+                    if answer_view:
+                        staleness = "S3_EVIDENCE_EXPIRED"
+                    else:
+                        reason = "S3_EVIDENCE_EXPIRED"
             if reason is None and (
                 set(versions) != set(expected_versions)
                 or any(type(value) is not int or value < 1 for value in versions.values())
-                or (not historical and versions != expected_versions)
             ):
                 reason = "S3_CURRENT_VERSION_MISMATCH"
-            elif reason is None and not historical and fact_type == "s3_transport_history":
+            if reason is None and not historical and versions != expected_versions:
+                changed = {key for key in versions if versions[key] != expected_versions[key]}
+                if answer_view and changed - _S3_BUSINESS_VERSIONS:
+                    reason = ("S3_CONTRACT_CHANGED" if changed - _S3_BUSINESS_VERSIONS == {"contract_version"}
+                              else "S3_AUTHORIZATION_CHANGED")
+                elif answer_view and all(versions[key] < expected_versions[key] for key in changed):
+                    staleness = "S3_BUSINESS_VERSION_CHANGED"
+                else:
+                    reason = "S3_CURRENT_VERSION_MISMATCH"
+            fact_advanced = answer_view and reason is None and (
+                versions[_S3_FACT_VERSION[fact_type]] < expected_versions[_S3_FACT_VERSION[fact_type]]
+            )
+            if reason is None and not historical and not fact_advanced and fact_type == "s3_transport_history":
                 if facts != history_facts:
                     reason = "S3_CURRENT_FACT_MISMATCH"
             elif reason is None and fact_type == "s3_order":
@@ -749,15 +800,16 @@ def current_s3_evidence(
                 if (http is None or facts.get("http_status") != 200 or http["body_digest"] != digest_json(body)
                     or facts.get("versions_before") != versions or facts.get("versions_after") != versions
                     or http["route"] != ROUTE or body.get("order_id") != binding["order_id"] or body.get("order_version") != versions.get("order_version")
-                    or (not historical and body.get("status") != order["status"])):
+                    or (not historical and not fact_advanced and body.get("status") != order["status"])):
                     reason = "S3_HTTP_OBSERVATION_INVALID"
-            elif reason is None and not historical and fact_type in {"s3_delivery", "s3_receiver"}:
+            elif reason is None and not historical and not fact_advanced and fact_type in {"s3_delivery", "s3_receiver"}:
                 expected = delivery if fact_type == "s3_delivery" else receiver
                 if facts != expected:
                     reason = "S3_CURRENT_FACT_MISMATCH"
             if reason is None and fact_type in {"s3_delivery", "s3_receiver"} and (
                 facts.get("tenant_id") != binding["tenant_id"] or facts.get("service_id") != SERVICE
                 or facts.get("order_id") != binding["order_id"]
+                or (answer_view and facts.get("version") != versions[_S3_FACT_VERSION[fact_type]])
             ):
                 reason = "S3_CORRELATION_INVALID"
             if reason is None:
@@ -769,7 +821,12 @@ def current_s3_evidence(
                     "source_observed_at": str(selected_observation["result"].get("observed_at")),
                     "result_digest": str(selected_observation["result_digest"]),
                 }
-                current.append({**e, "facts": facts, "observed_versions": versions, "_observation": observation_meta})
+                item = {**e, "facts": facts, "observed_versions": versions, "_observation": observation_meta}
+                if answer_view:
+                    observation_meta.update(call_id=selected_observation["call_id"],
+                                            tool_call_id=selected_observation["tool_call_id"])
+                    item["_answer_staleness"] = staleness
+                current.append(item)
         except (ValueError, TypeError, KeyError, ScopeDenied):
             reason = "S3_MALFORMED_EVIDENCE"
         if reason:

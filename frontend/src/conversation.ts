@@ -170,6 +170,16 @@ export function filterDeniedS3AssistantMessages(
     || !message.task_id || !isTaskDenied(message.task_id));
 }
 
+export function maskS3AnswersForRevalidation(messages: MessageItem[]): MessageItem[] {
+  return messages.map((message) => {
+    if (message.role !== 'ASSISTANT' || !message.answer_visibility || message.answer_visibility === 'HIDDEN') return message;
+    return {
+      ...message, body: '这条历史答复的读取资格待重新核验。',
+      answer_visibility: 'HIDDEN', source_status: 'S3_HISTORY_REVALIDATION_PENDING',
+    };
+  });
+}
+
 export function projectSessionEvent(event: SessionEventDisplay & { payload?: unknown }): SessionEventDisplay {
   return {
     event_seq: event.event_seq,

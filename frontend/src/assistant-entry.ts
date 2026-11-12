@@ -30,6 +30,7 @@ export function recentAssistantSourceRequests(
     answer_run_id?: string | null;
     answer_source_message_id?: string | null;
     answer_kind?: string | null;
+    answer_visibility?: string;
   }>,
   maximum = 8,
 ): AssistantSourceRequestReference[] {
@@ -43,6 +44,7 @@ export function recentAssistantSourceRequests(
     const sourceMessageId = message.answer_source_message_id?.trim();
     if (
       message.role !== 'ASSISTANT' || message.answer_kind !== 'CHAT_MODEL'
+      || (message.answer_visibility && message.answer_visibility !== 'CURRENT')
       || !runId || !sourceMessageId || !userMessageIds.has(sourceMessageId) || seenRunIds.has(runId)
     ) continue;
     requests.push({ runId, sourceMessageId, taskId: message.task_id });

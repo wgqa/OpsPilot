@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -46,6 +47,11 @@ from opspilot.web.schemas import (
 
 
 _M1_05_TEST_FAILPOINT: Callable[[str], None] | None = None
+_SENSITIVE_ANSWER_VALUE = re.compile(
+    r"(?i)(?:\b(?:authorization|(?:set-)?cookie|api[_ -]?key|password|passwd|"
+    r"secret(?:[_ -]?value)?|access[_ -]?token|refresh[_ -]?token)\b|(?:密码|口令|密钥))[\"']?\s*[:=]\s*\S"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+)
 
 
 def _run_m1_05_test_failpoint(name: str) -> None:
@@ -675,12 +681,14 @@ def create_app(
     @app.get("/api/runs/{run_id}/chunks")
     async def get_run_chunks(
         run_id: str,
+        response: Response,
         after_seq: int = Query(default=0, ge=0),
         limit: int = Query(default=500, ge=1, le=1000),
         context: AuthContext = Depends(current_user),
     ) -> dict[str, Any]:
         from opspilot.domain.chat import get_chat_chunks
 
+        response.headers["Cache-Control"] = "no-store"
         return {"items": get_chat_chunks(resolved_db, context.identity, run_id, after_seq=after_seq, limit=limit),
                 "after_seq": after_seq}
 
@@ -755,8 +763,9 @@ def create_app(
             s3_order_id=body.order_id,assistant_core=True)
 
     @app.get("/api/runs/{run_id}/assistant-sources")
-    async def assistant_sources(run_id: str,context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+    async def assistant_sources(run_id: str, response: Response, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
         from opspilot.domain.assistant import sources_current as current_sources
+        response.headers["Cache-Control"] = "no-store"
         with connect(resolved_db) as connection:
             row=connection.execute('SELECT r.* FROM task_runs r JOIN sessions s ON s.session_id=r.session_id JOIN assistant_runs a ON a.run_id=r.run_id WHERE r.run_id=? AND r.tenant_id=? AND s.owner_id=?',(run_id,context.identity.tenant_id,context.identity.actor_id)).fetchone()
             if row is None:raise HTTPException(status_code=404,detail='ASSISTANT_RUN_NOT_FOUND')
@@ -781,18 +790,27 @@ def create_app(
     @app.get("/api/sessions/{session_id}/messages")
     async def get_messages(
         session_id: str,
+        response: Response,
         after_seq: int = Query(default=0, ge=0),
         before_seq: int | None = Query(default=None, ge=1),
         latest: bool = Query(default=False),
         limit: int = Query(default=100, ge=1, le=500),
         context: AuthContext = Depends(current_user),
     ) -> dict[str, Any]:
+        from opspilot.domain.assistant import s3_answer_sources_for_display, sources_current
+        from opspilot.domain.chat import personal_memory_answer_is_current, s3_snapshot_dependencies_are_current
+        from opspilot.domain.d2 import ScopeDenied
+        from opspilot.domain.s3 import SERVICE as S3_SERVICE, get_s3_binding
+        from opspilot.model_io import redact_text
+
         require_session_owner(context.identity, session_id)
         if before_seq is not None and (latest or after_seq > 0):
             raise HTTPException(status_code=422, detail="Choose one message page cursor.")
         if latest and after_seq > 0:
             raise HTTPException(status_code=422, detail="Choose one message page cursor.")
+        response.headers["Cache-Control"] = "no-store"
         with connect(resolved_db) as connection:
+            connection.execute("BEGIN")
             select = """SELECT message_id, task_id, sequence, role, input_kind, body, created_at, command_id,
                               application_state, applied_run_id
                        FROM messages WHERE session_id = ? AND tenant_id = ?"""
@@ -841,28 +859,6 @@ def create_app(
                     ).fetchone()
                     if origin and hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() == str(origin["body_digest"]):
                         item["investigation_origin_message_id"] = str(origin["message_id"])
-                if row['role'] == 'ASSISTANT':
-                    from opspilot.domain.assistant import sources_current as assistant_sources_current
-                    assistant_answer=connection.execute('SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?',(row['message_id'],)).fetchone()
-                    if assistant_answer:
-                        valid,reason=assistant_sources_current(connection,assistant_answer['run_id'])
-                        if not valid:
-                            item['body']='这条历史答复的来源已失效，不能作为当前依据。请重新查询。'
-                            item['source_status']=reason
-                    chat_answer = connection.execute(
-                        "SELECT 1 FROM chat_run_answers WHERE message_id = ?", (row['message_id'],),
-                    ).fetchone()
-                    if chat_answer:
-                        from opspilot.domain.chat import personal_memory_answer_is_current
-
-                        valid, reason = personal_memory_answer_is_current(
-                            connection, message_id=str(row['message_id']),
-                            tenant_id=context.identity.tenant_id,
-                            owner_actor_id=context.identity.actor_id,
-                        )
-                        if not valid:
-                            item['body'] = '这条历史答复引用的个人记忆已撤销或失效，不能继续作为有效依据。'
-                            item['source_status'] = reason
                 item["answer_run_id"] = None
                 item["answer_source_message_id"] = None
                 item["answer_kind"] = None
@@ -911,29 +907,61 @@ def create_app(
                         item["answer_run_id"] = str(association["run_id"])
                         item["answer_source_message_id"] = str(association["source_message_id"])
                         item["answer_kind"] = str(association["answer_kind"])
-                if str(row["role"]) == "ASSISTANT" and row["task_id"]:
+                    chat_answer = connection.execute(
+                        """SELECT a.run_id,r.session_id,r.tenant_id,r.task_id,x.run_id IS NOT NULL AS assistant_core
+                           FROM chat_run_answers a JOIN task_runs r ON r.run_id=a.run_id
+                           LEFT JOIN assistant_runs x ON x.run_id=a.run_id WHERE a.message_id=?""",
+                        (row["message_id"],),
+                    ).fetchone()
                     task = connection.execute(
                         "SELECT actor_id,service_id FROM task_bindings WHERE tenant_id=? AND task_id=?",
-                        (context.identity.tenant_id, str(row["task_id"])),
-                    ).fetchone()
-                    if task is not None and str(task["service_id"]) == "orders-async-demo":
-                        authorized = (
-                            context.identity.role == "SUPPORT"
-                            and str(task["actor_id"]) == context.identity.actor_id
+                        (context.identity.tenant_id, row["task_id"]),
+                    ).fetchone() if row["task_id"] else None
+                    s3_bound = task is not None and task["service_id"] == S3_SERVICE
+                    valid, reason = True, None
+                    if s3_bound:
+                        try:
+                            if (context.identity.role != "SUPPORT" or task["actor_id"] != context.identity.actor_id):
+                                raise ScopeDenied("S3_SCOPE_AUTHORIZATION_DENIED")
+                            get_s3_binding(connection, row["task_id"])
+                        except ScopeDenied:
+                            valid, reason = False, "S3_AUTHORIZATION_UNAVAILABLE"
+                    if valid and chat_answer and chat_answer["assistant_core"]:
+                        if s3_bound:
+                            if (chat_answer["session_id"], chat_answer["tenant_id"], chat_answer["task_id"]) != (
+                                session_id, context.identity.tenant_id, row["task_id"],
+                            ) or item["answer_run_id"] != chat_answer["run_id"]:
+                                valid, reason = False, "S3_HISTORY_SOURCE_UNVERIFIED"
+                            else:
+                                valid, reason = s3_answer_sources_for_display(connection, chat_answer["run_id"])
+                        else:
+                            valid, reason = sources_current(connection, chat_answer["run_id"])
+                    if chat_answer and (valid or not s3_bound):
+                        memory_current, memory_reason = personal_memory_answer_is_current(
+                            connection, message_id=row["message_id"], tenant_id=context.identity.tenant_id,
+                            owner_actor_id=context.identity.actor_id,
                         )
-                        if authorized:
-                            from opspilot.domain.d2 import ScopeDenied
-                            from opspilot.domain.s3 import get_s3_binding
-
-                            try:
-                                get_s3_binding(connection, str(row["task_id"]))
-                            except ScopeDenied:
-                                authorized = False
-                        if not authorized:
+                        if not memory_current:
+                            valid, reason = False, memory_reason
+                    if s3_bound and valid and reason:
+                        body = str(row["body"])
+                        if (_SENSITIVE_ANSWER_VALUE.search(body) or redact_text(body, limit=len(body)) != body
+                            or any(secret and secret in body for secret in passwords.values())):
+                            valid, reason = False, "S3_HISTORY_SENSITIVE_CONTENT"
+                        elif not s3_snapshot_dependencies_are_current(connection, row["message_id"], context.identity):
+                            valid, reason = False, "S3_HISTORY_SOURCE_UNVERIFIED"
+                    if s3_bound:
+                        item["answer_visibility"] = ("HISTORICAL_SNAPSHOT" if reason else "CURRENT") if valid else "HIDDEN"
+                    if reason:
+                        item["source_status"] = reason
+                    if not valid:
+                        if s3_bound and reason == "S3_AUTHORIZATION_UNAVAILABLE":
                             item["body"] = "[S3 受限历史回答已隐藏：当前授权不可用]"
-                            item["answer_run_id"] = None
-                            item["answer_source_message_id"] = None
-                            item["answer_kind"] = None
+                            item["answer_run_id"] = item["answer_source_message_id"] = item["answer_kind"] = None
+                        elif reason and reason.startswith("PERSONAL_MEMORY_"):
+                            item["body"] = "这条历史答复引用的个人记忆已撤销或失效，不能继续作为有效依据。"
+                        else:
+                            item["body"] = "这条历史答复的来源已失效，不能作为当前依据。请重新查询。"
                 item.pop("command_id", None)
                 items.append(item)
         return {"items": items, "has_more_before": has_more_before, "has_more_after": has_more_after}

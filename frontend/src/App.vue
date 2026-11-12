@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type ChatRunContext, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PersonalMemoryRecord, type PersonalMemorySettings, type PlanReview, type RunActivity, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
-import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
+import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, maskS3AnswersForRevalidation, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
 import { renderAssistantMarkdown } from './markdown';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
@@ -262,6 +262,8 @@ async function logout(): Promise<void> {
   stopRunPolling();
   stopPersonalMemoryStatusPolling();
   user.value = null;
+  activeSessionMessageRevalidation = null;
+  revalidatingSessionId.value = '';
   csrf.value = '';
   sessionStorage.removeItem('opspilot.csrf');
   sessions.value = [];
@@ -818,6 +820,8 @@ async function createSession(): Promise<void> {
 
 async function selectSession(value: string): Promise<void> {
   stopRunPolling();
+  activeSessionMessageRevalidation = null;
+  revalidatingSessionId.value = '';
   chunkProjectionGeneration += 1;
   loadingChunksTicket += 1;
   loadingChunksRunId = null;
@@ -903,6 +907,8 @@ async function loadAssistantSources(event: Event, runId: string | null | undefin
 }
 
 async function refreshAssistantSource(runId: string, sourceTaskId: string | null): Promise<void> {
+  if (messages.value.some((message) => message.answer_run_id === runId
+    && message.answer_visibility && message.answer_visibility !== 'CURRENT')) return;
   const requestedSession = sessionId.value;
   const generation = ++assistantSourceGeneration;
   assistantSourceRequests.set(runId, generation);
@@ -1033,14 +1039,16 @@ async function refreshSession(): Promise<void> {
     if (activeChatRun.value) void refreshRunActivity(activeChatRun.value.run_id, requestedSessionId);
     if (recoverable) {
       const chunkGeneration = ++chunkProjectionGeneration;
-      chunks.value = await api.chunks(recoverable.run_id, 0).then((result) => result.items);
+      const chunkPage = await api.chunks(recoverable.run_id, 0);
       if (!isCurrentSession() || chunkGeneration !== chunkProjectionGeneration) return;
+      chunks.value = chunkPage.items;
       lastChunkSeq.value = chunks.value.reduce((max, item) => Math.max(max, item.chunk_seq), 0);
       void watchRun(recoverable.run_id);
     } else if (latestChat) {
       const chunkGeneration = ++chunkProjectionGeneration;
-      chunks.value = await api.chunks(latestChat.run_id, 0).then((result) => result.items);
+      const chunkPage = await api.chunks(latestChat.run_id, 0);
       if (!isCurrentSession() || chunkGeneration !== chunkProjectionGeneration) return;
+      chunks.value = chunkPage.items;
       lastChunkSeq.value = chunks.value.reduce((max, item) => Math.max(max, item.chunk_seq), 0);
       if (['FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE'].includes(latestChat.status)) {
         errorMessage.value = `上次只读回答结束：${readableStatus(latestChat.status)}${latestChat.waiting_reason ? `（${latestChat.waiting_reason}）` : ''}`;
@@ -1099,13 +1107,6 @@ async function refreshInspector(): Promise<boolean> {
     const authorizationRestored = isS3 && s3ReadResponseFence.isTaskDenied(requestedTaskId);
     if (isS3 && !s3ReadResponseFence.acceptAuthorizedInspector(requestTicket)) return false;
     inspector.value = refreshed;
-    if (s3SourcesInvalidated) {
-      // Hide cached answers as soon as the trusted Inspector reports stale
-      // sources; a failed history revalidation must not leave them visible.
-      messages.value = clearS3RestrictedResultCache(
-        refreshed as unknown as CachedS3Inspector, messages.value, requestedTaskId,
-      ).messages;
-    }
     if (authorizationRestored || s3SourcesInvalidated) {
       try {
         await refreshSessionMessagesOnly(true);
@@ -1181,7 +1182,11 @@ function clearS3TaskResultCache(expectedTaskId: string): void {
   s3HandoffOutcome.value = null;
   taskOutcome.value = null;
   if (activeChatRun.value?.task_id === expectedTaskId) {
+    chatActivities.value = [];
     activeChatRun.value = null;
+    chunkProjectionGeneration += 1;
+    loadingChunksTicket += 1;
+    loadingChunksRunId = null;
     chunks.value = [];
     lastChunkSeq.value = 0;
   }
@@ -1694,6 +1699,26 @@ function terminalRunMessage(run: RunItem): string {
   return `本次运行结束：${readableStatus(run.status)}${reason ? `（${readableRunReason(reason)}）` : ''}`;
 }
 
+function maskLoadedS3History(): void {
+  messages.value = maskS3AnswersForRevalidation(messages.value);
+  assistantSourceDetails.value = {};
+  assistantSourceRequests.clear();
+}
+
+function invalidateHistoryOnStreamDisconnect(): void {
+  if (!sessionId.value) return;
+  s3ReadResponseFence.beginSessionMessages(sessionId.value);
+  maskLoadedS3History();
+  if (activeChatRun.value?.task_id) {
+    chatActivities.value = [];
+    chunkProjectionGeneration += 1;
+    loadingChunksTicket += 1;
+    loadingChunksRunId = null;
+    chunks.value = [];
+    lastChunkSeq.value = 0;
+  }
+}
+
 async function refreshSessionMessagesOnly(revalidateLoaded = false): Promise<void> {
   if (!sessionId.value) return;
   const requestedSessionId = sessionId.value;
@@ -1708,6 +1733,7 @@ async function refreshSessionMessagesOnly(revalidateLoaded = false): Promise<voi
   if (revalidationState) {
     activeSessionMessageRevalidation = revalidationState;
     revalidatingSessionId.value = requestedSessionId;
+    maskLoadedS3History();
   }
   const requestTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
   const cachedFirstSequence = revalidateLoaded ? messages.value[0]?.sequence : undefined;
@@ -1775,8 +1801,7 @@ async function refreshSessionMessagesOnly(revalidateLoaded = false): Promise<voi
     }
   } finally {
     if (revalidationState && activeSessionMessageRevalidation === revalidationState) {
-      const canDrainQueue = s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)
-        && sessionId.value === requestedSessionId;
+      const canDrainQueue = sessionId.value === requestedSessionId;
       const rerunRevalidation = canDrainQueue && revalidationState.queueRevalidation;
       const rerunIncremental = canDrainQueue && !rerunRevalidation && revalidationState.queueIncremental;
       activeSessionMessageRevalidation = null;
@@ -1848,9 +1873,11 @@ async function loadChunks(runId: string): Promise<void> {
 }
 
 async function refreshRunActivity(runId: string, requestedSession = sessionId.value): Promise<void> {
+  const generation = chunkProjectionGeneration;
   try {
     const response = await api.runActivity(runId);
-    if (sessionId.value !== requestedSession || activeChatRun.value?.run_id !== runId) return;
+    if (sessionId.value !== requestedSession || activeChatRun.value?.run_id !== runId
+      || generation !== chunkProjectionGeneration) return;
     const merged = new Map(chatActivities.value.map((item) => [item.event_seq, item]));
     for (const item of response.items) merged.set(item.event_seq, item);
     chatActivities.value = [...merged.values()].sort((left, right) => left.event_seq - right.event_seq);
@@ -1882,6 +1909,10 @@ async function watchRun(runId: string): Promise<void> {
         const run = await api.run(runId);
         if (runPollGeneration !== pollGeneration) return;
         if (sessionId.value !== requestedSession || run.session_id !== requestedSession) {
+          stopRunPolling();
+          return;
+        }
+        if (run.task_id && s3ReadResponseFence.isTaskDenied(run.task_id)) {
           stopRunPolling();
           return;
         }
@@ -1957,7 +1988,7 @@ function acceptEvent(item: EventItem, requestedSession = sessionId.value): void 
   }
 }
 
-function connectEvents(): void {
+function connectEvents(revalidateOnOpen = false): void {
   if (!sessionId.value || reconnectPaused.value || eventSource) return;
   const requestedSession = sessionId.value;
   const cursor = sessionStorage.getItem(`opspilot.cursor.${requestedSession}`) ?? '0';
@@ -1965,6 +1996,10 @@ function connectEvents(): void {
   eventSource = source;
   source.onopen = () => {
     if (sessionId.value !== requestedSession || eventSource !== source) return;
+    if (revalidateOnOpen || reconnectCount.value > 0) {
+      void refreshSessionMessagesOnly(true);
+      if (taskId.value) void refreshInspector();
+    }
     reconnectCount.value = 0; notice.value = '';
   };
   const listener = (event: Event): void => {
@@ -1993,6 +2028,7 @@ function connectEvents(): void {
     if (sessionId.value !== requestedSession || eventSource !== source) return;
     source.close();
     if (eventSource === source) eventSource = null;
+    invalidateHistoryOnStreamDisconnect();
     reconnectCount.value += 1;
     if (reconnectCount.value > 5) {
       reconnectPaused.value = true;
@@ -2005,9 +2041,16 @@ function connectEvents(): void {
 }
 
 function reconnectEvents(): void {
+  const requestedSession = sessionId.value;
+  stopEvents();
+  invalidateHistoryOnStreamDisconnect();
   reconnectPaused.value = false;
   reconnectCount.value = 0;
-  void refreshEventHistory().then(connectEvents).catch((error: unknown) => { errorMessage.value = explainError(error); });
+  void refreshEventHistory().then(() => {
+    if (sessionId.value === requestedSession) connectEvents(true);
+  }).catch((error: unknown) => {
+    if (sessionId.value === requestedSession) errorMessage.value = explainError(error);
+  });
 }
 
 function stopEvents(): void {
@@ -2334,6 +2377,9 @@ onBeforeUnmount(() => {
                   <div class="message-bubble markdown-message">
                     <div v-for="message in assistantTurnMessages(item)" :key="message.message_id" class="assistant-message-segment" :data-message-id="message.message_id">
                       <span v-if="message.answer_kind === 'PROGRAM_LIMIT'" class="program-message-label">程序状态 · 非模型答复</span>
+                      <div v-if="message.answer_visibility === 'HISTORICAL_SNAPSHOT'" class="history-snapshot-notice" data-testid="historical-snapshot">
+                        <strong>历史快照</strong> · {{ message.source_status === 'S3_BUSINESS_VERSION_CHANGED' ? '业务版本已变化' : '来源已过期' }}。来源已失效，不可作为当前事实。
+                      </div>
                       <div class="markdown-body" v-html="renderAssistantMarkdown(message.body)"></div>
                     </div>
                   </div>
@@ -2342,7 +2388,7 @@ onBeforeUnmount(() => {
                     <small>这是与原问题关联的未验证建议；尚未创建 Task、审批或业务权限。</small>
                     <button class="primary-button" type="button" :disabled="busy || !csrf" @click="openControlledInvestigation(thread.anchor)">核对原问题并确认进入调查</button>
                   </div>
-                  <details class="followup-sources" @toggle="loadAssistantSources($event, item.runId, item.message.task_id)"><summary>查看工具与来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ assistantTurnSourceLabel(item) }}</small>
+                  <details v-if="!item.message.answer_visibility || item.message.answer_visibility === 'CURRENT'" class="followup-sources" @toggle="loadAssistantSources($event, item.runId, item.message.task_id)"><summary>查看工具与来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ assistantTurnSourceLabel(item) }}</small>
                     <template v-if="item.runId && assistantSourceDetails[item.runId]">
                       <small v-if="assistantSourceDetails[item.runId].message">{{ assistantSourceDetails[item.runId].message }}</small>
                       <ul v-if="assistantSourceDetails[item.runId].data"><li v-for="source in assistantSourceDetails[item.runId].data?.items ?? []" :key="source.call_id">
@@ -2421,6 +2467,7 @@ onBeforeUnmount(() => {
           <section v-if="conversationProjection.unassociatedItems.length" class="unassociated-results" data-testid="unassociated-results">
             <h3>未能关联到已加载问题的记录</h3><p>系统保留这些持久记录，但没有根据相邻消息猜测归属。</p>
             <article v-for="item in conversationProjection.unassociatedItems" :key="item.id" class="readonly-followup-card" :data-record-id="item.id">
+              <div v-if="item.message?.answer_visibility === 'HISTORICAL_SNAPSHOT'" class="history-snapshot-notice">历史快照 · 来源已失效，不可作为当前事实。</div>
               <p v-if="item.message">{{ item.message.body }}</p>
               <p v-else-if="item.answer">{{ item.answer.answer_text }}</p>
               <p v-else-if="item.followup">{{ item.followup.answer_text || '补查尚未完成。' }}</p>
