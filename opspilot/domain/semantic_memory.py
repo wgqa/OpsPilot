@@ -54,6 +54,15 @@ _MEMORY_STOPWORDS = {
     "问题", "根据", "什么", "需要", "可能", "相关", "资料", "方法", "如何",
     "应该", "一下", "用户", "场景", "情况", "时候", "这个", "那个", "作为",
 }
+# ASCII boundaries also match identifiers adjacent to Chinese prose, e.g. Java后端.
+_BACKEND_TOPIC = re.compile(r"(?i)后端|服务端|(?<![a-z0-9_])(?:back[ -]?end|server[ -]side|web services?|rest apis?)(?![a-z0-9_])")
+_JVM_TOPIC = re.compile(r"(?i)(?<![a-z0-9_])(?:java|jvm|kotlin)(?![a-z0-9_])")
+_JAVA_BACKEND_FRAMEWORK = re.compile(r"(?i)(?<![a-z0-9_])(?:spring[ -]*(?:boot|framework|mvc)|jakarta[ -]+ee)(?![a-z0-9_])")
+_AGENT_TOPIC = re.compile(
+    r"(?i)智能体|大模型应用|(?<![a-z0-9_])(?:(?:ai|llm|python)[ -]+agents?"
+    r"|agent(?:ic)?[ -]+(?:engineering|workflows?)|agent\s*(?:工程|开发|应用|工作流))(?![a-z0-9_])"
+)
+_AGENT_FRAMEWORK = re.compile(r"(?i)(?<![a-z0-9_])(?:langgraph|langchain)(?![a-z0-9_])")
 
 
 class SemanticMemoryConflict(RuntimeError):
@@ -1463,6 +1472,20 @@ def _memory_terms(text: str) -> set[str]:
     return terms - _MEMORY_STOPWORDS
 
 
+def _project_background_topics(text: str) -> set[str]:
+    """Match technical phrases with bilingual aliases for the two project areas."""
+    topics: set[str] = set()
+    backend = _BACKEND_TOPIC.search(text)
+    agent = _AGENT_TOPIC.search(text)
+    if _JAVA_BACKEND_FRAMEWORK.search(text) or (backend and _JVM_TOPIC.search(text)):
+        topics.add("java_backend")
+    if agent or _AGENT_FRAMEWORK.search(text):
+        topics.add("agent_engineering")
+    if backend and agent:
+        topics.add("backend_and_agent")
+    return topics
+
+
 def personal_memory_context(
     connection: sqlite3.Connection,
     tenant_id: str,
@@ -1476,7 +1499,7 @@ def personal_memory_context(
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[dict[str, Any]]]:
     """Return bounded PINNED plus relevant Personal Memory and all current records.
 
-    Retrieval is deliberately lexical and conservative for RELEVANT memories.
+    RELEVANT memories use lexical overlap and bounded project topic aliases.
     PINNED preferences bypass term matching but stay under a small item and
     token cap. `all_current` validates prior summaries/answers; only selected
     records enter the prompt.
@@ -1554,6 +1577,7 @@ def personal_memory_context(
         pinned_tokens += estimate
 
     query_terms = _memory_terms(query)
+    query_topics = _project_background_topics(query)
     scored: list[tuple[float, dict[str, Any]]] = []
     for memory in valid_active:
         if str(memory.get("memory_mode", "RELEVANT")) == "PINNED" or _is_global_learning_preference(memory):
@@ -1575,12 +1599,16 @@ def personal_memory_context(
         relevant = (
             covered >= 2 and covered / max(1, len(query_terms)) >= 0.2
         ) or (len(query_terms) == 1 and covered == 1)
-        if not query_terms or not relevant:
+        topic_match = (not relevant and memory["memory_kind"] == "PROJECT_BACKGROUND"
+                       and bool(query_topics & _project_background_topics(str(memory["content"]))))
+        if not relevant and not topic_match:
             excluded.append({"source_id": str(memory["memory_id"]), "reason": "NOT_RELEVANT_TO_QUERY", "category": "PERSONAL_MEMORY"})
             continue
         score = float(len(overlap) + 3 * len(key_overlap)) / max(1, len(query_terms))
+        if topic_match:
+            score = max(score, 0.25)
         memory["relevance_score"] = round(score, 4)
-        memory["selection_reason"] = "LEXICAL_RELEVANCE"
+        memory["selection_reason"] = "PROJECT_TOPIC_RELEVANCE" if topic_match else "LEXICAL_RELEVANCE"
         scored.append((score, memory))
     scored.sort(key=lambda pair: (-pair[0], str(pair[1]["memory_id"])))
     selected_relevant = [item for _, item in scored[:max(0, min(limit, PERSONAL_MEMORY_LIMIT))]]
