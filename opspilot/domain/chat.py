@@ -394,6 +394,7 @@ def _current_memories(
     state: dict[str, Any] | None,
     evidence: list[dict[str, Any]],
     excluded_sources: list[dict[str, str]] | None = None,
+    *, persist_expiry: bool = True,
 ) -> list[dict[str, Any]]:
     if task_id is None:
         return []
@@ -452,7 +453,7 @@ def _current_memories(
 
     from opspilot.domain.semantic_memory import active_semantic_context
 
-    semantic, semantic_excluded = active_semantic_context(connection, task_id)
+    semantic, semantic_excluded = active_semantic_context(connection, task_id, persist_expiry=persist_expiry)
     memories.extend(semantic)
     if excluded_sources is not None:
         excluded_sources.extend(semantic_excluded)
@@ -599,7 +600,10 @@ def s3_snapshot_dependencies_are_current(
     task_id = str(row["task_id"])
     state, state_digest = _trusted_state(connection, task_id)
     evidence = _current_evidence(connection, task_id, state or {})
-    memories = {str(item["memory_id"]): item for item in _current_memories(connection, task_id, state, evidence)}
+    memories = {
+        str(item["memory_id"]): item
+        for item in _current_memories(connection, task_id, state, evidence, persist_expiry=False)
+    }
     for memory in connection.execute(
         "SELECT * FROM personal_memories WHERE tenant_id=? AND owner_actor_id=? AND state='ACTIVE'",
         (identity.tenant_id, identity.actor_id),

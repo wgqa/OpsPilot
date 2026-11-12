@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 from starlette.requests import Request
 
-from opspilot.domain import s3
+from opspilot.domain import s3, semantic_memory
 from opspilot.domain.database import connect
 from test_ar02_assistant import client_for
 from test_ar02_runtime import FixtureModel, execute, setup_run
@@ -52,13 +52,18 @@ def test_ttl_allows_owner_snapshot_but_never_new_model_input(demo_db, tmp_path, 
     assert fresh["body"] == original
     _expire(monkeypatch)
 
-    stale, response = _answer(client, path)
-    assert stale["body"] == original
-    assert stale["answer_visibility"] == "HISTORICAL_SNAPSHOT"
-    assert stale["source_status"] == "S3_EVIDENCE_EXPIRED"
-    assert response.headers.get("cache-control") == "no-store"
-    for cursor in (f"?before_seq={fresh['sequence'] + 1}", f"?after_seq={fresh['sequence'] - 1}"):
-        assert _answer(client, path, cursor)[0] == stale
+    def fail_on_memory_write(*_args):
+        pytest.fail("history projection tried to persist semantic memory expiry")
+
+    with monkeypatch.context() as read_only:
+        read_only.setattr(semantic_memory, "_expire_scope", fail_on_memory_write)
+        stale, response = _answer(client, path)
+        assert stale["body"] == original
+        assert stale["answer_visibility"] == "HISTORICAL_SNAPSHOT"
+        assert stale["source_status"] == "S3_EVIDENCE_EXPIRED"
+        assert response.headers.get("cache-control") == "no-store"
+        for cursor in (f"?before_seq={fresh['sequence'] + 1}", f"?after_seq={fresh['sequence'] - 1}"):
+            assert _answer(client, path, cursor)[0] == stale
 
     sources = client.get(f"/api/runs/{admitted['run_id']}/assistant-sources").json()
     assert not sources["current"] and all(source["result"] is None for source in sources["items"])

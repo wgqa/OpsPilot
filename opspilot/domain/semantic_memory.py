@@ -575,12 +575,13 @@ def list_semantic_review_queue(
 
 
 def active_semantic_context(
-    connection: sqlite3.Connection, task_id: str,
+    connection: sqlite3.Connection, task_id: str, *, persist_expiry: bool = True,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     binding = _trusted_binding(connection, task_id)
     tenant_id = str(binding["tenant_id"])
     project_id = _scope_for_binding(binding)
-    _expire_scope(connection, tenant_id, project_id)
+    if persist_expiry:
+        _expire_scope(connection, tenant_id, project_id)
     rows = connection.execute(
         """SELECT * FROM semantic_memories WHERE tenant_id = ? AND project_id = ?
            AND state IN ('ACTIVE', 'EXPIRED', 'REVOKED', 'REVISED')

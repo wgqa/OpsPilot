@@ -914,12 +914,14 @@ async function refreshAssistantSource(runId: string, sourceTaskId: string | null
       ...assistantSourceDetails.value,
       [runId]: { taskId: sourceTaskId, data, message: data.current ? '' : '部分来源已经失效，不能作为当前事实。' },
     };
+    if (sourceTaskId && !data.current) void refreshSessionMessagesOnly(true);
   } catch (error) {
     if (requestedSession !== sessionId.value || assistantSourceRequests.get(runId) !== generation) return;
     // Never leave a prior authorized body visible after this read is rejected.
     assistantSourceDetails.value = {
       ...assistantSourceDetails.value, [runId]: { taskId: sourceTaskId, data: null, message: `此来源读取未获确认：${explainError(error)}` },
     };
+    if (sourceTaskId) void refreshSessionMessagesOnly(true);
   }
 }
 
