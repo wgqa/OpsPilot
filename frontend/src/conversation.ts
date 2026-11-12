@@ -1,5 +1,5 @@
 import type {
-  ChatChunk, MessageItem, RunItem,
+  ChatChunk, MessageItem, RunActivity, RunItem,
 } from './api';
 
 export interface ConversationAnswer {
@@ -73,6 +73,7 @@ export interface ConversationItem {
   supersededChatRuns?: ConversationRun[];
   run?: ConversationRun;
   chunks?: ChatChunk[];
+  activities?: RunActivity[];
   diagnosis?: Record<string, unknown>;
 }
 
@@ -94,6 +95,7 @@ export interface ProjectConversationInput {
   assessments?: ConversationAssessment[];
   activeChatRun?: ConversationRun | null;
   chunks?: ChatChunk[];
+  activities?: RunActivity[];
   s3Outcome?: Record<string, unknown> | null;
 }
 
@@ -178,6 +180,14 @@ export function maskS3AnswersForRevalidation(messages: MessageItem[]): MessageIt
       answer_visibility: 'HIDDEN', source_status: 'S3_HISTORY_REVALIDATION_PENDING',
     };
   });
+}
+
+export function mergeChatChunks(current: ChatChunk[], incoming: ChatChunk[]): ChatChunk[] {
+  const bySequence = new Map(current.map((chunk) => [chunk.chunk_seq, chunk]));
+  for (const chunk of incoming) {
+    if (!bySequence.has(chunk.chunk_seq)) bySequence.set(chunk.chunk_seq, chunk);
+  }
+  return [...bySequence.values()].sort((left, right) => left.chunk_seq - right.chunk_seq);
 }
 
 export function projectSessionEvent(event: SessionEventDisplay & { payload?: unknown }): SessionEventDisplay {
@@ -328,6 +338,12 @@ function confirmedCorrectionSources(
 
 export function projectConversation(input: ProjectConversationInput): ConversationProjection {
   const assessments = input.assessments ?? [];
+  const active = input.activeChatRun;
+  const activeActivities = active ? [...new Map((input.activities ?? [])
+    .filter((item) => item.payload.run_id === active.run_id)
+    .map((item) => [item.event_seq, item])).values()].sort((left, right) => left.event_seq - right.event_seq) : [];
+  const liveAssistantReply = active?.execution_core === 'ASSISTANT_V1' && ['QUEUED', 'RUNNING'].includes(active.status);
+  const hasDraft = (input.chunks?.length ?? 0) > 0;
   const uniqueMessages = [...new Map(input.messages.map((message) => [message.message_id, message])).values()];
   const messagesById = new Map(uniqueMessages.map((message) => [message.message_id, message]));
   const allRuns = new Map<string, ConversationRun>();
@@ -400,6 +416,8 @@ export function projectConversation(input: ProjectConversationInput): Conversati
       && !!message.answer_kind && !!displaySource && threadByMessageId.has(displaySource)
       && taskMatches(threadByMessageId.get(displaySource)!.anchor, message.task_id);
     if (valid && displaySource && message.answer_run_id) {
+      const showActivity = message.answer_run_id === active?.run_id && message.answer_kind === 'CHAT_MODEL'
+        && (!message.answer_visibility || message.answer_visibility === 'CURRENT') && activeActivities.length > 0;
       const itemId = `turn:${message.answer_run_id}:${displaySource}`;
       const ids = idsByThread.get(displaySource)!;
       const existing = ids.get(itemId);
@@ -413,10 +431,12 @@ export function projectConversation(input: ProjectConversationInput): Conversati
           existing.message = turnMessages[turnMessages.length - 1];
           existing.createdAt = turnMessages[0].created_at;
         }
+        if (showActivity) existing.activities = activeActivities;
       } else {
         attach(displaySource, message.task_id, {
           id: itemId, kind: 'CHAT_MESSAGE', createdAt: message.created_at,
           runId: message.answer_run_id, message, messages: [message],
+          ...(showActivity ? { activities: activeActivities } : {}),
         });
       }
       continue;
@@ -469,7 +489,6 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     if (!attach(assessment.source_message_id, taskId, item)) orphan(item);
   }
 
-  const active = input.activeChatRun;
   const answeredRuns = new Set<string>();
   const answerRunsBeyondProgramNotice = new Set<string>();
   for (const thread of threads) {
@@ -488,7 +507,7 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     const reason = run.blocked_reason ?? run.waiting_reason ?? '';
     if (reason === 'FOLLOWUP_ROUTED_TO_INVESTIGATOR'
       || reason === 'UPDATE_CLASSIFICATION_PENDING' || reason === 'UPDATE_CONFIRMATION_PENDING') continue;
-    if (active?.run_id === run.run_id && run.status === 'RUNNING' && (input.chunks?.length ?? 0) > 0) continue;
+    if (active?.run_id === run.run_id && (liveAssistantReply || (run.status === 'RUNNING' && hasDraft))) continue;
     if (answeredRuns.has(run.run_id)) continue;
     const item: ConversationItem = {
       id: `run:${run.run_id}`, kind: 'RUN_STATUS', createdAt: run.started_at ?? run.created_at,
@@ -499,13 +518,11 @@ export function projectConversation(input: ProjectConversationInput): Conversati
   }
 
   if (active?.source_message_id && !answerRunsBeyondProgramNotice.has(active.run_id)
-    && ['RUNNING', 'FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE'].includes(active.status)
-    && (input.chunks?.length ?? 0) > 0) {
-    const chunks = [...new Map((input.chunks ?? []).map((chunk) => [chunk.chunk_id, chunk])).values()]
-      .sort((left, right) => left.chunk_seq - right.chunk_seq);
+    && (liveAssistantReply || (hasDraft
+      && ['RUNNING', 'FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE'].includes(active.status)))) {
     const item: ConversationItem = {
       id: `stream:${active.run_id}`, kind: 'STREAM', createdAt: active.started_at ?? active.created_at,
-      runId: active.run_id, run: active, chunks,
+      runId: active.run_id, run: active, chunks: mergeChatChunks([], input.chunks ?? []), activities: activeActivities,
     };
     const source = resolveRunSource(allRuns.get(active.run_id), active.source_message_id);
     if (!source || !attach(source, active.task_id, item)) orphan(item);

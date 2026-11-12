@@ -3,8 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type ChatRunContext, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PersonalMemoryRecord, type PersonalMemorySettings, type PlanReview, type RunActivity, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
-import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, maskS3AnswersForRevalidation, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
+import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, maskS3AnswersForRevalidation, mergeChatChunks, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
 import { renderAssistantMarkdown } from './markdown';
+import AssistantRunActivity from './AssistantRunActivity.vue';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -80,9 +81,6 @@ const activeChatRun = ref<RunItem | null>(null);
 const chunks = ref<ChatChunk[]>([]);
 const lastChunkSeq = ref(0);
 const chatActivities = ref<RunActivity[]>([]);
-const activeChatActivities = computed(() => chatActivities.value.filter(
-  (item) => item.payload.run_id === activeChatRun.value?.run_id,
-));
 const reconnectCount = ref(0);
 const reconnectPaused = ref(false);
 const narrowInspectorOpen = ref(false);
@@ -100,6 +98,7 @@ let memoryStatusPollPending = false;
 let chunkProjectionGeneration = 0;
 let loadingChunksTicket = 0;
 let loadingChunksRunId: string | null = null;
+let requestedChunkSeq = 0;
 let assistantScopeGeneration = 0;
 let personalMemoryGeneration = 0;
 let personalMemorySettingsGeneration = 0;
@@ -127,6 +126,7 @@ const conversationProjection = computed(() => projectConversation({
   assessments: investigationUpdates.value as unknown as ConversationAssessment[],
   activeChatRun: activeChatRun.value as unknown as ConversationRun | null,
   chunks: chunks.value,
+  activities: chatActivities.value,
   s3Outcome: inspector.value?.trusted_state.s3_outcome as Record<string, unknown> | null,
 }));
 const latestContextProvenance = computed(() => inspector.value?.investigator_context_provenance[0] ?? null);
@@ -269,9 +269,7 @@ async function logout(): Promise<void> {
   sessions.value = [];
   sessionId.value = '';
   messages.value = [];
-  chunks.value = [];
-  chatActivities.value = [];
-  lastChunkSeq.value = 0;
+  setActiveChatRun(null);
   inspector.value = null;
   taskOutcome.value = null;
   s3HandoffOutcome.value = null;
@@ -822,9 +820,7 @@ async function selectSession(value: string): Promise<void> {
   stopRunPolling();
   activeSessionMessageRevalidation = null;
   revalidatingSessionId.value = '';
-  chunkProjectionGeneration += 1;
-  loadingChunksTicket += 1;
-  loadingChunksRunId = null;
+  setActiveChatRun(null);
   sessionId.value = value;
   rememberSelectedSession(value);
   olderScrollPosition = null;
@@ -846,11 +842,7 @@ async function selectSession(value: string): Promise<void> {
   s3HandoffOutcome.value = null;
   sessionEvents.value = [];
   seenEventSeq = new Set<number>();
-  chunks.value = [];
-  lastChunkSeq.value = 0;
-  chatActivities.value = [];
   conversationPinned.value = true;
-  activeChatRun.value = null;
   errorMessage.value = '';
   assistantScopes.value = { items: [], selected_project: null };
   assistantScopeNotice.value = '';
@@ -1010,8 +1002,7 @@ async function refreshSession(): Promise<void> {
   const requestedSessionId = sessionId.value;
   // Source results are authorization-sensitive. Drop page memory before the
   // server revalidates a bounded set of recent persisted model answers.
-  assistantSourceDetails.value = {};
-  assistantSourceRequests.clear();
+  maskLoadedS3History();
   const messageTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
   const isCurrentSession = (): boolean => sessionId.value === requestedSessionId;
   loading.value = true;
@@ -1035,24 +1026,17 @@ async function refreshSession(): Promise<void> {
     const chatRuns = [...runs.items].filter((run) => run.kind === 'CHAT_READONLY');
     const latestChat = chatRuns.at(-1) ?? null;
     const recoverable = [...chatRuns].reverse().find((run) => ['QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE'].includes(run.status));
-    activeChatRun.value = recoverable ?? latestChat;
-    if (activeChatRun.value) void refreshRunActivity(activeChatRun.value.run_id, requestedSessionId);
+    const chatRun = recoverable ?? latestChat;
+    setActiveChatRun(chatRun);
+    if (chatRun) void refreshRunActivity(chatRun.run_id, requestedSessionId);
     if (recoverable) {
-      const chunkGeneration = ++chunkProjectionGeneration;
-      const chunkPage = await api.chunks(recoverable.run_id, 0);
-      if (!isCurrentSession() || chunkGeneration !== chunkProjectionGeneration) return;
-      chunks.value = chunkPage.items;
-      lastChunkSeq.value = chunks.value.reduce((max, item) => Math.max(max, item.chunk_seq), 0);
+      await loadChunks(recoverable.run_id);
+      if (!isCurrentSession() || activeChatRun.value?.run_id !== recoverable.run_id) return;
       void watchRun(recoverable.run_id);
-    } else if (latestChat) {
-      const chunkGeneration = ++chunkProjectionGeneration;
-      const chunkPage = await api.chunks(latestChat.run_id, 0);
-      if (!isCurrentSession() || chunkGeneration !== chunkProjectionGeneration) return;
-      chunks.value = chunkPage.items;
-      lastChunkSeq.value = chunks.value.reduce((max, item) => Math.max(max, item.chunk_seq), 0);
-      if (['FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE'].includes(latestChat.status)) {
-        errorMessage.value = `上次只读回答结束：${readableStatus(latestChat.status)}${latestChat.waiting_reason ? `（${latestChat.waiting_reason}）` : ''}`;
-      }
+    } else if (latestChat && ['FAILED', 'BLOCKED', 'CANCELLED'].includes(latestChat.status)) {
+      await loadChunks(latestChat.run_id);
+      if (!isCurrentSession() || activeChatRun.value?.run_id !== latestChat.run_id) return;
+      errorMessage.value = terminalRunMessage(latestChat);
     }
     if (!linkedTask) {
       linkedTask = [...linkedTasks.tasks].reverse().find((item) => item.task_id)?.task_id ?? null;
@@ -1182,13 +1166,7 @@ function clearS3TaskResultCache(expectedTaskId: string): void {
   s3HandoffOutcome.value = null;
   taskOutcome.value = null;
   if (activeChatRun.value?.task_id === expectedTaskId) {
-    chatActivities.value = [];
-    activeChatRun.value = null;
-    chunkProjectionGeneration += 1;
-    loadingChunksTicket += 1;
-    loadingChunksRunId = null;
-    chunks.value = [];
-    lastChunkSeq.value = 0;
+    setActiveChatRun(null);
   }
 }
 
@@ -1302,14 +1280,12 @@ async function createDemoTask(): Promise<void> {
 async function sendMessage(): Promise<void> {
   const body = draft.value.trim();
   if (!sessionId.value || !body || !csrf.value || busy.value) return;
+  const requestedSession = sessionId.value;
   busy.value = true;
   let acceptedRunForReconnect: string | null = null;
   errorMessage.value = '';
   notice.value = '';
-  chunks.value = [];
-  lastChunkSeq.value = 0;
   try {
-    const requestedSession = sessionId.value;
     const assistantTargetTask = assistantTaskId.value;
     const operationKey = assistantOperationKey('message', requestedSession);
     const operation = await beginAssistantOperation(sessionStorage, operationKey, {
@@ -1319,17 +1295,22 @@ async function sendMessage(): Promise<void> {
       requestedSession, body, assistantTargetTask, csrf.value, operation.operationId,
     );
     acknowledgeAssistantOperation(sessionStorage, operationKey, operation.operationId);
+    if (sessionId.value !== requestedSession) return;
     acceptedRunForReconnect = accepted.run_id;
     draft.value = '';
-    activeChatRun.value = await api.run(accepted.run_id);
+    const run = await api.run(accepted.run_id);
+    if (sessionId.value !== requestedSession) return;
+    setActiveChatRun(run);
     await refreshSessionMessagesOnly();
     acceptedRunForReconnect = null;
     await watchRun(accepted.run_id);
+    if (sessionId.value !== requestedSession) return;
     if (taskId.value) await refreshInspector();
     if (assistantTargetTask === null && accepted.input_kind === 'CHAT_READONLY') {
       await refreshAssistantSource(accepted.run_id, null);
     }
   } catch (error) {
+    if (sessionId.value !== requestedSession) return;
     if (acceptedRunForReconnect) {
       notice.value = '助手运行已接收；正在恢复同一条会话回复。';
       await watchRun(acceptedRunForReconnect);
@@ -1711,11 +1692,7 @@ function invalidateHistoryOnStreamDisconnect(): void {
   maskLoadedS3History();
   if (activeChatRun.value?.task_id) {
     chatActivities.value = [];
-    chunkProjectionGeneration += 1;
-    loadingChunksTicket += 1;
-    loadingChunksRunId = null;
-    chunks.value = [];
-    lastChunkSeq.value = 0;
+    resetChunkProjection();
   }
 }
 
@@ -1850,23 +1827,50 @@ async function loadOlderMessages(): Promise<void> {
   }
 }
 
-async function loadChunks(runId: string): Promise<void> {
+function resetChunkProjection(afterSeq = 0): void {
+  chunkProjectionGeneration += 1;
+  loadingChunksTicket += 1;
+  loadingChunksRunId = null;
+  chunks.value = [];
+  lastChunkSeq.value = afterSeq;
+  requestedChunkSeq = afterSeq;
+}
+
+function setActiveChatRun(run: RunItem | null): void {
+  if (activeChatRun.value?.run_id !== run?.run_id) {
+    resetChunkProjection();
+    chatActivities.value = [];
+  }
+  activeChatRun.value = run;
+}
+
+async function loadChunks(runId: string, availableSeq = 0): Promise<void> {
+  if (activeChatRun.value?.run_id !== runId || (availableSeq > 0 && availableSeq <= lastChunkSeq.value)) return;
+  requestedChunkSeq = Math.max(requestedChunkSeq, availableSeq);
   if (loadingChunksRunId === runId) return;
   loadingChunksRunId = runId;
   const requestTicket = ++loadingChunksTicket;
   const generation = chunkProjectionGeneration;
   const requestedSession = sessionId.value;
-  const afterSeq = lastChunkSeq.value;
+  const isCurrent = () => sessionId.value === requestedSession && chunkProjectionGeneration === generation
+    && activeChatRun.value?.run_id === runId;
   try {
-    const response = await api.chunks(runId, afterSeq);
-    if (sessionId.value !== requestedSession || chunkProjectionGeneration !== generation
-      || activeChatRun.value?.run_id !== runId || response.items.length === 0) return;
-    const merged = new Map(chunks.value.map((chunk) => [chunk.chunk_seq, chunk]));
-    for (const chunk of response.items) {
-      if (!merged.has(chunk.chunk_seq)) merged.set(chunk.chunk_seq, chunk);
+    for (;;) {
+      const afterSeq = lastChunkSeq.value;
+      const response = await api.chunks(runId, afterSeq);
+      if (!isCurrent() || !response.items.length) return;
+      chunks.value = mergeChatChunks(chunks.value, response.items);
+      lastChunkSeq.value = chunks.value.at(-1)?.chunk_seq ?? afterSeq;
+      // Catch up to events received while this page was in flight.
+      if (lastChunkSeq.value <= afterSeq || (lastChunkSeq.value >= requestedChunkSeq && response.items.length < 500)) return;
     }
-    chunks.value = [...merged.values()].sort((left, right) => left.chunk_seq - right.chunk_seq);
-    lastChunkSeq.value = Math.max(lastChunkSeq.value, ...response.items.map((item) => item.chunk_seq));
+  } catch (error) {
+    if (!isCurrent()) return;
+    if (activeChatRun.value?.task_id) {
+      resetChunkProjection();
+      chatActivities.value = [];
+    }
+    errorMessage.value = explainError(error);
   } finally {
     if (loadingChunksTicket === requestTicket && loadingChunksRunId === runId) loadingChunksRunId = null;
   }
@@ -1900,10 +1904,12 @@ async function watchRun(runId: string): Promise<void> {
   const requestedSession = sessionId.value;
   const pollGeneration = ++runPollGeneration;
   let polls = 0;
+  let reading = false;
   await new Promise<void>((resolve) => {
     finishRunPoll = resolve;
     runPollTimer = window.setInterval(async () => {
-      if (runPollGeneration !== pollGeneration) return;
+      if (runPollGeneration !== pollGeneration || reading) return;
+      reading = true;
       polls += 1;
       try {
         const run = await api.run(runId);
@@ -1916,9 +1922,12 @@ async function watchRun(runId: string): Promise<void> {
           stopRunPolling();
           return;
         }
-        if (run.kind === 'CHAT_READONLY') activeChatRun.value = run;
         if (run.kind === 'CHAT_READONLY') {
-          await Promise.all([loadChunks(runId), refreshRunActivity(runId, requestedSession)]);
+          setActiveChatRun(run);
+          await Promise.all([
+            run.status !== 'SUCCEEDED' ? loadChunks(runId) : Promise.resolve(),
+            refreshRunActivity(runId, requestedSession),
+          ]);
         }
         if (runPollGeneration !== pollGeneration) return;
         if (['SUCCEEDED', 'FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE', 'WAITING_APPROVAL', 'WAITING_INPUT'].includes(run.status) || polls >= 240) {
@@ -1936,8 +1945,11 @@ async function watchRun(runId: string): Promise<void> {
           resolve();
         }
       } catch (error) {
+        if (runPollGeneration !== pollGeneration) return;
         if (sessionId.value === requestedSession) errorMessage.value = explainError(error);
         stopRunPolling();
+      } finally {
+        reading = false;
       }
     }, 500);
   });
@@ -1968,17 +1980,13 @@ function acceptEvent(item: EventItem, requestedSession = sessionId.value): void 
     }
   }
   if (item.event_kind === 'CHAT_CHUNKS_RESET' && runId === activeChatRun.value?.run_id) {
-    chunkProjectionGeneration += 1;
-    loadingChunksTicket += 1;
-    loadingChunksRunId = null;
-    chunks.value = [];
-    lastChunkSeq.value = Number(item.payload.reset_before_chunk_seq ?? 0);
+    resetChunkProjection(Number(item.payload.reset_before_chunk_seq ?? 0));
   }
   if (item.event_kind === 'CHAT_ANSWER_COMMITTED' && runId === activeChatRun.value?.run_id) {
     void refreshLatestChatContext(sessionId.value, runId);
   }
   if (item.event_kind === 'CHAT_CHUNK_AVAILABLE' && runId && runId === activeChatRun.value?.run_id) {
-    void loadChunks(runId);
+    void loadChunks(runId, Number(item.payload.chunk_seq ?? 0));
   }
   if (item.event_kind.startsWith('RUN_STATUS_') || item.event_kind === 'CHAT_ANSWER_COMMITTED'
     || item.event_kind === 'CHAT_ROUTE_RESOLVED'
@@ -1999,6 +2007,7 @@ function connectEvents(revalidateOnOpen = false): void {
     if (revalidateOnOpen || reconnectCount.value > 0) {
       void refreshSessionMessagesOnly(true);
       if (taskId.value) void refreshInspector();
+      if (activeChatRun.value) void refreshRunActivity(activeChatRun.value.run_id, requestedSession);
     }
     reconnectCount.value = 0; notice.value = '';
   };
@@ -2066,18 +2075,10 @@ function updateConversationPinned(): void {
     || element.scrollHeight - element.scrollTop - element.clientHeight < 120;
 }
 
-function activityLabel(item: RunActivity): string {
-  const stage = item.payload.stage;
-  const tool = item.payload.tool_name ? ` · ${item.payload.tool_name}` : '';
-  const duration = typeof item.payload.duration_ms === 'number' ? ` · ${item.payload.duration_ms} ms` : '';
-  const labels: Record<string, string> = {
-    PREPARING_CONTEXT: '正在准备上下文', CONTEXT_COMPACTION: '正在压缩历史上下文',
-    MEMORY_SELECTED: `已选择 ${item.payload.memory_count ?? 0} 条有效个人记忆`,
-    MODEL_REQUESTING: '正在请求模型', MODEL_RESPONSE_REPLAYING: '正在恢复已持久化的模型响应', MODEL_STREAMING: '模型正在生成',
-    TOOL_RUNNING: `正在执行工具${tool}`, TOOL_COMPLETED: `${item.payload.activity_status === 'SUCCEEDED' ? '工具已返回' : '工具执行失败'}${tool}${duration}`,
-    SAVING_ANSWER: '正在保存最终回答',
-  };
-  return labels[stage] ?? stage;
+function scrollToLatest(): void {
+  conversationPinned.value = true;
+  const element = conversationScroll.value;
+  if (element) element.scrollTop = element.scrollHeight;
 }
 
 function submitOnEnter(event: KeyboardEvent): void {
@@ -2088,21 +2089,8 @@ function submitOnEnter(event: KeyboardEvent): void {
 }
 
 watch(taskId, () => { void refreshInspector(); });
-watch([messages, chunks], async () => {
-  if (olderScrollPosition) {
-    const previous = olderScrollPosition;
-    await nextTick();
-    if (conversationScroll.value) {
-      conversationScroll.value.scrollTop = previous.top
-        + conversationScroll.value.scrollHeight - previous.height;
-    }
-    olderScrollPosition = null;
-    return;
-  }
-  if (!conversationPinned.value) return;
-  await nextTick();
-  if (!conversationPinned.value || !conversationScroll.value) return;
-  conversationScroll.value.scrollTop = conversationScroll.value.scrollHeight;
+watch([messages, chunks, chatActivities, activeChatRun], () => {
+  if (conversationPinned.value && !olderScrollPosition) scrollToLatest();
 }, { flush: 'post' });
 onMounted(() => { void restoreLogin(); });
 onBeforeUnmount(() => {
@@ -2343,7 +2331,7 @@ onBeforeUnmount(() => {
           <div class="task-input-actions"><span>输入会以未验证用户来源加入 Investigator 上下文。</span><button class="primary-button" type="submit" :disabled="!initialSymptom.trim() || busy || !csrf || (investigationKind === 'ASYNC_CALLBACK' && !selectedS3OrderId) || (investigationKind === 'AUTH_INCIDENT' && !s1DemoResource)">{{ investigationKind === 'ASYNC_CALLBACK' ? '确认订单并启动调查' : '确认并启动调查' }} <span>→</span></button></div>
         </form>
 
-        <div ref="conversationScroll" class="conversation-scroll" data-testid="conversation" aria-live="polite" @scroll="updateConversationPinned">
+        <div ref="conversationScroll" class="conversation-scroll" data-testid="conversation" role="region" aria-label="会话消息" @scroll="updateConversationPinned">
           <div v-if="sessionId && hasOlderMessages" class="history-pagination">
             <button class="text-button" type="button" :disabled="loadingOlderMessages || loading || revalidatingSessionMessages" @click="loadOlderMessages">
               {{ loadingOlderMessages ? '正在加载…' : `加载更早消息（已显示 ${messages.length} 条）` }}
@@ -2374,6 +2362,7 @@ onBeforeUnmount(() => {
               <article v-if="item.kind === 'CHAT_MESSAGE' && item.message" class="message-row assistant" :data-message-id="item.message.message_id" :data-message-ids="assistantTurnMessages(item).map(message => message.message_id).join(',')" :data-run-id="item.runId">
                 <div class="message-avatar">✳</div><div class="message-content">
                   <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(assistantTurnMessages(item)[0]?.created_at ?? item.message.created_at) }}</span><span class="message-task">{{ assistantTurnLabel(item) }}</span></div>
+                  <AssistantRunActivity v-if="item.activities" :activities="item.activities" :format-time="dateLabel" />
                   <div class="message-bubble markdown-message">
                     <div v-for="message in assistantTurnMessages(item)" :key="message.message_id" class="assistant-message-segment" :data-message-id="message.message_id">
                       <span v-if="message.answer_kind === 'PROGRAM_LIMIT'" class="program-message-label">程序状态 · 非模型答复</span>
@@ -2442,11 +2431,21 @@ onBeforeUnmount(() => {
                 <p v-else-if="item.run.status === 'FAILED' || item.run.status === 'BLOCKED'">本次工作未完成。请展开运行详情查看具体原因。</p>
                 <details class="followup-sources"><summary>查看运行详情</summary><small>Run {{ item.run.run_id }} · {{ dateLabel(item.run.started_at ?? item.run.created_at) }} · 来源问题 {{ thread.anchor.message_id }}<template v-if="item.run.blocked_reason || item.run.waiting_reason"> · 原因代码 {{ item.run.blocked_reason ?? item.run.waiting_reason }}</template></small></details>
               </article>
-              <div v-else-if="item.kind === 'STREAM' && item.run" class="streaming-row" data-testid="live-stream" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
-                <div class="message-avatar assistant-avatar">✳</div><div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label" :class="{ 'streaming-label-incomplete': item.run.status !== 'RUNNING' }"><i v-if="item.run.status === 'RUNNING'"></i>{{ item.run.status === 'RUNNING' ? '正在生成 · 暂存片段' : `未完成草稿 · ${readableStatus(item.run.status)}` }}</span></div>
-                  <div class="stream-bubble" :data-testid="item.run.status === 'RUNNING' ? 'stream-chunk' : 'incomplete-stream-draft'"><div class="markdown-body" v-html="renderAssistantMarkdown((item.chunks ?? []).map((chunk) => chunk.body).join(''))"></div><span v-if="item.run.status === 'RUNNING'" class="typing-cursor"></span></div>
+              <article v-else-if="item.kind === 'STREAM' && item.run" class="streaming-row" data-testid="live-stream" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
+                <div class="message-avatar assistant-avatar">✳</div>
+                <div class="message-content streaming-copy">
+                  <div class="message-meta">
+                    <strong>OpsPilot</strong>
+                    <span class="streaming-label" :class="{ 'streaming-label-incomplete': !['RUNNING', 'QUEUED'].includes(item.run.status) }">
+                      {{ item.chunks?.length ? (item.run.status === 'RUNNING' ? '暂存片段' : `未完成草稿 · ${readableStatus(item.run.status)}`) : readableStatus(item.run.status) }}
+                    </span>
+                  </div>
+                  <AssistantRunActivity v-if="item.activities" :activities="item.activities" :running="item.run.status === 'RUNNING'" :format-time="dateLabel" />
+                  <div v-if="item.chunks?.length" class="message-bubble markdown-message stream-bubble" :data-testid="item.run.status === 'RUNNING' ? 'stream-chunk' : 'incomplete-stream-draft'">
+                    <div class="markdown-body" v-html="renderAssistantMarkdown(item.chunks.map((chunk) => chunk.body).join(''))"></div>
+                  </div>
                 </div>
-              </div>
+              </article>
             </template>
             <article v-if="thread.anchor.investigation_origin_message_id && thread.anchor.task_id === taskId && inspector?.task.task_id === taskId" class="readonly-followup-card" data-testid="s1-bridge-result">
               <div class="update-proposal-heading"><h2>受控调查结果</h2><span class="status-badge" :class="statusTone(currentTaskStatus)">{{ readableStatus(currentTaskStatus) }}</span></div>
@@ -2456,14 +2455,6 @@ onBeforeUnmount(() => {
               <details><summary>查看调查来源和运行详情</summary><p>Task {{ taskId }} · Run {{ latestBusinessRun?.run_id ?? '尚未读取' }} · 当前 Evidence {{ inspector.evidence.length }} 条。</p><div v-for="evidence in inspector.evidence" :key="String(evidence.evidence_id)"><small>{{ String(evidence.fact_type) }} · {{ String(evidence.evidence_id) }} · {{ dateLabel(String(evidence.fetched_at)) }}</small></div></details>
             </article>
           </section>
-          <details v-if="activeChatRun && activeChatActivities.length" class="assistant-run-activity" data-testid="assistant-run-activity">
-            <summary>本轮实际执行步骤 · {{ readableStatus(activeChatRun.status) }}</summary>
-            <ol>
-              <li v-for="item in activeChatActivities" :key="item.event_seq" :class="statusTone(item.payload.activity_status)">
-                <span>{{ activityLabel(item) }}</span><time>{{ dateLabel(item.happened_at) }}</time>
-              </li>
-            </ol>
-          </details>
           <section v-if="conversationProjection.unassociatedItems.length" class="unassociated-results" data-testid="unassociated-results">
             <h3>未能关联到已加载问题的记录</h3><p>系统保留这些持久记录，但没有根据相邻消息猜测归属。</p>
             <article v-for="item in conversationProjection.unassociatedItems" :key="item.id" class="readonly-followup-card" :data-record-id="item.id">
@@ -2478,6 +2469,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="composer-wrap">
+          <button v-if="!conversationPinned && messages.length" class="outline-button scroll-latest" type="button" @click="scrollToLatest">回到最新消息 ↓</button>
           <div v-if="notice" class="notice-line" role="status">{{ notice }} <button v-if="reconnectPaused" type="button" @click="reconnectEvents">重新连接事件流</button></div>
           <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}<button v-if="errorMessage.includes('登录状态')" type="button" @click="logout">重新登录</button></div>
           <form class="composer" @submit.prevent="sendMessage">
@@ -2490,6 +2482,11 @@ onBeforeUnmount(() => {
 
       <aside class="inspector-panel panel" :class="{ open: narrowInspectorOpen }" aria-label="Task 检查器">
         <div class="inspector-header"><div><span class="eyebrow">LIVE CONTEXT</span><h2>Task 检查器</h2></div><button class="icon-button close-inspector" aria-label="关闭检查器" type="button" @click="narrowInspectorOpen = false">×</button></div>
+        <div v-if="inspector" class="task-summary-card" :data-task-id="String(inspector.task.task_id ?? taskId)">
+          <div class="summary-top"><span class="task-symbol">◈</span><span class="status-badge" :class="statusTone(currentTaskStatus)"><i></i>{{ readableStatus(currentTaskStatus) }}</span></div>
+          <span class="eyebrow">ACTIVE TASK</span><h3>{{ String(inspector.task.task_id ?? taskId).slice(0, 24) }}</h3>
+          <p>{{ String(inspector.task.service_id ?? 'orders-demo') }} <span>·</span> {{ String(inspector.task.integration_id ?? 'integration-a') }}</p>
+        </div>
         <section v-if="user" class="inspector-section memory-section personal-memory-manager" data-testid="personal-memory-manager">
           <div class="section-heading"><h3>个人长期记忆</h3><button class="text-button" type="button" :disabled="busy" @click="loadPersonalMemories">刷新</button></div>
           <p class="memory-warning">作用域由登录身份确定：{{ user.tenant_id }} · {{ user.actor_id }}。记忆只作为个人背景，不是业务事实或授权，也不会共享给同项目其他用户。个人记忆目前会在创建后 180 天到期；到期后需重新确认或保存。</p>
@@ -2560,11 +2557,6 @@ onBeforeUnmount(() => {
           </div>
         </section>
         <template v-if="inspector">
-          <div class="task-summary-card" :data-task-id="String(inspector.task.task_id ?? taskId)">
-            <div class="summary-top"><span class="task-symbol">◈</span><span class="status-badge" :class="statusTone(currentTaskStatus)"><i></i>{{ readableStatus(currentTaskStatus) }}</span></div>
-            <span class="eyebrow">ACTIVE TASK</span><h3>{{ String(inspector.task.task_id ?? taskId).slice(0, 24) }}</h3>
-            <p>{{ String(inspector.task.service_id ?? 'orders-demo') }} <span>·</span> {{ String(inspector.task.integration_id ?? 'integration-a') }}</p>
-          </div>
           <div class="inspector-section">
             <div class="section-heading"><h3>当前运行</h3><span class="section-count">{{ inspector.runs.length }}</span></div>
             <div v-if="latestBusinessRun" class="run-card"><div class="run-icon">⌁</div><div class="run-copy"><strong>{{ readableStatus(latestBusinessRun.kind) }}</strong><small>{{ readableStatus(latestBusinessRun.status) }}<template v-if="latestBusinessRun.blocked_reason"> · {{ readableRunReason(latestBusinessRun.blocked_reason) }}</template></small></div><span class="status-dot" :class="statusTone(latestBusinessRun.status)"></span></div>
