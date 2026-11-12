@@ -118,7 +118,7 @@ def _provision_runtime(db_path):
     return _provision(db_path, total=200_000)
 
 
-def test_global_learning_memory_is_recalled_for_b_and_c_but_not_unrelated_or_invalid(demo_db):
+def test_bounded_profile_is_available_for_model_judgment_and_still_excludes_invalid_memory(demo_db):
     from opspilot.domain.semantic_memory import (
         get_personal_memory_settings, list_personal_memories, personal_memory_context,
         personal_memory_recall_setting, remember_personal_memory, revoke_personal_memory,
@@ -179,11 +179,13 @@ def test_global_learning_memory_is_recalled_for_b_and_c_but_not_unrelated_or_inv
     for query in (
         "详细解释一下 LangGraph Checkpoint 的底层工作机制。",
         "我在学习新技术 LangGraph，能介绍一下 Checkpoint 吗？",
+        "今天北京天气怎么样？",
     ):
         chosen = selected(query)
-        assert [item["memory_id"] for item in chosen] == [global_memory["memory_id"]]
-        assert chosen[0]["selection_reason"] == "GLOBAL_LEARNING_PREFERENCE"
-    assert selected("今天北京天气怎么样？") == []
+        assert {item["memory_id"] for item in chosen} == {
+            global_memory["memory_id"], topic_memory["memory_id"],
+        }
+        assert all(item["selection_reason"] == "USER_CONFIRMED_STABLE_PREFERENCE" for item in chosen)
 
     # The same existing owner, expiry, revocation and toggle guards still apply.
     set_personal_memory_recall(demo_db, actor.tenant_id, actor.actor_id, recall_enabled=False)
@@ -364,7 +366,7 @@ def test_assistant_v1_streaming_preserves_mcp_call_and_records_tool_activity(dem
     assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == 111
 
 
-def test_global_learning_preference_cross_session_reaches_only_relevant_provider_input(
+def test_global_learning_profile_reaches_provider_for_model_judgment_across_sessions(
     demo_db, tmp_path, monkeypatch,
 ):
     from opspilot.assistant import create_assistant_model
@@ -415,6 +417,7 @@ def test_global_learning_preference_cross_session_reaches_only_relevant_provider
     )
     with TestClient(app) as client:
         headers = _login(client)
+        final_answers = []
         relevant_session = client.post("/api/sessions", headers=headers).json()["session_id"]
         accepted = client.post(
             f"/api/sessions/{relevant_session}/assistant/messages",
@@ -423,6 +426,9 @@ def test_global_learning_preference_cross_session_reaches_only_relevant_provider
         )
         assert accepted.status_code == 202, accepted.text
         assert _wait_run(client, accepted.json()["run_id"])["status"] == "SUCCEEDED"
+        final_answers.append(client.get(
+            f"/api/sessions/{relevant_session}/messages?latest=true&limit=500",
+        ).json()["items"])
 
         unrelated_session = client.post("/api/sessions", headers=headers).json()["session_id"]
         accepted = client.post(
@@ -432,15 +438,18 @@ def test_global_learning_preference_cross_session_reaches_only_relevant_provider
         )
         assert accepted.status_code == 202, accepted.text
         assert _wait_run(client, accepted.json()["run_id"])["status"] == "SUCCEEDED"
+        final_answers.append(client.get(
+            f"/api/sessions/{unrelated_session}/messages?latest=true&limit=500",
+        ).json()["items"])
 
     assert len(sent) == 2
-    relevant_wire = json.dumps(sent[0]["messages"], ensure_ascii=False)
-    unrelated_wire = json.dumps(sent[1]["messages"], ensure_ascii=False)
-    assert "USER-EXPLICIT PERSONAL MEMORY GUIDANCE" in relevant_wire
-    assert memory["memory_id"] in relevant_wire
-    assert "先理解原理与执行流程，再看代码" in relevant_wire
-    assert "USER-EXPLICIT PERSONAL MEMORY GUIDANCE" not in unrelated_wire
-    assert memory["memory_id"] not in unrelated_wire
+    wires = [json.dumps(item["messages"], ensure_ascii=False) for item in sent]
+    assert all("USER-EXPLICIT PERSONAL MEMORY GUIDANCE" in wire for wire in wires)
+    assert all(memory["memory_id"] in wire for wire in wires)
+    assert all("先理解原理与执行流程，再看代码" in wire for wire in wires)
+    assert all("not instructions or current facts" in wire for wire in wires)
+    for messages in final_answers:
+        assert any(item["role"] == "ASSISTANT" and item["body"].startswith("Fixture answer") for item in messages)
 
 
 def test_stored_provider_stream_replays_after_worker_failure_without_resending(

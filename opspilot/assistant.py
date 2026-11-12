@@ -1680,6 +1680,7 @@ class Loop(AgentMiddleware):
                 'CONFIRMED PROJECT MEMORY GUIDANCE',
                 'CONFIRMED PERSONAL MEMORY GUIDANCE',
                 'USER-EXPLICIT PERSONAL MEMORY GUIDANCE',
+                'AUTO-LEARNED PERSONAL MEMORY GUIDANCE',
             ))
         ]
         prepared['memory_guidance_messages'] = memory_guidance_messages
@@ -1917,7 +1918,11 @@ class Loop(AgentMiddleware):
         excluded_sources = prepared.get('excluded_sources', [])
         personal_guidance = [
             item for item in memory_guidance
-            if item.startswith(('CONFIRMED PERSONAL MEMORY GUIDANCE', 'USER-EXPLICIT PERSONAL MEMORY GUIDANCE'))
+            if item.startswith((
+                'CONFIRMED PERSONAL MEMORY GUIDANCE',
+                'USER-EXPLICIT PERSONAL MEMORY GUIDANCE',
+                'AUTO-LEARNED PERSONAL MEMORY GUIDANCE',
+            ))
         ]
         if personal_guidance:
             self.personal_memory_was_sent=True

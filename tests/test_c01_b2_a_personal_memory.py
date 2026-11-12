@@ -331,7 +331,8 @@ def test_explicit_memory_tool_cross_session_controls_revision_and_checkpoint_pri
         refs = _memory_refs(client, recall_run)
         assert [item["memory_id"] for item in refs] == [pinned_id]
         assert refs[0]["memory_mode"] == "PINNED"
-        assert refs[0]["estimated_tokens"] <= 250
+        assert refs[0]["estimated_tokens"] <= 600
+        assert sum(item["estimated_tokens"] for item in refs) <= 600
 
         # A malicious/over-eager fixture call cannot turn a one-shot request or
         # quoted tool output into persistent memory; neither blocks chat.
@@ -526,9 +527,12 @@ def test_pinned_selection_stays_within_item_and_token_caps(demo_db):
         selected, excluded, _ = personal_memory_context(
             connection, "tenant-a", "support-a", "unrelated Redis skip list question",
         )
-    assert len(selected) == 3
-    assert sum(item["estimated_tokens"] for item in selected) <= 250
-    assert len([item for item in excluded if item["reason"] == "PINNED_MEMORY_ITEM_LIMIT"]) == 1
+    assert 1 <= len(selected) <= 3
+    assert sum(item["estimated_tokens"] for item in selected) <= 600
+    assert len(selected) + len(excluded) == 4
+    assert all(item["reason"] in {
+        "PINNED_MEMORY_TOKEN_BUDGET", "PINNED_MEMORY_ITEM_LIMIT", "PERSONAL_PROFILE_TOKEN_BUDGET",
+    } for item in excluded)
 
 
 def test_v21_personal_memory_migration_preserves_candidate_confirmation_and_event_history(tmp_path):

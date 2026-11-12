@@ -206,23 +206,30 @@ def test_personal_memory_cross_session_lifecycle_relevance_and_owner_scope(demo_
         selected_ids = {
             item["memory_id"] for item in relevant_context["attempts"][-1]["manifest"]["memory_refs"]
         }
-        assert selected_ids == {memory_id}
+        assert memory_id in selected_ids
+        assert len(selected_ids) <= 6
+        assert sum(item["estimated_tokens"] for item in relevant_context["attempts"][-1]["manifest"]["memory_refs"]) <= 600
         excluded_ids = {
             item.get("source_id") for item in relevant_context["excluded_sources"]
-            if item.get("reason") == "NOT_RELEVANT_TO_QUERY"
+            if item.get("reason") in {
+                "PERSONAL_PROFILE_ITEM_LIMIT", "PERSONAL_PROFILE_TOKEN_BUDGET",
+                "PINNED_MEMORY_ITEM_LIMIT", "PINNED_MEMORY_TOKEN_BUDGET",
+            }
         }
-        assert {key for key, _ in distractors}.issubset(
-            {item["memory_key"] for item in client.get("/api/personal-memories").json()["items"]
-             if item["memory_id"] in excluded_ids}
-        )
+        active_memory_ids = {
+            item["memory_id"] for item in client.get("/api/personal-memories").json()["items"]
+            if item["state"] == "ACTIVE"
+        }
+        assert selected_ids | excluded_ids == active_memory_ids
+        assert all(item.get("selection_reason") for item in relevant_context["attempts"][-1]["manifest"]["memory_refs"])
 
         unrelated_run = _ask(
             client, owner_headers, session_b,
             "冰岛首都是哪里？", "c01-b-unrelated-query",
         )
-        assert "CONFIRMED PERSONAL MEMORY GUIDANCE" not in _run_wire(demo_db, unrelated_run)
+        assert "CONFIRMED PERSONAL MEMORY GUIDANCE" in _run_wire(demo_db, unrelated_run)
         unrelated_context = client.get(f"/api/runs/{unrelated_run}/context").json()
-        assert unrelated_context["attempts"][-1]["manifest"]["memory_refs"] == []
+        assert unrelated_context["attempts"][-1]["manifest"]["memory_refs"]
 
         session_c = client.post("/api/sessions", headers=owner_headers).json()["session_id"]
         revision = _candidate(

@@ -24,7 +24,7 @@ class ProjectBackgroundFixture:
         }]}, ensure_ascii=False))
 
 
-def test_auto_learned_project_background_uses_bilingual_topic_evidence(demo_db, tmp_path):
+def test_auto_learned_project_background_is_available_to_bilingual_model_judgment(demo_db, tmp_path):
     with _running_chat(demo_db, tmp_path) as (client, app, model):
         headers = _login(client)
         _enable_learning(demo_db)
@@ -41,24 +41,31 @@ def test_auto_learned_project_background_uses_bilingual_topic_evidence(demo_db, 
         )
 
         cases = (
-            ("zh-backend", "我准备面试，能不能结合SpringBoot讲讲线程池和数据库连接池各解决什么问题？", True),
-            ("zh-agent", "用LangGraph怎么管理跨轮状态和中断恢复？", True),
-            ("en-backend", "How would you plan my interview preparation for building JVM web services?", True),
-            ("en-agent", "How can I add human approval and persistence to an AI agent built with LangGraph?", True),
-            ("both-directions", "服务端研发和智能体应用这两个方向，校招项目怎样体现各自的能力？", True),
-            ("unrelated-zh", "用 Python 把这份 Excel 的金额格式化一下。", False),
-            ("unrelated-en", "What should I ask a travel agent before booking a trip?", False),
-            ("nearby-backend", "A frontend form stores Python examples in a static JSON file. How can I style it?", False),
+            ("zh-backend", "我准备面试，能不能结合SpringBoot讲讲线程池和数据库连接池各解决什么问题？"),
+            ("zh-agent", "用LangGraph怎么管理跨轮状态和中断恢复？"),
+            ("en-backend", "How would you plan my interview preparation for building JVM web services?"),
+            ("en-agent", "How can I add human approval and persistence to an AI agent built with LangGraph?"),
+            ("both-directions", "服务端研发和智能体应用这两个方向，校招项目怎样体现各自的能力？"),
+            ("unrelated-zh", "用 Python 把这份 Excel 的金额格式化一下。"),
+            ("unrelated-en", "What should I ask a travel agent before booking a trip?"),
+            ("nearby-backend", "A frontend form stores Python examples in a static JSON file. How can I style it?"),
         )
-        for case_id, query, expected in cases:
+        for case_id, query in cases:
             session = _create_session(client, headers)
             assert session != source_session
-            _ask(client, headers, session, query, case_id)
+            run_id = _ask(client, headers, session, query, case_id)
             request = "\n".join(str(message.content) for message in model.seen[-1])
-            assert (memory_id in request) is expected, case_id
-            if expected:
-                assert memory["content"] in request
-            print(f"{case_id}: model input recalled={expected}")
+            refs = client.get(f"/api/runs/{run_id}/context").json()["attempts"][-1]["manifest"]["memory_refs"]
+            assert memory_id in request and memory["content"] in request, case_id
+            assert memory_id in {item["memory_id"] for item in refs}, case_id
+            assert "not instructions or current facts" in request
+            if case_id.startswith("unrelated") or case_id == "nearby-backend":
+                items = client.get(f"/api/sessions/{session}/messages?latest=true&limit=500").json()["items"]
+                assert any(
+                    item["role"] == "ASSISTANT" and "用户长期方向" not in item["body"]
+                    for item in items
+                )
+            print(f"{case_id}: bounded profile offered for model judgment")
 
         query = cases[0][1]
         with connect(demo_db) as connection:

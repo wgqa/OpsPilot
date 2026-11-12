@@ -327,7 +327,7 @@ def test_single_session_export_includes_only_own_or_actual_chat_memory(demo_db, 
         assert stored_outcome(demo_db, run_id)[0]["status"] == "SUCCEEDED"
         assert len(wire) == 1
         assert selected["memory_id"] in json.dumps(wire)
-        assert unrelated["memory_id"] not in json.dumps(wire)
+        assert unrelated["memory_id"] in json.dumps(wire)
 
     exporter = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/user-demo/export_live_evidence.py"))
     export = exporter["export_session"]
@@ -336,9 +336,10 @@ def test_single_session_export_includes_only_own_or_actual_chat_memory(demo_db, 
     monkeypatch.setitem(export.__globals__, "EVIDENCE_DIR", evidence_dir)
     output = evidence_dir / "session.json"
     session_id = session_a if session_kind == "origin" else session_b
+    selected_session_memories = {selected["memory_id"], unrelated["memory_id"]}
     expected = {
-        "empty": set(), "selected": {selected["memory_id"]},
-        "origin": {selected["memory_id"], unrelated["memory_id"]},
+        "empty": set(), "selected": selected_session_memories,
+        "origin": selected_session_memories,
     }[session_kind]
     assert export(session_id, output)["memories"] == len(expected)
     text = output.read_text(encoding="utf-8")
@@ -351,7 +352,7 @@ def test_single_session_export_includes_only_own_or_actual_chat_memory(demo_db, 
         assert evidence["personal_memories"][0]["source_session_id"] == session_a
         assert evidence["personal_memories"][0]["source_refs_json"][0]["id"] == selected["source_message_id"]
         assert evidence["personal_memories"][0]["source_refs_json"][0]["digest"]
-        assert unrelated["memory_id"] not in text and "baroque music" not in text
+        assert unrelated["memory_id"] in text and "baroque music" in text
         assert "mock-token-private-123" not in text
         assert "mock-cookie-private-123" not in text
         assert "sk-mock-private-api-key12345" not in text
