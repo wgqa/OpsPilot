@@ -466,6 +466,43 @@ def get_receiver_processing_fact(path, task_id):
     return _table_fact(path, task_id, "s3_receiver")
 
 
+def receiver_sla_at_observation(observation: dict) -> dict:
+    """Derive elapsed time from the receiver Observation, without changing Evidence."""
+    receiver = observation["facts"]
+    status = receiver.get("status")
+    result = {
+        "event_id": receiver.get("event_id"),
+        "delivery_version": receiver.get("delivery_version"),
+        "receiver_version": receiver.get("version"),
+        "assessment": "UNKNOWN",
+    }
+    versions = observation["observed_versions"]
+    if (not result["event_id"] or result["delivery_version"] != versions.get("delivery_version")
+            or result["receiver_version"] != versions.get("receiver_version")):
+        return result
+    if status == "PROCESSED":
+        result["assessment"] = "PROCESSED"
+    elif status == "NOT_RECEIVED":
+        result["assessment"] = "NOT_APPLICABLE"
+    elif status == "QUEUED":
+        accepted = _parse_s3_time(receiver.get("accepted_at"))
+        observed = _parse_s3_time(observation.get("observed_at"))
+        seconds = receiver.get("processing_sla_seconds")
+        if accepted is None or observed is None or observed < accepted or type(seconds) is not int or seconds <= 0:
+            return result
+        try:
+            deadline = accepted + timedelta(seconds=seconds)
+        except OverflowError:
+            return result
+        result.update(
+            assessment="OVERDUE" if observed >= deadline else "WITHIN_SLA",
+            processing_sla_seconds=seconds,
+            elapsed_seconds=int((observed - accepted).total_seconds()),
+            deadline=deadline.isoformat().replace("+00:00", "Z"),
+        )
+    return result
+
+
 def _observation_scope(
     connection, task_id, evidence_rows, run_id, observation_ids, *,
     allow_failed_chat_run=False,

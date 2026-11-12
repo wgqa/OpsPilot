@@ -824,7 +824,7 @@ def source_context_for_model(payload):
     source_current = payload['current_run']
     observations = [
         {key: observation[key] for key in (
-            'tool', 'call_id', 'tool_call_id', 'evidence_id', 'observation_id', 'observed_at',
+            'tool', 'call_id', 'tool_call_id', 'evidence_id', 'observation_id', 'observed_at', 'receiver_sla',
         ) if key in observation and observation[key] is not None}
         for observation in source_current.get('business_observations', [])
         if isinstance(observation, dict)
@@ -843,6 +843,12 @@ def source_context_for_model(payload):
         if count else
         '本轮尚未重新查询业务状态。可以解释历史快照，或自主选择合法补查；当前状态仍待核实。'
     )
+    if any('receiver_sla' in observation for observation in observations):
+        current['receiver_sla_guide'] = (
+            '只用与目标 Event 对应的本轮 Receiver。OVERDUE 表示观察时仍 QUEUED 且超出处理 SLA，'
+            '应明确说明已超时及处理未确认。PROCESSED 表示已处理。只有同 Event 的 Delivery 失败和重试 '
+            'EXHAUSTED 等可信结果才支持传输失败且重试耗尽。缺少匹配观察时说明未知。'
+        )
     context['current_run'] = current
     context['source_time_guide'] = (
         '通过来源检查的历史快照可引用；引用资格有效不表示业务状态刚被查询。'

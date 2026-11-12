@@ -1640,11 +1640,19 @@ class Loop(AgentMiddleware):
                     }
                     if run['task_id']:
                         observation_link = c.execute(
-                            'SELECT tool_call_id FROM d2_tool_observations WHERE task_id=? AND call_id=?',
-                            (run['task_id'], call['call_id']),
+                            '''SELECT tool_call_id,result_digest FROM d2_tool_observations
+                               WHERE task_id=? AND call_id=? AND observation_id=?''',
+                            (run['task_id'], call['call_id'], call['observation_id']),
                         ).fetchone()
                         if observation_link is not None:
                             source['tool_call_id'] = observation_link['tool_call_id']
+                        if request['name'] == 'get_receiver_processing':
+                            from opspilot.domain.s3 import receiver_sla_at_observation
+
+                            if (result.get('fact_type') != 's3_receiver' or observation_link is None
+                                    or observation_link['result_digest'] != source['result_digest']):
+                                raise TaskControlError('ASSISTANT_SOURCE_RESULT_INVALID')
+                            source['receiver_sla'] = receiver_sla_at_observation(result)
                     current['business_observations'].append(source)
             previous=[]
             selected_ids=set(prepared.get('selected_message_ids',[]))
