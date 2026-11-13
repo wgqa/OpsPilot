@@ -1,0 +1,70 @@
+{
+  "task": "R2-AR03-USER-TEST-READY-01",
+  "repository": "wgqa/OpsPilot",
+  "base_sha": "6543fdd63b6d66ef2c7042c7da6e329cefbe73de",
+  "branch": "codex/r2-ar03-user-test-ready-01",
+  "worktree": "D:/OpsPilot-LIVE-02-FIX-01-HF02",
+  "worktrees_before": 76,
+  "worktrees_added": 0,
+  "readiness": "BLOCKED",
+  "readiness_reason": "Offline environment is ready, but local Provider configuration and Runtime Grant are absent; Live preflight refuses to start until the user configures and authorizes them.",
+  "verified": {
+    "isolated_domain_db_schema_version": 24,
+    "checkpoint_schema_tables": ["checkpoints", "writes"],
+    "api_worker_health": "PASS",
+    "vue_http_status": 200,
+    "support_login_and_session_create": "PASS",
+    "authorized_document_project": "orders-callback",
+    "support_visible_s3_orders": ["async-order", "async-order-2"],
+    "async_order_delivery": "ACKNOWLEDGED",
+    "async_order_receiver": "QUEUED",
+    "async_order_delivery_receiver_same_event": true,
+    "cross_tenant_order_bind": "DENIED_HTTP_422",
+    "cross_tenant_rejection_persisted_task_or_message": false,
+    "authenticated_sse_handshake": "PASS",
+    "sse_closed_on_graceful_stop": true,
+    "listeners_after_stop": 0,
+    "session_persisted_after_restart": true,
+    "offline_fixture_regressions": "44 passed",
+    "processed_fixture_pair": "2 passed, 4 deselected",
+    "python_compileall": "PASS",
+    "frontend_build": "PASS",
+    "password_values_found_in_logs_or_evidence": 0
+  },
+  "not_performed": {
+    "real_provider_requests": 0,
+    "runtime_grants_created": 0,
+    "provider_spend_records": 0,
+    "external_mcp_calls": 0,
+    "business_writes_approvals_or_handoffs": 0,
+    "browser_automation": 0,
+    "main_merge": false
+  },
+  "isolated_fixture_setup": {
+    "local_loopback_receiver_post_attempts": 2,
+    "responses": [202, 202],
+    "external_business_systems_contacted": 0
+  },
+  "evidence_files": [
+    "USER_TEST_GUIDE.md",
+    "ATTEMPTS.md",
+    "API-OFFLINE-PREFLIGHT.json",
+    "S3-SCOPE-HTTP-PREFLIGHT.json",
+    "STOP-SSE-PREFLIGHT-GREEN.json",
+    "DB-STATE-PREFLIGHT.json",
+    "RUNTIME-SUMMARY.log",
+    "RUNTIME-PREFLIGHT-NO-GRANT.log",
+    "LIVE-START-BLOCKED-NO-GRANT-RETRY.log",
+    "PYTHON-COMPILEALL.log",
+    "FRONTEND-BUILD.log",
+    "TARGETED-OFFLINE-REGRESSION-D-RUN.log",
+    "PROCESSED-FIXTURE-PAIR.log",
+    "SECRET-SCAN.json"
+  ],
+  "limitations": [
+    "No browser automation was run; the user performs the manual browser test.",
+    "Offline service mode has no Fixture model fallback; Fixture journey behavior is covered in explicit test fixtures.",
+    "The existing single-Session exporter requires a readable Runtime Spend summary and returns RUNTIME_GRANT_NOT_PROVISIONED before a Grant exists; the user guide calls it only after local authorization.",
+    "Live testing remains gated by the user's local Provider configuration and Runtime Grant authorization."
+  ]
+}

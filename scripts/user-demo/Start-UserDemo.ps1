@@ -108,6 +108,12 @@ $overrides = @{
     OPSPILOT_ASSISTANT_EXPERIMENT_ID = ''
     OPSPILOT_MODEL_API_KEY = $providerKey
 }
+$apiCredentials = @{
+    OPSPILOT_WEB_SUPPORT_PASSWORD = Get-EffectiveEnv 'OPSPILOT_WEB_SUPPORT_PASSWORD'
+    OPSPILOT_WEB_APPROVER_PASSWORD = Get-EffectiveEnv 'OPSPILOT_WEB_APPROVER_PASSWORD'
+    OPSPILOT_WEB_SUPPORT_B_PASSWORD = Get-EffectiveEnv 'OPSPILOT_WEB_SUPPORT_B_PASSWORD'
+    OPSPILOT_WEB_APPROVER_B_PASSWORD = Get-EffectiveEnv 'OPSPILOT_WEB_APPROVER_B_PASSWORD'
+}
 if ($Mode -eq 'Live') {
     foreach ($name in @(
         'OPSPILOT_MODEL_NAME', 'OPSPILOT_MODEL_BASE_URL', 'OPSPILOT_MODEL_CONFIG_VERSION',
@@ -123,12 +129,22 @@ foreach ($name in $overrides.Keys) {
     $oldEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     [Environment]::SetEnvironmentVariable($name, [string]$overrides[$name], 'Process')
 }
+$oldApiCredentials = @{}
+foreach ($name in $apiCredentials.Keys) {
+    $oldApiCredentials[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
 $apiProcess = $null
 $webProcess = $null
 try {
+    foreach ($name in $apiCredentials.Keys) {
+        [Environment]::SetEnvironmentVariable($name, [string]$apiCredentials[$name], 'Process')
+    }
     $apiProcess = Start-Process -FilePath $python -ArgumentList @('"' + $apiLauncher + '"') -WorkingDirectory $root `
         -WindowStyle Hidden -PassThru -RedirectStandardInput $emptyStdin `
         -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr
+    foreach ($name in $apiCredentials.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $oldApiCredentials[$name], 'Process')
+    }
     $webArgs = '"' + $webLauncher + '"'
     $webProcess = Start-Process -FilePath $node -ArgumentList $webArgs -WorkingDirectory (Join-Path $root 'frontend') `
         -WindowStyle Hidden -PassThru -RedirectStandardInput $emptyStdin `
@@ -136,6 +152,9 @@ try {
 } finally {
     foreach ($name in $overrides.Keys) {
         [Environment]::SetEnvironmentVariable($name, $oldEnvironment[$name], 'Process')
+    }
+    foreach ($name in $apiCredentials.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $oldApiCredentials[$name], 'Process')
     }
 }
 
