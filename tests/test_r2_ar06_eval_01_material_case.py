@@ -1,6 +1,9 @@
 """One independent E05 material-analysis case through the formal API/Worker."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from opspilot.web.app import create_app
@@ -13,6 +16,38 @@ from test_r2_ar03_integrated_journey_01 import (
     _record_trace,
     _submit,
 )
+
+
+def test_r2_ar06_e01_fresh_session_answers_http_202_without_mcp(demo_db, tmp_path):
+    cases_path = Path(__file__).resolve().parents[1] / "docs/evidence/r2-ar06-eval-01/CASES.json"
+    cases = json.loads(cases_path.read_text(encoding="utf-8"))
+    prompt = cases["cases"][0]["user_turns"][0]
+    model = IntegratedJourneyFixtureModel(scenario="simple")
+    app = create_app(
+        db_path=demo_db,
+        checkpoint_db_path=tmp_path / "r2-ar06-e01-checkpoint.sqlite3",
+        start_worker=True,
+        credentials=PASSWORDS,
+        expected_origin=ORIGIN,
+        assistant_model_factory=lambda: model,
+    )
+    with TestClient(app) as client:
+        headers = _login(client)
+        session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+        accepted, run, elapsed_ms = _submit(
+            client, headers, session_id, model, "r2-ar06-e01-fresh-session", prompt,
+        )
+        answer = _answer_for(_messages(client, headers, session_id), accepted["message_id"])
+        trace = _record_trace(
+            demo_db, session_id, [model], "E01-D", elapsed_ms,
+            {"answer": answer, "accepted": accepted},
+        )
+
+    assert run["status"] == "SUCCEEDED"
+    assert accepted.get("task_id") is None
+    assert "不证明异步工作已经完成" in answer
+    assert not any(call.get("kind") == "MCP" for call in trace["calls"])
+    assert trace["provider_requests"] == 0
 
 
 E05_INPUT = """请只按材料区分字面信息、条件性解释和未知线上事实，不要假设这些值已经部署。
