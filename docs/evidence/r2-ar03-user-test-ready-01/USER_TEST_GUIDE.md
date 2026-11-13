@@ -5,7 +5,7 @@
 - 仓库：`wgqa/OpsPilot`
 - Base：`codex/r2-ar03-integrated-journey-01@6543fdd63b6d66ef2c7042c7da6e329cefbe73de`
 - 候选分支：`codex/r2-ar03-user-test-ready-01`
-- 候选 SHA：提交后补入
+- 已验证实现候选 SHA：`14fbdd213b851653bbac79a2a66c31e11325294d`
 - 工作树：`D:\OpsPilot-LIVE-02-FIX-01-HF02`
 - Web：`http://127.0.0.1:5173`
 - API：`http://127.0.0.1:8000`
