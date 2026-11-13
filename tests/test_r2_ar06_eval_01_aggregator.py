@@ -23,6 +23,7 @@ def _row(record_type: str, case_id: str, status: str, run_status: str) -> dict[s
         "task_status": "NOT_APPLICABLE",
         "expected_outcome": "frozen expectation",
         "actual_outcome": "NOT_RUN" if status == "NOT_RUN" else "EXPLANATION_DELIVERED",
+        "business_outcome_code": "NOT_RUN" if status == "NOT_RUN" else "ANSWERED_GENERAL",
         "evidence_completeness": "NOT_RUN" if status == "NOT_RUN" else "PARTIAL",
         "evidence_validity": "NOT_RUN" if status == "NOT_RUN" else "UNVERIFIED",
         "decision_quality_rating": "UNVERIFIED",
@@ -72,6 +73,9 @@ def test_aggregator_keeps_not_run_denominator_and_does_not_infer_pass_from_run()
     assert result["first_attempt_status_counts"]["NOT_RUN"] == 1
     assert result["first_attempt_status_counts"]["PASS"] == 0
     assert result["first_attempt_completion_rate"] == 0
+    assert result["score_dimensions"]["M1_goal_completion"]["partial_cases"] == 11
+    assert result["score_dimensions"]["M4_business_outcomes"]["run_status_is_not_used_as_business_outcome"] is True
+    assert result["score_dimensions"]["M3_decision_quality"]["independent_semantic_scoring_performed"] is False
     assert result["security_negative_count"] == 4
     assert result["security_negative_first_attempt_status_counts"]["PASS"] == 4
     assert result["usage"]["provider_requests"] == 0

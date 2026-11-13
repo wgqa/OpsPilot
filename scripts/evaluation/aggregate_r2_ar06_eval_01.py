@@ -17,6 +17,7 @@ RESULT_STATUSES = {"PASS", "PARTIAL", "FAIL", "NOT_RUN", "UNVERIFIED"}
 RUN_FIELDS = {
     "record_type", "case_id", "attempt_id", "attempt_no", "result_status",
     "run_status", "task_status", "expected_outcome", "actual_outcome",
+    "business_outcome_code",
     "evidence_completeness", "evidence_validity", "decision_quality_rating",
     "unsupported_certainty_count", "safety_red_lines", "session_ids", "task_ids",
     "run_ids", "provider_requests", "provider_input_tokens", "provider_output_tokens",
@@ -122,12 +123,20 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
             "attempt_count": len(rows),
             "first_attempt_run_status": first["run_status"],
             "business_outcome": first["actual_outcome"],
+            "business_outcome_code": first["business_outcome_code"],
             "evidence_completeness": first["evidence_completeness"],
             "evidence_validity": first["evidence_validity"],
             "trace_refs": first["trace_refs"],
         })
 
     status_counts = Counter(row["result_status"] for row in first_attempts)
+    evidence_validity_counts = Counter(row["evidence_validity"] for row in first_attempts)
+    decision_quality_counts = Counter(row["decision_quality_rating"] for row in first_attempts)
+    business_outcome_counts = Counter(row["business_outcome_code"] for row in first_attempts)
+    certainty_values = [
+        row["unsupported_certainty_count"] for row in first_attempts
+        if isinstance(row["unsupported_certainty_count"], int)
+    ]
     security_results: list[dict[str, Any]] = []
     security_counts: Counter[str] = Counter()
     for case_id, case in negatives_by_id.items():
@@ -160,6 +169,35 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
         "attempt_record_count": len(runs),
         "first_attempt_status_counts": {key: status_counts.get(key, 0) for key in sorted(RESULT_STATUSES)},
         "first_attempt_completion_rate": status_counts.get("PASS", 0) / len(cases_by_id),
+        "score_dimensions": {
+            "M1_goal_completion": {
+                "complete_cases": status_counts.get("PASS", 0),
+                "planned_cases": len(cases_by_id),
+                "partial_cases": status_counts.get("PARTIAL", 0),
+                "failed_cases": status_counts.get("FAIL", 0),
+                "not_run_cases": status_counts.get("NOT_RUN", 0),
+                "unverified_cases": status_counts.get("UNVERIFIED", 0),
+            },
+            "M2_evidence_and_calibration": {
+                "evidence_validity_counts": dict(sorted(evidence_validity_counts.items())),
+                "unsupported_certainty_count": sum(certainty_values) if certainty_values else None,
+                "certainty_count_known_cases": len(certainty_values),
+            },
+            "M3_decision_quality": {
+                "rating_counts": dict(sorted(decision_quality_counts.items())),
+                "independent_semantic_scoring_performed": False,
+            },
+            "M4_business_outcomes": {
+                "outcome_counts": dict(sorted(business_outcome_counts.items())),
+                "run_status_is_not_used_as_business_outcome": True,
+            },
+            "M6_safety": {
+                "red_line_finding_count": len(red_lines),
+                "security_negative_counts": {
+                    key: security_counts.get(key, 0) for key in sorted(RESULT_STATUSES)
+                },
+            },
+        },
         "by_split": {
             split: {key: counts.get(key, 0) for key in sorted(RESULT_STATUSES)}
             for split, counts in sorted(by_split.items())
