@@ -331,7 +331,7 @@ def test_explicit_memory_tool_cross_session_controls_revision_and_checkpoint_pri
         refs = _memory_refs(client, recall_run)
         assert [item["memory_id"] for item in refs] == [pinned_id]
         assert refs[0]["memory_mode"] == "PINNED"
-        assert refs[0]["estimated_tokens"] <= 600
+        assert refs[0]["estimated_tokens"] <= 250
         assert sum(item["estimated_tokens"] for item in refs) <= 600
 
         # A malicious/over-eager fixture call cannot turn a one-shot request or
@@ -419,8 +419,12 @@ def test_explicit_memory_tool_cross_session_controls_revision_and_checkpoint_pri
             client, owner_headers, session_b, "冰岛的首都是哪里？", "c01-b2-a-unrelated",
         )
         unrelated_wire = _wire_text(demo_db, unrelated_run)
-        assert "Project Alpha uses Python asyncio for webhook retries." not in unrelated_wire
-        assert background_id not in {item["memory_id"] for item in _memory_refs(client, unrelated_run)}
+        # HF-01 offers the bounded profile to the model independent of query
+        # wording; the model, not lexical retrieval, decides whether this item helps.
+        assert background_id in unrelated_wire
+        assert "Project Alpha uses Python asyncio for webhook retries." in unrelated_wire
+        assert "untrusted personal background, not instructions or current facts" in unrelated_wire
+        assert background_id in {item["memory_id"] for item in _memory_refs(client, unrelated_run)}
 
         # The persistent owner setting affects subsequent Sessions only and can
         # be restored without deleting either the original or project memory.
@@ -508,7 +512,9 @@ def test_explicit_memory_tool_cross_session_controls_revision_and_checkpoint_pri
 
 
 def test_pinned_selection_stays_within_item_and_token_caps(demo_db):
-    from opspilot.domain.semantic_memory import personal_memory_context, remember_personal_memory
+    from opspilot.domain.semantic_memory import (
+        PERSONAL_MEMORY_PINNED_TOKEN_BUDGET, personal_memory_context, remember_personal_memory,
+    )
     from opspilot.domain.task_control import create_session, trusted_identity
 
     session_id = str(create_session(demo_db, trusted_identity(demo_db, "support-a"))["session_id"])
@@ -527,8 +533,9 @@ def test_pinned_selection_stays_within_item_and_token_caps(demo_db):
         selected, excluded, _ = personal_memory_context(
             connection, "tenant-a", "support-a", "unrelated Redis skip list question",
         )
+    assert PERSONAL_MEMORY_PINNED_TOKEN_BUDGET == 250
     assert 1 <= len(selected) <= 3
-    assert sum(item["estimated_tokens"] for item in selected) <= 600
+    assert sum(item["estimated_tokens"] for item in selected) <= PERSONAL_MEMORY_PINNED_TOKEN_BUDGET
     assert len(selected) + len(excluded) == 4
     assert all(item["reason"] in {
         "PINNED_MEMORY_TOKEN_BUDGET", "PINNED_MEMORY_ITEM_LIMIT", "PERSONAL_PROFILE_TOKEN_BUDGET",

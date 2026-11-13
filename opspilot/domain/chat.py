@@ -2762,9 +2762,10 @@ def complete_chat_attempt(
                         raise TaskControlError("CHAT_MEMORY_MODEL_SOURCES_INVALID")
                     memory_id = str(item["memory_id"])
                     expected_guidance = memory_guidance_text(item)
+                    # The prompt carries compact identity and content; digest/source lineage
+                    # stays in the request metadata and is matched to the persisted manifest below.
                     if (
                         memory_id not in wire_text
-                        or str(item.get("digest", "")) not in wire_text
                         or expected_guidance not in wire_content
                     ):
                         raise TaskControlError("CHAT_MEMORY_WIRE_SOURCE_MISMATCH")
