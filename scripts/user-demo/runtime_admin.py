@@ -25,6 +25,16 @@ OPERATOR_ID = "local-user-demo-owner"
 GRANT_SOURCE = "USER_DEMO_EXPLICIT_OWNER_CONFIRMATION"
 
 
+def _runtime_paths(runtime_name: str) -> tuple[Path, Path]:
+    from runtime_paths import resolve_user_demo_runtime
+
+    try:
+        runtime_dir = resolve_user_demo_runtime(runtime_name, root=ROOT)
+    except ValueError as error:
+        raise UserDemoRuntimeError(str(error)) from error
+    return runtime_dir / "domain.sqlite3", runtime_dir / "checkpoint.sqlite3"
+
+
 class UserDemoRuntimeError(RuntimeError):
     pass
 
@@ -165,7 +175,8 @@ def _assert_empty_runtime_ledger(path: Path) -> None:
 
 
 def _services_are_stopped() -> bool:
-    if (ROOT / ".runtime" / "user-demo" / "processes.json").exists():
+    runtime_root = ROOT / ".runtime"
+    if any(runtime_root.glob("user-demo-*/processes.json")) or (runtime_root / "user-demo" / "processes.json").exists():
         return False
     for port in (8000, 5173):
         with socket.socket() as client:
@@ -347,7 +358,8 @@ def _usd(micro: int) -> str:
     return f"USD {amount:.6f}"
 
 
-def _configure_interactively() -> None:
+def _configure_interactively(db_path: Path | None = None, runtime_name: str = "user-demo") -> None:
+    selected_db_path = db_path if db_path is not None else DB_PATH
     values = read_env()
     settings = _runtime_settings(values)
     print("Live mode will create one persistent shared Runtime Grant for this Demo database.")
@@ -372,22 +384,24 @@ def _configure_interactively() -> None:
     print(f"Grant expiry: {normalized_expiry}; key configured: yes (value hidden)")
     confirmation = input(f"To create the grant and authorize later Live-mode calls, type exactly: {expected}\n> ")
     result = provision_user_demo_grant(
-        DB_PATH, values, budget_usd=budget, expires_at=normalized_expiry,
+        selected_db_path, values, budget_usd=budget, expires_at=normalized_expiry,
         confirmation=confirmation,
     )
-    print("Runtime Grant created. No Provider request was sent.")
+    print(f"Runtime Grant created for '{runtime_name}'. No Provider request was sent.")
     print(f"Grant status: {result['status']}; shared limit: {_usd(total)}")
 
 
-def _print_summary() -> None:
-    if not DB_PATH.is_file():
+def _print_summary(db_path: Path | None = None, runtime_name: str = "user-demo") -> None:
+    selected_db_path = db_path if db_path is not None else DB_PATH
+    if not selected_db_path.is_file():
         raise UserDemoRuntimeError("USER_DEMO_DATABASE_MISSING")
+    print(f"Selected runtime: {runtime_name}; Domain DB: .runtime/{runtime_name}/domain.sqlite3")
     try:
-        summary = spend_summary(DB_PATH)
+        summary = spend_summary(selected_db_path)
     except Exception as error:
         code = getattr(error, "code", "")
         if code in {"RUNTIME_GRANT_NOT_PROVISIONED", "RUNTIME_SPEND_POOL_NOT_PROVISIONED"}:
-            print("Runtime Grant not configured. No fee pool exists.")
+            print(f"Runtime Grant not configured for '{runtime_name}'. No fee pool exists.")
             return
         raise
     print(f"Pool status: {summary['status']}; Grant status: {summary['grant_status']}")
@@ -408,14 +422,19 @@ def _print_summary() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Local OpsPilot user-demo Runtime Grant controls.")
     parser.add_argument("command", choices=("preflight", "configure", "summary"))
+    parser.add_argument("--runtime-name", default="user-demo")
     args = parser.parse_args(argv)
     from opspilot.domain.assistant_runtime_grant import RuntimeGrantError
 
     try:
+        db_path, _checkpoint_path = _runtime_paths(args.runtime_name)
+        if not db_path.is_file():
+            raise UserDemoRuntimeError("USER_DEMO_DATABASE_MISSING")
         if args.command == "preflight":
-            result = preflight(DB_PATH, read_env())
+            result = preflight(db_path, read_env())
             print(
-                f"Live preflight passed: model={result['model_id']}, pool={result['status']}, "
+                f"Live preflight passed for '{args.runtime_name}' at .runtime/{args.runtime_name}/domain.sqlite3: "
+                f"model={result['model_id']}, pool={result['status']}, "
                 f"available={_usd(int(result['remaining_usd_micro']))}, "
                 f"max-request reserve={_usd(int(result['one_max_request_reserve_usd_micro']))}, "
                 f"provider-sends={result['provider_sends']}, unknown={result['unknown_requests']}, "
@@ -425,9 +444,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "configure":
             if not _services_are_stopped():
                 raise UserDemoRuntimeError("USER_DEMO_STOP_SERVICES_BEFORE_GRANT_CHANGE")
-            _configure_interactively()
+            _configure_interactively(db_path, args.runtime_name)
             return 0
-        _print_summary()
+        _print_summary(db_path, args.runtime_name)
         return 0
     except (UserDemoRuntimeError, RuntimeGrantError) as error:
         label = getattr(error, "code", None) or str(error)

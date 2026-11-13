@@ -2,19 +2,24 @@ param(
     [ValidateSet('S1', 'S2')]
     [string]$Profile = 'S1',
     [ValidateSet('Offline', 'Live')]
-    [string]$Mode = 'Offline'
+    [string]$Mode = 'Offline',
+    [string]$RuntimeName = 'user-demo'
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
-$runtime = Join-Path $root '.runtime\user-demo'
+Import-Module (Join-Path $PSScriptRoot 'UserDemoRuntime.psm1') -Force
+$runtime = Resolve-UserDemoRuntimePath -RepositoryRoot $root -RuntimeName $RuntimeName
 $domain = Join-Path $runtime 'domain.sqlite3'
 $checkpoint = Join-Path $runtime 'checkpoint.sqlite3'
 $envFile = Join-Path $root '.env'
 $manifestPath = Join-Path $runtime 'processes.json'
 $stopRequest = Join-Path $runtime 'shutdown.request'
 
-if (-not (Test-Path -LiteralPath $domain)) { throw 'Demo data is missing. Run Initialize-UserDemo.ps1 once.' }
+if (-not (Test-Path -LiteralPath $domain)) { throw "Demo data is missing for '$RuntimeName'. Run Initialize-UserDemo.ps1 -RuntimeName '$RuntimeName' once." }
+if ($RuntimeName -ne 'user-demo' -and -not (Test-Path -LiteralPath $checkpoint)) {
+    throw "Checkpoint data is missing for '$RuntimeName'. Reinitialize only a fresh runtime after confirming the directory is absent."
+}
 if (-not (Test-Path -LiteralPath $envFile)) { throw 'Local .env is missing. Run Initialize-UserDemo.ps1 and set demo passwords.' }
 if (Test-Path -LiteralPath $manifestPath) { throw 'A process manifest already exists. Run Stop-UserDemo.ps1 before starting again.' }
 if (Test-Path -LiteralPath $stopRequest) { throw 'A prior shutdown request remains. Inspect process/log state before starting.' }
@@ -63,7 +68,7 @@ if (-not (Test-Path -LiteralPath $webLauncher)) { throw 'The user-demo Vite life
 
 if ($Mode -eq 'Live') {
     $runtimeAdmin = Join-Path $PSScriptRoot 'runtime_admin.py'
-    & $python $runtimeAdmin preflight
+    & $python $runtimeAdmin preflight --runtime-name $RuntimeName
     if ($LASTEXITCODE -ne 0) {
         throw 'Live mode was not started. Fix the Runtime Grant/configuration shown above; no Provider request was sent.'
     }
@@ -100,6 +105,7 @@ $overrides = @{
     OPSPILOT_WEB_ORIGIN = 'http://127.0.0.1:5173'
     OPSPILOT_API_ORIGIN = 'http://127.0.0.1:8000'
     OPSPILOT_USER_DEMO_WEB_PORT = '5173'
+    OPSPILOT_USER_DEMO_RUNTIME_NAME = $RuntimeName
     OPSPILOT_DEMO_SERVICE_ID = $profileService
     OPSPILOT_DEMO_INTEGRATION_ID = $profileIntegration
     OPSPILOT_ASSISTANT_RUNTIME_ENABLED = $runtimeEnabled
@@ -160,6 +166,9 @@ try {
 
 $record = [ordered]@{
     root = $root
+    runtimeName = $RuntimeName
+    domainDb = $domain
+    checkpointDb = $checkpoint
     profile = $Profile
     api = [ordered]@{ pid = $apiProcess.Id; executable = $python; commandMarker = $apiLauncher }
     frontend = [ordered]@{ pid = $webProcess.Id; executable = $node; commandMarker = $webLauncher }
@@ -189,6 +198,7 @@ if (-not ($apiReady -and $webReady)) {
     exit 1
 }
 Write-Host 'API and Worker ready at http://127.0.0.1:8000; frontend HTTP is ready at http://127.0.0.1:5173.'
+Write-Host "Runtime '$RuntimeName' uses Domain .runtime\$RuntimeName\domain.sqlite3 and Checkpoint .runtime\$RuntimeName\checkpoint.sqlite3."
 Write-Host "Profile $Profile uses $profileService / $profileIntegration for new synchronous investigations."
 if ($Mode -eq 'Offline') {
     Write-Host 'Offline mode: real Provider and all legacy Provider paths were forced off for these processes.'

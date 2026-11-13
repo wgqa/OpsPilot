@@ -1,6 +1,9 @@
+param([string]$RuntimeName = 'user-demo')
+
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\..')).Path
-$runtime = Join-Path $root '.runtime\user-demo'
+Import-Module (Join-Path $PSScriptRoot 'UserDemoRuntime.psm1') -Force
+$runtime = Resolve-UserDemoRuntimePath -RepositoryRoot $root -RuntimeName $RuntimeName
 $manifestPath = Join-Path $runtime 'processes.json'
 $stopRequest = Join-Path $runtime 'shutdown.request'
 
@@ -11,6 +14,23 @@ if (-not (Test-Path -LiteralPath $manifestPath)) {
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 if ([IO.Path]::GetFullPath([string]$manifest.root) -ne [IO.Path]::GetFullPath($root)) {
     throw 'Process manifest belongs to a different worktree; refusing to stop anything.'
+}
+if ($manifest.PSObject.Properties.Name -contains 'runtimeName') {
+    if ([string]$manifest.runtimeName -cne $RuntimeName) {
+        throw 'Process manifest belongs to a different User Demo runtime; refusing to stop anything.'
+    }
+} elseif ($RuntimeName -ne 'user-demo') {
+    throw 'Legacy process manifest does not prove ownership of the selected isolated runtime; refusing to stop anything.'
+}
+$expectedDomain = Join-Path $runtime 'domain.sqlite3'
+$expectedCheckpoint = Join-Path $runtime 'checkpoint.sqlite3'
+if ($manifest.PSObject.Properties.Name -contains 'domainDb' -and
+    [IO.Path]::GetFullPath([string]$manifest.domainDb) -ne [IO.Path]::GetFullPath($expectedDomain)) {
+    throw 'Process manifest Domain path does not match the selected runtime; refusing to stop anything.'
+}
+if ($manifest.PSObject.Properties.Name -contains 'checkpointDb' -and
+    [IO.Path]::GetFullPath([string]$manifest.checkpointDb) -ne [IO.Path]::GetFullPath($expectedCheckpoint)) {
+    throw 'Process manifest Checkpoint path does not match the selected runtime; refusing to stop anything.'
 }
 
 function Get-VerifiedProcess($Entry, [string]$Label) {

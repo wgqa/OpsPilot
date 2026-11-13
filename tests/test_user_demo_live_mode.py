@@ -145,3 +145,52 @@ def test_live_grant_rejects_budget_below_one_max_request_and_summary_handles_unc
     monkeypatch.setattr(runtime_admin, "DB_PATH", db_path)
     runtime_admin._print_summary()
     assert "Runtime Grant not configured" in capsys.readouterr().out
+
+
+def test_runtime_admin_summary_uses_selected_isolated_database(tmp_path, monkeypatch, capsys):
+    selected_root = tmp_path / "repo"
+    runtime_dir = selected_root / ".runtime" / "user-demo-r2-e07"
+    selected_db = initialize_user_demo(runtime_dir, require_absent_directory=True)
+    monkeypatch.setattr(runtime_admin, "ROOT", selected_root)
+
+    assert runtime_admin.main(["summary", "--runtime-name", "user-demo-r2-e07"]) == 0
+    output = capsys.readouterr().out
+    assert "Selected runtime: user-demo-r2-e07" in output
+    assert ".runtime/user-demo-r2-e07/domain.sqlite3" in output
+    assert "Runtime Grant not configured" in output
+    assert selected_db.is_file()
+
+
+def test_runtime_admin_refuses_unlisted_or_path_like_runtime_name(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(runtime_admin, "ROOT", tmp_path / "repo")
+    assert runtime_admin.main(["summary", "--runtime-name", "../outside"]) == 2
+    output = capsys.readouterr()
+    assert "RUNTIME_NAME_INVALID" in output.err
+    assert "outside" not in output.err
+
+
+def test_runtime_admin_preflight_uses_selected_database_without_provisioning(tmp_path, monkeypatch, capsys):
+    from opspilot.domain.database import connect
+
+    selected_root = tmp_path / "repo"
+    runtime_dir = selected_root / ".runtime" / "user-demo-r2-preflight"
+    db_path = initialize_user_demo(runtime_dir, require_absent_directory=True)
+    monkeypatch.setattr(runtime_admin, "ROOT", selected_root)
+    monkeypatch.setattr(runtime_admin, "read_env", lambda: _values())
+
+    assert runtime_admin.main(["preflight", "--runtime-name", "user-demo-r2-preflight"]) == 2
+    output = capsys.readouterr().err
+    assert "RUNTIME_GRANT_NOT_PROVISIONED" in output
+    with connect(db_path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM assistant_runtime_authority").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM assistant_runtime_pools").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM assistant_runtime_spends").fetchone()[0] == 0
+
+
+def test_stopped_check_observes_custom_runtime_manifest(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    manifest = root / ".runtime" / "user-demo-r2-e07" / "processes.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(runtime_admin, "ROOT", root)
+    assert runtime_admin._services_are_stopped() is False

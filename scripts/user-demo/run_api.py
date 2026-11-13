@@ -10,7 +10,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 os.chdir(ROOT)
+
+from runtime_paths import DEFAULT_RUNTIME_NAME, resolve_user_demo_database_paths
 
 import uvicorn
 
@@ -47,13 +50,26 @@ def watch_for_stop_request(stop_request: Path, app, server: uvicorn.Server) -> N
 def main() -> int:
     host = "127.0.0.1"
     port = 8000
+    runtime_name = os.environ.get("OPSPILOT_USER_DEMO_RUNTIME_NAME", DEFAULT_RUNTIME_NAME)
+    try:
+        domain_path, checkpoint_path = resolve_user_demo_database_paths(
+            runtime_name,
+            root=ROOT,
+            domain_override=os.environ.get("OPSPILOT_DB_PATH"),
+            checkpoint_override=os.environ.get("OPSPILOT_CHECKPOINT_DB_PATH"),
+        )
+    except ValueError as error:
+        print(f"User Demo runtime selection rejected: {error}", file=sys.stderr)
+        return 2
+    runtime_dir = domain_path.parent
+    os.environ["OPSPILOT_DB_PATH"] = str(domain_path)
+    os.environ["OPSPILOT_CHECKPOINT_DB_PATH"] = str(checkpoint_path)
     expected_origin = os.environ.get("OPSPILOT_WEB_ORIGIN", f"http://{host}:{port}")
     app = create_app(expected_origin=expected_origin, assistant_model_factory=create_assistant_model)
     server = UserDemoServer(
         uvicorn.Config(app, host=host, port=port, workers=1, reload=False, log_level="info"), app
     )
-    runtime = ROOT / ".runtime" / "user-demo"
-    stop_request = runtime / "shutdown.request"
+    stop_request = runtime_dir / "shutdown.request"
 
     threading.Thread(
         target=watch_for_stop_request, args=(stop_request, app, server),
