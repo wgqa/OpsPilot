@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import json
 import os
@@ -16,6 +17,37 @@ from test_ar02_runtime import FixtureModel
 
 
 QUESTION = '我们轮换了 API 凭据以后订单接口一直返回 401。你帮我调查一下，如果需要修复，告诉我后续怎么操作。'
+
+
+def _digest_model_messages(messages) -> str:
+    material = [
+        {
+            'type': type(message).__name__,
+            'content': getattr(message, 'content', None),
+            'tool_calls': getattr(message, 'tool_calls', None),
+        }
+        for message in messages
+    ]
+    raw = json.dumps(material, ensure_ascii=False, sort_keys=True, default=str).encode('utf-8')
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _digest_tool_schemas(tools) -> str:
+    values = []
+    for tool in tools:
+        if isinstance(tool, dict):
+            values.append(tool)
+            continue
+        schema = getattr(tool, 'args_schema', None)
+        if hasattr(schema, 'model_json_schema'):
+            schema = schema.model_json_schema()
+        values.append({
+            'name': getattr(tool, 'name', None),
+            'description': getattr(tool, 'description', None),
+            'args_schema': schema,
+        })
+    raw = json.dumps(values, ensure_ascii=False, sort_keys=True, default=str).encode('utf-8')
+    return hashlib.sha256(raw).hexdigest()
 
 
 class _ProfessionalOutcomeAssistantModel(FixtureModel):
@@ -118,17 +150,26 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
     from test_m1_web_api import ORIGIN, PASSWORDS
 
     model_tool_choices: list[dict[str, object]] = []
+    investigator_call_digests: list[dict[str, object]] = []
 
     class OfflineS1Model:
         def __init__(self, *args, **kwargs):
             self.bound = False
             self.index = 0
+            self.tool_schema_digest = _digest_tool_schemas([])
 
-        def bind_tools(self, *args, **kwargs):
+        def bind_tools(self, tools, **kwargs):
             self.bound = True
+            self.tool_schema_digest = _digest_tool_schemas(list(tools))
             return self
 
         async def ainvoke(self, messages):
+            investigator_call_digests.append({
+                'model_id': 'AR05_S1_OFFLINE_INVESTIGATOR_FIXTURE',
+                'prompt_digest': _digest_model_messages(messages),
+                'tool_schema_digest': self.tool_schema_digest,
+                'message_count': len(messages),
+            })
             if not self.bound:
                 return AIMessage(content='{}')
             calls = [
@@ -208,6 +249,7 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
             'initial_message_id': created['message_id'], 'run_id': run_id,
             'run': run, 'trusted_state': inspector['trusted_state'],
             'evidence': inspector['evidence'], 'observations': inspector['observations'],
+            'investigator_call_digests': investigator_call_digests,
             'gate': inspector['current_gate'], 'outcome': outcome, 'messages': messages,
             'inspector_runs': inspector['runs'],
             'origin_readback': initial['investigation_origin_message_id']}
@@ -425,6 +467,7 @@ def test_formal_worker_investigates_same_session_through_real_mcp_and_http(
             'investigation_run_id': run_id,
             'approval_resume_runs': [first_resume_id, second_resume_id],
             'model_tool_choices': model_tool_choices,
+            'investigator_call_digests': investigator_call_digests,
             'trusted_observations': observations,
             'approval_revalidation_receipts': revalidations,
             'runs': runs,

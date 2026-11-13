@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,24 @@ from test_m1_web_api import ORIGIN, PASSWORDS, _login, _session
 QUESTION = "我们的 API 返回 403，感觉是调用权限不够。帮我查一下，如果需要人工开通权限，帮我准备交接。"
 
 
+def _digest_messages(messages: list[object]) -> str:
+    material = [
+        {
+            "type": type(message).__name__,
+            "content": getattr(message, "content", None),
+            "tool_calls": getattr(message, "tool_calls", None),
+        }
+        for message in messages
+    ]
+    raw = json.dumps(material, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _digest_tool_schemas(tools: list[dict[str, Any]]) -> str:
+    raw = json.dumps(tools, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 class _AssistantAnswerModel(BaseChatModel):
     @property
     def _llm_type(self) -> str:
@@ -39,9 +58,13 @@ class _AssistantAnswerModel(BaseChatModel):
 class _S2InvestigatorFixture:
     """Deterministic model for the formal Investigator path; MCP remains real/local."""
 
+    instances: list["_S2InvestigatorFixture"] = []
+
     def __init__(self, *args: object, **kwargs: object) -> None:
         self.available_tools: list[dict[str, Any]] = []
         self.seen_tools: list[str] = []
+        self.request_digests: list[dict[str, Any]] = []
+        self.__class__.instances.append(self)
         self.turn = 0
 
     def bind_tools(self, tools, **kwargs):
@@ -49,6 +72,13 @@ class _S2InvestigatorFixture:
         return self
 
     async def ainvoke(self, messages):
+        self.request_digests.append({
+            "model_id": "AR05_S2_OFFLINE_ASSISTANT_FIXTURE",
+            "prompt_digest": _digest_messages(messages),
+            "tool_schema_digest": _digest_tool_schemas(self.available_tools),
+            "message_count": len(messages),
+            "tool_schema_count": len(self.available_tools),
+        })
         names = [str(item.get("function", {}).get("name")) for item in self.available_tools]
         if "probe_endpoint" in names:
             name = "probe_endpoint"
@@ -124,6 +154,7 @@ def test_ar05_same_session_assistant_to_s2_handoff_receipt(
     import opspilot.investigator as investigator
 
     reset_fixture(demo_db, "S2_SCOPE_DENIED")
+    _S2InvestigatorFixture.instances.clear()
     _install_scope_write_audit(demo_db)
     monkeypatch.setattr(investigator, "ChatOpenAI", _S2InvestigatorFixture)
     monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-placeholder")
@@ -307,6 +338,11 @@ def test_ar05_same_session_assistant_to_s2_handoff_receipt(
             "investigation_run_id": task_run_id,
             "investigation_execution_core": run["execution_core"],
             "mcp_observations": observations,
+            "investigator_call_digests": [
+                item
+                for model in _S2InvestigatorFixture.instances
+                for item in model.request_digests
+            ],
             "same_session_handoff_event": handoff_events[0],
             "handoff_ready": ready,
             "handoff_accepted": accepted,
