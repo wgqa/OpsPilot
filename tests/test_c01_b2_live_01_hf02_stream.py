@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import runpy
+import sqlite3
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -67,6 +68,22 @@ def stored_outcome(path, run_id):
         call = connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MODEL' ORDER BY created_at,rowid", (run_id,)).fetchone()
         answers = connection.execute("SELECT COUNT(*) FROM chat_run_answers WHERE run_id=?", (run_id,)).fetchone()[0]
     return run, spend, call, answers
+
+
+def _export_runtime_copy(source_db, tmp_path, runtime_name="user-demo"):
+    root = tmp_path / "export-root"
+    runtime_dir = root / ".runtime" / runtime_name
+    runtime_dir.mkdir(parents=True)
+    destination = sqlite3.connect(runtime_dir / "domain.sqlite3")
+    try:
+        source = sqlite3.connect(f"file:{source_db.resolve().as_posix()}?mode=ro", uri=True)
+        try:
+            source.backup(destination)
+        finally:
+            source.close()
+    finally:
+        destination.close()
+    return root, runtime_dir / "evidence"
 
 
 @pytest.mark.parametrize(("reason", "code"), [
@@ -331,9 +348,7 @@ def test_single_session_export_includes_only_own_or_actual_chat_memory(demo_db, 
 
     exporter = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/user-demo/export_live_evidence.py"))
     export = exporter["export_session"]
-    evidence_dir = tmp_path / "evidence"
-    monkeypatch.setitem(export.__globals__, "DB_PATH", demo_db)
-    monkeypatch.setitem(export.__globals__, "EVIDENCE_DIR", evidence_dir)
+    export_root, evidence_dir = _export_runtime_copy(demo_db, tmp_path)
     output = evidence_dir / "session.json"
     session_id = session_a if session_kind == "origin" else session_b
     selected_session_memories = {selected["memory_id"], unrelated["memory_id"]}
@@ -341,13 +356,13 @@ def test_single_session_export_includes_only_own_or_actual_chat_memory(demo_db, 
         "empty": set(), "selected": selected_session_memories,
         "origin": selected_session_memories,
     }[session_kind]
-    assert export(session_id, output)["memories"] == len(expected)
+    assert export(session_id, output, root=export_root)["memories"] == len(expected)
     text = output.read_text(encoding="utf-8")
     evidence = json.loads(text)
     assert {row["memory_id"] for row in evidence["personal_memories"]} == expected
     assert {row["memory_id"] for row in evidence["personal_memory_events"]} == expected
     with pytest.raises(RuntimeError, match="EVIDENCE_OUTPUT_MUST_STAY_INSIDE_ISOLATED_RUNTIME"):
-        export(session_id, tmp_path / "outside.json")
+        export(session_id, tmp_path / "outside.json", root=export_root)
     if session_kind == "selected":
         assert evidence["personal_memories"][0]["source_session_id"] == session_a
         assert evidence["personal_memories"][0]["source_refs_json"][0]["id"] == selected["source_message_id"]
@@ -397,11 +412,9 @@ def test_session_export_does_not_disclose_unrelated_memory_comparison_payload(de
 
     exporter = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/user-demo/export_live_evidence.py"))
     export = exporter["export_session"]
-    evidence_dir = tmp_path / "evidence"
-    monkeypatch.setitem(export.__globals__, "DB_PATH", demo_db)
-    monkeypatch.setitem(export.__globals__, "EVIDENCE_DIR", evidence_dir)
+    export_root, evidence_dir = _export_runtime_copy(demo_db, tmp_path)
     output = evidence_dir / "session-b.json"
-    export(session_b, output)
+    export(session_b, output, root=export_root)
     text = output.read_text(encoding="utf-8")
     evidence = json.loads(text)
     assert other["memory_id"] not in text and other_content not in text

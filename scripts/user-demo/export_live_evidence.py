@@ -14,8 +14,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-DB_PATH = ROOT / ".runtime" / "user-demo" / "domain.sqlite3"
-EVIDENCE_DIR = ROOT / ".runtime" / "user-demo" / "evidence"
+USER_DEMO_DIR = ROOT / "scripts" / "user-demo"
+if str(USER_DEMO_DIR) not in sys.path:
+    sys.path.insert(0, str(USER_DEMO_DIR))
+DEFAULT_ACTOR_ID = "support-a"
 SENSITIVE_KEYS = {
     "api_key", "api-key", "x-api-key", "authorization", "cookie", "set-cookie", "x-csrf-token",
     "access_token", "refresh_token", "token", "password", "secret",
@@ -59,7 +61,7 @@ def _redact(value: Any, secrets: list[str], key: str = "") -> Any:
         cleaned = cleaned.replace(secret, "[REDACTED]")
     cleaned = _PRIVATE_HEADER.sub(r"\1\2[REDACTED]", cleaned)
     cleaned = re.sub(r"(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[REDACTED]", cleaned)
-    cleaned = re.sub(r"(?i)(sk-[A-Za-z0-9_-]{12,})", "[REDACTED]", cleaned)
+    cleaned = re.sub(r"(?i)(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{12,}", "[REDACTED]", cleaned)
     return cleaned
 
 
@@ -76,6 +78,54 @@ def _decode_json_field(value: Any) -> Any:
 
 def _rows(connection: sqlite3.Connection, sql: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
     return [dict(row) for row in connection.execute(sql, params).fetchall()]
+
+
+def _is_reparse_path(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    return bool(is_junction and is_junction())
+
+
+def _selected_runtime_paths(runtime_name: str, root: Path | None) -> tuple[Path, Path, Path]:
+    from runtime_paths import (
+        resolve_user_demo_database_paths,
+        resolve_user_demo_runtime,
+    )
+
+    repo_root = (root or ROOT).resolve()
+    runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
+    db_path, _ = resolve_user_demo_database_paths(runtime_name, root=repo_root)
+    evidence_dir = runtime_dir / "evidence"
+    if not runtime_dir.is_dir():
+        raise RuntimeError("USER_DEMO_RUNTIME_MISSING")
+    if _is_reparse_path(db_path) or not db_path.is_file():
+        raise RuntimeError("USER_DEMO_DATABASE_MISSING_OR_UNSAFE")
+    if evidence_dir.exists() and _is_reparse_path(evidence_dir):
+        raise RuntimeError("EVIDENCE_DIRECTORY_REPARSE_POINT")
+    if evidence_dir.resolve(strict=False).parent != runtime_dir.resolve():
+        raise RuntimeError("EVIDENCE_DIRECTORY_OUTSIDE_SELECTED_RUNTIME")
+    return repo_root, db_path, evidence_dir
+
+
+def _selected_output_path(output: Path, repo_root: Path, evidence_dir: Path) -> Path:
+    candidate = output if output.is_absolute() else repo_root / output
+    if ".." in candidate.parts:
+        raise RuntimeError("EVIDENCE_OUTPUT_MUST_STAY_INSIDE_ISOLATED_RUNTIME")
+    lexical_path = Path(os.path.abspath(candidate))
+    evidence_lexical = Path(os.path.abspath(evidence_dir))
+    if lexical_path == evidence_lexical or evidence_lexical not in lexical_path.parents:
+        raise RuntimeError("EVIDENCE_OUTPUT_MUST_STAY_INSIDE_ISOLATED_RUNTIME")
+    current = lexical_path
+    while current != evidence_lexical and evidence_lexical in current.parents:
+        if current.exists() and _is_reparse_path(current):
+            raise RuntimeError("EVIDENCE_OUTPUT_REPARSE_POINT")
+        current = current.parent
+    resolved = candidate.resolve(strict=False)
+    evidence_root = evidence_dir.resolve(strict=False)
+    if resolved == evidence_root or evidence_root not in resolved.parents:
+        raise RuntimeError("EVIDENCE_OUTPUT_MUST_STAY_INSIDE_ISOLATED_RUNTIME")
+    return resolved
 
 
 def _selected_personal_ids(request: Any) -> set[str]:
@@ -130,23 +180,36 @@ def _scope_call(call: dict[str, Any], memory_ids: set[str]) -> None:
     call["request_json"] = _scope_memory_refs(request, memory_ids)
 
 
-def export_session(session_id: str, output: Path) -> dict[str, Any]:
-    if not DB_PATH.is_file():
-        raise RuntimeError("USER_DEMO_DATABASE_MISSING")
-    output = output.resolve()
-    root = EVIDENCE_DIR.resolve()
-    if output != root and root not in output.parents:
-        raise RuntimeError("EVIDENCE_OUTPUT_MUST_STAY_INSIDE_ISOLATED_RUNTIME")
+def export_session(
+    session_id: str,
+    output: Path,
+    *,
+    runtime_name: str = "user-demo",
+    actor_id: str = DEFAULT_ACTOR_ID,
+    root: Path | None = None,
+) -> dict[str, Any]:
+    repo_root, db_path, evidence_dir = _selected_runtime_paths(runtime_name, root)
+    output = _selected_output_path(Path(output), repo_root, evidence_dir)
     secrets = _private_values()
-    connection = sqlite3.connect(DB_PATH.resolve().as_uri() + "?mode=ro", uri=True)
+    connection = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+    connection.execute("PRAGMA query_only = ON")
     connection.row_factory = sqlite3.Row
     try:
         connection.execute("BEGIN")
-        session = connection.execute(
-            "SELECT session_id,tenant_id,owner_id,created_at,updated_at FROM sessions WHERE session_id=?",
-            (session_id,),
+        actor = connection.execute(
+            "SELECT tenant_id FROM trusted_operators WHERE actor_id=? AND role='SUPPORT'",
+            (actor_id,),
         ).fetchone()
-        if session is None or (session["tenant_id"], session["owner_id"]) != ("tenant-a", "support-a"):
+        if actor is None:
+            raise RuntimeError("SUPPORT_ACTOR_NOT_AUTHORIZED")
+        session = connection.execute(
+            """SELECT s.session_id,s.tenant_id,s.owner_id,s.created_at,s.updated_at
+               FROM sessions s JOIN trusted_operators o
+                 ON o.actor_id=s.owner_id AND o.tenant_id=s.tenant_id
+               WHERE s.session_id=? AND s.owner_id=? AND s.tenant_id=? AND o.role='SUPPORT'""",
+            (session_id, actor_id, actor["tenant_id"]),
+        ).fetchone()
+        if session is None:
             raise RuntimeError("SESSION_SCOPE_DENIED")
         run_ids = [str(row[0]) for row in connection.execute(
             "SELECT run_id FROM task_runs WHERE session_id=? ORDER BY created_at,run_id", (session_id,),
@@ -162,8 +225,8 @@ def export_session(session_id: str, output: Path) -> dict[str, Any]:
                       written_count,duplicate_count,skipped_count,rejected_count,result_digest,
                       failure_code,created_at,updated_at,completed_at
                FROM personal_memory_consolidation_jobs
-               WHERE tenant_id='tenant-a' AND owner_actor_id='support-a' AND session_id=? ORDER BY created_at""",
-            (session_id,),
+               WHERE tenant_id=? AND owner_actor_id=? AND session_id=? ORDER BY created_at""",
+            (session["tenant_id"], actor_id, session_id),
         )
         placeholders = ",".join("?" for _ in run_ids)
         if run_ids:
@@ -195,19 +258,67 @@ def export_session(session_id: str, output: Path) -> dict[str, Any]:
                 tuple(run_ids),
             )
             runs = _rows(connection,
-                f"""SELECT run_id,kind,status,source_message_id,created_at,started_at,ended_at,blocked_reason
+                f"""SELECT run_id,task_id,kind,status,source_message_id,created_at,started_at,ended_at,blocked_reason
                     FROM task_runs WHERE run_id IN ({placeholders}) ORDER BY created_at,run_id""",
                 tuple(run_ids),
             )
         else:
             calls, chat_attempts, manifests, compressions, runs = [], [], [], [], []
-        spends = _rows(connection,
-            """SELECT assistant_call_id,run_id,source_message_id,logical_key,price_version,
-                      requested_max_output_tokens,reserved_usd_micro,settled_usd_micro,status,
-                      response_status,usage_json,completion_id,error_code,created_at,send_granted_at,completed_at
-               FROM assistant_runtime_spends WHERE session_id=? ORDER BY created_at,request_key""",
-            (session_id,),
-        )
+        if run_ids:
+            spend_placeholders = ",".join("?" for _ in run_ids)
+            spends = _rows(connection,
+                f"""SELECT assistant_call_id,run_id,source_message_id,logical_key,price_version,
+                           requested_max_output_tokens,reserved_usd_micro,settled_usd_micro,status,
+                           response_status,usage_json,completion_id,error_code,created_at,send_granted_at,completed_at
+                    FROM assistant_runtime_spends WHERE session_id=? AND run_id IN ({spend_placeholders})
+                    ORDER BY created_at,request_key""",
+                tuple([session_id] + run_ids),
+            )
+        else:
+            spends = []
+        call_ids = [str(row["call_id"]) for row in calls if row["kind"] == "MCP"]
+        observation_ids = [str(row["observation_id"]) for row in calls if row["kind"] == "MCP" and row["observation_id"]]
+        task_ids = [str(row["task_id"]) for row in runs if row.get("task_id")]
+        if call_ids and observation_ids and task_ids:
+            call_marks = ",".join("?" for _ in call_ids)
+            obs_marks = ",".join("?" for _ in observation_ids)
+            task_marks = ",".join("?" for _ in task_ids)
+            observations = _rows(connection,
+                f"""SELECT observation_id,task_id,call_id,attempt_id,tool_call_id,tool_name,
+                           argument_digest,status,progress_added,error_class,result_digest,
+                           result_json,evidence_id,created_at
+                    FROM d2_tool_observations
+                    WHERE call_id IN ({call_marks}) AND observation_id IN ({obs_marks})
+                      AND task_id IN ({task_marks}) ORDER BY created_at,observation_id""",
+                tuple(call_ids + observation_ids + task_ids),
+            )
+        else:
+            observations = []
+        evidence_ids = [str(row["evidence_id"]) for row in calls if row["kind"] == "MCP" and row["evidence_id"]]
+        if task_ids:
+            task_marks = ",".join("?" for _ in task_ids)
+            task_bindings = _rows(connection,
+                f"""SELECT task_id,thread_id,tenant_id,actor_id,service_id,integration_id,
+                           principal_id,ticket_id,status,created_at
+                    FROM task_bindings WHERE task_id IN ({task_marks})
+                      AND tenant_id=? AND actor_id=? ORDER BY created_at,task_id""",
+                tuple(task_ids + [session["tenant_id"], actor_id]),
+            )
+        else:
+            task_bindings = []
+        if evidence_ids and task_ids:
+            evidence_marks = ",".join("?" for _ in evidence_ids)
+            task_marks = ",".join("?" for _ in task_ids)
+            evidence = _rows(connection,
+                f"""SELECT evidence_id,tenant_id,task_id,call_id,tool_call_id,resource_id,
+                           principal_id,data_source,fetched_at,observed_versions_json,fact_type,
+                           facts_json,original_result_ref,trust_class,digest
+                    FROM d2_evidence WHERE tenant_id=? AND evidence_id IN ({evidence_marks})
+                      AND task_id IN ({task_marks}) ORDER BY fetched_at,evidence_id""",
+                tuple([session["tenant_id"]] + evidence_ids + task_ids),
+            )
+        else:
+            evidence = []
         # Successful calls and recorded HTTP responses prove a model request.
         # A prepared manifest or a send permit alone does not prove delivery.
         received_calls = {row["assistant_call_id"] for row in spends if row["response_status"] is not None}
@@ -225,14 +336,14 @@ def export_session(session_id: str, output: Path) -> dict[str, Any]:
                WHERE p.tenant_id=? AND p.owner_actor_id=?
                  AND (m.session_id=? OR p.memory_id IN (SELECT value FROM json_each(?)))
                ORDER BY p.created_at,p.memory_id""",
-            (session["tenant_id"], session["owner_id"], session_id, json.dumps(sorted(used_memory_ids))),
+            (session["tenant_id"], actor_id, session_id, json.dumps(sorted(used_memory_ids))),
         )
         memory_ids = {row["memory_id"] for row in memories}
         memory_events = _rows(connection,
             """SELECT event_id,memory_id,event_type,actor_id,memory_version,occurred_at,details_json
                FROM personal_memory_events WHERE tenant_id=? AND owner_actor_id=?
                  AND memory_id IN (SELECT value FROM json_each(?)) ORDER BY occurred_at,event_id""",
-            (session["tenant_id"], session["owner_id"], json.dumps(sorted(memory_ids))),
+            (session["tenant_id"], actor_id, json.dumps(sorted(memory_ids))),
         )
     finally:
         connection.close()
@@ -243,6 +354,11 @@ def export_session(session_id: str, output: Path) -> dict[str, Any]:
         _scope_call(item, memory_ids)
     for item in jobs:
         item["source_refs_json"] = _decode_json_field(item["source_refs_json"])
+    for item in observations:
+        item["result_json"] = _decode_json_field(item["result_json"])
+    for item in evidence:
+        for field in ("observed_versions_json", "facts_json"):
+            item[field] = _decode_json_field(item[field])
     for item in memories:
         item["source_refs_json"] = _decode_json_field(item["source_refs_json"])
     for item in memory_events:
@@ -256,13 +372,24 @@ def export_session(session_id: str, output: Path) -> dict[str, Any]:
     for item in spends:
         item["usage_json"] = _decode_json_field(item["usage_json"])
 
-    from opspilot.domain.assistant_runtime_grant import spend_summary
+    response_spends = [row for row in spends if row["response_status"] is not None]
+    session_spend_summary = {
+        "scope": "SELECTED_SESSION_ONLY",
+        "send_granted_count": sum(row["send_granted_at"] is not None for row in spends),
+        "responses_received_count": len(response_spends),
+        "unknown_count": sum(row["status"] == "UNKNOWN" for row in spends),
+        "responses_missing_usage_count": sum(row["usage_json"] is None for row in response_spends),
+        "responses_missing_settlement_count": sum(row["settled_usd_micro"] is None for row in response_spends),
+    }
 
     payload = {
-        "schema": "opspilot-c01-b2-live-redacted-evidence-v1",
+        "schema": "opspilot-c01-b2-live-redacted-evidence-v2",
         "session": dict(session),
+        "task_bindings": task_bindings,
         "runs": runs,
         "messages": messages,
+        "observations": observations,
+        "evidence": evidence,
         "chat_attempts": chat_attempts,
         "context_manifests": manifests,
         "compression_attempts": compressions,
@@ -271,7 +398,7 @@ def export_session(session_id: str, output: Path) -> dict[str, Any]:
         "personal_memory_events": memory_events,
         "assistant_calls_actual_model_input_output": calls,
         "runtime_spends": spends,
-        "runtime_spend_summary": spend_summary(DB_PATH),
+        "session_spend_summary": session_spend_summary,
         "redaction": {
             "api_key_cookie_authorization_and_configured_passwords_removed": True,
             "generic_bearer_and_sk_token_patterns_removed": True,
@@ -281,21 +408,27 @@ def export_session(session_id: str, output: Path) -> dict[str, Any]:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(_redact(payload, secrets), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"output": str(output), "messages": len(messages), "runs": len(runs),
-            "jobs": len(jobs), "calls": len(calls), "memories": len(memories)}
+            "jobs": len(jobs), "calls": len(calls), "observations": len(observations),
+            "evidence": len(evidence), "memories": len(memories)}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--runtime-name", default="user-demo")
+    parser.add_argument("--actor-id", default=DEFAULT_ACTOR_ID)
     args = parser.parse_args()
     try:
-        result = export_session(args.session_id, args.output)
+        result = export_session(args.session_id, args.output, runtime_name=args.runtime_name, actor_id=args.actor_id)
+    except (RuntimeError, ValueError) as error:
+        print(f"Evidence export failed: {error}", file=sys.stderr)
+        return 2
     except Exception as error:
-        print(f"Evidence export failed: {getattr(error, 'code', None) or type(error).__name__}", file=sys.stderr)
+        print(f"Evidence export failed: {type(error).__name__}", file=sys.stderr)
         return 2
     print("Redacted evidence export created inside the isolated runtime.")
-    print(f"Messages: {result['messages']}; runs: {result['runs']}; consolidation jobs: {result['jobs']}; model calls: {result['calls']}; Session memories: {result['memories']}.")
+    print(f"Messages: {result['messages']}; runs: {result['runs']}; consolidation jobs: {result['jobs']}; calls: {result['calls']}; observations: {result['observations']}; evidence: {result['evidence']}; Session memories: {result['memories']}.")
     print("Secret values and authorization material are not included in this status output.")
     return 0
 

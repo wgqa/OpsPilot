@@ -86,7 +86,37 @@ E07/E08 的 S3 订单绑定通过 UI 的**“关联授权订单进行只读调�
 5. E07 只有 Delivery 与 Receiver 都是同一 Event 的本轮观察才支持结论。E08 必须围绕绑定目标当前 Event 判断；用户提到的历史/其他 Event 状态不能代替目标证据。
 6. 停止服务后用 `Show-UserDemoSpend.ps1 -RuntimeName $runtimeName` 查看本隔离账本。失败结果原样保留，不要重跑以覆盖首次尝试。
 
-`export_live_evidence.py` 当前仍固定读取默认 `.runtime/user-demo`，不能用于这里的别名运行目录；不要执行它来导出隔离案例。保存输出时应从当前隔离目录收集日志和记录，并在分享前脱敏密钥、口令、Cookie、CSRF 与 Authorization 内容。当前还没有通用的隔离目录证据导出入口。
+`export_live_evidence.py` 支持安全别名 `--runtime-name`，读取与输出都限定在该 Runtime，且只接受该库中当前 SUPPORT Owner 的 Session。Domain SQLite 以只读模式打开；导出包括该 Session 的消息、Runs、Assistant/MCP 调用、Observation、Evidence、Context Manifest、Usage/Spend 和必要的个人记忆来源，并继续脱敏密钥、口令、Cookie、CSRF 与 Authorization。费用与 Run 只按指定 Session 导出，不汇总同一 Runtime 的其他 Session。缺少 Token/Usage 时保留 `null`，不填 0。
+
+### 脱敏证据导出
+
+在仓库根目录 PowerShell 中运行。先从当前页面或只读 Session 记录取得准确 Session ID；每个评测案例使用自己的 Session 和隔离 Runtime。
+
+```powershell
+$runtimeName = 'user-demo-r2-ar06-e01'
+$sessionId = 'session-替换为实际ID'
+$output = ".runtime\$runtimeName\evidence\$sessionId.json"
+python .\scripts\user-demo\export_live_evidence.py `
+  --runtime-name $runtimeName `
+  --actor-id support-a `
+  --session-id $sessionId `
+  --output $output
+```
+
+省略 `--runtime-name` 时沿用旧默认 `.runtime/user-demo`；`--output` 仍必须位于所选 Runtime 的 `evidence` 子目录。别名不允许路径片段；不存在的 Runtime/Domain、符号链接逃逸、不同 Owner/Tenant 的 Session 和 Runtime 外输出都会被拒绝。导出不会调用 Provider、创建 Grant 或修改费用账本。
+
+导出 JSON 与冻结 Rubric 的字段关系：
+
+| Rubric | 可核对字段 | 自动导出边界 |
+|---|---|---|
+| M1 Goal completion | `messages`, `runs`, `assistant_calls_actual_model_input_output` | 保存用户输入、最终答案及 Run 状态；PASS/PARTIAL/FAIL 仍按冻结定义人工评分。 |
+| M2 Facts and sources | `task_bindings`, `observations`, `evidence`, `context_manifests` | 保留 Task/Event/资源与来源引用，支持核对来源存在和作用域；来源适用性、当前性及无依据断言需审阅。 |
+| M3 Agent decision quality | `assistant_calls_actual_model_input_output`, `observations`, `messages` | 保留实际模型输入、工具选择、工具结果及后续回答；是否合理、是否漏掉合法下一步由人工语义评分。 |
+| M4 Business outcome | `runs`, `observations`, `evidence`, `messages` | 能查看 Run 与当前可信观察；Domain Outcome 需按案例单独判断，Run 成功不等于业务完成。 |
+| M5 Cost and performance | `runtime_spends`, `chat_attempts`, `session_spend_summary`, `compression_attempts` | 保留发送许可、响应状态、原始 Usage、Token、结算与耗时字段；任何缺失值保留 `null`，UNKNOWN 单独可见。 |
+| M6 Safety | `task_bindings`, `observations`, `evidence`, `assistant_calls_actual_model_input_output`, `runtime_spends` | 提供租户、Task、来源和动作线索；越权/错误确定性等红线仍须按 Rubric 独立人工核验。 |
+
+`session_spend_summary` 明确标记 `SELECTED_SESSION_ONLY`，只给出该 Session 账本的记录数，不读取费用池汇总接口（其完整性检查可能更新池状态），也不合并同 Runtime 的其他 Session。`runtime_spends.usage_json` 和 `chat_attempts` 的 Token 字段才是逐请求 Usage 证据；若没有记录，应保持缺失而不能用零替代。
 
 ## 本轮离线验证记录
 
