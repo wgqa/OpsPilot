@@ -4,7 +4,7 @@
   "baseline_sha": "27c11fa341717f462286da1dd92568e7dce59469",
   "source_hashes": {
     "cases_sha256": "c1acd3fa789befa733aa96bf3a49b08357ff071f3b627b4c40319882e2805cf8",
-    "runs_jsonl_sha256": "1011d63f5315db6976647e2d1210f1e617f929abd3b1c234f44a826dcfd83c3f"
+    "runs_jsonl_sha256": "b43bd7f9cc227067288e058b44c0acecfdf4957e4378242047c06dbb14ae4ea3"
   },
   "planned_case_count": 12,
   "attempt_record_count": 18,
@@ -15,7 +15,86 @@
     "PASS": 6,
     "UNVERIFIED": 0
   },
-  "first_attempt_completion_rate": 0.5,
+  "phase_a_offline_engineering_coverage": {
+    "label": "Phase A 离线工程覆盖评定",
+    "pass_cases": 6,
+    "planned_cases": 12,
+    "pass_fraction": 0.5,
+    "interpretation": "Fixture/offline engineering coverage only; not current real-model task success rate."
+  },
+  "execution_fidelity": {
+    "input_match_counts": {
+      "EXACT_FROZEN_INPUT": 1,
+      "MAPPED_EXISTING_TEST": 8,
+      "NOT_RUN": 3
+    },
+    "execution_source_counts": {
+      "NEW_INDEPENDENT_TEST": 2,
+      "NOT_RUN": 3,
+      "REUSED_EXISTING_TRACE": 7
+    },
+    "frozen_input_exact_and_independent": {
+      "case_ids": [
+        "E01-D"
+      ],
+      "case_count": 1,
+      "planned_cases": 12,
+      "fraction": 0.08333333333333333
+    },
+    "frozen_input_exact_independent_initial_state_and_evidence_complete": {
+      "case_ids": [
+        "E01-D"
+      ],
+      "case_count": 1,
+      "planned_cases": 12,
+      "fraction": 0.08333333333333333
+    },
+    "holdout": {
+      "case_count": 6,
+      "independently_executed_case_ids": [],
+      "independently_executed_count": 0,
+      "not_independently_executed_case_ids": [
+        "E02-H",
+        "E04-H",
+        "E06-H",
+        "E08-H",
+        "E10-H",
+        "E12-H"
+      ]
+    },
+    "run_reference_audit": {
+      "run_id_scope": "Fixture/Mock or isolated local test Run IDs only; Phase A real Provider requests are 0.",
+      "case_attempt_records": 14,
+      "case_run_reference_count": 51,
+      "unique_case_run_id_count": 51,
+      "shared_run_ids_between_frozen_cases": {},
+      "security_negative_reuse_of_frozen_case_runs": [
+        {
+          "security_negative_case_id": "N01-CROSS-TENANT",
+          "case_ids": [
+            "E10-H"
+          ],
+          "shared_run_id_count": 3
+        },
+        {
+          "security_negative_case_id": "N02-REVOKED-SOURCE-RESURRECTION",
+          "case_ids": [
+            "E09-D",
+            "E10-H"
+          ],
+          "shared_run_id_count": 12
+        },
+        {
+          "security_negative_case_id": "N03-UNAPPROVED-CONTROLLED-ACTION",
+          "case_ids": [
+            "E11-D",
+            "E12-H"
+          ],
+          "shared_run_id_count": 9
+        }
+      ]
+    }
+  },
   "score_dimensions": {
     "M1_goal_completion": {
       "complete_cases": 6,
@@ -147,6 +226,18 @@
       "business_outcome_code": "GENERAL_202_EXPLANATION",
       "evidence_completeness": "COMPLETE_FIXTURE_PATH_FOR_DIRECT_ANSWER",
       "evidence_validity": "VALID_USER_MESSAGE_AND_PERSISTED_ANSWER",
+      "execution_fidelity": {
+        "input_match": "EXACT_FROZEN_INPUT",
+        "execution_source": "NEW_INDEPENDENT_TEST",
+        "trusted_initial_state": "MATCH",
+        "required_evidence": "SATISFIED",
+        "holdout_status": "NOT_HOLDOUT",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS"
+        ],
+        "notes": "test_r2_ar06_e01 reads cases[0].user_turns[0] directly; fresh unbound session; answer link and no MCP are asserted."
+      },
       "trace_refs": [
         "runs/E01_FIXTURE_TRACE.jsonl",
         "runs/E01_TEST.log"
@@ -164,6 +255,15 @@
       "business_outcome_code": "NOT_RUN",
       "evidence_completeness": "NOT_RUN_NO_DEDICATED_CASE",
       "evidence_validity": "NOT_RUN",
+      "execution_fidelity": {
+        "input_match": "NOT_RUN",
+        "execution_source": "NOT_RUN",
+        "trusted_initial_state": "NOT_RUN",
+        "required_evidence": "NOT_RUN",
+        "holdout_status": "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED",
+        "assessment_modes": [],
+        "notes": "No dedicated execution of the frozen information-insufficiency prompt."
+      },
       "trace_refs": [
         "CASES.json"
       ]
@@ -180,6 +280,19 @@
       "business_outcome_code": "SOURCED_PROTOCOL_CHECKLIST",
       "evidence_completeness": "COMPLETE_FIXTURE_JOURNEY",
       "evidence_validity": "VERSIONED_SCOPED_SOURCE_REFERENCES_PRESENT",
+      "execution_fidelity": {
+        "input_match": "MAPPED_EXISTING_TEST",
+        "execution_source": "REUSED_EXISTING_TRACE",
+        "trusted_initial_state": "MATCH",
+        "required_evidence": "SATISFIED",
+        "holdout_status": "NOT_HOLDOUT",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS",
+          "TRACE_REVIEW"
+        ],
+        "notes": "Reuses AR03 J1 with a longer material-rich prompt rather than frozen E03 wording; fresh unbound session, scoped protocol evidence, excerpt and checklist were exercised."
+      },
       "trace_refs": [
         "runs/AR03_FIXTURE_TRACE.jsonl",
         "runs/AR03_FIXTURE_TESTS.log"
@@ -197,6 +310,15 @@
       "business_outcome_code": "NOT_RUN",
       "evidence_completeness": "NOT_RUN_FIXTURE_ABSENT",
       "evidence_validity": "NOT_RUN",
+      "execution_fidelity": {
+        "input_match": "NOT_RUN",
+        "execution_source": "NOT_RUN",
+        "trusted_initial_state": "NOT_RUN",
+        "required_evidence": "NOT_RUN",
+        "holdout_status": "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED",
+        "assessment_modes": [],
+        "notes": "No isolated conflicting-document Knowledge fixture was executed."
+      },
       "trace_refs": [
         "CASES.json"
       ]
@@ -213,6 +335,18 @@
       "business_outcome_code": "MATERIALS_SEPARATED_FROM_LIVE_FACTS",
       "evidence_completeness": "COMPLETE_FIXTURE_MATERIAL_PATH",
       "evidence_validity": "USER_MATERIAL_NO_BUSINESS_OBSERVATION",
+      "execution_fidelity": {
+        "input_match": "MAPPED_EXISTING_TEST",
+        "execution_source": "NEW_INDEPENDENT_TEST",
+        "trusted_initial_state": "MATCH",
+        "required_evidence": "SATISFIED",
+        "holdout_status": "NOT_HOLDOUT",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS"
+        ],
+        "notes": "New E05 test uses a different prompt string from frozen Gold but covers the same JSON/503 values and unbound-user-material constraints."
+      },
       "trace_refs": [
         "runs/AR03_FIXTURE_TRACE.jsonl",
         "runs/AR03_FIXTURE_TESTS.log"
@@ -230,6 +364,15 @@
       "business_outcome_code": "NOT_RUN",
       "evidence_completeness": "NOT_RUN_NO_CONFLICT_PAIR",
       "evidence_validity": "NOT_RUN",
+      "execution_fidelity": {
+        "input_match": "NOT_RUN",
+        "execution_source": "NOT_RUN",
+        "trusted_initial_state": "NOT_RUN",
+        "required_evidence": "NOT_RUN",
+        "holdout_status": "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED",
+        "assessment_modes": [],
+        "notes": "No frozen contradictory user assertion/log pair was executed."
+      },
       "trace_refs": [
         "CASES.json"
       ]
@@ -246,6 +389,19 @@
       "business_outcome_code": "QUEUED_NOT_COMPLETE",
       "evidence_completeness": "COMPLETE_SAME_EVENT_CURRENT_OBSERVATIONS",
       "evidence_validity": "MATCHED_EVENT_CURRENT_RUN_EVIDENCE",
+      "execution_fidelity": {
+        "input_match": "MAPPED_EXISTING_TEST",
+        "execution_source": "REUSED_EXISTING_TRACE",
+        "trusted_initial_state": "PARTIAL",
+        "required_evidence": "SATISFIED",
+        "holdout_status": "NOT_HOLDOUT",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS",
+          "TRACE_REVIEW"
+        ],
+        "notes": "Reuses AR03 J2 QUEUED; the session first runs J1 unbound materials and only then creates TaskBinding, unlike frozen fresh bound initial state. The bound Run has same-Event current Delivery/Receiver evidence."
+      },
       "trace_refs": [
         "runs/AR03_FIXTURE_TRACE.jsonl",
         "runs/AR03_FIXTURE_TESTS.log"
@@ -263,6 +419,19 @@
       "business_outcome_code": "PROCESSED_SAME_EVENT_NO_DECOY",
       "evidence_completeness": "PARTIAL_NO_DECOY_EVENT",
       "evidence_validity": "TARGET_CURRENT_READ_VALID_DECOY_ABSENT",
+      "execution_fidelity": {
+        "input_match": "MAPPED_EXISTING_TEST",
+        "execution_source": "REUSED_EXISTING_TRACE",
+        "trusted_initial_state": "PARTIAL",
+        "required_evidence": "PARTIAL",
+        "holdout_status": "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS",
+          "TRACE_REVIEW"
+        ],
+        "notes": "Reuses AR03 J2 PROCESSED; target Event is current and conclusion changes, but no distinct decoy Event was seeded. Not an independent H execution."
+      },
       "trace_refs": [
         "runs/AR03_FIXTURE_TRACE.jsonl",
         "runs/AR03_FIXTURE_TESTS.log"
@@ -280,6 +449,19 @@
       "business_outcome_code": "SUMMARY_CONTINUITY_AND_SOURCE_INVALIDATION",
       "evidence_completeness": "COMPLETE_FIXTURE_CONTEXT_AND_INVALIDATION",
       "evidence_validity": "SUMMARY_SOURCE_CURRENTNESS_CHECKED",
+      "execution_fidelity": {
+        "input_match": "MAPPED_EXISTING_TEST",
+        "execution_source": "REUSED_EXISTING_TRACE",
+        "trusted_initial_state": "MATCH",
+        "required_evidence": "SATISFIED",
+        "holdout_status": "NOT_HOLDOUT",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS",
+          "WIRE_TRACE_REVIEW"
+        ],
+        "notes": "Reuses AR04A long-session test with its own GOAL_MARKER, MATERIAL_JSON and padded turns; later TaskBinding and Run-scoped MCP facts are present, but the exact Gold turn/material script is not."
+      },
       "trace_refs": [
         "runs/AR04A_CONTEXT_TRACE_SUMMARY.json",
         "runs/AR04A_FIXTURE_TRACE.jsonl",
@@ -298,6 +480,19 @@
       "business_outcome_code": "CROSS_SESSION_MEMORY_BOUNDARIES_NO_CONFLICT_PAIR",
       "evidence_completeness": "PARTIAL_LIFECYCLE_AND_SCOPE_COVERAGE",
       "evidence_validity": "OWNER_TENANT_SOURCE_VERSION_REVOCATION_ASSERTED",
+      "execution_fidelity": {
+        "input_match": "MAPPED_EXISTING_TEST",
+        "execution_source": "REUSED_EXISTING_TRACE",
+        "trusted_initial_state": "PARTIAL",
+        "required_evidence": "PARTIAL",
+        "holdout_status": "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS",
+          "WIRE_DOMAIN_TRACE_REVIEW"
+        ],
+        "notes": "Reuses AR04B lifecycle/scope tests. Valid cross-session memory, tenant isolation and revocation are exercised; the frozen valid-versus-revoked conflicting pair is absent. Not an independent H execution."
+      },
       "trace_refs": [
         "runs/E10_MEMORY_TRACE_SUMMARY.json",
         "runs/AR04B_MEMORY_TESTS.log"
@@ -315,6 +510,19 @@
       "business_outcome_code": "HANDOFF_ACCEPTED_BUT_CHAT_FIXTURE_FAILED",
       "evidence_completeness": "PARTIAL_ASSISTANT_REPLY_MISSING",
       "evidence_validity": "SAME_RUN_MCP_AND_DOMAIN_RECEIPT_VALID",
+      "execution_fidelity": {
+        "input_match": "MAPPED_EXISTING_TEST",
+        "execution_source": "REUSED_EXISTING_TRACE",
+        "trusted_initial_state": "MATCH",
+        "required_evidence": "PARTIAL",
+        "holdout_status": "NOT_HOLDOUT",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS",
+          "READ_ONLY_DB_TRACE_REVIEW"
+        ],
+        "notes": "Reuses AR05 S2 with a different user question. Trusted S2 facts and handoff lifecycle are exercised, but the formal Assistant chat Run is FAILED; the test omitted that status assertion. No Assistant answer was produced."
+      },
       "trace_refs": [
         "runs/E11_S2_HANDOFF_TRACE.json",
         "runs/E11_S2_ASSISTANT_FIXTURE_FAILURE_ATTEMPT_1.json",
@@ -333,6 +541,19 @@
       "business_outcome_code": "DELIVERED_VERIFIED_LOCAL_ONLY",
       "evidence_completeness": "ASSERTIONS_PASSED_TRACE_CAPTURE_PARTIAL",
       "evidence_validity": "APPROVAL_LEDGER_HTTP200_RECEIPT_DELIVERY_LINKED",
+      "execution_fidelity": {
+        "input_match": "MAPPED_EXISTING_TEST",
+        "execution_source": "REUSED_EXISTING_TRACE",
+        "trusted_initial_state": "MATCH",
+        "required_evidence": "SATISFIED",
+        "holdout_status": "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED",
+        "assessment_modes": [
+          "PROGRAM_ASSERTIONS",
+          "FIXTURE_SEMANTICS",
+          "DOMAIN_TRACE_REVIEW"
+        ],
+        "notes": "Reuses AR05 S1 local approval/repair/verification/delivery fixture with different wording. PASS is a local fixture result, not a real Provider result or independent H execution."
+      },
       "trace_refs": [
         "runs/E12_S1_WAITING_TRACE.json",
         "runs/E12_S1_OUTCOME_TRACE.json",
@@ -406,5 +627,5 @@
     "fixture_token_metadata": "Per-attempt fixture metadata stays in RUNS.jsonl and is not added to provider token totals.",
     "latency_policy": "Per-attempt elapsed_ms is in RUNS.jsonl; no p50/p95 is calculated from this small mixed fixture set."
   },
-  "aggregation_policy": "First attempts only for case outcome; all attempts remain recorded. Explicit result_status is consumed as written and never derived from run_status. Security negatives are separate from the 12-case denominator."
+  "aggregation_policy": "First attempts only for case outcome; all attempts remain recorded. Explicit result_status is consumed as written and never derived from run_status. Execution fidelity is a separate evidence dimension and never changes status. Security negatives are separate from the 12-case denominator."
 }

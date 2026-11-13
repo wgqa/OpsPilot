@@ -1,0 +1,102 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__ test_holdout_execution_remains_executed_when_required_evidence_is_missing __
+
+    def test_holdout_execution_remains_executed_when_required_evidence_is_missing():
+        cases = {
+            "experiment_id": "R2-AR06-EVAL-01",
+            "baseline_sha": "base",
+            "cases": [
+                {"case_id": f"E{index:02d}-{'D' if index % 2 else 'H'}",
+                 "split": "D" if index % 2 else "H", "work_type": "fixture"}
+                for index in range(1, 13)
+            ],
+            "security_negatives": [{"case_id": f"N{index:02d}"} for index in range(1, 5)],
+        }
+        runs = [
+            _row("CASE_ATTEMPT", str(case["case_id"]),
+                 "PASS" if case["case_id"] == "E01-D" else "NOT_RUN" if case["case_id"] == "E02-H" else "PARTIAL",
+                 "SUCCEEDED")
+            for case in cases["cases"]
+        ]
+        failed_holdout = runs[1]
+        failed_holdout["result_status"] = "PARTIAL"
+        failed_holdout["run_status"] = "FAILED"
+        failed_holdout["execution_fidelity"] = {
+            "input_match": "EXACT_FROZEN_INPUT",
+            "execution_source": "NEW_INDEPENDENT_TEST",
+            "trusted_initial_state": "MATCH",
+            "required_evidence": "PARTIAL",
+            "holdout_status": "INDEPENDENT_HOLDOUT_EXECUTED",
+            "assessment_modes": ["PROGRAM_ASSERTIONS"],
+            "notes": "independent exact holdout run did not obtain all required evidence",
+        }
+        runs.extend(
+            _row("SECURITY_NEGATIVE", str(case["case_id"]), "PASS", "SUCCEEDED")
+            for case in cases["security_negatives"]
+        )
+
+>       result = aggregator.aggregate(cases, runs, "cases-hash", "runs-hash")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_r2_ar06_eval_01_aggregator.py:200:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+scripts\evaluation\aggregate_r2_ar06_eval_01.py:143: in aggregate
+    _validate_execution_fidelity(row, str(cases_by_id[case_id]["split"]))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+row = {'record_type': 'CASE_ATTEMPT', 'case_id': 'E02-H', 'attempt_id': 'attempt-E02-H', 'attempt_no': 1, ...}
+split = 'H'
+
+    def _validate_execution_fidelity(row: dict[str, Any], split: str) -> dict[str, Any]:
+        fidelity = row.get("execution_fidelity")
+        if not isinstance(fidelity, dict):
+            raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} missing execution_fidelity")
+        required = {
+            "input_match", "execution_source", "trusted_initial_state", "required_evidence",
+            "holdout_status", "assessment_modes", "notes",
+        }
+        missing = sorted(required - fidelity.keys())
+        if missing:
+            raise ValueError(
+                f"CASE_ATTEMPT {row.get('case_id')} execution_fidelity missing fields: "
+                f"{', '.join(missing)}"
+            )
+        if fidelity["input_match"] not in FIDELITY_INPUTS:
+            raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid input_match")
+        if fidelity["execution_source"] not in FIDELITY_SOURCES:
+            raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid execution_source")
+        if fidelity["trusted_initial_state"] not in FIDELITY_STATES:
+            raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid trusted_initial_state")
+        if fidelity["required_evidence"] not in FIDELITY_EVIDENCE:
+            raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid required_evidence")
+        if fidelity["holdout_status"] not in HOLDOUT_STATUSES:
+            raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid holdout_status")
+        if not isinstance(fidelity["assessment_modes"], list) or not all(
+            isinstance(item, str) for item in fidelity["assessment_modes"]
+        ):
+            raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} assessment_modes must be a string list")
+        if not isinstance(fidelity["notes"], str):
+            raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} fidelity notes must be a string")
+
+        independent_execution = (
+            fidelity["input_match"] == "EXACT_FROZEN_INPUT"
+            and fidelity["execution_source"] == "NEW_INDEPENDENT_TEST"
+            and fidelity["trusted_initial_state"] == "MATCH"
+            and fidelity["required_evidence"] == "SATISFIED"
+        )
+        expected_holdout = (
+            "INDEPENDENT_HOLDOUT_EXECUTED" if independent_execution
+            else "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED"
+        )
+        expected_status = expected_holdout if split == "H" else "NOT_HOLDOUT"
+        if fidelity["holdout_status"] != expected_status:
+>           raise ValueError(
+                f"CASE_ATTEMPT {row.get('case_id')} holdout_status conflicts with fidelity fields"
+            )
+E           ValueError: CASE_ATTEMPT E02-H holdout_status conflicts with fidelity fields
+
+scripts\evaluation\aggregate_r2_ar06_eval_01.py:116: ValueError
+=========================== short test summary info ===========================
+FAILED tests/test_r2_ar06_eval_01_aggregator.py::test_holdout_execution_remains_executed_when_required_evidence_is_missing
+1 failed in 0.09s

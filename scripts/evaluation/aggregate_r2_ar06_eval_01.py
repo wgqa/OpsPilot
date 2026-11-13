@@ -14,6 +14,11 @@ from typing import Any
 
 
 RESULT_STATUSES = {"PASS", "PARTIAL", "FAIL", "NOT_RUN", "UNVERIFIED"}
+FIDELITY_INPUTS = {"EXACT_FROZEN_INPUT", "MAPPED_EXISTING_TEST", "NOT_RUN"}
+FIDELITY_SOURCES = {"NEW_INDEPENDENT_TEST", "REUSED_EXISTING_TRACE", "NOT_RUN"}
+FIDELITY_STATES = {"MATCH", "PARTIAL", "NOT_RUN"}
+FIDELITY_EVIDENCE = {"SATISFIED", "PARTIAL", "NOT_RUN"}
+HOLDOUT_STATUSES = {"NOT_HOLDOUT", "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED", "INDEPENDENT_HOLDOUT_EXECUTED"}
 RUN_FIELDS = {
     "record_type", "case_id", "attempt_id", "attempt_no", "result_status",
     "run_status", "task_status", "expected_outcome", "actual_outcome",
@@ -65,6 +70,54 @@ def _sum_known(rows: list[dict[str, Any]], field: str) -> int | float | None:
     return sum(values)
 
 
+def _validate_execution_fidelity(row: dict[str, Any], split: str) -> dict[str, Any]:
+    fidelity = row.get("execution_fidelity")
+    if not isinstance(fidelity, dict):
+        raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} missing execution_fidelity")
+    required = {
+        "input_match", "execution_source", "trusted_initial_state", "required_evidence",
+        "holdout_status", "assessment_modes", "notes",
+    }
+    missing = sorted(required - fidelity.keys())
+    if missing:
+        raise ValueError(
+            f"CASE_ATTEMPT {row.get('case_id')} execution_fidelity missing fields: "
+            f"{', '.join(missing)}"
+        )
+    if fidelity["input_match"] not in FIDELITY_INPUTS:
+        raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid input_match")
+    if fidelity["execution_source"] not in FIDELITY_SOURCES:
+        raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid execution_source")
+    if fidelity["trusted_initial_state"] not in FIDELITY_STATES:
+        raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid trusted_initial_state")
+    if fidelity["required_evidence"] not in FIDELITY_EVIDENCE:
+        raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid required_evidence")
+    if fidelity["holdout_status"] not in HOLDOUT_STATUSES:
+        raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} has invalid holdout_status")
+    if not isinstance(fidelity["assessment_modes"], list) or not all(
+        isinstance(item, str) for item in fidelity["assessment_modes"]
+    ):
+        raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} assessment_modes must be a string list")
+    if not isinstance(fidelity["notes"], str):
+        raise ValueError(f"CASE_ATTEMPT {row.get('case_id')} fidelity notes must be a string")
+
+    independent_execution = (
+        fidelity["input_match"] == "EXACT_FROZEN_INPUT"
+        and fidelity["execution_source"] == "NEW_INDEPENDENT_TEST"
+        and fidelity["trusted_initial_state"] == "MATCH"
+    )
+    expected_holdout = (
+        "INDEPENDENT_HOLDOUT_EXECUTED" if independent_execution
+        else "HOLDOUT_NOT_INDEPENDENTLY_EXECUTED"
+    )
+    expected_status = expected_holdout if split == "H" else "NOT_HOLDOUT"
+    if fidelity["holdout_status"] != expected_status:
+        raise ValueError(
+            f"CASE_ATTEMPT {row.get('case_id')} holdout_status conflicts with fidelity fields"
+        )
+    return fidelity
+
+
 def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: str, runs_sha256: str) -> dict[str, Any]:
     case_rows = cases.get("cases")
     negative_rows = cases.get("security_negatives")
@@ -86,6 +139,7 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
         if record_type == "CASE_ATTEMPT":
             if case_id not in cases_by_id:
                 raise ValueError(f"Unknown case_id: {case_id}")
+            _validate_execution_fidelity(row, str(cases_by_id[case_id]["split"]))
             attempts[case_id].append(row)
         elif record_type == "SECURITY_NEGATIVE":
             if case_id not in negatives_by_id:
@@ -103,6 +157,7 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
 
     first_attempts: list[dict[str, Any]] = []
     case_results: list[dict[str, Any]] = []
+    first_fidelity_by_case: dict[str, dict[str, Any]] = {}
     by_split: dict[str, Counter[str]] = defaultdict(Counter)
     by_work_type: dict[str, Counter[str]] = defaultdict(Counter)
     for case_id, case in cases_by_id.items():
@@ -111,6 +166,8 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
             raise ValueError(f"Duplicate attempt_no for {case_id}")
         first = rows[0]
         first_attempts.append(first)
+        fidelity = _validate_execution_fidelity(first, str(case["split"]))
+        first_fidelity_by_case[case_id] = fidelity
         status = first["result_status"]
         by_split[str(case["split"])][status] += 1
         by_work_type[str(case["work_type"])][status] += 1
@@ -126,6 +183,7 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
             "business_outcome_code": first["business_outcome_code"],
             "evidence_completeness": first["evidence_completeness"],
             "evidence_validity": first["evidence_validity"],
+            "execution_fidelity": fidelity,
             "trace_refs": first["trace_refs"],
         })
 
@@ -160,6 +218,54 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
         for row in all_first
         for value in row["safety_red_lines"]
     ]
+    fidelity_input_counts = Counter(value["input_match"] for value in first_fidelity_by_case.values())
+    fidelity_source_counts = Counter(value["execution_source"] for value in first_fidelity_by_case.values())
+    exact_independent_ids = sorted(
+        case_id for case_id, value in first_fidelity_by_case.items()
+        if value["input_match"] == "EXACT_FROZEN_INPUT"
+        and value["execution_source"] == "NEW_INDEPENDENT_TEST"
+    )
+    fully_supported_exact_ids = sorted(
+        case_id for case_id, value in first_fidelity_by_case.items()
+        if value["input_match"] == "EXACT_FROZEN_INPUT"
+        and value["execution_source"] == "NEW_INDEPENDENT_TEST"
+        and value["trusted_initial_state"] == "MATCH"
+        and value["required_evidence"] == "SATISFIED"
+    )
+    holdout_ids = sorted(case_id for case_id, case in cases_by_id.items() if str(case["split"]) == "H")
+    independently_executed_holdouts = sorted(
+        case_id for case_id in holdout_ids
+        if first_fidelity_by_case[case_id]["holdout_status"] == "INDEPENDENT_HOLDOUT_EXECUTED"
+    )
+
+    case_run_owners: dict[str, set[str]] = defaultdict(set)
+    case_run_reference_count = 0
+    for case_id, rows in attempts.items():
+        for row in rows:
+            for run_id in row.get("run_ids") or []:
+                case_run_reference_count += 1
+                case_run_owners[str(run_id)].add(case_id)
+    shared_case_run_ids = {
+        run_id: sorted(owners) for run_id, owners in case_run_owners.items() if len(owners) > 1
+    }
+    security_reuse: list[dict[str, Any]] = []
+    for negative_id, rows in security_attempts.items():
+        overlapping_ids = {
+            str(run_id) for row in rows for run_id in (row.get("run_ids") or [])
+            if str(run_id) in case_run_owners
+        }
+        if overlapping_ids:
+            case_ids = sorted({
+                case_id for run_id in overlapping_ids for case_id in case_run_owners[run_id]
+            })
+            security_reuse.append({
+                "security_negative_case_id": negative_id,
+                "case_ids": case_ids,
+                "shared_run_id_count": len(overlapping_ids),
+            })
+
+    exact_independent_ratio = len(exact_independent_ids) / len(cases_by_id)
+    fully_supported_ratio = len(fully_supported_exact_ids) / len(cases_by_id)
     return {
         "schema_version": 1,
         "experiment_id": cases.get("experiment_id"),
@@ -168,7 +274,45 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
         "planned_case_count": len(cases_by_id),
         "attempt_record_count": len(runs),
         "first_attempt_status_counts": {key: status_counts.get(key, 0) for key in sorted(RESULT_STATUSES)},
-        "first_attempt_completion_rate": status_counts.get("PASS", 0) / len(cases_by_id),
+        "phase_a_offline_engineering_coverage": {
+            "label": "Phase A 离线工程覆盖评定",
+            "pass_cases": status_counts.get("PASS", 0),
+            "planned_cases": len(cases_by_id),
+            "pass_fraction": status_counts.get("PASS", 0) / len(cases_by_id),
+            "interpretation": "Fixture/offline engineering coverage only; not current real-model task success rate.",
+        },
+        "execution_fidelity": {
+            "input_match_counts": {key: fidelity_input_counts.get(key, 0) for key in sorted(FIDELITY_INPUTS)},
+            "execution_source_counts": {key: fidelity_source_counts.get(key, 0) for key in sorted(FIDELITY_SOURCES)},
+            "frozen_input_exact_and_independent": {
+                "case_ids": exact_independent_ids,
+                "case_count": len(exact_independent_ids),
+                "planned_cases": len(cases_by_id),
+                "fraction": exact_independent_ratio,
+            },
+            "frozen_input_exact_independent_initial_state_and_evidence_complete": {
+                "case_ids": fully_supported_exact_ids,
+                "case_count": len(fully_supported_exact_ids),
+                "planned_cases": len(cases_by_id),
+                "fraction": fully_supported_ratio,
+            },
+            "holdout": {
+                "case_count": len(holdout_ids),
+                "independently_executed_case_ids": independently_executed_holdouts,
+                "independently_executed_count": len(independently_executed_holdouts),
+                "not_independently_executed_case_ids": sorted(set(holdout_ids) - set(independently_executed_holdouts)),
+            },
+            "run_reference_audit": {
+                "run_id_scope": "Fixture/Mock or isolated local test Run IDs only; Phase A real Provider requests are 0.",
+                "case_attempt_records": sum(len(rows) for rows in attempts.values()),
+                "case_run_reference_count": case_run_reference_count,
+                "unique_case_run_id_count": len(case_run_owners),
+                "shared_run_ids_between_frozen_cases": shared_case_run_ids,
+                "security_negative_reuse_of_frozen_case_runs": sorted(
+                    security_reuse, key=lambda item: item["security_negative_case_id"],
+                ),
+            },
+        },
         "score_dimensions": {
             "M1_goal_completion": {
                 "complete_cases": status_counts.get("PASS", 0),
@@ -223,7 +367,7 @@ def aggregate(cases: dict[str, Any], runs: list[dict[str, Any]], cases_sha256: s
             "fixture_token_metadata": "Per-attempt fixture metadata stays in RUNS.jsonl and is not added to provider token totals.",
             "latency_policy": "Per-attempt elapsed_ms is in RUNS.jsonl; no p50/p95 is calculated from this small mixed fixture set."
         },
-        "aggregation_policy": "First attempts only for case outcome; all attempts remain recorded. Explicit result_status is consumed as written and never derived from run_status. Security negatives are separate from the 12-case denominator."
+        "aggregation_policy": "First attempts only for case outcome; all attempts remain recorded. Explicit result_status is consumed as written and never derived from run_status. Execution fidelity is a separate evidence dimension and never changes status. Security negatives are separate from the 12-case denominator."
     }
 
 
@@ -238,8 +382,11 @@ def main() -> int:
     result = aggregate(cases, runs, _sha256(args.cases), _sha256(args.runs))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"Wrote {args.output}: {result['planned_case_count']} cases, "
-          f"{result['first_attempt_status_counts']['PASS']} first-attempt PASS, "
+    coverage = result["phase_a_offline_engineering_coverage"]
+    exact = result["execution_fidelity"]["frozen_input_exact_and_independent"]
+    print(f"Wrote {args.output}: Phase A offline engineering coverage "
+          f"{coverage['pass_cases']}/{coverage['planned_cases']} PASS; "
+          f"exact independent {exact['case_count']}/{exact['planned_cases']}; "
           f"{result['usage']['provider_requests']} Provider requests")
     return 0
 

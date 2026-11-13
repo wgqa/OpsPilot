@@ -1,0 +1,37 @@
+F...                                                                     [100%]
+================================== FAILURES ===================================
+_ test_aggregator_keeps_not_run_denominator_and_does_not_infer_pass_from_run __
+
+    def test_aggregator_keeps_not_run_denominator_and_does_not_infer_pass_from_run():
+        cases = {
+            "experiment_id": "R2-AR06-EVAL-01",
+            "baseline_sha": "base",
+            "cases": [
+                {"case_id": f"E{index:02d}-{'D' if index % 2 else 'H'}",
+                 "split": "D" if index % 2 else "H", "work_type": "fixture"}
+                for index in range(1, 13)
+            ],
+            "security_negatives": [
+                {"case_id": f"N{index:02d}"} for index in range(1, 5)
+            ],
+        }
+        runs = []
+        for case in cases["cases"]:
+            status = "NOT_RUN" if case["case_id"].startswith("E02") else "PARTIAL"
+            # A successful workflow is intentionally still PARTIAL.
+            runs.append(_row("CASE_ATTEMPT", str(case["case_id"]), status,
+                             "NOT_RUN" if status == "NOT_RUN" else "SUCCEEDED"))
+        for case in cases["security_negatives"]:
+            runs.append(_row("SECURITY_NEGATIVE", str(case["case_id"]), "PASS", "SUCCEEDED"))
+
+        result = aggregator.aggregate(cases, runs, "cases-hash", "runs-hash")
+
+        assert result["planned_case_count"] == 12
+        assert result["first_attempt_status_counts"]["NOT_RUN"] == 1
+>       assert result["first_attempt_status_counts"]["PASS"] == 1
+E       assert 0 == 1
+
+tests\test_r2_ar06_eval_01_aggregator.py:112: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_r2_ar06_eval_01_aggregator.py::test_aggregator_keeps_not_run_denominator_and_does_not_infer_pass_from_run
+1 failed, 3 passed in 0.10s
