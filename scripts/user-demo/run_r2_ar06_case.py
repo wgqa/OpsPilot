@@ -25,15 +25,37 @@ USER_DEMO_DIR = ROOT / "scripts" / "user-demo"
 EVAL_DIR = ROOT / "docs" / "evidence" / "r2-ar06-eval-01"
 CASES_PATH = EVAL_DIR / "CASES.json"
 FROZEN_HASHES_PATH = EVAL_DIR / "FROZEN_HASHES.json"
-SUPPORTED_CASES = {"E02-H", "E05-D", "E06-H", "E07-D"}
+OBSERVATION_CONTRAST_CASE_ID = "OBSERVATION-CONTRAST-PROCESSED"
+OBSERVATION_CONTRAST_TARGET_EVENT_ID = "event-00000000-0000-4000-8000-000000000101"
+OBSERVATION_CONTRAST_DECOY_EVENT_ID = "event-00000000-0000-4000-8000-000000000102"
+SUPPORTED_CASES = {
+    "E02-H", "E05-D", "E06-H", "E07-D", OBSERVATION_CONTRAST_CASE_ID,
+}
+EXPLORATORY_CASE_SOURCES = {OBSERVATION_CONTRAST_CASE_ID: "E07-D"}
 CASE_S3_PROFILES = {
     "E02-H": "standard",
     "E05-D": "standard",
     "E06-H": "standard",
     "E07-D": "r2-e07-queued",
+    OBSERVATION_CONTRAST_CASE_ID: "r2-e08-processed-decoy",
 }
 E07_ORDER_ID = "async-order"
 E07_EVENT_ID = "event-00000000-0000-4000-8000-000000000001"
+S3_FIXTURE_EXPECTATIONS = {
+    "E07-D": {
+        "target_order_id": E07_ORDER_ID,
+        "target_event_id": E07_EVENT_ID,
+        "target_receiver_status": "QUEUED",
+    },
+    OBSERVATION_CONTRAST_CASE_ID: {
+        "target_order_id": E07_ORDER_ID,
+        "target_event_id": OBSERVATION_CONTRAST_TARGET_EVENT_ID,
+        "target_receiver_status": "PROCESSED",
+        "decoy_order_id": "async-order-decoy",
+        "decoy_event_id": OBSERVATION_CONTRAST_DECOY_EVENT_ID,
+        "decoy_receiver_status": "QUEUED",
+    },
+}
 DEFAULT_API_ORIGIN = "http://127.0.0.1:8000"
 DEFAULT_WEB_ORIGIN = "http://127.0.0.1:5173"
 DEFAULT_RUN_TIMEOUT_SECONDS = 600
@@ -63,7 +85,8 @@ def load_frozen_case(case_id: str) -> dict[str, Any]:
     if actual_hash != expected_hash:
         raise EvaluationPreflightError("FROZEN_CASES_DIGEST_MISMATCH")
     document = json.loads(cases_bytes.decode("utf-8"))
-    matches = [item for item in document["cases"] if item.get("case_id") == case_id]
+    source_case_id = EXPLORATORY_CASE_SOURCES.get(case_id, case_id)
+    matches = [item for item in document["cases"] if item.get("case_id") == source_case_id]
     if len(matches) != 1:
         raise EvaluationPreflightError("FROZEN_CASE_ID_NOT_UNIQUE")
     case = matches[0]
@@ -74,12 +97,19 @@ def load_frozen_case(case_id: str) -> dict[str, Any]:
     if not isinstance(turns[0], str) or not turns[0].strip():
         raise EvaluationPreflightError("FROZEN_CASE_INPUT_INVALID")
     # Keep the fields the executor needs; Gold outcomes never enter Context.
-    return {
+    result = {
         "case_id": case_id,
         "split": split,
         "user_turns": list(turns),
         "gold_sha256": actual_hash,
     }
+    if case_id in EXPLORATORY_CASE_SOURCES:
+        result.update({
+            "source_case_id": source_case_id,
+            "split": "EXPLORATORY",
+            "experiment_class": "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE",
+        })
+    return result
 
 
 def initialize_case_runtime(
@@ -103,7 +133,7 @@ def initialize_case_runtime(
     initialize_user_demo(
         runtime_dir,
         require_absent_directory=True,
-        s3_fixture_profile=CASE_S3_PROFILES[case_id] if case_id in CASE_S3_PROFILES else "standard",
+        s3_fixture_profile=CASE_S3_PROFILES.get(case_id, "standard"),
     )
     return runtime_dir
 
@@ -131,8 +161,7 @@ def inspect_case_runtime(
 
     from runtime_paths import resolve_user_demo_database_paths, resolve_user_demo_runtime
 
-    if case_id not in SUPPORTED_CASES:
-        raise ValueError("LIVE_CASE_NOT_PREPARED:" + str(case_id))
+    load_frozen_case(case_id)
     repo_root = Path(root or ROOT).resolve()
     try:
         runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
@@ -187,7 +216,8 @@ def inspect_case_runtime(
                 "personal_memories", "assistant_calls", "provider_spends",
             )
         )
-        if case_id == "E07-D":
+        fixture = S3_FIXTURE_EXPECTATIONS.get(case_id)
+        if fixture:
             row = connection.execute(
                 """SELECT d.status AS delivery_status,d.event_id AS delivery_event_id,
                           d.receiver_http_status,r.status AS receiver_status,
@@ -195,11 +225,11 @@ def inspect_case_runtime(
                    FROM s3_deliveries d JOIN s3_receivers r
                      ON r.tenant_id=d.tenant_id AND r.service_id=d.service_id AND r.order_id=d.order_id
                    WHERE d.tenant_id='tenant-a' AND d.order_id=?""",
-                (E07_ORDER_ID,),
+                (fixture["target_order_id"],),
             ).fetchone()
             if row is not None:
                 result.update({
-                    "s3_order_id": E07_ORDER_ID,
+                    "s3_order_id": fixture["target_order_id"],
                     "delivery_status": str(row["delivery_status"]),
                     "receiver_http_status": row["receiver_http_status"],
                     "receiver_status": str(row["receiver_status"]),
@@ -208,7 +238,102 @@ def inspect_case_runtime(
                 })
             else:
                 result["s3_order_id"] = None
+            if fixture.get("decoy_order_id"):
+                decoy = connection.execute(
+                    """SELECT d.status AS delivery_status,d.event_id AS delivery_event_id,
+                              d.receiver_http_status,r.status AS receiver_status,
+                              r.event_id AS receiver_event_id
+                       FROM s3_deliveries d JOIN s3_receivers r
+                         ON r.tenant_id=d.tenant_id AND r.service_id=d.service_id AND r.order_id=d.order_id
+                       WHERE d.tenant_id='tenant-a' AND d.order_id=?""",
+                    (fixture["decoy_order_id"],),
+                ).fetchone()
+                if decoy is not None:
+                    result.update({
+                        "decoy_order_id": fixture["decoy_order_id"],
+                        "decoy_delivery_status": str(decoy["delivery_status"]),
+                        "decoy_receiver_http_status": decoy["receiver_http_status"],
+                        "decoy_receiver_status": str(decoy["receiver_status"]),
+                        "decoy_delivery_event_id": str(decoy["delivery_event_id"]),
+                        "decoy_receiver_event_id": str(decoy["receiver_event_id"]),
+                    })
         return result
+    finally:
+        connection.close()
+
+
+def _s3_fixture_mismatch(case_id: str, state: dict[str, Any]) -> str | None:
+    """Validate the target and, when present, the separate decoy Event fixture."""
+    fixture = S3_FIXTURE_EXPECTATIONS.get(case_id)
+    if fixture is None:
+        return None
+    target_matches = (
+        state.get("delivery_status") == "ACKNOWLEDGED"
+        and state.get("receiver_http_status") == 202
+        and state.get("receiver_status") == fixture["target_receiver_status"]
+        and state.get("delivery_event_id") == fixture["target_event_id"]
+        and state.get("receiver_event_id") == fixture["target_event_id"]
+    )
+    if not target_matches:
+        return (
+            "OBSERVATION_CONTRAST_FIXTURE_MISMATCH"
+            if case_id == OBSERVATION_CONTRAST_CASE_ID
+            else "E07_TRUSTED_FIXTURE_MISMATCH"
+        )
+    if fixture.get("decoy_order_id"):
+        decoy_matches = (
+            state.get("decoy_order_id") == fixture["decoy_order_id"]
+            and state.get("decoy_delivery_status") == "ACKNOWLEDGED"
+            and state.get("decoy_receiver_http_status") == 202
+            and state.get("decoy_receiver_status") == fixture["decoy_receiver_status"]
+            and state.get("decoy_delivery_event_id") == fixture["decoy_event_id"]
+            and state.get("decoy_receiver_event_id") == fixture["decoy_event_id"]
+            and fixture["decoy_event_id"] != fixture["target_event_id"]
+            and fixture["decoy_order_id"] != fixture["target_order_id"]
+        )
+        if not decoy_matches:
+            return "OBSERVATION_CONTRAST_FIXTURE_MISMATCH"
+    return None
+
+
+def _s3_fixture_summary(case_id: str, state: dict[str, Any]) -> dict[str, Any] | None:
+    if case_id not in S3_FIXTURE_EXPECTATIONS:
+        return None
+    summary = {
+        "target_order_id": state.get("s3_order_id"),
+        "target_event_id": state.get("delivery_event_id"),
+        "target_delivery_status": state.get("delivery_status"),
+        "target_receiver_status": state.get("receiver_status"),
+    }
+    if case_id == OBSERVATION_CONTRAST_CASE_ID:
+        summary.update({
+            "decoy_order_id": state.get("decoy_order_id"),
+            "decoy_event_id": state.get("decoy_delivery_event_id"),
+            "decoy_delivery_status": state.get("decoy_delivery_status"),
+            "decoy_receiver_status": state.get("decoy_receiver_status"),
+        })
+    return summary
+
+
+def _read_s3_task_binding_scope(runtime_dir: Path, task_id: str) -> dict[str, Any]:
+    """Read the post-API binding through the Domain validator, without writes."""
+    import sqlite3
+
+    from opspilot.domain.s3 import get_s3_binding
+
+    database = runtime_dir / "domain.sqlite3"
+    connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True)
+    connection.execute("PRAGMA query_only = ON")
+    connection.row_factory = sqlite3.Row
+    try:
+        binding = get_s3_binding(connection, task_id)
+        return {
+            key: binding.get(key)
+            for key in (
+                "task_id", "tenant_id", "actor_id", "service_id", "integration_id",
+                "principal_id", "order_id",
+            )
+        }
     finally:
         connection.close()
 
@@ -279,14 +404,9 @@ def live_preflight(
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_CONTAINS_SESSION_OR_RUN_DATA")
     if state["provider_send_grants"] or state["unknown_requests"]:
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
-    if case_id == "E07-D" and not (
-        state.get("delivery_status") == "ACKNOWLEDGED"
-        and state.get("receiver_http_status") == 202
-        and state.get("receiver_status") == "QUEUED"
-        and state.get("delivery_event_id") == E07_EVENT_ID
-        and state.get("receiver_event_id") == E07_EVENT_ID
-    ):
-        raise EvaluationPreflightError("E07_TRUSTED_FIXTURE_MISMATCH")
+    mismatch = _s3_fixture_mismatch(case_id, state)
+    if mismatch:
+        raise EvaluationPreflightError(mismatch)
 
     runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
     _manifest_matches(runtime_name, runtime_dir, repo_root)
@@ -320,7 +440,7 @@ def live_preflight(
     health = response.json()
     if health.get("status") != "ok" or (health.get("worker") or {}).get("ready") is not True:
         raise EvaluationPreflightError("LOCAL_API_WORKER_NOT_READY")
-    return {
+    result = {
         "status": "READY_FOR_EXPLICIT_CASE_RUN",
         "case_id": case_id,
         "runtime_name": runtime_name,
@@ -334,6 +454,13 @@ def live_preflight(
         "worst_case_run_reserve_usd_micro": maximum_dispatch_reserve,
         "task_binding_created": False,
     }
+    fixture_summary = _s3_fixture_summary(case_id, state)
+    if fixture_summary is not None:
+        result["s3_fixture"] = fixture_summary
+    if case_id in EXPLORATORY_CASE_SOURCES:
+        result["experiment_class"] = "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE"
+        result["source_question_case_id"] = EXPLORATORY_CASE_SOURCES[case_id]
+    return result
 
 
 def _raise_for_status(response: Any, expected: set[int], label: str) -> dict[str, Any]:
@@ -427,6 +554,72 @@ def _result_metrics(trace: dict[str, Any], execution_mode: str) -> dict[str, Any
     }
 
 
+def _observation_contrast_audit(
+    trace: dict[str, Any], *, run_id: str, task_id: str | None,
+) -> dict[str, Any]:
+    """Summarize only task-scoped Receiver observations issued by this Run."""
+    fixture = S3_FIXTURE_EXPECTATIONS[OBSERVATION_CONTRAST_CASE_ID]
+    task_calls = {
+        row.get("call_id"): row
+        for row in trace.get("assistant_calls_actual_model_input_output", [])
+        if row.get("run_id") == run_id and row.get("kind") == "MCP"
+    }
+    receiver_observations: list[dict[str, Any]] = []
+    if task_id:
+        for observation in trace.get("observations", []):
+            call = task_calls.get(observation.get("call_id"))
+            result = observation.get("result_json")
+            if (
+                observation.get("task_id") != task_id
+                or not call
+                or call.get("status") != "OK"
+                or observation.get("status") != "OK"
+                or not isinstance(result, dict)
+                or result.get("fact_type") != "s3_receiver"
+                or result.get("tenant_id") != "tenant-a"
+            ):
+                continue
+            facts = result.get("facts")
+            if not isinstance(facts, dict) or facts.get("tenant_id") != "tenant-a":
+                continue
+            receiver_observations.append({
+                "observation_id": observation.get("observation_id"),
+                "run_id": run_id,
+                "task_id": task_id,
+                "tenant_id": result.get("tenant_id"),
+                "order_id": facts.get("order_id"),
+                "event_id": facts.get("event_id"),
+                "receiver_status": facts.get("status"),
+                "observed_at": result.get("observed_at"),
+                "original_result_ref": result.get("original_result_ref"),
+                "evidence_id": observation.get("evidence_id"),
+                "trust_class": result.get("trust_class"),
+            })
+    target_observations = [
+        row for row in receiver_observations
+        if row.get("order_id") == fixture["target_order_id"]
+        and row.get("event_id") == fixture["target_event_id"]
+    ]
+    supported = any(
+        row.get("receiver_status") == "PROCESSED"
+        and row.get("evidence_id")
+        and row.get("original_result_ref")
+        for row in target_observations
+    )
+    return {
+        "experiment_class": "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_E08_H",
+        "source_question_case_id": "E07-D",
+        "task_binding_id": task_id,
+        "target_order_id": fixture["target_order_id"],
+        "target_event_id": fixture["target_event_id"],
+        "decoy_order_id": fixture["decoy_order_id"],
+        "decoy_event_id": fixture["decoy_event_id"],
+        "current_run_task_scoped_receiver_observations": receiver_observations,
+        "target_receiver_observation_ids": [row.get("observation_id") for row in target_observations],
+        "supports_target_processed_conclusion": supported,
+    }
+
+
 def _execute_case_once(
     client: Any,
     *,
@@ -457,14 +650,9 @@ def _execute_case_once(
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_CONTAINS_SESSION_OR_RUN_DATA")
     if pre_state["provider_send_grants"] or pre_state["unknown_requests"]:
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
-    if case_id == "E07-D" and not (
-        pre_state.get("delivery_status") == "ACKNOWLEDGED"
-        and pre_state.get("receiver_http_status") == 202
-        and pre_state.get("receiver_status") == "QUEUED"
-        and pre_state.get("delivery_event_id") == E07_EVENT_ID
-        and pre_state.get("receiver_event_id") == E07_EVENT_ID
-    ):
-        raise EvaluationPreflightError("E07_TRUSTED_FIXTURE_MISMATCH")
+    mismatch = _s3_fixture_mismatch(case_id, pre_state)
+    if mismatch:
+        raise EvaluationPreflightError(mismatch)
     output = runtime_dir / "evidence" / f"{case_id}.json"
     result_output = runtime_dir / "evidence" / f"{case_id}.result.json"
     if output.exists() or result_output.exists():
@@ -492,13 +680,19 @@ def _execute_case_once(
 
     question = case["user_turns"][0]
     task_id: str | None = None
-    if case_id == "E07-D":
+    if case_id in S3_FIXTURE_EXPECTATIONS:
         response = client.post(
             f"{api_origin}/api/sessions/{session_id}/assistant/order",
-            headers={**write_headers, "Idempotency-Key": "r2-ar06-e07-" + uuid.uuid4().hex},
+            headers={
+                **write_headers,
+                "Idempotency-Key": (
+                    "r2-ar06-e07-" if case_id == "E07-D"
+                    else "r2-ar06-observation-contrast-"
+                ) + uuid.uuid4().hex,
+            },
             json={"order_id": E07_ORDER_ID, "initial_message": question},
         )
-        accepted = _raise_for_status(response, {200, 202}, "E07_TASK_BINDING_AND_RUN")
+        accepted = _raise_for_status(response, {200, 202}, "S3_TASK_BINDING_AND_RUN")
         task_id = str(accepted.get("task_id", "")) or None
     else:
         key_prefix = "r2-ar06-e05-" if case_id == "E05-D" else (
@@ -532,6 +726,23 @@ def _execute_case_once(
         raise EvaluationPreflightError("EXPORTED_RUN_SOURCE_LINK_MISMATCH")
     if task_id and not any(row.get("task_id") == task_id for row in trace.get("task_bindings", [])):
         raise EvaluationPreflightError("EXPORTED_TRUSTED_TASK_BINDING_MISSING")
+    if task_id:
+        binding = next(
+            (row for row in trace.get("task_bindings", []) if row.get("task_id") == task_id),
+            None,
+        )
+        if not binding or binding.get("tenant_id") != "tenant-a" or binding.get("service_id") != "orders-async-demo":
+            raise EvaluationPreflightError("EXPORTED_TRUSTED_TASK_BINDING_SCOPE_MISMATCH")
+    if case_id in S3_FIXTURE_EXPECTATIONS:
+        if not task_id:
+            raise EvaluationPreflightError("S3_TRUSTED_TASK_BINDING_MISSING")
+        task_binding_scope = _read_s3_task_binding_scope(runtime_dir, task_id)
+        if (
+            task_binding_scope.get("tenant_id") != "tenant-a"
+            or task_binding_scope.get("order_id") != S3_FIXTURE_EXPECTATIONS[case_id]["target_order_id"]
+            or task_binding_scope.get("service_id") != "orders-async-demo"
+        ):
+            raise EvaluationPreflightError("S3_TASK_BINDING_TARGET_MISMATCH")
 
     result_record: dict[str, Any] = {
         "schema": "r2-ar06-auto-live-case-result-v1",
@@ -553,6 +764,13 @@ def _execute_case_once(
         "trace_path": str(output),
         **_result_metrics(trace, execution_mode),
     }
+    if case_id == OBSERVATION_CONTRAST_CASE_ID:
+        result_record["source_question_case_id"] = case["source_case_id"]
+        result_record["experiment_class"] = case["experiment_class"]
+        result_record["task_binding_scope"] = task_binding_scope
+        result_record["observation_contrast"] = _observation_contrast_audit(
+            trace, run_id=run_id, task_id=task_id,
+        )
     result_output.write_text(json.dumps(result_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result_record
 
@@ -594,23 +812,18 @@ def _local_support_password() -> str:
     return read_env().get("OPSPILOT_WEB_SUPPORT_PASSWORD", "").strip()
 
 
-def _case_preflight_cli(args: argparse.Namespace) -> dict[str, Any]:
-    state = inspect_case_runtime(args.case_id, args.runtime_name)
+def _case_preflight_cli(args: argparse.Namespace, *, root: str | Path | None = None) -> dict[str, Any]:
+    state = inspect_case_runtime(args.case_id, args.runtime_name, root=root)
     if not state["fresh"]:
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_CONTAINS_SESSION_OR_RUN_DATA")
     if state["runtime_grant_present"]:
         raise EvaluationPreflightError("OFFLINE_PREFLIGHT_REQUIRES_NO_RUNTIME_GRANT")
     if state["provider_send_grants"] or state["unknown_requests"]:
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
-    if args.case_id == "E07-D" and not (
-        state.get("delivery_status") == "ACKNOWLEDGED"
-        and state.get("receiver_http_status") == 202
-        and state.get("receiver_status") == "QUEUED"
-        and state.get("delivery_event_id") == E07_EVENT_ID
-        and state.get("receiver_event_id") == E07_EVENT_ID
-    ):
-        raise EvaluationPreflightError("E07_TRUSTED_FIXTURE_MISMATCH")
-    return {
+    mismatch = _s3_fixture_mismatch(args.case_id, state)
+    if mismatch:
+        raise EvaluationPreflightError(mismatch)
+    result = {
         "status": "OFFLINE_READY",
         "case_id": args.case_id,
         "runtime_name": args.runtime_name,
@@ -622,6 +835,13 @@ def _case_preflight_cli(args: argparse.Namespace) -> dict[str, Any]:
         "delivery_status": state.get("delivery_status"),
         "receiver_status": state.get("receiver_status"),
     }
+    fixture_summary = _s3_fixture_summary(args.case_id, state)
+    if fixture_summary is not None:
+        result["s3_fixture"] = fixture_summary
+    if args.case_id in EXPLORATORY_CASE_SOURCES:
+        result["experiment_class"] = "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE"
+        result["source_question_case_id"] = EXPLORATORY_CASE_SOURCES[args.case_id]
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -653,14 +873,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "prepare":
             runtime_dir = initialize_case_runtime(args.case_id, args.runtime_name)
             state = inspect_case_runtime(args.case_id, args.runtime_name)
-            print(json.dumps({
+            result = {
                 "status": "ISOLATED_RUNTIME_CREATED",
+                "case_id": args.case_id,
                 "runtime_name": args.runtime_name,
                 "runtime_dir": str(runtime_dir),
                 "fresh": state["fresh"],
                 "runtime_grant_present": state["runtime_grant_present"],
                 "provider_requests": 0,
-            }, ensure_ascii=False))
+            }
+            if args.case_id in EXPLORATORY_CASE_SOURCES:
+                result["experiment_class"] = "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE"
+                result["source_question_case_id"] = EXPLORATORY_CASE_SOURCES[args.case_id]
+            print(json.dumps(result, ensure_ascii=False))
             return 0
         if args.command == "preflight" and args.mode == "offline":
             print(json.dumps(_case_preflight_cli(args), ensure_ascii=False))

@@ -1,0 +1,39 @@
+R2-AR06-OBSERVATION-CONTRAST-01 offline verification
+Date: 2026-11-14
+Base: f4d106b35e75b8eb654b6a508cfe807579c59fed
+Worktree: D:\OpsPilot-LIVE-02-FIX-01-HF02
+Provider requests: 0
+Runtime Grants created: 0
+User Demo runtime initialized in the repository .runtime: no
+
+Final command (PowerShell):
+
+  $base = Join-Path (Resolve-Path '.runtime') 'pytest-observation-contrast-20261114-9a72'
+  if (Test-Path -LiteralPath $base) { throw 'Refusing to reuse existing pytest basetemp.' }
+  python -m py_compile scripts/user-demo/run_r2_ar06_case.py tests/test_r2_ar06_auto_live_eval.py
+  python -m pytest -q -p no:cacheprovider --basetemp $base tests/test_r2_ar06_auto_live_eval.py tests/test_user_demo_setup.py
+
+Final result:
+
+  .......................                                                  [100%]
+  23 passed in 34.38s
+
+Coverage includes:
+
+- Existing E02/E05/E06/E07 Runner cases and frozen-input handling.
+- Isolated initialization and read-only validation of the processed target Event and queued decoy Event.
+- Live Preflight reserve/cap behavior for the exploratory case, using a mocked grant preflight and loopback health response; no real Grant was provisioned and no API process was started.
+- Formal Assistant API fixture execution, TaskBinding target order inspection, exact E07 user text, no Rubric/Gold fields in the actual Fixture Model prompt, and current-Run target Receiver Observation linkage.
+- Negative audit where a decoy Event and a matching target Observation from another Run do not support a target PROCESSED conclusion.
+- Existing S3 fixture setup and Support TaskBinding API regressions.
+
+RED / harness correction history:
+
+1. First targeted attempt: 3 failed, 19 passed in 26.59s. Two failures were caused by the test helper generating a Runtime alias beyond the existing safe-name length; one was caused by synthetic Observation fixtures omitting Tenant data. No Runtime alias rule was relaxed.
+2. Intermediate rerun: 22 passed in 32.49s.
+3. After tightening the audit to require Tenant consistency in both the Observation envelope and facts, an intermediate run had 1 failed, 22 passed because the negative synthetic Observation omitted facts.tenant_id. The fixture was corrected to match the actual Trace schema.
+4. Final run after the Live Preflight variant, read-only TaskBinding audit, and explicit exploratory output labels: 23 passed in 34.38s.
+
+The tests used pytest-created isolated directories under .runtime/pytest-observation-contrast-20261114-9a72; application fixtures were created under each pytest tmp_path/repo/.runtime. No existing LIVE-02 Domain DB, Checkpoint, Runtime Grant, Spend ledger, or saved Trace was opened for writes. The pre-existing E07-D trace was read only.
+
+Not run: real DeepSeek, Runtime Grant creation, managed Live API/Worker/Vue startup, browser automation, production MCP server, external business write, or controlled submit.

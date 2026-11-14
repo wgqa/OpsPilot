@@ -19,6 +19,9 @@ sys.path.insert(0, str(ROOT / "tests"))
 from opspilot.web.app import create_app  # noqa: E402
 from run_r2_ar06_case import (  # noqa: E402
     E07_EVENT_ID,
+    OBSERVATION_CONTRAST_CASE_ID,
+    OBSERVATION_CONTRAST_DECOY_EVENT_ID,
+    OBSERVATION_CONTRAST_TARGET_EVENT_ID,
     EvaluationPreflightError,
     initialize_case_runtime,
     execute_case,
@@ -26,6 +29,9 @@ from run_r2_ar06_case import (  # noqa: E402
     live_preflight,
     load_frozen_case,
     main,
+    _case_preflight_cli,
+    _observation_contrast_audit,
+    _s3_fixture_mismatch,
     _manifest_matches,
 )
 from test_r2_ar03_integrated_journey_01 import IntegratedJourneyFixtureModel  # noqa: E402
@@ -77,7 +83,8 @@ class HoldoutRouteFixtureModel(BaseChatModel):
 def _runtime(tmp_path: Path, case_id: str):
     root = tmp_path / "repo"
     (root / ".runtime").mkdir(parents=True)
-    name = f"user-demo-{case_id.lower().replace('-', '')}-fixture"
+    suffix = "obscontrast" if case_id == OBSERVATION_CONTRAST_CASE_ID else case_id.lower().replace("-", "")
+    name = f"user-demo-{suffix}-fixture"
     runtime = initialize_case_runtime(case_id, name, root=root)
     return root, name, runtime
 
@@ -146,6 +153,140 @@ def test_prepare_e07_runtime_keeps_the_frozen_same_event_queued_fixture(tmp_path
     assert state["provider_send_grants"] == state["unknown_requests"] == 0
 
 
+def test_observation_contrast_prepares_processed_target_and_distinct_queued_decoy(tmp_path):
+    root, name, _runtime_dir = _runtime(tmp_path, OBSERVATION_CONTRAST_CASE_ID)
+    state = inspect_case_runtime(OBSERVATION_CONTRAST_CASE_ID, name, root=root)
+    assert state["fresh"] is True
+    assert state["runtime_grant_present"] is False
+    assert state["provider_send_grants"] == state["unknown_requests"] == 0
+    assert state["s3_order_id"] == "async-order"
+    assert state["decoy_order_id"] == "async-order-decoy"
+    assert state["delivery_status"] == state["decoy_delivery_status"] == "ACKNOWLEDGED"
+    assert state["receiver_http_status"] == state["decoy_receiver_http_status"] == 202
+    assert state["receiver_status"] == "PROCESSED"
+    assert state["delivery_event_id"] == state["receiver_event_id"] == OBSERVATION_CONTRAST_TARGET_EVENT_ID
+    assert state["decoy_receiver_status"] == "QUEUED"
+    assert state["decoy_delivery_event_id"] == state["decoy_receiver_event_id"] == OBSERVATION_CONTRAST_DECOY_EVENT_ID
+    assert state["delivery_event_id"] != state["decoy_delivery_event_id"]
+    assert _s3_fixture_mismatch(OBSERVATION_CONTRAST_CASE_ID, state) is None
+    assert _case_preflight_cli(type("Args", (), {
+        "case_id": OBSERVATION_CONTRAST_CASE_ID, "runtime_name": name,
+    })(), root=root)["s3_fixture"] == {
+        "target_order_id": "async-order",
+        "target_event_id": OBSERVATION_CONTRAST_TARGET_EVENT_ID,
+        "target_delivery_status": "ACKNOWLEDGED",
+        "target_receiver_status": "PROCESSED",
+        "decoy_order_id": "async-order-decoy",
+        "decoy_event_id": OBSERVATION_CONTRAST_DECOY_EVENT_ID,
+        "decoy_delivery_status": "ACKNOWLEDGED",
+        "decoy_receiver_status": "QUEUED",
+    }
+    mismatched = dict(state, decoy_receiver_event_id=state["delivery_event_id"])
+    assert _s3_fixture_mismatch(OBSERVATION_CONTRAST_CASE_ID, mismatched) == "OBSERVATION_CONTRAST_FIXTURE_MISMATCH"
+
+
+def test_observation_contrast_uses_exact_e07_question_and_is_not_a_frozen_gold_case():
+    case = load_frozen_case(OBSERVATION_CONTRAST_CASE_ID)
+    assert case["user_turns"] == load_frozen_case("E07-D")["user_turns"]
+    assert case["source_case_id"] == "E07-D"
+    assert case["split"] == "EXPLORATORY"
+    assert case["experiment_class"] == "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE"
+    assert "expected_user_outcome" not in case
+    assert "forbidden" not in case
+
+
+def test_observation_contrast_executes_fixture_through_formal_order_api_and_audits_current_target_observation(
+    tmp_path,
+):
+    root, name, runtime = _runtime(tmp_path, OBSERVATION_CONTRAST_CASE_ID)
+    result, model = _run_fixture_case(root, name, runtime, OBSERVATION_CONTRAST_CASE_ID)
+    trace = json.loads(Path(result["trace_path"]).read_text(encoding="utf-8"))
+    case = load_frozen_case(OBSERVATION_CONTRAST_CASE_ID)
+    from opspilot.domain.database import connect
+    from opspilot.domain.s3 import get_s3_binding
+
+    with connect(runtime / "domain.sqlite3") as connection:
+        binding = get_s3_binding(connection, result["task_id"])
+    assert binding["order_id"] == "async-order"
+    user_messages = [row for row in trace["messages"] if row["role"] == "USER"]
+    assert [row["body"] for row in user_messages] == case["user_turns"]
+    assert result["run_status"] == "SUCCEEDED"
+    assert result["assessment_status"] == "UNVERIFIED"
+    assert result["split"] == "EXPLORATORY"
+    assert result["experiment_class"] == "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE"
+    assert result["source_question_case_id"] == "E07-D"
+    assert result["task_id"]
+    assert result["provider_send_grants"] == 0
+    assert result["fixture_model_dispatches"] == len(model.seen)
+    assert result["task_binding_scope"]["tenant_id"] == "tenant-a"
+    assert result["task_binding_scope"]["actor_id"] == "support-a"
+    assert result["task_binding_scope"]["order_id"] == "async-order"
+    assert result["observation_contrast"]["task_binding_id"] == result["task_id"]
+    assert result["observation_contrast"]["target_event_id"] == OBSERVATION_CONTRAST_TARGET_EVENT_ID
+    assert result["observation_contrast"]["decoy_event_id"] == OBSERVATION_CONTRAST_DECOY_EVENT_ID
+    assert result["observation_contrast"]["supports_target_processed_conclusion"] is True
+    current = result["observation_contrast"]["current_run_task_scoped_receiver_observations"]
+    assert current
+    assert {row["run_id"] for row in current} == {result["run_id"]}
+    assert {row["task_id"] for row in current} == {result["task_id"]}
+    assert {row["event_id"] for row in current} == {OBSERVATION_CONTRAST_TARGET_EVENT_ID}
+    assert {row["receiver_status"] for row in current} == {"PROCESSED"}
+    assert {row["evidence_id"] for row in current}
+    prompts = "\n".join(str(message.content) for request in model.seen for message in request)
+    assert case["user_turns"][0] in prompts
+    for rubric_field in ("expected_user_outcome", "acceptable_decisions", "required_evidence", "forbidden", "independent_scoring"):
+        assert rubric_field not in prompts
+    assert "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE" not in prompts
+    assert case["gold_sha256"] not in prompts
+
+
+def test_observation_contrast_does_not_accept_decoy_or_other_run_receiver_observation():
+    fixture = {
+        "task_id": "task-target",
+        "call_id": "call-target",
+        "status": "OK",
+        "evidence_id": "evidence-target",
+        "result_json": {
+            "fact_type": "s3_receiver",
+            "tenant_id": "tenant-a",
+            "facts": {
+                "tenant_id": "tenant-a",
+                "order_id": "async-order-decoy",
+                "event_id": OBSERVATION_CONTRAST_DECOY_EVENT_ID,
+                "status": "PROCESSED",
+            },
+            "original_result_ref": "s3://decoy/v1",
+        },
+    }
+    historical_target = {
+        "task_id": "task-target",
+        "call_id": "call-historical",
+        "status": "OK",
+        "evidence_id": "evidence-old",
+        "result_json": {
+            "fact_type": "s3_receiver",
+            "tenant_id": "tenant-a",
+            "facts": {
+                "tenant_id": "tenant-a",
+                "order_id": "async-order",
+                "event_id": OBSERVATION_CONTRAST_TARGET_EVENT_ID,
+                "status": "PROCESSED",
+            },
+            "original_result_ref": "s3://target/old",
+        },
+    }
+    audit = _observation_contrast_audit({
+        "assistant_calls_actual_model_input_output": [
+            {"call_id": "call-target", "run_id": "run-current", "kind": "MCP", "status": "OK"},
+            {"call_id": "call-historical", "run_id": "run-old", "kind": "MCP", "status": "OK"},
+        ],
+        "observations": [fixture, historical_target],
+    }, run_id="run-current", task_id="task-target")
+    assert audit["supports_target_processed_conclusion"] is False
+    assert audit["target_receiver_observation_ids"] == []
+    assert len(audit["current_run_task_scoped_receiver_observations"]) == 1
+
+
 def test_live_manifest_must_prove_selected_runtime_and_live_mode(tmp_path):
     root = tmp_path / "repo"
     runtime = root / ".runtime" / "user-demo-e05-live"
@@ -169,10 +310,11 @@ def test_live_manifest_must_prove_selected_runtime_and_live_mode(tmp_path):
     assert _manifest_matches("user-demo-e05-live", runtime, root)["mode"] == "Live"
 
 
-def test_live_preflight_checks_eight_request_reserve_without_creating_grant(tmp_path, monkeypatch):
+@pytest.mark.parametrize("case_id", ["E05-D", OBSERVATION_CONTRAST_CASE_ID])
+def test_live_preflight_checks_eight_request_reserve_without_creating_grant(tmp_path, monkeypatch, case_id):
     import runtime_admin
 
-    root, name, runtime = _runtime(tmp_path, "E05-D")
+    root, name, runtime = _runtime(tmp_path, case_id)
     manifest = {
         "root": str(root),
         "runtimeName": name,
@@ -207,14 +349,19 @@ def test_live_preflight_checks_eight_request_reserve_without_creating_grant(tmp_
 
     client = HealthClient()
     result = live_preflight(
-        "E05-D", name, authorized_max_cost_usd="0.05",
+        case_id, name, authorized_max_cost_usd="0.05",
         root=root, client=client,
     )
     assert result["maximum_provider_dispatches_per_run"] == 8
     assert result["worst_case_run_reserve_usd_micro"] == 48_464
     assert result["provider_requests_so_far"] == 0
     assert client.called is True
-    state = inspect_case_runtime("E05-D", name, root=root)
+    if case_id == OBSERVATION_CONTRAST_CASE_ID:
+        assert result["s3_fixture"]["target_event_id"] == OBSERVATION_CONTRAST_TARGET_EVENT_ID
+        assert result["s3_fixture"]["target_receiver_status"] == "PROCESSED"
+        assert result["s3_fixture"]["decoy_event_id"] == OBSERVATION_CONTRAST_DECOY_EVENT_ID
+        assert result["s3_fixture"]["decoy_receiver_status"] == "QUEUED"
+    state = inspect_case_runtime(case_id, name, root=root)
     assert state["runtime_grant_present"] is False
     assert state["provider_send_grants"] == 0
 
