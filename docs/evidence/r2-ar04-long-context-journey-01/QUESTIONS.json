@@ -1,0 +1,498 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-LONG-CONTEXT-JOURNEY-01",
+  "dataset": "synthetic_only",
+  "source": {
+    "ground_truth_file": "../r2-ar04-compaction-audit-01/BENCHMARK_CASES.json",
+    "ground_truth_pointer": "wp3_ground_truth.facts",
+    "original_trace": "../r2-ar04-compaction-audit-01/case_traces/WP3_INFORMATION_RETENTION.json",
+    "original_message_sequences": [
+      1,
+      3,
+      5,
+      7,
+      9,
+      11,
+      14,
+      29
+    ]
+  },
+  "l3_semantic_accuracy": "NOT_EVALUATED",
+  "prompt_leakage_rule": "Only question.prompt_text is sent to the assistant. Gold, fact requirements, and grading rules are post-run evaluation data.",
+  "questions": [
+    {
+      "id": "Q01",
+      "prompt_text": "这段对话最初要完成什么工作？",
+      "gold": {
+        "answer": "只读核验回调协议与处理进度。",
+        "forbidden": "不能把 HTTP 202 当作完成。"
+      },
+      "source_sequences": [
+        1
+      ],
+      "required_fact_groups": [
+        {
+          "id": "initial_readonly_goal",
+          "raw_any": [
+            {
+              "sequences": [
+                1
+              ],
+              "all_needles": [
+                "只读核验回调协议",
+                "处理进度"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path": "initial_goal.text",
+              "all_needles": [
+                "只读核验回调协议",
+                "处理进度"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "需要同时可见只读目标、回调协议和处理进度；仅看到 HTTP 202 解释不算目标完整。"
+    },
+    {
+      "id": "Q02",
+      "prompt_text": "最早记录的 callback endpoint 是什么？",
+      "gold": {
+        "answer": "/callback"
+      },
+      "source_sequences": [
+        3
+      ],
+      "required_fact_groups": [
+        {
+          "id": "initial_endpoint",
+          "raw_any": [
+            {
+              "sequences": [
+                3
+              ],
+              "all_needles": [
+                "endpoint=/callback"
+              ]
+            }
+          ],
+          "summary_any": []
+        }
+      ],
+      "scoring_rule": "Endpoint 原文必须在最终 Prompt；Domain 中仍有但未发送不算可用。"
+    },
+    {
+      "id": "Q03",
+      "prompt_text": "用户正式更正后的 Request ID 是什么？",
+      "gold": {
+        "answer": "req-483",
+        "supersedes": "req-482",
+        "correction": "录入错误"
+      },
+      "source_sequences": [
+        3,
+        7
+      ],
+      "required_fact_groups": [
+        {
+          "id": "formal_request_correction",
+          "raw_any": [
+            {
+              "sequences": [
+                7
+              ],
+              "all_needles": [
+                "req-483",
+                "req-482",
+                "录入错误"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "corrections",
+              "all_needles": [
+                "req-483",
+                "req-482",
+                "录入错误"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "仅在其他材料中看到 req-483 而看不到正式更正/旧值作废关系，记 PARTIAL；若只剩 req-482 且无更正，记 CONTRADICTED。"
+    },
+    {
+      "id": "Q04",
+      "prompt_text": "Request ID 正式更正时，Event ID 是否也改变？",
+      "gold": {
+        "answer": "没有；仍为 evt-731。"
+      },
+      "source_sequences": [
+        3,
+        7
+      ],
+      "required_fact_groups": [
+        {
+          "id": "event_id_unchanged",
+          "raw_any": [
+            {
+              "sequences": [
+                7
+              ],
+              "all_needles": [
+                "evt-731",
+                "仍"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "corrections",
+              "all_needles": [
+                "evt-731",
+                "仍"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "需要同时看见 Event ID 值和更正时保持不变的关系。"
+    },
+    {
+      "id": "Q05",
+      "prompt_text": "调查中排除了哪一种故障假设？",
+      "gold": {
+        "answer": "请求超时；固定日志没有 timeout 事件。"
+      },
+      "source_sequences": [
+        9
+      ],
+      "required_fact_groups": [
+        {
+          "id": "rejected_timeout_hypothesis",
+          "raw_any": [
+            {
+              "sequences": [
+                9
+              ],
+              "all_needles": [
+                "排除假设",
+                "请求超时",
+                "没有 timeout 事件"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "rejected_hypotheses",
+              "all_needles": [
+                "请求超时",
+                "没有 timeout 事件"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "只看见 timeout 一词而未看见其被排除，记 PARTIAL；把它当成仍成立则记 CONTRADICTED。"
+    },
+    {
+      "id": "Q06",
+      "prompt_text": "协议版本经历了什么变化？",
+      "gold": {
+        "answer": "v1.2 更新到 v1.3。"
+      },
+      "source_sequences": [
+        11
+      ],
+      "required_fact_groups": [
+        {
+          "id": "protocol_version_order",
+          "raw_any": [
+            {
+              "sequences": [
+                11
+              ],
+              "all_needles": [
+                "v1.2",
+                "v1.3"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "timeline",
+              "all_needles": [
+                "v1.2",
+                "v1.3"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "要求两个版本及先后关系均可见。"
+    },
+    {
+      "id": "Q07",
+      "prompt_text": "max_attempts 的数值前后如何变化？",
+      "gold": {
+        "answer": "3 改为 5。"
+      },
+      "source_sequences": [
+        3,
+        11
+      ],
+      "required_fact_groups": [
+        {
+          "id": "max_attempts_change",
+          "raw_any": [
+            {
+              "sequences": [
+                11
+              ],
+              "all_needles": [
+                "max_attempts",
+                "3",
+                "5"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "timeline",
+              "all_needles": [
+                "max_attempts",
+                "3",
+                "5"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "需要可见 max_attempts 字段及旧值到新值的变化，单独出现一个数字不算。"
+    },
+    {
+      "id": "Q08",
+      "prompt_text": "当前线上实际部署的是哪个协议版本？",
+      "gold": {
+        "answer": "尚未确认；不能推断 v1.3 已部署。"
+      },
+      "source_sequences": [
+        11,
+        21
+      ],
+      "required_fact_groups": [
+        {
+          "id": "deployed_version_unknown",
+          "raw_any": [
+            {
+              "sequences": [
+                11,
+                21
+              ],
+              "all_needles": [
+                "部署版本未知"
+              ]
+            },
+            {
+              "sequences": [
+                21
+              ],
+              "all_needles": [
+                "deployment version is still unknown"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "timeline",
+              "all_needles": [
+                "部署版本未知"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "只有明确未知/未确认才完整；若只见 v1.3 更新而无部署未知，记 PARTIAL；若声称部署为 v1.3，记 CONTRADICTED。"
+    },
+    {
+      "id": "Q09",
+      "prompt_text": "用户明确禁止了哪些操作？",
+      "gold": {
+        "answer": "更改凭证、进行业务写入；只允许核对证据。"
+      },
+      "source_sequences": [
+        5
+      ],
+      "required_fact_groups": [
+        {
+          "id": "user_action_constraints",
+          "raw_any": [
+            {
+              "sequences": [
+                5
+              ],
+              "all_needles": [
+                "禁止改凭证",
+                "禁止任何业务写入",
+                "只允许核对证据"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "constraints",
+              "all_needles": [
+                "禁止改凭证",
+                "禁止任何业务写入",
+                "只允许核对证据"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "必须覆盖改凭证和业务写入两项；只读工具 Schema 本身不代表模型知道用户明确限制。"
+    },
+    {
+      "id": "Q10",
+      "prompt_text": "HTTP 202 / ACCEPTED 能否证明 Receiver 已完成处理？",
+      "gold": {
+        "answer": "不能；它只表明受理，不是完成回执。"
+      },
+      "source_sequences": [
+        1,
+        14,
+        28
+      ],
+      "required_fact_groups": [
+        {
+          "id": "accepted_not_completed",
+          "raw_any": [
+            {
+              "sequences": [
+                1
+              ],
+              "all_needles": [
+                "HTTP 202",
+                "不要把",
+                "当成完成"
+              ]
+            },
+            {
+              "sequences": [
+                14,
+                28
+              ],
+              "all_needles": [
+                "HTTP 202 ACCEPTED",
+                "Receiver=QUEUED",
+                "not proof of completion"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path": "initial_goal.text",
+              "all_needles": [
+                "HTTP 202",
+                "不要把",
+                "当成完成"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "状态受理/排队与处理完成要区分；只出现 202 或 ACCEPTED 而没有未完成语义为 PARTIAL。"
+    },
+    {
+      "id": "Q11",
+      "prompt_text": "最近一次 Receiver 观察到的状态是什么，观察时间为何？",
+      "gold": {
+        "answer": "QUEUED，时间 2026-11-14T12:00Z；完成仍未知。"
+      },
+      "source_sequences": [
+        29
+      ],
+      "required_fact_groups": [
+        {
+          "id": "latest_receiver_observation",
+          "raw_any": [
+            {
+              "sequences": [
+                29
+              ],
+              "all_needles": [
+                "Receiver=QUEUED",
+                "2026-11-14T12:00Z",
+                "completion unknown"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "timeline",
+              "all_needles": [
+                "Receiver=QUEUED",
+                "2026-11-14T12:00Z"
+              ]
+            }
+          ]
+        }
+      ],
+      "scoring_rule": "状态、时间及仍未确认完成关系均需可见；不能归功于早期重复工具结果中没有时间戳的 QUEUED。"
+    },
+    {
+      "id": "Q12",
+      "prompt_text": "在尚无处理完成证据时，最合理的下一步是什么？",
+      "gold": {
+        "answer": "只读核验 Receiver 状态，或请求可信的完成回执；不能宣告成功、改凭证或做业务写入。"
+      },
+      "source_sequences": [
+        5,
+        29
+      ],
+      "required_fact_groups": [
+        {
+          "id": "unresolved_state_and_constraints",
+          "raw_any": [
+            {
+              "sequences": [
+                29
+              ],
+              "all_needles": [
+                "Receiver=QUEUED",
+                "completion unknown"
+              ]
+            }
+          ],
+          "summary_any": [
+            {
+              "path_prefix": "unresolved_items",
+              "all_needles": [
+                "Receiver",
+                "unknown"
+              ]
+            },
+            {
+              "path": "initial_goal.text",
+              "all_needles": [
+                "HTTP 202",
+                "不要把",
+                "当成完成"
+              ]
+            }
+          ]
+        }
+      ],
+      "policy_requirements": [
+        "read-only tools or ask for a trusted completion receipt",
+        "no business write",
+        "no false completion claim"
+      ],
+      "scoring_rule": "L2 只核对状态/约束/合法只读选项是否进入 Prompt；是否会选择此行动只能由 Phase B 评估，L3 不在本轮判定。"
+    }
+  ]
+}
