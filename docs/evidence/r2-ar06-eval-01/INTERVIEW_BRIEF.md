@@ -50,11 +50,11 @@ R2 Phase A 发现 S2 pytest 测试漏断言前置 Assistant Run 状态。隔离 
 
 ### 9. 样本与真实模型请求有多少？结论适用于什么范围？
 
-冻结集 12 例，Phase A 离线工程覆盖 6/12 PASS、3 PARTIAL、3 NOT_RUN；只有 1/12 冻结输入精确且独立执行，H 独立执行 0/6。另 3/4 安全负例通过，N04 未验证。真实 Provider 请求 0，因此本轮不支持真实模型成功率、Token 成本或质量推断。AR-03、AR-04C 等历史真实模型失败按各自 Base、模型、费用和 Trace 独立引用，不能合并成一个成功率。
+冻结集 12 例，Phase A 离线工程覆盖 6/12 PASS、3 PARTIAL、3 NOT_RUN；只有 1/12 冻结输入精确且独立执行，H 独立执行 0/6。另 3/4 安全负例通过，N04 未验证。Phase A 的真实 Provider 请求为 0。后续首批真实模型记录覆盖 E01-D、E05-D、E07-D 三个开发集案例，共 4 次 Provider 请求；E01 是历史首次尝试，本轮没有重跑。E01/E05 候选为 PASS，E07 候选为 PARTIAL，不能据此估算全量成功率或泛化性能。AR-03、AR-04C 等历史真实模型失败按各自 Base、模型、费用和 Trace 独立引用，不能合并成一个成功率。
 
 ### 10. 如何准备下一轮真实模型评测？
 
-先冻结每个案例实际发送的逐字输入、附件和可信初态；每例使用新的隔离 Domain/Checkpoint，不继承旧 Session、Memory、Grant 或费用账本。保持候选 SHA、模型/配置、Knowledge、Tool Schema 和预算可追溯，每例只记录首次结果，失败不选择性重跑。Provider Usage 与 MCP/Observation 从真实 Trace 和账本读取；用冻结 Rubric 分别评分来源、决策和业务 Outcome，`Run=SUCCEEDED` 不等于 PASS。只有 D/H 均有独立执行、权限和事实匹配时才报告模型结果；缺样本就写明限制。
+首批 E05-D/E07-D 已按冻结输入在独立 Domain/Checkpoint 和各自 USD 0.05 Grant 下执行；费用、真实 Usage、MCP 与 Observation 已从账本/Trace 记录。E07 的模型回答正确区分 202 与 QUEUED，但有一条没有来源支持的 Event ID 扩展说法，因此候选为 PARTIAL。后续案例仍需独立授权、全新隔离初态，失败或 UNKNOWN 不重提。Provider Usage 与 MCP/Observation 从真实 Trace 和账本读取；用冻结 Rubric 分别评分来源、决策和业务 Outcome，`Run=SUCCEEDED` 不等于 PASS。仅三个 D 案例、没有 H 留出，不能声称泛化或模型成功率。
 
 ## 可复现材料
 
@@ -64,3 +64,11 @@ R2 Phase A 发现 S2 pytest 测试漏断言前置 Assistant Run 状态。隔离 
 - [冻结案例](CASES.json)、[Rubric](RUBRIC.json)、[执行协议](EVAL_PROTOCOL.md)
 - [逐次运行 JSONL](runs/RUNS.jsonl)、[聚合结果](RESULTS.json)
 - [E11 失败诊断](runs/E11_S2_ASSISTANT_FIXTURE_FAILURE.json)
+
+## 首批真实模型结果（R2-AR06-LIVE-EXEC-01）
+
+E01-D 的历史真实首次回答未重跑；E05-D 与 E07-D 分别在独立 Runtime 中执行一次。合计 3 个开发集案例、4 次 Provider 请求、14,245 Token、USD 0.005708 应用账本费用（其中本轮新调用 USD 0.004372）。H 留出运行数为 0。样本不足以计算基准成功率、成本分位数或泛化能力。
+
+E05-D 按“已知、推断、未知”分析 JSON 与 503 日志，没有把用户材料提升为线上事实，候选 PASS。E07-D 自主读取订单状态、Delivery 与 Receiver，正确说明订单完成不代表回调处理完成，HTTP 202 是已接收而 Receiver 仍 `QUEUED`；回答另外称订单 Observation 也具有相同 Event ID，但该 Observation 实际没有 `event_id` 字段，因此候选 PARTIAL，等待主 Agent 复核。
+
+可检查[结构化结果](LIVE_RESULTS.json)、[真实评测报告](LIVE_EVAL_REPORT.md)和[逐案 Trace 索引](CASE_TRACE_INDEX.md)。脱敏 Trace 与 Runner 结果副本位于 `runs/LIVE_*`，各自 SHA 与本地 Runtime 原件匹配。
