@@ -16,7 +16,7 @@
 | `AGENTS.md` Blob at Base | `807b928686a4dd2cac7b15b3c354b9943c93c910` |
 | Review Skill Blob at Base | `.agents/skills/opspilot-slice-review/SKILL.md` — `d405c8d413d633824b279202cc1503dab4cf0b03` |
 | Candidate start | Clean at Base, except pre-existing untracked `.pytest-tmp/` (preserved) |
-| Remote Base/main/target refs | `UNVERIFIED`: `git ls-remote` did not return; it was interrupted. No remote ref is guessed. |
+| Remote refs | Initial preflight `git ls-remote` did not return and was interrupted. After the first candidate push, refs were verified: `origin/main` `60eee87bfe3cca522011316cb4cd2c0064ad291b`; Base branch `origin/codex/r2-ar04-live-semantic-pilot-01` `e6db85e17681a9aa6f6bf6e8b1b01bdef400c49e`; candidate first-push SHA `3a5b98d5d95eb2fec3efb7453a47e7e2b08af273`. |
 
 The target Base's North Star, AGENTS instructions, Review Skill, applicable runtime/context contracts, deferred gates and previous live-pilot evidence were opened and checked. Recorded contract/evidence Blobs: `vNext-product-baseline-candidate.md` `52323facbebc6e466f226c87bc67a3b9004a7bc4`; `ACCESS_MATRIX.md` `9d62359c3a97a2fe78678b178889288e551b3d7c`; `STATE_TRANSITIONS.md` `cb34e6402cf3ce795260414b9b652f31b49f4de1`; M2-01 deferred gates `2e65870acb26a7c1383fdd96b5b8619748dda6b9`; M2-02 deferred gates `2536030b5b942bf9e3765e0916607549fa919934`; Runtime Grant prior report `dcd228603d9f1e603346021feb1c760e500f2ce7` and HF01 report `794b88cc071467d068f200607eb6e21ec44e819d`; previous pilot `RESULTS.json` Blob `96ac4ed32c68dada1dd506d62e2e948a84e2a23b`.
 
