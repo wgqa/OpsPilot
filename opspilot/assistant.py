@@ -951,6 +951,13 @@ def _assert_stream_completion(aggregate, final):
 def _assistant_failure_notice(error: BaseException) -> str | None:
     """Describe provider dispatch outcomes without confusing known usage with UNKNOWN."""
     code = getattr(error, "_opspilot_failure_code", None) or getattr(error, "code", None)
+    if code == "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET":
+        return (
+            "当前会话中有一段较长的历史材料，超过了安全摘要输入预算，本轮暂时无法完成回答。"
+            "系统保留了原始消息，没有将这段材料静默删减、截断或改写；本轮未生成模型答复。"
+            "你可以在新会话中分段提供所需资料后继续。"
+            "本提示由程序生成，不代表模型已完成调查或任何业务处理。"
+        )
     if code == "ASSISTANT_PROVIDER_NOT_SENT":
         return "模型请求未越过发送授权边界，本次没有发送 Provider 请求，解释未完成；系统不会自动重试。"
     if code == "ASSISTANT_PROVIDER_RESPONSE_PROCESSING_FAILED":
@@ -2913,7 +2920,18 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             reserved_tokens=base_reserved,runtime_grant_binding=runtime_grant_binding,
             worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
         )
-        _,probe_payload=probe.context()
+        try:
+            _,probe_payload=probe.context()
+        except ContextBudgetExceeded as error:
+            reason=error.code
+            failure=_close_terminal_assistant_failure(path,worker_id,run_id,error,reason)
+            trace(
+                'stopped',reason=reason,status=failure.get('status'),
+                error_class=type(error).__name__,phase='INITIAL_CONTEXT_PREFLIGHT',
+                required_tokens=error.required_tokens,
+                input_budget_tokens=error.input_budget_tokens,
+            )
+            return {'status':'NOT_COMPLETED','reason':reason}
         reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(domain.source_context_for_model(probe_payload)))+4
         if specs:
             reserved_tokens+=ASSISTANT_TOOL_RESULT_RESERVE

@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-COMPACTION-C06-HF-01",
+  "base_sha": "d3f197f7ddbfb41e9d35c83a3b6cb5352f1e57d0",
+  "evidence_levels": {
+    "primary": "FIXTURE_OFFLINE_ACTUAL_DOMAIN_API_AND_WORKER",
+    "mocked_case": "MOCK_INJECTED_PRECHECK_EXCEPTION",
+    "live_provider_or_external_service": "NOT_RUN"
+  },
+  "pre_fix_red": {
+    "evidence_file": "RED_REPRO.txt",
+    "trace_file": "RED_REPRO_TRACE.json",
+    "run_status": "FAILED",
+    "reason": "WORKER_RUN_FAILED",
+    "internal_error": "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET",
+    "required_tokens": 6176,
+    "compression_input_budget_tokens": 6000,
+    "target_run_model_calls": 0,
+    "target_run_compression_attempts": 0,
+    "target_run_answers": 0,
+    "program_notice_messages": 0,
+    "first_user_body_digest": "289865aa0634a87f4391ae65cf4a68d07a3e1ab9fdb02e4f6699db758e090f78"
+  },
+  "cases": [
+    {
+      "id": "T01",
+      "status": "PASS",
+      "evidence_level": "FIXTURE_OFFLINE_ACTUAL_DOMAIN_API_AND_WORKER",
+      "run_status": "FAILED",
+      "reason": "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET",
+      "required_tokens": 6176,
+      "compression_input_budget_tokens": 6000,
+      "first_user_body_characters": 9352,
+      "first_user_body_digest_matches_frozen_trace": true,
+      "target_run_model_calls": 0,
+      "target_run_assistant_calls": 0,
+      "target_run_compression_attempts": 0,
+      "target_run_answers": 0,
+      "delivery_attempt": null,
+      "program_notice_count": 1,
+      "failed_status_event_count": 1,
+      "notice_event_count": 1
+    },
+    {
+      "id": "T02",
+      "status": "PASS",
+      "evidence_level": "FIXTURE_OFFLINE_ACTUAL_API_PLUS_DETERMINISTIC_TEXT_ASSERTIONS",
+      "observable_via": "GET /api/runs/{run_id} and GET /api/sessions/{session_id}/messages",
+      "answer_kind": "PROGRAM_LIMIT",
+      "notice_count": 1,
+      "notice_checks": [
+        "程序生成",
+        "安全摘要输入预算",
+        "本轮未生成模型答复",
+        "原始消息",
+        "静默删减",
+        "不代表模型已完成调查或任何业务处理"
+      ],
+      "model_generated": false
+    },
+    {
+      "id": "T03",
+      "status": "PASS",
+      "evidence_level": "FIXTURE_OFFLINE_ACTUAL_DOMAIN_IDEMPOTENCY_ASSERTIONS",
+      "repeat_closeout": "same Run closed again with the same ContextBudgetExceeded code",
+      "program_notice_count_after_repeat": 1,
+      "notice_event_count_after_repeat": 1,
+      "failed_status_event_count_after_repeat": 1,
+      "business_writes": 0
+    },
+    {
+      "id": "T04",
+      "status": "PASS",
+      "evidence_level": "AUDIT_FIXTURE_MODEL_AND_ACTUAL_DOMAIN_COMPRESSION",
+      "run_status": "SUCCEEDED",
+      "compression_attempts": 2,
+      "compression_statuses": [
+        "SUCCEEDED",
+        "SUCCEEDED"
+      ],
+      "fixture_model_calls": 3,
+      "answers": 1,
+      "frozen_long_assistant_message_digest_preserved": true
+    },
+    {
+      "id": "T05",
+      "status": "PASS",
+      "evidence_level": "AUDIT_FIXTURE_MODEL_AND_ACTUAL_DOMAIN_CHAT",
+      "run_status": "SUCCEEDED",
+      "fixture_model_calls": 1,
+      "compression_attempts": 0,
+      "answers": 1
+    },
+    {
+      "id": "T06",
+      "status": "PASS",
+      "evidence_level": "AUDIT_FIXTURE_MODEL_AND_ACTUAL_CONTEXT_MANIFEST",
+      "run_status": "SUCCEEDED",
+      "strategy": "RECENT_WINDOW",
+      "selected_message_sequences": [
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29
+      ],
+      "selected_message_count": 12,
+      "fixture_model_calls": 1,
+      "compression_attempts": 0,
+      "summary_created": false
+    },
+    {
+      "id": "T07",
+      "status": "PASS",
+      "evidence_level": "EXISTING_OFFLINE_FIXTURE_REGRESSION_SUITES",
+      "source_invalidation_test": "test_ar04a_invalidated_summary_is_not_sent_to_the_model",
+      "cancellation_and_unknown_coverage": "All existing context compression budget and cancellation tests in the commanded suites passed, including unknown outcome and replay no-resend cases.",
+      "regression_tests_passed_in_combined_command": 14
+    },
+    {
+      "id": "T08",
+      "status": "PASS",
+      "evidence_level": "MOCK_INJECTED_PRECHECK_EXCEPTION_PLUS_ACTUAL_WORKER_PATH",
+      "injected_exception": "RuntimeError",
+      "run_status": "FAILED",
+      "reason": "WORKER_RUN_FAILED",
+      "misclassified_as_budget_error": false,
+      "program_budget_notice": false,
+      "fixture_model_calls": 0
+    }
+  ],
+  "validation": {
+    "command": "python -m pytest -q tests/test_r2_ar04_compaction_c06_hf_01.py tests/test_ar04a_context_journey_01.py tests/test_ar04a_compression_budget_hf_01.py tests/test_ar04a_compression_cancel_hf_01.py --basetemp .pytest-tmp/r2-ar04-c06-hf01",
+    "tests_passed": 19,
+    "tests_failed": 0,
+    "duration_seconds": 191.41,
+    "compileall": "PASS",
+    "diff_check": "PASS"
+  },
+  "execution_counts": {
+    "paid_or_real_provider_calls": 0,
+    "live_external_mcp_calls": 0,
+    "external_business_writes": 0,
+    "browser_automation_runs": 0,
+    "full_repository_test_suite": "NOT_RUN"
+  },
+  "preservation": {
+    "original_audit_trace_modified": false,
+    "original_audit_results_json_modified": false,
+    "repair_before_red_preserved": true,
+    "historical_test_run_logs_preserved": true,
+    "historical_test_run_log_trailing_whitespace_normalized": true
+  },
+  "preflight_blobs": {
+    "PROJECT_NORTH_STAR.md": "43dabda468506717c6956e676dfad4304c4f38e6",
+    "AGENTS.md": "807b928686a4dd2cac7b15b3c354b9943c93c910",
+    ".agents/skills/opspilot-slice-review/SKILL.md": "d405c8d413d633824b279202cc1503dab4cf0b03",
+    "docs/learning/OPEN_SOURCE_AGENT_REFERENCES.md": "890ddf8918f976401c4df849eda6394770ed1997",
+    "docs/evidence/r2-ar04-compaction-audit-01/RESULTS.json": "ece761f81ca2357c4007738f9ed1d06098a02187",
+    "docs/evidence/r2-ar04-compaction-audit-01/case_traces/C06_USER_OVERSIZE.json": "4ed598187bfe25ad27be955235b165368a798f91",
+    "docs/evidence/r2-ar04-compaction-audit-01/case_traces/C06_ASSISTANT_EXCERPT.json": "0df804c21f49cfd03e771897e3190f6d532cf668"
+  }
+}
