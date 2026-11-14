@@ -6,7 +6,7 @@
 
 我用隔离 Domain 和 Checkpoint、固定合成消息与确定性 Fixture Model 跑边界实验，不访问付费 Provider，也没有实时 MCP 调用。结果复现了 `HYBRID` 的单 Token 边界、`ROLLING_SUMMARY` 的主动压缩、`RECENT_WINDOW` 的零摘要调用、多批摘要的父摘要链接，以及工具 Schema 变大后可用预算下降。每个案例都保留了来源序号、Context Manifest、实际 Fixture Model 输入和预算估算；这些结果证明的是程序选择与持久化路径，不是自然语言记忆能力。
 
-信息保持评测里，摘要带来源 ID，正式更正和被排除假设可以追溯；但早期 API 配置未进入摘要，协议 `max_attempts` 与部署版本被截断，摘要没有保留 `Receiver=QUEUED` 和 unresolved 项。最终请求仍包含一条完整长结果和最新用户状态，但这不能证明模型会基于摘要回忆早期材料；自然语言保真和回忆均标为 `NEEDS_LIVE_SEMANTIC_EVAL`。C06 的 `ROLLING_SUMMARY` 触发为 true，但在初始 `Loop.context()` 预检构造首批摘要材料时因 `6176 > 6000` 抛出内部预算错误；没有摘要尝试或模型调用，公开结果只有 `WORKER_RUN_FAILED`。这是 fail-closed 的错误可见性缺陷，最小修复候选是 `assistant.py` 预检边界仅映射该类型异常；本切片不修生产代码。
+信息保持评测里，CURRENT Summary v2 带来源 ID，保留了正式更正、被排除假设，以及 seq 11 的协议 `v1.2→v1.3`、`max_attempts 3→5` 和“部署版本未知”；早期 `/callback` 配置未作为配置记录保留，`req-482` 只作为被更正的录入错误出现。摘要里的长工具结果条目止于 HTTP 202，因此摘要自身没有保留 `Receiver=QUEUED` 和“不证明完成”的语义；但最终请求还含一条完整长结果和 seq 29 的最新用户状态，其中明确写有未解决状态及最新 `QUEUED` 观察。这些材料在摘要覆盖范围之外或通过近期原文进入 prompt，不能证明模型会基于摘要回忆早期材料；自然语言保真和回忆均标为 `NEEDS_LIVE_SEMANTIC_EVAL`。C06 的 `ROLLING_SUMMARY` 触发为 true，但在初始 `Loop.context()` 预检构造首批摘要材料时因 `6176 > 6000` 抛出内部预算错误；没有摘要尝试或模型调用，公开结果只有 `WORKER_RUN_FAILED`。这是 fail-closed 的错误可见性缺陷，最小修复候选是 `assistant.py` 预检边界仅映射该类型异常；本切片不修生产代码。
 
 ## 可复述的实验结论
 

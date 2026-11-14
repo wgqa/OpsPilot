@@ -176,6 +176,43 @@ for case_id, row in ROWS.items():
     lines += [""]
 
 wp3 = json.loads((ROOT / "case_traces" / "WP3_INFORMATION_RETENTION.json").read_text(encoding="utf-8"))
+current_summaries = [summary for summary in wp3.get("summaries", []) if summary.get("state") == "CURRENT"]
+assert len(current_summaries) == 1, f"expected one CURRENT WP3 summary, found {len(current_summaries)}"
+wp3_summary = current_summaries[0]
+wp3_summary_json = json.loads(wp3_summary["summary_json"])
+wp3_sequence_by_message_id = {
+    message["message_id"]: message["sequence"]
+    for message in wp3.get("persisted_messages", [])
+}
+wp3_summary_source_ids = [
+    source_id
+    for value in wp3_summary_json.values()
+    for item in ([value] if isinstance(value, dict) else value if isinstance(value, list) else [])
+    if isinstance(item, dict)
+    for source_id in item.get("source_message_ids", [])
+]
+assert all(source_id in wp3_sequence_by_message_id for source_id in wp3_summary_source_ids), (
+    "CURRENT WP3 summary contains source IDs absent from the persisted message snapshot"
+)
+protocol_timeline = [
+    item for item in wp3_summary_json.get("timeline", [])
+    if "v1.2" in item.get("text", "") and "max_attempts" in item.get("text", "")
+]
+assert len(protocol_timeline) == 1, "CURRENT WP3 summary must have one protocol/attempts timeline item"
+protocol_item = protocol_timeline[0]
+protocol_text = protocol_item.get("text", "")
+required_protocol_facts = ("v1.2", "v1.3", "max_attempts", "3", "5", "部署版本未知")
+assert all(fact in protocol_text for fact in required_protocol_facts), (
+    "CURRENT WP3 summary lost a version/attempts/deployed-version ground truth"
+)
+protocol_source_sequences = [
+    wp3_sequence_by_message_id[source_id]
+    for source_id in protocol_item.get("source_message_ids", [])
+    if source_id in wp3_sequence_by_message_id
+]
+assert protocol_source_sequences == [11], (
+    f"CURRENT WP3 protocol timeline should cite seq 11, got {protocol_source_sequences}"
+)
 wp3_call = [
     call for call in wp3.get("model_calls", [])
     if "context-compression:" not in str(call.get("logical_key", ""))
@@ -225,11 +262,11 @@ lines += [
     "|---|---|---|",
     "| 初始目标：只读核验回调处理，202 不等于完成 | 保留在 `initial_goal`，引用 seq 1 | 含义一致；Fixture 仅证结构字段和来源映射 |",
     "| 禁止改凭证/业务写入 | 保留在 `constraints`，引用 seq 5 | 含义一致 |",
-    "| 初始 endpoint `/callback`、`max_attempts=3`、req-482、evt-731 | Summary 未保留 endpoint/max_attempts=3；req-482 仅在后续更正中作为错误值出现，evt-731 保留于更正 | 早期配置丢失；摘要不会自行恢复初始状态 |",
+    "| 初始 endpoint `/callback`、`max_attempts=3`、req-482、evt-731 | Summary 未保留 endpoint 和原始配置关联；`max_attempts=3` 在 seq 11 版本变更中保留，req-482 仅作为更正前错误值出现，evt-731 保留于更正 | 早期配置仅部分保留；摘要不能恢复未写入的 endpoint/原始关联 |",
     "| 正式更正 req-483；req-482 是录入错误；Event 仍 evt-731 | 保留在 `corrections`，引用 seq 7 | 内容和来源 ID 相符 |",
     "| 排除 timeout 假设 | 保留在 `rejected_hypotheses`，引用 seq 9 | 内容和来源 ID 相符 |",
-    "| 协议 v1.2→v1.3；attempts 3→5；部署版本未知 | `timeline` 被 120 字条目上限截成 `...max_at` | attempts 变化和部署未知均丢失 |",
-    "| Synthetic tool result：202 ACCEPTED，Receiver=QUEUED，不证明完成 | `timeline` 保留两条重复材料且在 `HTTP 202` 结束 | 丢失 Receiver 与非完成语义；不能把摘要当事实回执 |",
+    f"| 协议 v1.2→v1.3；attempts 3→5；部署版本未知 | CURRENT Summary `timeline` 原文：{protocol_text} | 已保留；来源 seq {sequence_list(protocol_source_sequences)}。生成器断言校验版本、attempts、未知部署状态及来源 |",
+    "| Synthetic tool result：202 ACCEPTED，Receiver=QUEUED，不证明完成 | `timeline` 保留两条重复材料且在 `HTTP 202` 结束 | 丢失 ACCEPTED、Receiver 与非完成语义；不能把摘要当事实回执 |",
     "| Receiver completion unknown | `unresolved_items` 是空数组 | 未保留在 Summary；当前用户消息仍包含该未解决状态 |",
     "| 最新观察：Receiver=QUEUED，时间 2026-11-14T12:00Z | 不在 Summary；在最终用户消息 seq 29 | 本轮实际 prompt 可见，不能证明跨轮摘要保持 |",
     "",
