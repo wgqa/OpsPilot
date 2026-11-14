@@ -170,6 +170,7 @@ $record = [ordered]@{
     domainDb = $domain
     checkpointDb = $checkpoint
     profile = $Profile
+    mode = $Mode
     api = [ordered]@{ pid = $apiProcess.Id; executable = $python; commandMarker = $apiLauncher }
     frontend = [ordered]@{ pid = $webProcess.Id; executable = $node; commandMarker = $webLauncher }
     startedAt = (Get-Date).ToUniversalTime().ToString('o')
