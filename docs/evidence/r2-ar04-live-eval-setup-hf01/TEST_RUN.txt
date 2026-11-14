@@ -1,0 +1,24 @@
+# R2-AR04-LIVE-EVAL-SETUP-HF-01 test execution log
+
+Workspace: `D:\学习\agent新项目\.worktrees\ar04a-context-journey-01`
+Branch: `codex/r2-ar04-live-eval-setup-hf01`
+Base during execution: `e6db85e17681a9aa6f6bf6e8b1b01bdef400c49e`
+Real Provider requests: 0. Real spend: $0.
+
+## Final passing commands
+
+1. `python -B -m pytest -q docs/evidence/r2-ar04-live-eval-setup-hf01/test_offline_harness.py -s` — final run exit 0; `2 passed in 66.79s`. The first test executed 24 separate Grant-backed Assistant Runs and captured 59 MockTransport request/response bodies. It also confirmed per-strategy system-prompt prefix and distinct temporary DB/Checkpoint identities. The second test validated the preliminary scoring supplement and ownership fields.
+   Earlier full run before those extra identity assertions: exit 0; `2 passed in 60.66s`.
+2. `python -B -m pytest -q tests/test_product_01_runtime_grant_01.py::test_database_initialization_does_not_provision_or_enable_runtime_grant tests/test_product_01_runtime_grant_01.py::test_database_copy_cannot_reuse_runtime_grant_or_pool tests/test_product_01_runtime_grant_01.py::test_expired_grant_is_not_bound_and_zero_price_cannot_authorize_paid_calls tests/test_product_01_runtime_grant_01.py::test_runtime_context_compression_and_answer_share_the_persistent_pool tests/test_m302_context.py::test_compression_source_change_is_rejected_before_provider_io --basetemp docs/evidence/r2-ar04-live-eval-setup-hf01/.pytest-basetemp` — exit 0; `6 passed in 8.40s`. The context-pool test is parameterized for sufficient and insufficient pool budgets.
+   T04 guard regressions: final 7/7 PASS.
+3. `python -B -m pytest -q tests/test_product_01_runtime_grant_01.py::test_concurrent_sessions_cannot_reserve_more_than_shared_pool --basetemp docs/evidence/r2-ar04-live-eval-setup-hf01/.pytest-basetemp-budget` — exit 0; `1 passed in 0.49s`; directly asserts one reserved request and one `RUNTIME_BUDGET_EXHAUSTED` refusal.
+4. `python -B docs/evidence/r2-ar04-live-eval-setup-hf01/score_preliminary.py` — exit 0; 2 prior live-answer score records transformed into a new supplement with `IMPLEMENTER_PRELIMINARY_REVIEW`; the old score/trace files were not changed.
+5. `python -B docs/evidence/r2-ar04-live-eval-setup-hf01/validate_setup_results.py` — final run exit 0; `checks=9/9 status=PASS_OFFLINE_ONLY cases=24 mock_requests=59`.
+
+## Preserved unsuccessful attempts
+
+- Initial offline-harness invocation: exit 1 before test execution. Pytest's machine-default temp root raised `PermissionError` while scanning `C:\Users\tu me manques\AppData\Local\Temp\pytest-of-tu me manques`. The harness was changed to create and clean a unique temp directory under this new evidence folder; no existing temp directory or user data was cleared.
+- Next full mock run: exit 1 after all 24 Assistant Runs completed successfully. The result assertion incorrectly required the effective context budget to be exactly equal across strategies. The actual effective values differed by 1–9 tokens while all strategies retained the same configured 12,000-token input limit. The final test records those per-strategy values and compares the shared cap without hiding the variance.
+- First result-validator invocation: exit 1 because its pinned expected SHA256 for the prior scorer file had a transcription typo. Rechecking the file's SHA showed the historical file itself was unchanged. The pin was corrected and the validator then passed 9/9 checks.
+
+The 24-case harness databases/checkpoints were scoped to unique temporary directories and cleaned by the harness. The targeted pytest fixture databases remain under the two task-local `.pytest-basetemp*` directories; they are generated isolated test data and are excluded from the candidate commit. The pre-existing repository `.pytest-tmp/` remains untouched. An attempted recursive cleanup command for these new directories was rejected by the environment policy, so they are left intact and unstaged.

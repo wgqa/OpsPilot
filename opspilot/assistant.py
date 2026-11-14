@@ -1432,7 +1432,8 @@ def _fit_tool_messages_to_budget(
 
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,
-                 reserved_tokens=0,runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False):
+                 reserved_tokens=0,runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False,
+                 tool_choice_override=None):
         self.path,self.run_id,self.worker_id,self.client,self.specs,self.trace=path,run_id,worker_id,client,specs,trace
         self.run,self.actor=domain.read_run(path,run_id,worker_id=worker_id)
         self.model_id=model_id
@@ -1441,6 +1442,7 @@ class Loop(AgentMiddleware):
         self.runtime_grant_binding=runtime_grant_binding
         self.worker_epoch=worker_epoch
         self.streaming_enabled=bool(streaming_enabled)
+        self.tool_choice_override=tool_choice_override
         self.streaming_started=False
         self.personal_memory_was_sent=False
 
@@ -2034,7 +2036,9 @@ class Loop(AgentMiddleware):
             # wire parameter. Re-injecting `max_tokens` here would make the
             # pinned ChatOpenAI emit DeepSeek's unsupported alias.
             model_settings={**request.model_settings,'parallel_tool_calls':False}
-            tool_choice='auto' if request.tools else request.tool_choice
+            # None keeps the existing production default; explicit overrides
+            # are used by bounded evaluation tracks while retaining tool schemas.
+            tool_choice = self.tool_choice_override or ('auto' if request.tools else request.tool_choice)
             provider_request=request.override(
                 messages=messages,system_message=system,tool_choice=tool_choice,model_settings=model_settings,
             )
@@ -2331,7 +2335,8 @@ class Loop(AgentMiddleware):
             return ToolMessage(content=canonical_json({'error':str(error),'authority':'TOOL_REFUSAL_NOT_FACT'}),tool_call_id=call['id'])
 
 async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None,
-                        runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False):
+                        runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False,
+                        tool_choice_override=None):
     from opspilot.domain.execution_budget import begin_execution_interval,end_execution_interval
     from opspilot.web.worker import _heartbeat_budget
     run,_=domain.read_run(path,run_id,worker_id=worker_id)
@@ -2340,6 +2345,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
             path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
             experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
             worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
+            tool_choice_override=tool_choice_override,
         )
     remaining=begin_execution_interval(path,run['task_id'])
     stopped=asyncio.Event()
@@ -2351,6 +2357,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
                 path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
                 experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
                 worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
+                tool_choice_override=tool_choice_override,
             ),min(60,remaining/1000),
         )
     except (asyncio.TimeoutError,TaskControlError) as error:
@@ -2793,7 +2800,9 @@ async def _prepare_assistant_context_impl(
 
 async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,
                          experiment_id=None,runtime_grant_binding=None,worker_epoch=None,
-                         streaming_enabled=False):
+                         streaming_enabled=False,tool_choice_override=None):
+    if tool_choice_override not in {None, 'auto', 'none'}:
+        raise ValueError('ASSISTANT_TOOL_CHOICE_OVERRIDE_INVALID')
     trace=trace or (lambda event,**values:None)
     run,actor=domain.read_run(path,run_id,worker_id=worker_id)
     if model is None:
@@ -2919,6 +2928,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
             reserved_tokens=base_reserved,runtime_grant_binding=runtime_grant_binding,
             worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
+            tool_choice_override=tool_choice_override,
         )
         try:
             _,probe_payload=probe.context()
@@ -2948,6 +2958,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
             reserved_tokens=reserved_tokens,runtime_grant_binding=runtime_grant_binding,
             worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
+            tool_choice_override=tool_choice_override,
         )
         prepared,_=loop.context()
         initial,_,_=loop._fresh_context_prefix(prepared)
