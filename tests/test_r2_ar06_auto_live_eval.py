@@ -5,7 +5,9 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import Field
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -51,6 +53,25 @@ class E05FixtureModel(BaseChatModel):
             "若日志真实且相关，可推断重试已计划；不能证明重试成功或当前线上状态。"
         ), usage_metadata={"input_tokens": 31, "output_tokens": 17, "total_tokens": 48})
         return ChatResult(generations=[ChatGeneration(message=answer)])
+
+
+class HoldoutRouteFixtureModel(BaseChatModel):
+    dispatch_count: int = 0
+    seen: list[list[object]] = Field(default_factory=list)
+
+    @property
+    def _llm_type(self) -> str:
+        return "R2_AR06_HOLDOUT_ROUTE_FIXTURE"
+
+    def bind_tools(self, _tools, **_kwargs):
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        self.dispatch_count += 1
+        self.seen.append(list(messages))
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(
+            content="FIXTURE_ONLY: route completed; semantic scoring is not performed."
+        ))])
 
 
 def _runtime(tmp_path: Path, case_id: str):
@@ -367,3 +388,71 @@ def test_ambiguous_message_post_is_never_submitted_twice(tmp_path):
         else:
             raise AssertionError("The simulated ambiguous POST should stop execution.")
         assert ambiguous.message_posts == 1
+
+
+@pytest.mark.parametrize("case_id", ["E02-H", "E06-H"])
+def test_holdout_route_uses_exact_frozen_input_in_fresh_formal_session_without_gold(
+    tmp_path, case_id
+):
+    root, name, runtime = _runtime(tmp_path, case_id)
+    model = HoldoutRouteFixtureModel()
+    app = create_app(
+        db_path=runtime / "domain.sqlite3",
+        checkpoint_db_path=runtime / "checkpoint.sqlite3",
+        start_worker=True,
+        credentials=PASSWORDS,
+        expected_origin=ORIGIN,
+        heartbeat_seconds=0.05,
+        assistant_model_factory=lambda: model,
+        assistant_runtime_enabled=False,
+    )
+    with TestClient(app, base_url=ORIGIN, raise_server_exceptions=False) as client:
+        result = execute_case(
+            client,
+            case_id=case_id,
+            runtime_name=name,
+            root=root,
+            support_password=PASSWORDS["support-a"],
+            api_origin=ORIGIN,
+            web_origin=ORIGIN,
+            execution_mode="FIXTURE",
+            timeout_seconds=30,
+        )
+
+    gold = load_frozen_case(case_id)
+    assert set(gold) == {"case_id", "split", "user_turns", "gold_sha256"}
+    trace = json.loads(Path(result["trace_path"]).read_text(encoding="utf-8"))
+    user_messages = [row for row in trace["messages"] if row["role"] == "USER"]
+    assert [row["body"] for row in user_messages] == gold["user_turns"]
+    assert result["split"] == "H"
+    assert result["run_status"] == "SUCCEEDED"
+    assert result["assessment_status"] == "UNVERIFIED"
+    assert result["fixture_model_dispatches"] == model.dispatch_count == 1
+    assert result["provider_send_grants"] == 0
+    assert result["mcp_tools_call_count"] == 0
+    assert result["observation_count"] == 0
+    assert result["task_id"] is None
+    actual_user_inputs = [
+        str(message.content)
+        for request in model.seen
+        for message in request
+        if getattr(message, "type", "") == "human"
+    ]
+    assert actual_user_inputs == gold["user_turns"]
+    actual_prompt = "\n".join(
+        str(message.content) for request in model.seen for message in request
+    )
+    for gold_field in (
+        "expected_user_outcome",
+        "acceptable_decisions",
+        "required_evidence",
+        "forbidden",
+        "independent_scoring",
+        "gold_sha256",
+    ):
+        assert gold_field not in actual_prompt
+    assert gold["gold_sha256"] not in actual_prompt
+    final_messages = [row for row in trace["messages"] if row["role"] == "ASSISTANT"]
+    assert [row["body"] for row in final_messages] == [
+        "FIXTURE_ONLY: route completed; semantic scoring is not performed."
+    ]

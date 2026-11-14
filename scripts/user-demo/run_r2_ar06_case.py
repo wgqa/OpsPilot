@@ -25,8 +25,13 @@ USER_DEMO_DIR = ROOT / "scripts" / "user-demo"
 EVAL_DIR = ROOT / "docs" / "evidence" / "r2-ar06-eval-01"
 CASES_PATH = EVAL_DIR / "CASES.json"
 FROZEN_HASHES_PATH = EVAL_DIR / "FROZEN_HASHES.json"
-SUPPORTED_CASES = {"E05-D", "E07-D"}
-CASE_S3_PROFILES = {"E05-D": "standard", "E07-D": "r2-e07-queued"}
+SUPPORTED_CASES = {"E02-H", "E05-D", "E06-H", "E07-D"}
+CASE_S3_PROFILES = {
+    "E02-H": "standard",
+    "E05-D": "standard",
+    "E06-H": "standard",
+    "E07-D": "r2-e07-queued",
+}
 E07_ORDER_ID = "async-order"
 E07_EVENT_ID = "event-00000000-0000-4000-8000-000000000001"
 DEFAULT_API_ORIGIN = "http://127.0.0.1:8000"
@@ -63,14 +68,15 @@ def load_frozen_case(case_id: str) -> dict[str, Any]:
         raise EvaluationPreflightError("FROZEN_CASE_ID_NOT_UNIQUE")
     case = matches[0]
     turns = case.get("user_turns")
-    if case.get("split") != "D" or not isinstance(turns, list) or len(turns) != 1:
-        raise EvaluationPreflightError("LIVE_CASE_REQUIRES_ONE_FROZEN_DEVELOPMENT_TURN")
+    split = case.get("split")
+    if split not in {"D", "H"} or not isinstance(turns, list) or len(turns) != 1:
+        raise EvaluationPreflightError("CASE_REQUIRES_ONE_FROZEN_TURN")
     if not isinstance(turns[0], str) or not turns[0].strip():
         raise EvaluationPreflightError("FROZEN_CASE_INPUT_INVALID")
     # Keep the fields the executor needs; Gold outcomes never enter Context.
     return {
         "case_id": case_id,
-        "split": "D",
+        "split": split,
         "user_turns": list(turns),
         "gold_sha256": actual_hash,
     }
@@ -125,7 +131,7 @@ def inspect_case_runtime(
 
     from runtime_paths import resolve_user_demo_database_paths, resolve_user_demo_runtime
 
-    if case_id not in CASE_S3_PROFILES:
+    if case_id not in SUPPORTED_CASES:
         raise ValueError("LIVE_CASE_NOT_PREPARED:" + str(case_id))
     repo_root = Path(root or ROOT).resolve()
     try:
@@ -495,12 +501,19 @@ def _execute_case_once(
         accepted = _raise_for_status(response, {200, 202}, "E07_TASK_BINDING_AND_RUN")
         task_id = str(accepted.get("task_id", "")) or None
     else:
+        key_prefix = "r2-ar06-e05-" if case_id == "E05-D" else (
+            "r2-ar06-" + case_id.lower().replace("-", "") + "-"
+        )
         response = client.post(
             f"{api_origin}/api/sessions/{session_id}/assistant/messages",
-            headers={**write_headers, "Idempotency-Key": "r2-ar06-e05-" + uuid.uuid4().hex},
+            headers={
+                **write_headers,
+                "Idempotency-Key": key_prefix + uuid.uuid4().hex,
+            },
             json={"body": question},
         )
-        accepted = _raise_for_status(response, {202}, "E05_MESSAGE_AND_RUN")
+        label = "E05_MESSAGE_AND_RUN" if case_id == "E05-D" else "HOLDOUT_MESSAGE_AND_RUN"
+        accepted = _raise_for_status(response, {202}, label)
     run_id = str(accepted.get("run_id", ""))
     if not run_id:
         raise EvaluationPreflightError("RUN_ID_MISSING_AFTER_ACCEPTANCE")
@@ -523,7 +536,7 @@ def _execute_case_once(
     result_record: dict[str, Any] = {
         "schema": "r2-ar06-auto-live-case-result-v1",
         "case_id": case_id,
-        "split": "D",
+        "split": case["split"],
         "execution_mode": execution_mode,
         "assessment_status": "UNVERIFIED",
         "assessor_note": "Structured evidence only; independent Rubric scoring is pending.",
