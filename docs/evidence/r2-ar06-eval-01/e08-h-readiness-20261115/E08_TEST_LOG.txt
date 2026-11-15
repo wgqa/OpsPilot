@@ -1,0 +1,42 @@
+R2-AR06-E08-H-READINESS-01 test log
+Base: fb919ce89c4c73b9eaebc3c0bc95e96eb77cf94b
+Branch: codex/r2-ar06-e08-h-readiness-01
+Provider requests: 0
+Business writes: 0
+Runtime Grants created: 0
+
+RED / repair history
+- Baseline RED before implementation: collection failed because run_r2_ar06_case did not yet export E08_H_CASE_ID. The E08 fixture profile and Runner support were absent at the baseline.
+- Intermediate RED: fixture initialization rejected r2-e08-history-queued as USER_DEMO_S3_FIXTURE_PROFILE_INVALID. Added the profile to the existing allowlist and retained the existing initializer path.
+- Intermediate RED: priming readiness expected TaskBinding status ACTIVE, but the formal order-binding API correctly persisted CREATED. The validator was corrected to the observed existing API contract; no status semantics changed.
+- Intermediate RED: first trace audit looked for MCP data in Assistant Call results and answer-source links removed by the exporter. The audit now joins exported Observation rows to their persisted Assistant Call IDs and derives answer association from ordered Session messages.
+- Environment-only pytest issue: the default Windows pytest temp root denied directory enumeration. All successful pytest runs used a fresh, unique basetemp under this worktree's ignored .runtime directory. No existing test temp directory was removed.
+
+Final E08 targeted tests
+Command:
+  $base = Join-Path (Resolve-Path '.runtime') ('pytest-e08-' + [guid]::NewGuid().ToString('N'))
+  python -m pytest tests/test_r2_ar06_e08_h_readiness.py -q --basetemp $base
+Result: 5 passed.
+
+Covered: frozen input loading; official API Session and TaskBinding creation; distinct target/decoy Event IDs; historical target QUEUED answer; current target PROCESSED Observation in the evaluated Run; decoy scope denial; user log authority/time; no Gold labels in actual model requests; stale source invalidation; bad Evidence Digest rejection; no sidecar-only readiness; repeat-prime rejection; no Provider usage.
+
+Relevant regression command:
+  $base = Join-Path (Resolve-Path '.runtime') ('pytest-e08-final-' + [guid]::NewGuid().ToString('N'))
+  python -m pytest tests/test_r2_ar06_e08_h_readiness.py tests/test_r2_ar06_auto_live_eval.py tests/test_r2_ar06_source_grounding_hf01.py tests/test_r2_ar06_e03_eval_exec.py tests/test_r2_ar06_e04_eval_exec.py tests/test_live_02_fix_01_history.py tests/test_m4_ttl_fix_01_integrity.py -q --basetemp $base
+Final result after historical Run/message association validation: 52 passed in 115.56s.
+
+Earlier checkpoint before adding the final E08 audit assertions: the six existing regression files passed 47 tests in 108.71s. The combined 52-test result above is the final candidate result.
+
+Actual offline Runner execution
+- `prepare --case-id E08-H` succeeded for `user-demo-r2-e08h-offline-20261115-02` with no Grant.
+- Offline preflight returned OFFLINE_READY_TO_PRIME_HISTORY: target ...0101 QUEUED; decoy ...0102 QUEUED; no Provider or UNKNOWN.
+- `run-fixture --case-id E08-H` completed SUCCEEDED. It used 4 scripted Fixture Model dispatches across the history and evaluated Runs, 2 `get_receiver_processing` MCP calls, 2 Observations, and 2 Evidence rows. The evaluated Run read target ...0101 as PROCESSED version 3; the historical Run read the same Event as QUEUED version 2. Decoy ...0102 remained QUEUED.
+- Fixture Token metadata is synthetic only (68 input / 56 output across dispatches); it is not Provider Usage. Provider requests, UNKNOWN, and spend rows were all 0. Runner assessment remains UNVERIFIED.
+
+Live-readiness priming
+- A second new runtime, `user-demo-r2-e08h-live-prime-20261115`, was initialized and primed using only the local Fixture Model through TestClient / Worker.
+- Offline preflight then returned OFFLINE_HISTORY_PRIMED, target ...0101 PROCESSED, decoy ...0102 QUEUED, history source invalidated, Provider requests 0, UNKNOWN 0.
+- `runtime_admin.py summary --runtime-name user-demo-r2-e08h-live-prime-20261115` reported no Runtime Grant and no fee pool.
+- No external Start-UserDemo service, browser, real Provider, or business write was run.
+
+Preserved evidence: `E08_OFFLINE_TRACE.json`, `E08_RUNNER_RESULT.json`, and `E08_MODEL_INPUT_AUDIT.json`.

@@ -34,8 +34,22 @@ E04_BLINDING_BASE_SHA = "4e23e229cea3e42d61ebb2bc49f25a0e37bf5f1c"
 OBSERVATION_CONTRAST_CASE_ID = "OBSERVATION-CONTRAST-PROCESSED"
 OBSERVATION_CONTRAST_TARGET_EVENT_ID = "event-00000000-0000-4000-8000-000000000101"
 OBSERVATION_CONTRAST_DECOY_EVENT_ID = "event-00000000-0000-4000-8000-000000000102"
+E08_H_CASE_ID = "E08-H"
+E08_TARGET_EVENT_ID = OBSERVATION_CONTRAST_TARGET_EVENT_ID
+E08_DECOY_EVENT_ID = OBSERVATION_CONTRAST_DECOY_EVENT_ID
+E08_LOG_EVENT_ID = E08_DECOY_EVENT_ID
+E08_LOG_LINE = (
+    f"event_id={E08_LOG_EVENT_ID} receiver_status=PROCESSED "
+    "observed_at=2026-11-14T12:00:00Z"
+)
+E08_HISTORY_SETUP_MESSAGE = (
+    "我收到另一 Event 的复制回调日志线索：" + E08_LOG_LINE
+    + "。请检查授权订单 async-order 当前 Receiver 状态，并说明这条日志能否代表该订单。"
+)
+E08_FIXTURE_SPEC_STATUS = "POST_FREEZE_FIXTURE_SPECIFIED"
 SUPPORTED_CASES = {
     "E02-H", "E03-D", "E04-H", "E05-D", "E06-H", "E07-D", OBSERVATION_CONTRAST_CASE_ID,
+    E08_H_CASE_ID,
 }
 EXPLORATORY_CASE_SOURCES = {OBSERVATION_CONTRAST_CASE_ID: "E07-D"}
 CASE_S3_PROFILES = {
@@ -44,6 +58,7 @@ CASE_S3_PROFILES = {
     "E06-H": "standard",
     "E07-D": "r2-e07-queued",
     OBSERVATION_CONTRAST_CASE_ID: "r2-e08-processed-decoy",
+    E08_H_CASE_ID: "r2-e08-history-queued",
 }
 E07_ORDER_ID = "async-order"
 E07_EVENT_ID = "event-00000000-0000-4000-8000-000000000001"
@@ -59,6 +74,14 @@ S3_FIXTURE_EXPECTATIONS = {
         "target_receiver_status": "PROCESSED",
         "decoy_order_id": "async-order-decoy",
         "decoy_event_id": OBSERVATION_CONTRAST_DECOY_EVENT_ID,
+        "decoy_receiver_status": "QUEUED",
+    },
+    E08_H_CASE_ID: {
+        "target_order_id": "async-order",
+        "target_event_id": E08_TARGET_EVENT_ID,
+        "target_receiver_status": "PROCESSED",
+        "decoy_order_id": "async-order-decoy",
+        "decoy_event_id": E08_DECOY_EVENT_ID,
         "decoy_receiver_status": "QUEUED",
     },
 }
@@ -555,9 +578,9 @@ def _s3_fixture_mismatch(case_id: str, state: dict[str, Any]) -> str | None:
     )
     if not target_matches:
         return (
+            "E08_FIXTURE_MISMATCH" if case_id == E08_H_CASE_ID else
             "OBSERVATION_CONTRAST_FIXTURE_MISMATCH"
-            if case_id == OBSERVATION_CONTRAST_CASE_ID
-            else "E07_TRUSTED_FIXTURE_MISMATCH"
+            if case_id == OBSERVATION_CONTRAST_CASE_ID else "E07_TRUSTED_FIXTURE_MISMATCH"
         )
     if fixture.get("decoy_order_id"):
         decoy_matches = (
@@ -571,7 +594,10 @@ def _s3_fixture_mismatch(case_id: str, state: dict[str, Any]) -> str | None:
             and fixture["decoy_order_id"] != fixture["target_order_id"]
         )
         if not decoy_matches:
-            return "OBSERVATION_CONTRAST_FIXTURE_MISMATCH"
+            return (
+                "E08_FIXTURE_MISMATCH" if case_id == E08_H_CASE_ID
+                else "OBSERVATION_CONTRAST_FIXTURE_MISMATCH"
+            )
     return None
 
 
@@ -584,7 +610,7 @@ def _s3_fixture_summary(case_id: str, state: dict[str, Any]) -> dict[str, Any] |
         "target_delivery_status": state.get("delivery_status"),
         "target_receiver_status": state.get("receiver_status"),
     }
-    if case_id == OBSERVATION_CONTRAST_CASE_ID:
+    if case_id in {OBSERVATION_CONTRAST_CASE_ID, E08_H_CASE_ID}:
         summary.update({
             "decoy_order_id": state.get("decoy_order_id"),
             "decoy_event_id": state.get("decoy_delivery_event_id"),
@@ -592,6 +618,366 @@ def _s3_fixture_summary(case_id: str, state: dict[str, Any]) -> dict[str, Any] |
             "decoy_receiver_status": state.get("decoy_receiver_status"),
         })
     return summary
+
+
+def inspect_e08_history_ready(
+    runtime_name: str,
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Derive E08's Live-ready state from Domain rows, never from a sidecar marker.
+
+    The expected first Run is a local Fixture Model setup turn. It must have
+    persisted a QUEUED target observation and answer before the isolated
+    fixture advances that same target Event to PROCESSED. This validator is
+    deliberately narrower than general Runtime readiness.
+    """
+    import sqlite3
+
+    from runtime_paths import resolve_user_demo_database_paths, resolve_user_demo_runtime
+    from opspilot.domain.assistant import sources_current
+
+    repo_root = Path(root or ROOT).resolve()
+    try:
+        runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
+        domain_path, checkpoint_path = resolve_user_demo_database_paths(runtime_name, root=repo_root)
+    except ValueError as error:
+        raise EvaluationPreflightError("E08_HISTORY_NOT_PRIMED") from error
+    if (
+        not runtime_dir.is_dir() or not domain_path.is_file() or not checkpoint_path.is_file()
+        or any(path.is_symlink() or (getattr(path, "is_junction", None) and path.is_junction())
+               for path in (runtime_dir, domain_path, checkpoint_path))
+    ):
+        raise EvaluationPreflightError("E08_HISTORY_NOT_PRIMED")
+
+    connection = sqlite3.connect(domain_path.resolve().as_uri() + "?mode=ro", uri=True)
+    connection.execute("PRAGMA query_only = ON")
+    connection.row_factory = sqlite3.Row
+    try:
+        sessions = connection.execute("SELECT * FROM sessions ORDER BY created_at").fetchall()
+        messages = connection.execute(
+            "SELECT * FROM messages ORDER BY session_id,sequence"
+        ).fetchall()
+        bindings = connection.execute("SELECT * FROM task_bindings ORDER BY created_at").fetchall()
+        runs = connection.execute("SELECT * FROM task_runs ORDER BY created_at").fetchall()
+        if len(sessions) != 1 or len(messages) != 2 or len(bindings) != 1 or len(runs) != 1:
+            raise EvaluationPreflightError("E08_HISTORY_NOT_PRIMED")
+        session = dict(sessions[0])
+        first_user, historical_answer = (dict(row) for row in messages)
+        binding = dict(bindings[0])
+        history_run = dict(runs[0])
+        if (
+            first_user["role"] != "USER"
+            or first_user["body"] != E08_HISTORY_SETUP_MESSAGE
+            or first_user["input_kind"] != "CHAT_READONLY"
+            or historical_answer["role"] != "ASSISTANT"
+            or historical_answer["input_kind"] != "CHAT_READONLY"
+            or historical_answer["command_id"] != f"chat-answer:{history_run['run_id']}"
+            or first_user["session_id"] != session["session_id"]
+            or historical_answer["session_id"] != session["session_id"]
+            or historical_answer["task_id"] != binding["task_id"]
+            or first_user["task_id"] != binding["task_id"]
+            or binding["tenant_id"] != "tenant-a"
+            or binding["actor_id"] != "support-a"
+            or binding["service_id"] != "orders-async-demo"
+            or binding["integration_id"] != "async-integration-a"
+            or binding["principal_id"] != "async-principal-a"
+            or binding["status"] != "CREATED"
+            or session["tenant_id"] != "tenant-a"
+            or session["owner_id"] != "support-a"
+            or history_run["status"] != "SUCCEEDED"
+            or history_run["session_id"] != session["session_id"]
+            or history_run["task_id"] != binding["task_id"]
+            or history_run["source_message_id"] != first_user["message_id"]
+            or history_run["kind"] not in {"CHAT_READONLY", "INVESTIGATE"}
+            or not isinstance(historical_answer["body"], str)
+            or "QUEUED" not in historical_answer["body"]
+            or E08_TARGET_EVENT_ID not in historical_answer["body"]
+            or any(row["body"] == load_frozen_case(E08_H_CASE_ID)["user_turns"][0] for row in messages)
+        ):
+            raise EvaluationPreflightError("E08_HISTORY_NOT_PRIMED")
+
+        calls = connection.execute(
+            "SELECT * FROM assistant_calls WHERE run_id=? ORDER BY created_at,call_id",
+            (history_run["run_id"],),
+        ).fetchall()
+        history_receiver: dict[str, Any] | None = None
+        history_observation_id = None
+        history_evidence_id = None
+        for call_row in calls:
+            call = dict(call_row)
+            if call.get("kind") != "MCP" or call.get("status") != "OK":
+                continue
+            try:
+                request = json.loads(call.get("request_json") or "{}")
+                result = json.loads(call.get("result_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            facts = result.get("facts") if isinstance(result, dict) else None
+            if (
+                request.get("name") == "get_receiver_processing"
+                and result.get("fact_type") == "s3_receiver"
+                and isinstance(facts, dict)
+                and facts.get("event_id") == E08_TARGET_EVENT_ID
+                and facts.get("status") == "QUEUED"
+            ):
+                history_receiver = result
+                history_observation_id = call.get("observation_id")
+                history_evidence_id = call.get("evidence_id")
+                break
+        if not history_receiver or not history_observation_id or not history_evidence_id:
+            raise EvaluationPreflightError("E08_HISTORY_NOT_PRIMED")
+
+        target = connection.execute(
+            """SELECT d.status AS delivery_status,d.event_id AS delivery_event_id,
+                      r.status AS receiver_status,r.event_id AS receiver_event_id,r.version AS receiver_version
+               FROM s3_deliveries d JOIN s3_receivers r
+                 ON r.tenant_id=d.tenant_id AND r.service_id=d.service_id AND r.order_id=d.order_id
+               WHERE d.tenant_id='tenant-a' AND d.order_id='async-order'"""
+        ).fetchone()
+        decoy = connection.execute(
+            """SELECT d.status AS delivery_status,d.event_id AS delivery_event_id,
+                      r.status AS receiver_status,r.event_id AS receiver_event_id,r.version AS receiver_version
+               FROM s3_deliveries d JOIN s3_receivers r
+                 ON r.tenant_id=d.tenant_id AND r.service_id=d.service_id AND r.order_id=d.order_id
+               WHERE d.tenant_id='tenant-a' AND d.order_id='async-order-decoy'"""
+        ).fetchone()
+        if not target or not decoy:
+            raise EvaluationPreflightError("E08_HISTORY_NOT_PRIMED")
+        target, decoy = dict(target), dict(decoy)
+        history_facts = history_receiver["facts"]
+        if (
+            target["delivery_status"] != "ACKNOWLEDGED"
+            or target["delivery_event_id"] != E08_TARGET_EVENT_ID
+            or target["receiver_event_id"] != E08_TARGET_EVENT_ID
+            or target["receiver_status"] != "PROCESSED"
+            or type(target["receiver_version"]) is not int
+            or target["receiver_version"] <= int(history_facts.get("version", 0))
+            or decoy["delivery_status"] != "ACKNOWLEDGED"
+            or decoy["delivery_event_id"] != E08_DECOY_EVENT_ID
+            or decoy["receiver_event_id"] != E08_DECOY_EVENT_ID
+            or decoy["receiver_status"] != "QUEUED"
+            or E08_TARGET_EVENT_ID == E08_DECOY_EVENT_ID
+            or E08_LOG_EVENT_ID == E08_TARGET_EVENT_ID
+        ):
+            raise EvaluationPreflightError("E08_HISTORY_NOT_PRIMED")
+
+        spend_count = 0
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='assistant_runtime_spends'"
+        ).fetchone():
+            spend_count = int(connection.execute("SELECT COUNT(*) FROM assistant_runtime_spends").fetchone()[0])
+        if spend_count:
+            raise EvaluationPreflightError("E08_HISTORY_HAS_PROVIDER_ACTIVITY")
+        history_current, history_current_reason = sources_current(connection, history_run["run_id"])
+        return {
+            "prepared": True,
+            "session_id": session["session_id"],
+            "task_id": binding["task_id"],
+            "history_run_id": history_run["run_id"],
+            "history_user_message_id": first_user["message_id"],
+            "history_answer_message_id": historical_answer["message_id"],
+            "history_answer_sha256": hashlib.sha256(historical_answer["body"].encode("utf-8")).hexdigest(),
+            "history_observation_id": history_observation_id,
+            "history_evidence_id": history_evidence_id,
+            "history_event_id": E08_TARGET_EVENT_ID,
+            "history_receiver_status": "QUEUED",
+            "history_receiver_version": int(history_facts.get("version", 0)),
+            "history_source_current": bool(history_current),
+            "history_source_current_reason": history_current_reason,
+            "target_event_id": E08_TARGET_EVENT_ID,
+            "target_receiver_status": "PROCESSED",
+            "target_receiver_version": int(target["receiver_version"]),
+            "decoy_event_id": E08_DECOY_EVENT_ID,
+            "decoy_receiver_status": "QUEUED",
+            "log_event_id": E08_LOG_EVENT_ID,
+            "log_authority": "USER_PROVIDED_UNVERIFIED",
+            "provider_spends": spend_count,
+        }
+    except EvaluationPreflightError:
+        raise
+    except Exception as error:
+        raise EvaluationPreflightError("E08_HISTORY_NOT_PRIMED") from error
+    finally:
+        connection.close()
+
+
+def _e08_history_audit(
+    trace: dict[str, Any],
+    *,
+    final_run_id: str,
+    task_id: str,
+) -> dict[str, Any]:
+    """Link the previous and current Receiver facts by their real Run/Task IDs."""
+    call_rows = {
+        str(row.get("call_id")): row
+        for row in trace.get("assistant_calls_actual_model_input_output", [])
+        if isinstance(row, dict)
+    }
+    user_messages = [row for row in trace.get("messages", []) if row.get("role") == "USER"]
+    answer_messages = [row for row in trace.get("messages", []) if row.get("role") == "ASSISTANT"]
+    runs = {str(row.get("run_id")): row for row in trace.get("runs", []) if isinstance(row, dict)}
+    history_message = next(
+        (row for row in user_messages if row.get("body") == E08_HISTORY_SETUP_MESSAGE), None,
+    )
+    history_run = next(
+        (row for row in runs.values() if history_message and row.get("source_message_id") == history_message.get("message_id")),
+        None,
+    )
+    history_run_id = str(history_run.get("run_id")) if history_run else ""
+    history_receiver: list[dict[str, Any]] = []
+    current_receiver: list[dict[str, Any]] = []
+    for observation in trace.get("observations", []):
+        if not isinstance(observation, dict) or observation.get("task_id") != task_id:
+            continue
+        call = call_rows.get(str(observation.get("call_id")))
+        if not call or call.get("kind") != "MCP" or call.get("status") != "OK":
+            continue
+        result = observation.get("result_json")
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except (TypeError, json.JSONDecodeError):
+                continue
+        if not isinstance(result, dict) or result.get("fact_type") != "s3_receiver":
+            continue
+        facts = result.get("facts")
+        if not isinstance(facts, dict):
+            continue
+        item = {
+            "observation_id": observation.get("observation_id"),
+            "evidence_id": observation.get("evidence_id"),
+            "run_id": call.get("run_id"),
+            "task_id": observation.get("task_id"),
+            "event_id": facts.get("event_id"),
+            "order_id": facts.get("order_id"),
+            "receiver_status": facts.get("status"),
+            "receiver_version": facts.get("version"),
+            "source_ref": result.get("original_result_ref"),
+            "observed_at": result.get("observed_at"),
+        }
+        if call.get("run_id") == history_run_id:
+            history_receiver.append(item)
+        if call.get("run_id") == final_run_id:
+            current_receiver.append(item)
+
+    old = next((row for row in history_receiver if row.get("event_id") == E08_TARGET_EVENT_ID), None)
+    current = next((row for row in current_receiver if row.get("event_id") == E08_TARGET_EVENT_ID), None)
+    decoy_id = E08_DECOY_EVENT_ID
+    log = {
+        "event_id": E08_LOG_EVENT_ID,
+        "receiver_status": "PROCESSED",
+        "authority": "USER_PROVIDED_UNVERIFIED",
+        "source_digest": hashlib.sha256(E08_LOG_LINE.encode("utf-8")).hexdigest(),
+    }
+    model_calls = [
+        row for row in trace.get("assistant_calls_actual_model_input_output", [])
+        if isinstance(row, dict) and row.get("run_id") == final_run_id and row.get("kind") == "MODEL"
+    ]
+    model_input_messages = [
+        message
+        for row in model_calls
+        for message in (
+            row.get("request_json", {}).get("messages", [])
+            if isinstance(row.get("request_json"), dict)
+            else row.get("request", {}).get("messages", [])
+        )
+        if isinstance(message, dict)
+    ]
+    prompt_text = json.dumps(model_input_messages, ensure_ascii=False)
+    leak_markers = (
+        "expected_user_outcome", "acceptable_decisions", "required_evidence",
+        "independent_scoring", "gold_sha256", "POST_FREEZE_FIXTURE_SPECIFIED",
+        "RUBRIC.json", "CASES.json", "E08-H",
+    )
+    leaks = [marker for marker in leak_markers if marker in prompt_text]
+    ordered_messages = sorted(trace.get("messages", []), key=lambda row: int(row.get("sequence", 0)))
+
+    def answer_after(user_message: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not user_message:
+            return None
+        try:
+            index = next(
+                i for i, row in enumerate(ordered_messages)
+                if row.get("message_id") == user_message.get("message_id")
+            )
+        except StopIteration:
+            return None
+        for row in ordered_messages[index + 1:]:
+            if row.get("role") == "USER":
+                return None
+            if row.get("role") == "ASSISTANT":
+                return row
+        return None
+
+    final_user = next(
+        (row for row in reversed(user_messages)
+         if row.get("body") == load_frozen_case(E08_H_CASE_ID)["user_turns"][0]),
+        None,
+    )
+    answer_for_final = answer_after(final_user)
+    history_answer = answer_after(history_message)
+    history_answer_body = str(history_answer.get("body", "")) if history_answer else ""
+    final_model_call = model_calls[-1] if model_calls else {}
+    final_request = final_model_call.get("request_json") if isinstance(final_model_call, dict) else None
+    final_request = final_request if isinstance(final_request, dict) else {}
+    final_model_messages = final_request.get("messages") if isinstance(final_request.get("messages"), list) else []
+    final_tools = final_request.get("tools") if isinstance(final_request.get("tools"), list) else []
+    return {
+        "history_run_id": history_run_id,
+        "current_run_id": final_run_id,
+        "history_answer_message_id": history_answer.get("message_id") if history_answer else None,
+        "history_event_id": old.get("event_id") if old else None,
+        "history_receiver_status": old.get("receiver_status") if old else None,
+        "history_receiver_version": old.get("receiver_version") if old else None,
+        "history_observation_id": old.get("observation_id") if old else None,
+        "history_evidence_id": old.get("evidence_id") if old else None,
+        "current_event_id": current.get("event_id") if current else None,
+        "current_receiver_status": current.get("receiver_status") if current else None,
+        "current_receiver_version": current.get("receiver_version") if current else None,
+        "current_observation_id": current.get("observation_id") if current else None,
+        "current_evidence_id": current.get("evidence_id") if current else None,
+        "current_source_ref": current.get("source_ref") if current else None,
+        "current_observed_at": current.get("observed_at") if current else None,
+        "target_event_changed": bool(old and current and old.get("event_id") != current.get("event_id")),
+        "current_is_later_version": bool(
+            old and current and type(old.get("receiver_version")) is int
+            and type(current.get("receiver_version")) is int
+            and current["receiver_version"] > old["receiver_version"]
+        ),
+        "decoy_event_id": decoy_id,
+        "log_event_id": log["event_id"],
+        "log_authority": log["authority"],
+        "log_observed_at": "2026-11-14T12:00:00Z",
+        "log_digest": log["source_digest"],
+        "current_run_target_observation_count": len([
+            row for row in current_receiver if row.get("event_id") == E08_TARGET_EVENT_ID
+        ]),
+        "current_run_other_event_observation_count": len([
+            row for row in current_receiver if row.get("event_id") != E08_TARGET_EVENT_ID
+        ]),
+        "current_run_receiver_observations": current_receiver,
+        "model_input_contains_frozen_question": bool(
+            load_frozen_case(E08_H_CASE_ID)["user_turns"][0] in prompt_text
+        ),
+        "model_input_contains_history_user_turn": bool(
+            history_message and history_message.get("body") and history_message["body"] in prompt_text
+        ),
+        "model_input_contains_historical_assistant_answer": bool(
+            history_answer_body and history_answer_body in prompt_text
+        ),
+        "model_input_contains_target_event_id": E08_TARGET_EVENT_ID in prompt_text,
+        "model_input_contains_decoy_event_id": E08_DECOY_EVENT_ID in prompt_text,
+        "model_call_count": len(model_calls),
+        "final_model_message_types": [str(item.get("type", "")) for item in final_model_messages],
+        "final_model_visible_tool_names": [
+            str(item.get("function", {}).get("name", ""))
+            for item in final_tools if isinstance(item, dict) and isinstance(item.get("function"), dict)
+        ],
+        "gold_leak_matches": leaks,
+        "model_calls_used_gold_labels": bool(leaks),
+        "final_answer_message_id": answer_for_final.get("message_id") if answer_for_final else None,
+    }
 
 
 def _read_s3_task_binding_scope(runtime_dir: Path, task_id: str) -> dict[str, Any]:
@@ -679,7 +1065,12 @@ def live_preflight(
     repo_root = Path(root or ROOT).resolve()
     api_origin = _loopback_url(api_origin, label="API_ORIGIN")
     state = inspect_case_runtime(case_id, runtime_name, root=repo_root)
-    if not state["fresh"]:
+    e08_history = None
+    if case_id == E08_H_CASE_ID:
+        e08_history = inspect_e08_history_ready(runtime_name, root=repo_root)
+        if state["provider_send_grants"] or state["unknown_requests"]:
+            raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
+    elif not state["fresh"]:
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_CONTAINS_SESSION_OR_RUN_DATA")
     if state["provider_send_grants"] or state["unknown_requests"]:
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
@@ -738,6 +1129,8 @@ def live_preflight(
     fixture_summary = _s3_fixture_summary(case_id, state)
     if fixture_summary is not None:
         result["s3_fixture"] = fixture_summary
+    if e08_history is not None:
+        result["e08_history"] = e08_history
     if case_id in EXPLORATORY_CASE_SOURCES:
         result["experiment_class"] = "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE"
         result["source_question_case_id"] = EXPLORATORY_CASE_SOURCES[case_id]
@@ -927,10 +1320,16 @@ def _execute_case_once(
 
     runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
     pre_state = inspect_case_runtime(case_id, runtime_name, root=repo_root)
-    if not pre_state["fresh"]:
-        raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_CONTAINS_SESSION_OR_RUN_DATA")
-    if pre_state["provider_send_grants"] or pre_state["unknown_requests"]:
-        raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
+    e08_history: dict[str, Any] | None = None
+    if case_id == E08_H_CASE_ID:
+        e08_history = inspect_e08_history_ready(runtime_name, root=repo_root)
+        if pre_state["provider_send_grants"] or pre_state["unknown_requests"]:
+            raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
+    else:
+        if not pre_state["fresh"]:
+            raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_CONTAINS_SESSION_OR_RUN_DATA")
+        if pre_state["provider_send_grants"] or pre_state["unknown_requests"]:
+            raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
     mismatch = _s3_fixture_mismatch(case_id, pre_state)
     if mismatch:
         raise EvaluationPreflightError(mismatch)
@@ -955,9 +1354,14 @@ def _execute_case_once(
     if not csrf:
         raise EvaluationPreflightError("CSRF_TOKEN_MISSING")
     write_headers = {"Origin": web_origin, "X-CSRF-Token": csrf}
-    session_response = client.post(api_origin + "/api/sessions", headers=write_headers)
-    session = _raise_for_status(session_response, {201}, "SESSION_CREATE")
-    session_id = str(session.get("session_id", ""))
+    if e08_history is not None:
+        session_id = str(e08_history["session_id"])
+        task_id: str | None = str(e08_history["task_id"])
+    else:
+        session_response = client.post(api_origin + "/api/sessions", headers=write_headers)
+        session = _raise_for_status(session_response, {201}, "SESSION_CREATE")
+        session_id = str(session.get("session_id", ""))
+        task_id = None
     if not session_id:
         raise EvaluationPreflightError("SESSION_ID_MISSING")
 
@@ -1005,15 +1409,22 @@ def _execute_case_once(
             })
 
     question = case["user_turns"][0]
-    task_id: str | None = None
-    if case_id in S3_FIXTURE_EXPECTATIONS:
+    if case_id == E08_H_CASE_ID:
+        response = client.post(
+            f"{api_origin}/api/sessions/{session_id}/assistant/messages",
+            headers={**write_headers, "Idempotency-Key": "r2-ar06-e08-h-final-" + uuid.uuid4().hex},
+            json={"task_id": task_id, "body": question},
+        )
+        accepted = _raise_for_status(response, {202}, "E08_FINAL_FROZEN_MESSAGE_AND_RUN")
+    elif case_id in S3_FIXTURE_EXPECTATIONS:
         response = client.post(
             f"{api_origin}/api/sessions/{session_id}/assistant/order",
             headers={
                 **write_headers,
                 "Idempotency-Key": (
                     "r2-ar06-e07-" if case_id == "E07-D"
-                    else "r2-ar06-observation-contrast-"
+                    else "r2-ar06-observation-contrast-" if case_id == OBSERVATION_CONTRAST_CASE_ID
+                    else "r2-ar06-e08-h-"
                 ) + uuid.uuid4().hex,
             },
             json={"order_id": E07_ORDER_ID, "initial_message": question},
@@ -1050,10 +1461,18 @@ def _execute_case_once(
     export_session(session_id, output, runtime_name=runtime_name, actor_id="support-a", root=repo_root)
     trace = json.loads(output.read_text(encoding="utf-8"))
     submitted = [row for row in trace["messages"] if row.get("role") == "USER"]
-    if len(submitted) != 1 or submitted[0].get("body") != question:
+    evaluated_user = submitted[-1] if submitted else None
+    if case_id == E08_H_CASE_ID:
+        if (
+            len(submitted) != 2
+            or submitted[0].get("body") != E08_HISTORY_SETUP_MESSAGE
+            or submitted[-1].get("body") != question
+        ):
+            raise EvaluationPreflightError("E08_FROZEN_TURN_OR_HISTORY_MISMATCH")
+    elif len(submitted) != 1 or submitted[0].get("body") != question:
         raise EvaluationPreflightError("EXPORTED_INPUT_DOES_NOT_MATCH_FROZEN_GOLD")
     exported_run = next((row for row in trace["runs"] if row.get("run_id") == run_id), None)
-    if exported_run is None or exported_run.get("source_message_id") != submitted[0].get("message_id"):
+    if exported_run is None or exported_run.get("source_message_id") != (evaluated_user or {}).get("message_id"):
         raise EvaluationPreflightError("EXPORTED_RUN_SOURCE_LINK_MISMATCH")
     if task_id and not any(row.get("task_id") == task_id for row in trace.get("task_bindings", [])):
         raise EvaluationPreflightError("EXPORTED_TRUSTED_TASK_BINDING_MISSING")
@@ -1105,6 +1524,13 @@ def _execute_case_once(
         result_record["observation_contrast"] = _observation_contrast_audit(
             trace, run_id=run_id, task_id=task_id,
         )
+    if case_id == E08_H_CASE_ID:
+        result_record["fixture_specification_status"] = E08_FIXTURE_SPEC_STATUS
+        result_record["e08_history"] = e08_history
+        result_record["e08_history_audit"] = _e08_history_audit(
+            trace, final_run_id=run_id, task_id=str(task_id),
+        )
+        result_record["real_model_semantic_score"] = "NOT_ESTABLISHED_BY_FIXTURE"
     if case_id == "E04-H":
         result_record.update({
             "fixture_specification_status": "POST_FREEZE_FIXTURE_BLINDED_V2",
@@ -1542,14 +1968,373 @@ def run_e04_fixture(
     }
 
 
+def make_e08_fixture_model():
+    """Offline model that answers from the Receiver ToolMessage it actually receives."""
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import AIMessage, ToolMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+    from pydantic import Field
+
+    class E08HistoryFixtureModel(BaseChatModel):
+        dispatch_count: int = 0
+        offered_tool_names: list[str] = Field(default_factory=list)
+        offered_tool_schemas: list[dict[str, Any]] = Field(default_factory=list)
+        decisions: list[dict[str, Any]] = Field(default_factory=list)
+        seen: list[list[Any]] = Field(default_factory=list)
+
+        @property
+        def _llm_type(self) -> str:
+            return "R2_AR06_E08_HISTORY_FIXTURE"
+
+        def bind_tools(self, tools, **kwargs):
+            self.offered_tool_names = [tool.name for tool in tools]
+            self.offered_tool_schemas = _fixture_model_visible_tool_schemas(tools)
+            return self
+
+        @staticmethod
+        def _payload(message):
+            value = message.content
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    return {}
+            while isinstance(value, dict) and set(value) == {"result"}:
+                value = value["result"]
+            return value if isinstance(value, dict) else {}
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            self.dispatch_count += 1
+            self.seen.append(list(messages))
+            result = next(
+                (self._payload(message) for message in messages
+                 if isinstance(message, ToolMessage) and (self._payload(message).get("fact_type") == "s3_receiver")),
+                None,
+            )
+            if result is None:
+                if "get_receiver_processing" not in self.offered_tool_names:
+                    raise AssertionError("The formal Assistant did not offer its bound Receiver read tool.")
+                self.decisions.append({"action": "CALL", "tool": "get_receiver_processing"})
+                answer = AIMessage(content="", tool_calls=[{
+                    "name": "get_receiver_processing",
+                    "args": {"reason": "Check the currently bound order's Receiver state."},
+                    "id": f"e08-fixture-{self.dispatch_count}",
+                }])
+                answer.usage_metadata = {"input_tokens": 16, "output_tokens": 8, "total_tokens": 24}
+                return ChatResult(generations=[ChatGeneration(message=answer)])
+
+            facts = result.get("facts")
+            if not isinstance(facts, dict) or not facts.get("event_id") or facts.get("status") not in {"QUEUED", "PROCESSED"}:
+                raise AssertionError("The fixture answer requires a typed current Receiver Observation.")
+            self.decisions.append({
+                "action": "ANSWER_FROM_OBSERVATION",
+                "event_id": facts["event_id"],
+                "receiver_status": facts["status"],
+                "version": facts.get("version"),
+            })
+            text = (
+                f"本次授权订单的 Receiver 当前观察对应 Event {facts['event_id']}，"
+                f"状态为 {facts['status']}，版本 {facts.get('version')}。"
+                "这是 Fixture Model 的离线路由证明，不构成真实模型质量评分。"
+            )
+            answer = AIMessage(content=text)
+            answer.usage_metadata = {"input_tokens": 18, "output_tokens": 20, "total_tokens": 38}
+            return ChatResult(generations=[ChatGeneration(message=answer)])
+
+    return E08HistoryFixtureModel()
+
+
+def _advance_e08_target_in_fixture(runtime_dir: Path) -> dict[str, Any]:
+    """Advance only the newly initialized synthetic target after its old read."""
+    from opspilot.domain.database import connect
+
+    with connect(runtime_dir / "domain.sqlite3") as connection:
+        row = connection.execute(
+            "SELECT event_id,status,version FROM s3_receivers WHERE tenant_id='tenant-a' AND order_id='async-order'"
+        ).fetchone()
+        if (
+            row is None or row["event_id"] != E08_TARGET_EVENT_ID
+            or row["status"] != "QUEUED" or type(row["version"]) is not int
+        ):
+            raise EvaluationPreflightError("E08_TARGET_FIXTURE_TRANSITION_FROM_QUEUED_FAILED")
+        before_version = int(row["version"])
+        cursor = connection.execute(
+            "UPDATE s3_receivers SET status='PROCESSED',version=version+1 "
+            "WHERE tenant_id='tenant-a' AND order_id='async-order' AND event_id=? AND status='QUEUED' AND version=?",
+            (E08_TARGET_EVENT_ID, before_version),
+        )
+        if cursor.rowcount != 1:
+            raise EvaluationPreflightError("E08_TARGET_FIXTURE_TRANSITION_FROM_QUEUED_FAILED")
+        row = connection.execute(
+            "SELECT event_id,status,version FROM s3_receivers WHERE tenant_id='tenant-a' AND order_id='async-order'"
+        ).fetchone()
+        if row is None or row["status"] != "PROCESSED" or int(row["version"]) <= before_version:
+            raise EvaluationPreflightError("E08_TARGET_FIXTURE_TRANSITION_TO_PROCESSED_FAILED")
+        return {
+            "event_id": str(row["event_id"]),
+            "status_before": "QUEUED",
+            "version_before": before_version,
+            "status_after": str(row["status"]),
+            "version_after": int(row["version"]),
+        }
+
+
+def _e08_history_prime_with_client(
+    client: Any,
+    *,
+    runtime_name: str,
+    support_password: str,
+    api_origin: str,
+    web_origin: str,
+    root: str | Path,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    from runtime_paths import resolve_user_demo_runtime
+    from export_live_evidence import export_session
+
+    repo_root = Path(root).resolve()
+    runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
+    preflight = _case_preflight_cli(
+        argparse.Namespace(case_id=E08_H_CASE_ID, runtime_name=runtime_name), root=repo_root,
+    )
+    if preflight.get("status") != "OFFLINE_READY_TO_PRIME_HISTORY":
+        raise EvaluationPreflightError("E08_HISTORY_ALREADY_PRIMED_OR_RUNTIME_NOT_FRESH")
+    api_origin = _loopback_url(api_origin, label="API_ORIGIN")
+    web_origin = _loopback_url(web_origin, label="WEB_ORIGIN")
+    login = _raise_for_status(client.post(
+        api_origin + "/api/auth/login",
+        headers={"Origin": web_origin},
+        json={"actor_id": "support-a", "password": support_password},
+    ), {200}, "E08_HISTORY_LOGIN")
+    if login.get("tenant_id") != "tenant-a" or login.get("actor_id") != "support-a":
+        raise EvaluationPreflightError("SUPPORT_IDENTITY_SCOPE_MISMATCH")
+    csrf = str(login.get("csrf_token", ""))
+    if not csrf:
+        raise EvaluationPreflightError("CSRF_TOKEN_MISSING")
+    headers = {"Origin": web_origin, "X-CSRF-Token": csrf}
+    session = _raise_for_status(
+        client.post(api_origin + "/api/sessions", headers=headers), {201}, "E08_HISTORY_SESSION_CREATE",
+    )
+    session_id = str(session.get("session_id", ""))
+    if not session_id:
+        raise EvaluationPreflightError("SESSION_ID_MISSING")
+    accepted = _raise_for_status(client.post(
+        f"{api_origin}/api/sessions/{session_id}/assistant/order",
+        headers={**headers, "Idempotency-Key": "r2-ar06-e08-history-" + uuid.uuid4().hex},
+        json={"order_id": "async-order", "initial_message": E08_HISTORY_SETUP_MESSAGE},
+    ), {200, 202}, "E08_HISTORY_BIND_AND_RUN")
+    task_id = str(accepted.get("task_id", ""))
+    history_run_id = str(accepted.get("run_id", ""))
+    if not task_id or not history_run_id:
+        raise EvaluationPreflightError("E08_HISTORY_BINDING_OR_RUN_MISSING")
+    history_run, timed_out = _wait_for_terminal(client, history_run_id, timeout_seconds=timeout_seconds)
+    if timed_out or history_run.get("status") != "SUCCEEDED":
+        raise EvaluationPreflightError("E08_HISTORY_FIXTURE_RUN_FAILED")
+
+    transition = _advance_e08_target_in_fixture(runtime_dir)
+    source_view = client.get(f"{api_origin}/api/runs/{history_run_id}/assistant-sources")
+    if source_view.status_code != 200:
+        raise EvaluationPreflightError("E08_HISTORY_SOURCE_STATUS_UNAVAILABLE")
+    source_projection = source_view.json()
+    output = runtime_dir / "evidence" / "E08-H.history.json"
+    export_session(session_id, output, runtime_name=runtime_name, actor_id="support-a", root=repo_root)
+    history_trace = json.loads(output.read_text(encoding="utf-8"))
+    prepared = inspect_e08_history_ready(runtime_name, root=repo_root)
+    history_result = {
+        "schema": "r2-ar06-e08-history-prime-v1",
+        "fixture_specification_status": E08_FIXTURE_SPEC_STATUS,
+        "case_id": E08_H_CASE_ID,
+        "runtime_name": runtime_name,
+        "session_id": session_id,
+        "task_id": task_id,
+        "history_run_id": history_run_id,
+        "history_user_message_id": prepared["history_user_message_id"],
+        "history_answer_message_id": prepared["history_answer_message_id"],
+        "history_observation_id": prepared["history_observation_id"],
+        "history_evidence_id": prepared["history_evidence_id"],
+        "history_event_id": E08_TARGET_EVENT_ID,
+        "history_receiver_status": "QUEUED",
+        "history_receiver_version": prepared["history_receiver_version"],
+        "history_answer_sha256": prepared["history_answer_sha256"],
+        "history_source_current_after_fixture_advance": bool(source_projection.get("current")),
+        "history_source_projection": source_projection,
+        "target_state_transition": transition,
+        "user_log": {
+            "event_id": E08_LOG_EVENT_ID,
+            "receiver_status": "PROCESSED",
+            "observed_at": "2026-11-14T12:00:00Z",
+            "source_class": "USER_PROVIDED_UNVERIFIED",
+            "sha256": hashlib.sha256(E08_LOG_LINE.encode("utf-8")).hexdigest(),
+        },
+        "trace_path": str(output),
+        "trace_message_count": len(history_trace.get("messages", [])),
+        "provider_requests": 0,
+        "unknown_requests": 0,
+        "fixture_specification_status_only_operator_side": True,
+    }
+    (runtime_dir / "evidence" / "E08-H.history.result.json").write_text(
+        json.dumps(history_result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+    )
+    return {"preflight": preflight, "history": history_result, "prepared": prepared}
+
+
+def prime_e08_history_fixture(
+    runtime_name: str,
+    *,
+    api_origin: str = DEFAULT_API_ORIGIN,
+    web_origin: str = DEFAULT_WEB_ORIGIN,
+    timeout_seconds: float = 60,
+    root: str | Path | None = None,
+    support_password: str | None = None,
+) -> dict[str, Any]:
+    """Persist only the offline historical turn and stop before the frozen question."""
+    from fastapi.testclient import TestClient
+    from runtime_paths import resolve_user_demo_runtime
+    from opspilot.web.app import create_app
+
+    repo_root = Path(root or ROOT).resolve()
+    runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
+    password = support_password or _local_support_password()
+    if not password:
+        raise EvaluationPreflightError("SUPPORT_PASSWORD_NOT_CONFIGURED_LOCALLY")
+    model = make_e08_fixture_model()
+    app = create_app(
+        db_path=runtime_dir / "domain.sqlite3",
+        checkpoint_db_path=runtime_dir / "checkpoint.sqlite3",
+        start_worker=True,
+        credentials={"support-a": password},
+        expected_origin=web_origin,
+        assistant_model_factory=lambda: model,
+        assistant_runtime_enabled=False,
+    )
+    with TestClient(app, base_url=api_origin, raise_server_exceptions=False) as client:
+        result = _e08_history_prime_with_client(
+            client, runtime_name=runtime_name, support_password=password,
+            api_origin=api_origin, web_origin=web_origin, root=repo_root,
+            timeout_seconds=timeout_seconds,
+        )
+    result["fixture_model_dispatches"] = model.dispatch_count
+    result["fixture_decisions"] = model.decisions
+    result["model_visible_tool_schemas"] = model.offered_tool_schemas
+    return result
+
+
+def run_e08_fixture(
+    runtime_name: str,
+    *,
+    api_origin: str = DEFAULT_API_ORIGIN,
+    web_origin: str = DEFAULT_WEB_ORIGIN,
+    timeout_seconds: float = 60,
+    root: str | Path | None = None,
+    support_password: str | None = None,
+) -> dict[str, Any]:
+    """Prime a sourced history, advance only its synthetic target, then query the frozen turn."""
+    from fastapi.testclient import TestClient
+    from runtime_paths import resolve_user_demo_runtime
+    from opspilot.web.app import create_app
+
+    repo_root = Path(root or ROOT).resolve()
+    runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
+    password = support_password or _local_support_password()
+    if not password:
+        raise EvaluationPreflightError("SUPPORT_PASSWORD_NOT_CONFIGURED_LOCALLY")
+    model = make_e08_fixture_model()
+    app = create_app(
+        db_path=runtime_dir / "domain.sqlite3",
+        checkpoint_db_path=runtime_dir / "checkpoint.sqlite3",
+        start_worker=True,
+        credentials={"support-a": password},
+        expected_origin=web_origin,
+        assistant_model_factory=lambda: model,
+        assistant_runtime_enabled=False,
+    )
+    with TestClient(app, base_url=api_origin, raise_server_exceptions=False) as client:
+        history_setup = _e08_history_prime_with_client(
+            client, runtime_name=runtime_name, support_password=password,
+            api_origin=api_origin, web_origin=web_origin, root=repo_root,
+            timeout_seconds=timeout_seconds,
+        )
+        result = execute_case(
+            client, case_id=E08_H_CASE_ID, runtime_name=runtime_name,
+            support_password=password, api_origin=api_origin, web_origin=web_origin,
+            root=repo_root, execution_mode="FIXTURE", timeout_seconds=timeout_seconds,
+        )
+    return {
+        "preflight": history_setup["preflight"],
+        "history_setup": history_setup["history"],
+        "prepared_state": history_setup["prepared"],
+        "result": result,
+        "fixture_decisions": model.decisions,
+        "model_visible_tool_schemas": model.offered_tool_schemas,
+        "fixture_model_dispatches": model.dispatch_count,
+        "fixture_specification_status": E08_FIXTURE_SPEC_STATUS,
+    }
+
+
 def _case_preflight_cli(args: argparse.Namespace, *, root: str | Path | None = None) -> dict[str, Any]:
     state = inspect_case_runtime(args.case_id, args.runtime_name, root=root)
+    if args.case_id == E08_H_CASE_ID and not state["fresh"]:
+        if state["runtime_grant_present"]:
+            raise EvaluationPreflightError("OFFLINE_PREFLIGHT_REQUIRES_NO_RUNTIME_GRANT")
+        if state["provider_send_grants"] or state["unknown_requests"]:
+            raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
+        prepared = inspect_e08_history_ready(args.runtime_name, root=root)
+        return {
+            "status": "OFFLINE_HISTORY_PRIMED",
+            "case_id": E08_H_CASE_ID,
+            "fixture_specification_status": E08_FIXTURE_SPEC_STATUS,
+            "runtime_name": args.runtime_name,
+            "fresh": False,
+            "runtime_grant_present": False,
+            "provider_requests": 0,
+            "unknown_requests": 0,
+            "history_run_id": prepared["history_run_id"],
+            "history_receiver_status": prepared["history_receiver_status"],
+            "target_event_id": prepared["target_event_id"],
+            "target_receiver_status": prepared["target_receiver_status"],
+            "decoy_event_id": prepared["decoy_event_id"],
+            "decoy_receiver_status": prepared["decoy_receiver_status"],
+            "history_source_current": prepared["history_source_current"],
+        }
     if not state["fresh"]:
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_CONTAINS_SESSION_OR_RUN_DATA")
     if state["runtime_grant_present"]:
         raise EvaluationPreflightError("OFFLINE_PREFLIGHT_REQUIRES_NO_RUNTIME_GRANT")
     if state["provider_send_grants"] or state["unknown_requests"]:
         raise EvaluationPreflightError("CASE_RUNTIME_ALREADY_HAS_PROVIDER_ACTIVITY")
+    if args.case_id == E08_H_CASE_ID:
+        initial_is_valid = (
+            state.get("s3_order_id") == "async-order"
+            and state.get("delivery_status") == "ACKNOWLEDGED"
+            and state.get("receiver_http_status") == 202
+            and state.get("receiver_status") == "QUEUED"
+            and state.get("delivery_event_id") == E08_TARGET_EVENT_ID
+            and state.get("receiver_event_id") == E08_TARGET_EVENT_ID
+            and state.get("decoy_order_id") == "async-order-decoy"
+            and state.get("decoy_receiver_status") == "QUEUED"
+            and state.get("decoy_delivery_event_id") == E08_DECOY_EVENT_ID
+            and state.get("decoy_receiver_event_id") == E08_DECOY_EVENT_ID
+            and E08_TARGET_EVENT_ID != E08_DECOY_EVENT_ID
+            and E08_LOG_EVENT_ID != E08_TARGET_EVENT_ID
+        )
+        if not initial_is_valid:
+            raise EvaluationPreflightError("E08_INITIAL_FIXTURE_MISMATCH")
+        return {
+            "status": "OFFLINE_READY_TO_PRIME_HISTORY",
+            "case_id": E08_H_CASE_ID,
+            "fixture_specification_status": E08_FIXTURE_SPEC_STATUS,
+            "runtime_name": args.runtime_name,
+            "fresh": True,
+            "runtime_grant_present": False,
+            "provider_requests": 0,
+            "unknown_requests": 0,
+            "target_event_id": E08_TARGET_EVENT_ID,
+            "target_receiver_status_before_history": "QUEUED",
+            "decoy_event_id": E08_DECOY_EVENT_ID,
+            "decoy_receiver_status": "QUEUED",
+            "user_log_event_id": E08_LOG_EVENT_ID,
+            "user_log_authority": "USER_PROVIDED_UNVERIFIED",
+        }
     mismatch = _s3_fixture_mismatch(args.case_id, state)
     if mismatch:
         raise EvaluationPreflightError(mismatch)
@@ -1604,13 +2389,22 @@ def main(argv: list[str] | None = None) -> int:
     live.add_argument("--timeout-seconds", type=float, default=DEFAULT_RUN_TIMEOUT_SECONDS)
 
     fixture = sub.add_parser("run-fixture", help="Run an offline case through the formal API with a local Fixture Model; no Provider call.")
-    fixture.add_argument("--case-id", required=True, choices=("E03-D", "E04-H"))
+    fixture.add_argument("--case-id", required=True, choices=("E03-D", "E04-H", E08_H_CASE_ID))
     fixture.add_argument("--runtime-name", required=True)
     fixture.add_argument("--api-origin", default=DEFAULT_API_ORIGIN)
     fixture.add_argument("--web-origin", default=DEFAULT_WEB_ORIGIN)
     fixture.add_argument("--timeout-seconds", type=float, default=60)
     fixture.add_argument("--tool-order", choices=("compare_then_excerpt", "excerpt_then_compare"), default="compare_then_excerpt")
     fixture.add_argument("--decision-path", choices=("compare_available", "request_missing_materials"), default="compare_available")
+    prime = sub.add_parser(
+        "prime-history",
+        help="Use the local Fixture Model to persist E08's historical turn, then stop before the frozen question.",
+    )
+    prime.add_argument("--case-id", required=True, choices=(E08_H_CASE_ID,))
+    prime.add_argument("--runtime-name", required=True)
+    prime.add_argument("--api-origin", default=DEFAULT_API_ORIGIN)
+    prime.add_argument("--web-origin", default=DEFAULT_WEB_ORIGIN)
+    prime.add_argument("--timeout-seconds", type=float, default=60)
     args = parser.parse_args(argv)
 
     try:
@@ -1658,6 +2452,13 @@ def main(argv: list[str] | None = None) -> int:
                     timeout_seconds=args.timeout_seconds,
                     tool_order=args.tool_order,
                 )
+            elif args.case_id == E08_H_CASE_ID:
+                result = run_e08_fixture(
+                    args.runtime_name,
+                    api_origin=args.api_origin,
+                    web_origin=args.web_origin,
+                    timeout_seconds=args.timeout_seconds,
+                )
             else:
                 result = run_e04_fixture(
                     args.runtime_name,
@@ -1668,6 +2469,16 @@ def main(argv: list[str] | None = None) -> int:
                 )
             print(json.dumps(result, ensure_ascii=False))
             return 0 if not result["result"]["terminal_timeout"] else 3
+
+        if args.command == "prime-history":
+            result = prime_e08_history_fixture(
+                args.runtime_name,
+                api_origin=args.api_origin,
+                web_origin=args.web_origin,
+                timeout_seconds=args.timeout_seconds,
+            )
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
 
         if args.authorized_case_id != args.case_id:
             raise EvaluationPreflightError("LIVE_AUTHORIZATION_CASE_MISMATCH")

@@ -15,7 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-S3_FIXTURE_PROFILES = ("standard", "r2-e07-queued", "r2-e08-processed-decoy")
+S3_FIXTURE_PROFILES = (
+    "standard", "r2-e07-queued", "r2-e08-processed-decoy", "r2-e08-history-queued",
+)
 
 
 def _add_s2_scope_demo(db_path: Path) -> None:
@@ -121,6 +123,21 @@ def _seed_s3_fixture_profile(db_path: Path, profile: str) -> None:
             transport_uuid="00000000-0000-4000-8000-000000000202",
         )
         return
+    if profile == "r2-e08-history-queued":
+        # E08 priming starts with the target still queued. The offline setup
+        # Run records a real scoped Observation and answer before the isolated
+        # fixture advances this same Event to PROCESSED.
+        _prepare_s3_fixture_with_ids(
+            db_path, order_id="async-order",
+            event_uuid="00000000-0000-4000-8000-000000000101",
+            transport_uuid="00000000-0000-4000-8000-000000000201",
+        )
+        _prepare_s3_fixture_with_ids(
+            db_path, order_id="async-order-decoy",
+            event_uuid="00000000-0000-4000-8000-000000000102",
+            transport_uuid="00000000-0000-4000-8000-000000000202",
+        )
+        return
     raise ValueError("USER_DEMO_S3_FIXTURE_PROFILE_INVALID")
 
 
@@ -198,7 +215,12 @@ def _seed_new_user_demo(runtime_dir: Path, s3_fixture_profile: str = "standard")
             or s3["delivery_event_id"] != "event-00000000-0000-4000-8000-000000000101"
         ):
             raise RuntimeError("E08 target fixture did not preserve the frozen same-Event identity.")
-        if s3_fixture_profile == "r2-e08-processed-decoy":
+        if s3_fixture_profile == "r2-e08-history-queued" and (
+            s3["delivery_event_id"] != s3["receiver_event_id"]
+            or s3["delivery_event_id"] != "event-00000000-0000-4000-8000-000000000101"
+        ):
+            raise RuntimeError("E08 history fixture did not preserve the frozen target Event identity.")
+        if s3_fixture_profile in {"r2-e08-processed-decoy", "r2-e08-history-queued"}:
             decoy = connection.execute(
                 "SELECT d.event_id AS delivery_event_id,r.event_id AS receiver_event_id,"
                 "d.status AS delivery_status,r.status AS receiver_status "
