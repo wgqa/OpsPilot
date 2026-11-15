@@ -1,0 +1,94 @@
+R2-AR04-LIVE-RECHECK-V2-FINAL-01 test and execution log
+Date: 2026-11-15 (Asia/Shanghai workspace date)
+Repo: wgqa/OpsPilot
+Branch: codex/r2-ar04-live-recheck-v2-final-01
+Task Base: 1f0b27b9f14686a4c33bd33c212bb5d7a007280e
+Final production pins: chat.py d10f495cadc4c2006504ecd87e5c02947f87e80b; assistant.py 4fa1aaa7059cf6478fce4c262b8c1876df9a7dcb
+Python 3.14.0; pytest 9.1.1
+
+Commands and outcomes
+=====================
+
+1) python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+   Exit: 0. Syntax check passed (final run recorded below after implementation edits).
+
+2) python -m pytest -q docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+   Exit: 1. First collection failed because the new runner had not yet added the accepted V2 runner directory to sys.path (`ModuleNotFoundError: run_v2`). Fixed the local import path.
+
+3) python -m pytest -q docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+   Exit: 1. 2 passed, 5 setup errors. Pytest could not enumerate the shared Windows temp root (`PermissionError` under pytest-of-tu me manques); no application assertion failed. Switched to a fresh basetemp inside this task evidence directory.
+
+4) python -m pytest -q --basetemp docs/evidence/r2-ar04-live-recheck-v2-final-01/.pytest-run-01 docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+   Exit: 0. 7 passed in 18.15s.
+
+5) Initial preparation command using the initial V2 adapter identity:
+   python docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py prepare
+   Exit: 0. 3/3 Cases, 9 Mock requests and zero-cost preflight passed; zero Provider sends. A review found the ledger/task metadata still identified V2 PREP rather than this final task. Retained as `mock_run_01/` and superseded; its preflight file was replaced by the final preflight.
+
+6) python -m pytest -q --basetemp docs/evidence/r2-ar04-live-recheck-v2-final-01/.pytest-run-02 docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+   Exit: 0. 8 passed in 39.25s, including final task identity in the ledger.
+
+7) Preparation attempt after binding V2 to the final task:
+   python docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py prepare
+   Exit: 1. `mock_run_02/` completed all 3 Cases and 9 Mock requests. A wrapper check then compared the final result against the restored V2 PREP task name and falsely stopped before preflight. No Provider send occurred. Fixed to validate the final task and Base; preserved `mock_run_02/`.
+
+8) Final preparation command:
+   python docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py prepare
+   Exit: 0. `mock_run_03/` completed 3/3, 6 summary + 3 answer Mock requests; zero Provider requests, USD 0.00, zero MCP. Zero-cost preflight status `READY_FOR_LIVE_AUTHORIZATION`; isolated Grant was created/bound and Assistant was built with Mock transport.
+
+9) Final syntax check before target-fact assertion was added:
+   python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+   Exit: 0.
+
+10) Final combined current V2 provenance/failure suite and final runner suite:
+    python -m pytest -q --basetemp docs/evidence/r2-ar04-live-recheck-v2-final-01/.pytest-run-04 docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+    Exit: 0. 21 passed in 78.90s. This includes V2 frozen-source wrong-ID/body/swap rejection tests and final task authorization, source invalidation, budget, Domain failure and UNKNOWN stop tests.
+
+11) CLI live-entry negative check (no authorization file supplied):
+    python docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py live
+    Exit: 1 (PowerShell process status). Output: `NEW_TASK_SPECIFIC_LIVE_AUTHORIZATION_REQUIRED`, `provider_requests_sent=0`. No live output directory was created.
+
+12) Final syntax check after the target-fact assertions:
+    python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+    Exit: 0.
+
+13) Final task-specific tests after adding explicit `/callback` and ordered-transition assertions:
+    python -m pytest -q --basetemp docs/evidence/r2-ar04-live-recheck-v2-final-01/.pytest-run-05 docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+    Exit: 0. 8 passed in 31.10s.
+
+14) Final zero-cost preflight refresh after exposing the new authorization-gated live entry in the report:
+    python docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py preflight
+    Exit: 0. `READY_FOR_LIVE_AUTHORIZATION`; main `.env` loaded; effective six-key configuration complete after non-secret supplements; isolated Grant bound; Mock transport invocations 0; Provider requests 0; production database not opened.
+
+15) Final syntax and final task-specific test run after live-entry metadata assertions:
+    python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+    Exit: 0.
+    python -m pytest -q --basetemp docs/evidence/r2-ar04-live-recheck-v2-final-01/.pytest-run-06 docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+    Exit: 0. 8 passed in 30.89s.
+
+16) Final task-specific tests after binding a lower authorized cap into the shared ledger:
+    python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+    Exit: 0.
+    python -m pytest -q --basetemp docs/evidence/r2-ar04-live-recheck-v2-final-01/.pytest-run-07 docs/evidence/r2-ar04-live-recheck-v2-final-01/test_live_final.py
+    Exit: 0. 8 passed in 30.70s.
+
+17) Final zero-cost preflight after the authorization-bound ledger-cap fix:
+    python docs/evidence/r2-ar04-live-recheck-v2-final-01/run_live_final.py preflight
+    Exit: 0. `READY_FOR_LIVE_AUTHORIZATION`; isolated grant bindable; Provider requests 0; cost USD 0.00; production DB unopened.
+
+18) Delivery artifact validation:
+    Parsed all delivered JSON and compressed JSONL records; checked text and compressed traces for credential-pattern matches.
+    Exit: 0. 15 JSON files and 6 gzip JSONL files parsed; 0 parse errors; 0 credential-pattern hits; `live_run_01` absent; authorization manifest absent.
+    A first broad scan also traversed pytest temporary fixture files and stopped on a transient empty file; the final check was scoped to delivered artifacts and passed. No artifact was changed by either scan.
+
+Safety totals for this task
+===========================
+Provider requests: 0
+Provider cost: USD 0.00
+External MCP calls: 0
+Production database opened/written: no
+Live run directory: not created
+Authorization manifest: not created
+Live L2/L3 semantic evaluation: NOT_RUN
+
+The temporary `.pytest-run-*` directories and `__pycache__` are ignored and retained; no historical worktree artifacts were deleted or reset.
