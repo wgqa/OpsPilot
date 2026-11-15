@@ -37,19 +37,19 @@ def build_s3_server(db_path, task_id, api_url):
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def get_order_status(reason: Reason, ctx: Context) -> D2ToolFact:
-        """Read the bound order through real authenticated HTTP; 200 alone does not prove completion."""
+        """Read the bound order through real authenticated HTTP. It supports only order-level fields returned in the response body and does not provide the callback business event_id; authn_event_id is a separate authentication event ID. HTTP 200 alone does not prove callback completion."""
         validate(reason,ctx,{"reason"})
         return D2ToolFact.model_validate(get_order_status_fact(db_path, task_id, api_url))
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def get_callback_delivery(reason: Reason, ctx: Context) -> D2ToolFact:
-        """Read the current Delivery row for the trusted bound order. It returns its actual event_id; use it for a requested Event only when that ID matches. It does not change or expand the TaskBinding."""
+        """Read the current Delivery row for the trusted bound order. Its returned event_id identifies this Delivery Event and can be compared with the Receiver Observation only when both tools return the same ID; it does not establish an event_id for the order Observation. Use it for a requested Event only when that ID matches. It does not change or expand the TaskBinding."""
         validate(reason,ctx,{"reason"})
         return D2ToolFact.model_validate(get_callback_delivery_fact(db_path, task_id))
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def get_receiver_processing(reason: Reason, ctx: Context) -> D2ToolFact:
-        """Read the current Receiver row for the trusted bound order. It returns its actual event_id; use it for a requested Event only when that ID matches. ACK is not completed processing."""
+        """Read the current Receiver row for the trusted bound order. Its returned event_id identifies this Receiver Event and can be compared with the Delivery Observation only when both tools return the same ID; it does not establish an event_id for the order Observation. Use it for a requested Event only when that ID matches. ACK is not completed processing."""
         validate(reason,ctx,{"reason"})
         return D2ToolFact.model_validate(get_receiver_processing_fact(db_path, task_id))
 
