@@ -26,7 +26,11 @@ USER_DEMO_DIR = ROOT / "scripts" / "user-demo"
 EVAL_DIR = ROOT / "docs" / "evidence" / "r2-ar06-eval-01"
 CASES_PATH = EVAL_DIR / "CASES.json"
 FROZEN_HASHES_PATH = EVAL_DIR / "FROZEN_HASHES.json"
-E04_FIXTURE_MANIFEST_PATH = EVAL_DIR / "e04-h-absence-20261115" / "E04_FIXTURE_MANIFEST.json"
+E04_PRIOR_MANIFEST_PATH = EVAL_DIR / "e04-h-absence-20261115" / "E04_FIXTURE_MANIFEST.json"
+E04_PRIOR_MANIFEST_SHA256 = "5ea356cc2928d335aa5030bae083ffd899aa121843454a028532fb53b124b83f"
+E04_FIXTURE_MANIFEST_PATH = EVAL_DIR / "e04-blinding-hf01-20261115" / "E04_FIXTURE_MANIFEST.v2.json"
+E04_FIXTURE_PROJECT_ID = "orders-protocol-review"
+E04_BLINDING_BASE_SHA = "4e23e229cea3e42d61ebb2bc49f25a0e37bf5f1c"
 OBSERVATION_CONTRAST_CASE_ID = "OBSERVATION-CONTRAST-PROCESSED"
 OBSERVATION_CONTRAST_TARGET_EVENT_ID = "event-00000000-0000-4000-8000-000000000101"
 OBSERVATION_CONTRAST_DECOY_EVENT_ID = "event-00000000-0000-4000-8000-000000000102"
@@ -70,6 +74,33 @@ for path in (ROOT, USER_DEMO_DIR):
 
 class EvaluationPreflightError(RuntimeError):
     """A safe, non-secret reason a case cannot be prepared or run."""
+
+
+def _fixture_model_visible_tool_schemas(tools: list[Any]) -> list[dict[str, Any]]:
+    """Capture the exact schemas bound to a fixture model, without assuming wrappers."""
+    result: list[dict[str, Any]] = []
+    for tool in tools:
+        if isinstance(tool, dict):
+            function = tool.get("function", tool)
+            name = function.get("name") if isinstance(function, dict) else None
+            description = function.get("description") if isinstance(function, dict) else None
+            parameters = function.get("parameters") if isinstance(function, dict) else None
+        else:
+            name = getattr(tool, "name", None)
+            description = getattr(tool, "description", None)
+            schema = getattr(tool, "tool_call_schema", None)
+            if hasattr(schema, "model_json_schema"):
+                parameters = schema.model_json_schema()
+            elif isinstance(schema, dict):
+                parameters = schema
+            else:
+                parameters = None
+        result.append({
+            "name": str(name or ""),
+            "description": str(description or ""),
+            "parameters": parameters,
+        })
+    return result
 
 
 def load_frozen_case(case_id: str) -> dict[str, Any]:
@@ -213,13 +244,14 @@ def _e03_runtime_registry() -> dict[str, Any]:
 
 
 def _e04_fixture_manifest() -> tuple[dict[str, Any], str]:
-    """Validate the post-freeze absence fixture against the locked source files."""
+    """Validate the versioned blinded fixture against its previous manifest and sources."""
     path = E04_FIXTURE_MANIFEST_PATH
     if path.is_symlink() or not path.is_file():
         raise EvaluationPreflightError("E04_FIXTURE_MANIFEST_UNAVAILABLE")
     try:
         raw = path.read_bytes()
         manifest = json.loads(raw.decode("utf-8"))
+        previous_raw = E04_PRIOR_MANIFEST_PATH.read_bytes()
         trusted_path = ROOT / "knowledge" / "async-callback" / "manifest.json"
         trusted_raw = trusted_path.read_bytes()
         trusted = json.loads(trusted_raw.decode("utf-8"))
@@ -227,14 +259,22 @@ def _e04_fixture_manifest() -> tuple[dict[str, Any], str]:
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise EvaluationPreflightError("E04_FIXTURE_MANIFEST_INVALID") from error
     actual_fixture_sha = hashlib.sha256(raw).hexdigest()
+    actual_previous_sha = hashlib.sha256(previous_raw).hexdigest()
     allowed_ids = ["callback-retry-contract", "callback-retry-contract-v2"]
     if not isinstance(manifest, dict) or not isinstance(trusted, dict):
         raise EvaluationPreflightError("E04_FIXTURE_MANIFEST_INVALID")
     if (
-        manifest.get("schema_version") != 1
+        manifest.get("schema_version") != 2
+        or manifest.get("fixture_version") != 2
         or manifest.get("case_id") != "E04-H"
-        or manifest.get("fixture_specification_status") != "POST_FREEZE_FIXTURE_SPECIFIED"
-        or manifest.get("base_sha") != "9dd9bb1366bdeaf601f0023f66a443c9f8b6f38a"
+        or manifest.get("fixture_specification_status") != "POST_FREEZE_FIXTURE_BLINDED_V2"
+        or manifest.get("base_sha") != E04_BLINDING_BASE_SHA
+        or actual_previous_sha != E04_PRIOR_MANIFEST_SHA256
+        or manifest.get("revision", {}).get("previous_manifest_sha256") != E04_PRIOR_MANIFEST_SHA256
+        or manifest.get("revision", {}).get("model_visible_project_id") != E04_FIXTURE_PROJECT_ID
+        or manifest.get("revision", {}).get("documents_and_contents_unchanged") is not True
+        or manifest.get("revision", {}).get("frozen_question_unchanged") is not True
+        or manifest.get("revision", {}).get("no_provider_authorization_added") is not True
         or manifest.get("trusted_source_manifest", {}).get("relative_path")
         != "knowledge/async-callback/manifest.json"
         or manifest.get("trusted_source_manifest", {}).get("sha256")
@@ -249,7 +289,7 @@ def _e04_fixture_manifest() -> tuple[dict[str, Any], str]:
         authorization.get("tenant_id") != "tenant-a"
         or authorization.get("actor_id") != "support-a"
         or authorization.get("role") != "SUPPORT"
-        or authorization.get("project_id") != "orders-e04-absence"
+        or authorization.get("project_id") != E04_FIXTURE_PROJECT_ID
         or authorization.get("allowed_document_ids") != allowed_ids
         or authorization.get("grant_version") != 1
         or authorization.get("configured_contract_version") != 2
@@ -302,14 +342,14 @@ def _e04_fixture_manifest() -> tuple[dict[str, Any], str]:
             or trusted_row.get("active") is not True
         ):
             raise EvaluationPreflightError("E04_TRUSTED_DOCUMENT_DIGEST_MISMATCH")
-    absence = manifest.get("absence_and_claim_boundary", {})
+    condition = manifest.get("scoped_document_condition", {})
     if (
-        absence.get("authorized_scope_versions") != ["1.0.0", "2.0.0"]
-        or absence.get("v1_4_document_registered_in_this_fixture") is not False
-        or absence.get("two_conflicting_migration_notes_provided") is not False
-        or absence.get("user_claim_about_conflicting_notes") != "UNVERIFIED_USER_ASSERTION_ONLY"
+        condition.get("authorized_versions") != ["1.0.0", "2.0.0"]
+        or condition.get("v1_4_document_registered_in_this_runtime") is not False
+        or condition.get("migration_notes_supplied") is not False
+        or condition.get("user_claim_about_conflicting_notes") != "UNVERIFIED_USER_ASSERTION_ONLY"
     ):
-        raise EvaluationPreflightError("E04_ABSENCE_BOUNDARY_INVALID")
+        raise EvaluationPreflightError("E04_SCOPED_DOCUMENT_CONDITION_INVALID")
     evaluation_boundary = manifest.get("evaluation_boundary", {})
     if not isinstance(evaluation_boundary, dict) or any(
         evaluation_boundary.get(key) is not False
@@ -326,25 +366,17 @@ def _e04_fixture_manifest() -> tuple[dict[str, Any], str]:
 
 
 def _e04_runtime_registry() -> dict[str, Any]:
-    """Reuse E03's verified document references under a new runtime-local project grant."""
-    fixture, manifest_sha = _e04_fixture_manifest()
+    """Reuse E03's verified documents under a neutral, business-shaped project grant."""
+    _e04_fixture_manifest()
     registry = _e03_runtime_registry()
     project = json.loads(json.dumps(registry["projects"][0]))
     project.update({
-        "project_id": "orders-e04-absence",
-        "title": "E04-H isolated callback retry document scope",
-        "evaluation_fixture": {
-            "case_id": "E04-H",
-            "fixture_specification_status": "POST_FREEZE_FIXTURE_SPECIFIED",
-            "manifest_path": E04_FIXTURE_MANIFEST_PATH.relative_to(ROOT).as_posix(),
-            "manifest_sha256": manifest_sha,
-            "documents": [
-                {"document_id": row["document_id"], "version": row["version"],
-                 "digest": row["sha256"], "source": row["source"]}
-                for row in fixture["documents"]
-            ],
-        },
+        "project_id": E04_FIXTURE_PROJECT_ID,
+        "title": "Order callback protocol review",
     })
+    # Evaluation metadata remains in the versioned manifest, never the registry
+    # read by MCP tools while constructing model-visible context.
+    project.pop("evaluation_fixture", None)
     return {"schema_version": 1, "projects": [project]}
 
 
@@ -450,7 +482,7 @@ def inspect_case_runtime(
                     except EvaluationPreflightError:
                         manifest_sha = None
                     result["assistant_knowledge_registry"].update({
-                        "fixture_specification_status": "POST_FREEZE_FIXTURE_SPECIFIED",
+                        "fixture_specification_status": "POST_FREEZE_FIXTURE_BLINDED_V2",
                         "fixture_manifest_sha256": manifest_sha,
                         "v1_4_absent_in_authorized_scope": bool(
                             valid_registry and manifest_sha and
@@ -931,7 +963,7 @@ def _execute_case_once(
 
     knowledge_scope: dict[str, Any] | None = None
     if case_id in {"E03-D", "E04-H"}:
-        project_id = "orders-async-demo" if case_id == "E03-D" else "orders-e04-absence"
+        project_id = "orders-async-demo" if case_id == "E03-D" else E04_FIXTURE_PROJECT_ID
         scope_response = client.get(f"{api_origin}/api/sessions/{session_id}/assistant/scopes")
         scope = _raise_for_status(scope_response, {200}, f"{case_id.replace('-', '_')}_SCOPE_DISCOVERY")
         items = scope.get("items")
@@ -964,12 +996,12 @@ def _execute_case_once(
             "document_ids": list(scoped_project.get("document_ids", [])),
         }
         if case_id == "E04-H":
-            fixture = scoped_project.get("evaluation_fixture", {})
+            fixture_manifest, fixture_manifest_sha = _e04_fixture_manifest()
             knowledge_scope.update({
-                "fixture_specification_status": "POST_FREEZE_FIXTURE_SPECIFIED",
-                "fixture_manifest_sha256": fixture.get("manifest_sha256"),
-                "registered_versions": [row.get("version") for row in fixture.get("documents", [])],
-                "v1_4_absence_claim_scope": "AUTHORIZED_RUNTIME_PROJECT_ONLY",
+                "fixture_specification_status": "POST_FREEZE_FIXTURE_BLINDED_V2",
+                "fixture_manifest_sha256": fixture_manifest_sha,
+                "registered_versions": [row.get("version") for row in fixture_manifest["documents"]],
+                "data_claim_scope": "AUTHORIZED_PROJECT_ONLY",
             })
 
     question = case["user_turns"][0]
@@ -1075,9 +1107,9 @@ def _execute_case_once(
         )
     if case_id == "E04-H":
         result_record.update({
-            "fixture_specification_status": "POST_FREEZE_FIXTURE_SPECIFIED",
+            "fixture_specification_status": "POST_FREEZE_FIXTURE_BLINDED_V2",
             "fixture_manifest_sha256": knowledge_scope.get("fixture_manifest_sha256"),
-            "absence_claim_scope": "AUTHORIZED_RUNTIME_PROJECT_ONLY",
+            "data_claim_scope": "AUTHORIZED_PROJECT_ONLY",
             "real_model_semantic_score": "NOT_ESTABLISHED_BY_FIXTURE",
         })
     result_output.write_text(json.dumps(result_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1135,6 +1167,7 @@ def make_e03_fixture_model(*, tool_order: str = "compare_then_excerpt"):
         tool_order: str = "compare_then_excerpt"
         dispatch_count: int = 0
         offered_tool_names: list[str] = Field(default_factory=list)
+        offered_tool_schemas: list[dict[str, Any]] = Field(default_factory=list)
         decisions: list[dict[str, Any]] = Field(default_factory=list)
         seen: list[list[Any]] = Field(default_factory=list)
 
@@ -1144,6 +1177,7 @@ def make_e03_fixture_model(*, tool_order: str = "compare_then_excerpt"):
 
         def bind_tools(self, tools, **kwargs):
             self.offered_tool_names = [tool.name for tool in tools]
+            self.offered_tool_schemas = _fixture_model_visible_tool_schemas(tools)
             return self
 
         @staticmethod
@@ -1321,19 +1355,21 @@ def make_e04_fixture_model(*, decision_path: str = "compare_available"):
     if decision_path not in {"compare_available", "request_missing_materials"}:
         raise ValueError("E04_FIXTURE_DECISION_PATH_INVALID")
 
-    class E04AbsenceFixtureModel(BaseChatModel):
+    class E04BlindedFixtureModel(BaseChatModel):
         decision_path: str = "compare_available"
         dispatch_count: int = 0
         offered_tool_names: list[str] = Field(default_factory=list)
+        offered_tool_schemas: list[dict[str, Any]] = Field(default_factory=list)
         decisions: list[dict[str, Any]] = Field(default_factory=list)
         seen: list[list[Any]] = Field(default_factory=list)
 
         @property
         def _llm_type(self) -> str:
-            return "R2_AR06_E04_ABSENCE_FIXTURE"
+            return "R2_AR06_E04_BLINDED_FIXTURE"
 
         def bind_tools(self, tools, **kwargs):
             self.offered_tool_names = [tool.name for tool in tools]
+            self.offered_tool_schemas = _fixture_model_visible_tool_schemas(tools)
             return self
 
         @staticmethod
@@ -1377,7 +1413,7 @@ def make_e04_fixture_model(*, decision_path: str = "compare_available"):
                     excerpt_result: dict[str, Any] | None = None) -> ChatResult:
             documents = discovery.get("protocol_documents", [])
             by_id = {row.get("document_id"): row for row in documents if isinstance(row, dict)}
-            if discovery.get("project_id") != "orders-e04-absence":
+            if discovery.get("project_id") != E04_FIXTURE_PROJECT_ID:
                 raise AssertionError("Fixture received an unexpected project scope.")
             if set(by_id) != {"callback-retry-contract", "callback-retry-contract-v2"}:
                 raise AssertionError("Fixture did not receive exactly the authorized v1/v2 documents.")
@@ -1388,7 +1424,7 @@ def make_e04_fixture_model(*, decision_path: str = "compare_available"):
             if old.get("version") != "1.0.0" or new.get("version") != "2.0.0":
                 raise AssertionError("Unexpected protocol versions in scoped tool result.")
             sections = [
-                "在本次授权项目 orders-e04-absence 返回的目录中，可见 callback-retry-contract v1.0.0 和 "
+                "在本次授权项目 orders-protocol-review 返回的目录中，可见 callback-retry-contract v1.0.0 和 "
                 "callback-retry-contract-v2 v2.0.0；未列出 v1.4。这只说明本次授权目录，不能证明其他环境或线上不存在 v1.4。",
                 "你提到的两份迁移说明没有随本轮提供可核验原文或来源，因此我还不能确认它们的内容或相互冲突。",
             ]
@@ -1456,7 +1492,7 @@ def make_e04_fixture_model(*, decision_path: str = "compare_available"):
                 })
             return self._answer(discovery, comparison, excerpt_result)
 
-    return E04AbsenceFixtureModel(decision_path=decision_path)
+    return E04BlindedFixtureModel(decision_path=decision_path)
 
 
 def run_e04_fixture(
@@ -1498,7 +1534,12 @@ def run_e04_fixture(
             support_password=password, api_origin=api_origin, web_origin=web_origin,
             root=root, execution_mode="FIXTURE", timeout_seconds=timeout_seconds,
         )
-    return {"preflight": preflight, "result": result, "fixture_decisions": model.decisions}
+    return {
+        "preflight": preflight,
+        "result": result,
+        "fixture_decisions": model.decisions,
+        "model_visible_tool_schemas": model.offered_tool_schemas,
+    }
 
 
 def _case_preflight_cli(args: argparse.Namespace, *, root: str | Path | None = None) -> dict[str, Any]:
@@ -1534,7 +1575,7 @@ def _case_preflight_cli(args: argparse.Namespace, *, root: str | Path | None = N
         result["experiment_class"] = "EXPLORATORY_COUNTERFACTUAL_NOT_FROZEN_CASE"
         result["source_question_case_id"] = EXPLORATORY_CASE_SOURCES[args.case_id]
     if args.case_id == "E04-H":
-        result["fixture_specification_status"] = "POST_FREEZE_FIXTURE_SPECIFIED"
+        result["fixture_specification_status"] = "POST_FREEZE_FIXTURE_BLINDED_V2"
         result["fixture_manifest_sha256"] = state["assistant_knowledge_registry"].get("fixture_manifest_sha256")
     return result
 

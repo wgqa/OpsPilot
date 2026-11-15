@@ -1,0 +1,43 @@
+R2-AR06-E04-EVAL-BLINDING-HF01 offline evidence log
+Base: 4e23e229cea3e42d61ebb2bc49f25a0e37bf5f1c
+Branch: codex/r2-ar06-e04-eval-blinding-hf01
+
+RED (before schema capture compatibility fix)
+Command:
+  python -m pytest tests/test_r2_ar06_e03_eval_exec.py tests/test_r2_ar06_e04_eval_exec.py -q --basetemp=.runtime/pytest-e04-blinding-hf01-02
+Result: 6 failed, 8 passed in 31.07s.
+The two E04 failures were missing Fixture Model schema capture. Four E03 failures cascaded from the existing E03 Fixture helper assuming tool_call_schema was a Pydantic model; the installed wrapper exposed a dict, so the first model call failed before MCP. The original E03 project and business implementation were not changed.
+
+GREEN
+Commands:
+  python -m py_compile scripts/user-demo/run_r2_ar06_case.py
+  python -m pytest tests/test_r2_ar06_e03_eval_exec.py tests/test_r2_ar06_e04_eval_exec.py -q --basetemp=.runtime/pytest-e04-blinding-hf01-03
+Result: 14 passed in 32.42s (E03 6/6, E04 8/8).
+The compatibility change is limited to Fixture-only capture of schemas from either schema objects or dictionaries. E04 tests include exact frozen input, model-visible labels, isolation, cross-tenant denial, unauthorized document denial, source revocation, and digest invalidation.
+
+FRESH ISOLATED E04-H FIXTURE RUN
+Commands:
+  python scripts/user-demo/run_r2_ar06_case.py prepare --case-id E04-H --runtime-name user-demo-r2-e04-h-blind-20261115-01
+  python scripts/user-demo/run_r2_ar06_case.py run-fixture --case-id E04-H --runtime-name user-demo-r2-e04-h-blind-20261115-01 --decision-path compare_available
+Prepare: ISOLATED_RUNTIME_CREATED; fresh=true; Runtime Grant=false; Provider requests=0.
+Preflight: OFFLINE_READY; neutral project orders-protocol-review; exactly the authorized v1.0.0/v2.0.0 documents; no previous Session/Run.
+Run: SUCCEEDED; Session=session-268d7776-34a8-40d4-9c1f-f3eed86f19d6; Run=run-7c9dab6e-a8ab-459e-a64a-d21e20c794bd; no TaskBinding; MCP calls=3 (discover, compare, excerpt); Fixture dispatches=4; Provider grants/responses/UNKNOWN=0/0/0; elapsed=2178ms; Fixture token metadata 118 input + 81 output (not Provider Usage or billed tokens); no Observation/Evidence.
+Result assessment_status=UNVERIFIED. Fixture completion is not a real-model score.
+
+ACTUAL MODEL INPUT AUDIT
+  Model requests inspected: 4 persisted MODEL request_json payloads.
+  Forbidden marker matches: none (old project id/absence, expected_answer, gold_status, POST_FREEZE fixture labels, fixture_manifest, E04-H, evaluation_only).
+  Old trace model-input occurrences of orders-e04-absence: 12.
+  New project id orders-protocol-review visible after scoped discovery: yes.
+  deployment_version_verified=false business boundary present: yes.
+  Frozen input SHA256: 8d68006c77971378ba75ff57af67ea4cb8b8c38fb4f23c3856333a77e988932a.
+  Revised manifest SHA256: a9c5787ce504eaf44d87746445a1ca3d039ad55d98b43225eeb12b70e20a5507.
+  New trace SHA256: 8d144f5c06cc4d59f9e9e0c9d7bc455854276100ea5550717725869127c6a7bc.
+  New result SHA256: cbb5d23407b5597470f73a44b755c0012849d9eb2be0acb0d68cc6477447a7a2.
+
+ORIGINAL ARTIFACT HASHES (verified unchanged)
+  Manifest: 5ea356cc2928d335aa5030bae083ffd899aa121843454a028532fb53b124b83f
+  Trace:    7354e0ba526e18515c829f31a659640a064584f98689a4d57602f8366b23c432
+  Result:   3fb707e218150284d185672c2846381b731d83f3ade5688bb3eebf9de7d15ebb
+
+No real Provider request, Grant creation, browser automation, business write, Gold/Rubric change, or main merge occurred.

@@ -77,6 +77,23 @@ def _execute(root: Path, name: str, runtime: Path, *, decision_path="compare_ava
         return result, model, json.loads(Path(result["trace_path"]).read_text(encoding="utf-8")), sources.json()
 
 
+def _serialized_model_surface(model) -> str:
+    messages = []
+    for dispatch in model.seen:
+        messages.append([
+            message.model_dump() if hasattr(message, "model_dump") else {
+                "type": getattr(message, "type", type(message).__name__),
+                "content": str(getattr(message, "content", "")),
+            }
+            for message in dispatch
+        ])
+    return json.dumps(
+        {"messages": messages, "mcp_schemas": model.offered_tool_schemas},
+        ensure_ascii=False,
+        sort_keys=True,
+    ).lower()
+
+
 @pytest.mark.parametrize(
     ("decision_path", "expected_tools"),
     [
@@ -99,7 +116,7 @@ def test_e04_formal_api_runs_frozen_question_with_scoped_docs_and_no_task(
     assert result["assessment_status"] == "UNVERIFIED"
     assert result["execution_mode"] == "FIXTURE"
     assert result["split"] == "H"
-    assert result["fixture_specification_status"] == "POST_FREEZE_FIXTURE_SPECIFIED"
+    assert result["fixture_specification_status"] == "POST_FREEZE_FIXTURE_BLINDED_V2"
     assert result["task_id"] is None and trace["task_bindings"] == []
     assert result["provider_send_grants"] == 0
     assert result["provider_responses_received"] == 0
@@ -110,22 +127,42 @@ def test_e04_formal_api_runs_frozen_question_with_scoped_docs_and_no_task(
     assert set(expected_tools).issubset(set(model.offered_tool_names))
     assert sources["current"] is True
     assert len(trace["runs"]) == 1 and trace["runs"][0]["task_id"] is None
-    assert result["knowledge_scope"]["project_id"] == "orders-e04-absence"
+    assert result["knowledge_scope"]["project_id"] == "orders-protocol-review"
     assert result["knowledge_scope"]["registered_versions"] == ["1.0.0", "2.0.0"]
-    assert result["absence_claim_scope"] == "AUTHORIZED_RUNTIME_PROJECT_ONLY"
+    assert result["data_claim_scope"] == "AUTHORIZED_PROJECT_ONLY"
     answer = next(row["body"] for row in trace["messages"] if row["role"] == "ASSISTANT")
     assert "不能证明其他环境或线上不存在 v1.4" in answer
     assert "没有随本轮提供可核验原文" in answer
     assert "实际部署版本" in answer
     assert "Gold" not in answer and "Rubric" not in answer
+    visible_surface = _serialized_model_surface(model)
+    for forbidden in (
+        "orders-e04-absence", "absence", "expected_answer", "gold_status",
+        "post_freeze_fixture_specified", "e04-h",
+    ):
+        assert forbidden not in visible_surface
+    assert "orders-protocol-review" in visible_surface
+    assert model.offered_tool_schemas
 
     calls = trace["assistant_calls_actual_model_input_output"]
+    model_requests = [row["request_json"] for row in calls if row["kind"] == "MODEL"]
+    assert model_requests
+    traced_model_surface = json.dumps([
+        {"messages": request.get("messages", []), "tools": request.get("tools", [])}
+        for request in model_requests
+    ], ensure_ascii=False, sort_keys=True).lower()
+    for forbidden in (
+        "orders-e04-absence", "absence", "expected_answer", "gold_status",
+        "post_freeze_fixture_specified", "e04-h",
+    ):
+        assert forbidden not in traced_model_surface
+    assert "orders-protocol-review" in traced_model_surface
     tool_results = {
         row["request_json"]["name"]: row["result_json"]
         for row in calls if row["kind"] == "MCP"
     }
     discovery = tool_results["list_scoped_protocol_documents"]
-    assert discovery["project_id"] == "orders-e04-absence"
+    assert discovery["project_id"] == "orders-protocol-review"
     docs = {row["document_id"]: row for row in discovery["protocol_documents"]}
     assert set(docs) == {"callback-retry-contract", "callback-retry-contract-v2"}
     assert docs["callback-retry-contract"]["version"] == "1.0.0"
@@ -133,7 +170,6 @@ def test_e04_formal_api_runs_frozen_question_with_scoped_docs_and_no_task(
     assert docs["callback-retry-contract-v2"]["version"] == "2.0.0"
     assert docs["callback-retry-contract-v2"]["digest"] == "9ad3f5a67a5f40da986769c66a78317027d3e57803371a0674d3b14fe412e238"
     assert all(row.get("document_id") != "callback-retry-contract-v1-4" for row in docs.values())
-    assert all("POST_FREEZE_FIXTURE_SPECIFIED" not in str(messages) for messages in model.seen)
     if decision_path == "compare_available":
         comparison = tool_results["compare_scoped_protocols"]
         assert comparison["success"] is True and comparison["identical"] is False
@@ -146,17 +182,21 @@ def test_e04_formal_api_runs_frozen_question_with_scoped_docs_and_no_task(
 
 def test_e04_manifest_is_post_freeze_and_runtime_scope_does_not_change_shared_grants(tmp_path: Path):
     manifest, manifest_sha = _e04_fixture_manifest()
-    assert manifest["fixture_specification_status"] == "POST_FREEZE_FIXTURE_SPECIFIED"
+    assert manifest["fixture_specification_status"] == "POST_FREEZE_FIXTURE_BLINDED_V2"
+    assert manifest["revision"]["previous_manifest_sha256"] == runner.E04_PRIOR_MANIFEST_SHA256
+    assert manifest["authorization_fixture"]["project_id"] == "orders-protocol-review"
+    assert manifest["revision"]["model_visible_project_id"] == "orders-protocol-review"
     assert manifest["evaluation_boundary"]["real_provider_authorized_by_this_manifest"] is False
     assert manifest["evaluation_boundary"]["expected_answer_in_model_context"] is False
     assert manifest["authorization_fixture"]["allowed_document_ids"] == [
         "callback-retry-contract", "callback-retry-contract-v2",
     ]
     registry = _e04_runtime_registry()
-    assert registry["projects"][0]["project_id"] == "orders-e04-absence"
-    assert registry["projects"][0]["evaluation_fixture"]["manifest_sha256"] == manifest_sha
+    assert registry["projects"][0]["project_id"] == "orders-protocol-review"
+    assert registry["projects"][0]["title"] == "Order callback protocol review"
+    assert "evaluation_fixture" not in registry["projects"][0]
     shared = json.loads((ROOT / "knowledge" / "assistant-access.json").read_text(encoding="utf-8"))
-    assert "orders-e04-absence" not in {row["project_id"] for row in shared["projects"]}
+    assert "orders-protocol-review" not in {row["project_id"] for row in shared["projects"]}
     assert Path(E04_FIXTURE_MANIFEST_PATH).is_file()
 
 
@@ -183,7 +223,7 @@ def test_e04_scope_is_owner_tenant_and_runtime_isolated(tmp_path: Path, unauthor
     docs = list_scoped_protocols(
         database, identity_a, session_a, topic="callback retry", registry_path=registry_path,
     )
-    assert docs["project_id"] == "orders-e04-absence"
+    assert docs["project_id"] == "orders-protocol-review"
     assert {row["document_id"] for row in docs["protocol_documents"]} == {
         "callback-retry-contract", "callback-retry-contract-v2",
     }
@@ -192,6 +232,10 @@ def test_e04_scope_is_owner_tenant_and_runtime_isolated(tmp_path: Path, unauthor
     )
     assert other_scope["items"] == []
     assert other_scope["reason_code"] == "KNOWLEDGE_SCOPE_DENIED"
+    search_result = assistant_knowledge.search(
+        database, identity_a, session_a, "callback retry protocol", registry_path=registry_path,
+    )
+    assert search_result["deployment_version_verified"] is False
     with pytest.raises(DocumentNotAuthorizedError):
         compare_scoped_protocols(
             database, identity_a, session_a,
@@ -207,7 +251,7 @@ def test_e04_scope_is_owner_tenant_and_runtime_isolated(tmp_path: Path, unauthor
     other_identity = trusted_identity(other_database, "support-a")
     other_session = create_session(other_database, other_identity)["session_id"]
     default = assistant_knowledge.list_scopes(other_database, other_identity, other_session)
-    assert "orders-e04-absence" not in {row["project_id"] for row in default["items"]}
+    assert "orders-protocol-review" not in {row["project_id"] for row in default["items"]}
 
 
 def test_e04_revocation_invalidates_persisted_sources_and_answer_projection(tmp_path: Path):
