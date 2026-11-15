@@ -1,0 +1,39 @@
+R2-AR06-E04-H-EVAL-EXEC-01 offline verification
+Base: 9dd9bb1366bdeaf601f0023f66a443c9f8b6f38a
+Branch at run: codex/r2-ar06-e04-eval-exec-01
+Date: 2026-11-15
+
+Compile:
+  python -m py_compile scripts/user-demo/run_r2_ar06_case.py tests/test_r2_ar06_e04_eval_exec.py
+  Result: exit 0
+
+Initial regression attempt:
+  python -m pytest tests/test_r2_ar06_e03_eval_exec.py -q
+  Result: pytest setup failed before test execution: Windows PermissionError (WinError 5) scanning the default
+          C:\Users\tu me manques\AppData\Local\Temp\pytest-of-tu me manques directory. Six setup errors;
+          no assertion ran. This was an environment temp-directory ACL issue, not a test assertion failure.
+
+Successful isolated regression:
+  python -m pytest --basetemp=.runtime/pytest-e04-h-20261115-003 tests/test_r2_ar06_e03_eval_exec.py tests/test_r2_ar06_e04_eval_exec.py -q
+  Result: 14 passed in 33.34s.
+  Breakdown: E03 6 passed; E04 8 passed. The basetemp was new and isolated.
+  E04 includes a changed-manifest Digest rejection check.
+
+Actual isolated E04-H Fixture run (formal in-process FastAPI TestClient, Assistant Worker and Mock/Fixture Model):
+  python scripts/user-demo/run_r2_ar06_case.py prepare --case-id E04-H --runtime-name user-demo-r2-e04-h-absence-20261115-01
+  Result: ISOLATED_RUNTIME_CREATED; fresh=true; runtime_grant_present=false; provider_requests=0.
+  python scripts/user-demo/run_r2_ar06_case.py preflight --case-id E04-H --runtime-name user-demo-r2-e04-h-absence-20261115-01 --mode offline
+  Result: OFFLINE_READY; registry valid; authorized project orders-e04-absence; exactly the v1.0.0/v2.0.0 documents;
+          fixture manifest SHA256 5ea356cc2928d335aa5030bae083ffd899aa121843454a028532fb53b124b83f;
+          provider_requests=0; unknown_requests=0.
+  python scripts/user-demo/run_r2_ar06_case.py run-fixture --case-id E04-H --runtime-name user-demo-r2-e04-h-absence-20261115-01 --decision-path compare_available --timeout-seconds 60
+  Result: exit 0; Run SUCCEEDED; assessment_status=UNVERIFIED; no TaskBinding; 3 MCP calls (list, compare, excerpt);
+          4 Fixture Model dispatches; provider sends=0; responses=0; UNKNOWN=0; no Observation/Evidence; elapsed=2056ms.
+
+Run IDs:
+  Session: session-3d71a55b-bfa3-4f1b-83a1-6e23dc03baae
+  Run: run-fd6ee466-1176-4d42-a6ab-0e05e79766fe
+  Trace SHA256: 7354e0ba526e18515c829f31a659640a064584f98689a4d57602f8366b23c432
+  Fixture-only Token metadata: input=118 output=81 total=199; not Provider Usage and not billed.
+
+No real Provider request, Runtime Grant, external business write, browser automation or Gold/Rubric edit occurred.

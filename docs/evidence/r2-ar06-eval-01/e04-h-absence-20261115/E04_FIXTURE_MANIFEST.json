@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "case_id": "E04-H",
+  "fixture_specification_status": "POST_FREEZE_FIXTURE_SPECIFIED",
+  "generated_at_utc": "2026-11-15T06:30:25Z",
+  "base_sha": "9dd9bb1366bdeaf601f0023f66a443c9f8b6f38a",
+  "frozen_gold": {
+    "cases_sha256": "c1acd3fa789befa733aa96bf3a49b08357ff071f3b627b4c40319882e2805cf8",
+    "rubric_sha256": "859985480169b04824a96a97db3031c312a68abbb550be3a96ffa6cbe5040944",
+    "eval_protocol_sha256": "22c0677121a2106fa529c4a5c245ca557ad5d7ea8ed01d3660bc4171d77e12c7"
+  },
+  "trusted_source_manifest": {
+    "relative_path": "knowledge/async-callback/manifest.json",
+    "sha256": "1dbd5d0ee05106c01554eb31778d48dca2717dd973cbdb9336aa73dd4cdf3ac0"
+  },
+  "authorization_fixture": {
+    "tenant_id": "tenant-a",
+    "actor_id": "support-a",
+    "role": "SUPPORT",
+    "project_id": "orders-e04-absence",
+    "allowed_document_ids": [
+      "callback-retry-contract",
+      "callback-retry-contract-v2"
+    ],
+    "grant_version": 1,
+    "configured_contract_version": 2,
+    "configured_contract_version_semantics": "Synthetic retrieval default required by the existing registry schema; not a claim about a real project or deployed version."
+  },
+  "documents": [
+    {
+      "document_id": "callback-retry-contract",
+      "title": "Callback failure and retry policy v1",
+      "relative_path": "knowledge/async-callback/callback-retry-contract.md",
+      "version": "1.0.0",
+      "contract_versions": [
+        1
+      ],
+      "source": "local:orders-async-demo/contract-v1",
+      "sha256": "a5974f46bf50e2bfcd63ed1e6528d473560854204d12a50dfb3f82b9e61bc0c3",
+      "byte_length": 405,
+      "content_utf8": "Protocol v1 retry contract. A 503 response with TEMPORARY_UNAVAILABLE is retriable. Retry state SCHEDULED and a trusted retry_at mean the sender will make another attempt; wait for that attempt rather than creating a parallel resend. Contact the callback operator only when the attempt limit is reached and the trusted retry state is EXHAUSTED. Correlate response request, event, order and attempt count.\n",
+      "content_base64_exact_bytes": "UHJvdG9jb2wgdjEgcmV0cnkgY29udHJhY3QuIEEgNTAzIHJlc3BvbnNlIHdpdGggVEVNUE9SQVJZX1VOQVZBSUxBQkxFIGlzIHJldHJpYWJsZS4gUmV0cnkgc3RhdGUgU0NIRURVTEVEIGFuZCBhIHRydXN0ZWQgcmV0cnlfYXQgbWVhbiB0aGUgc2VuZGVyIHdpbGwgbWFrZSBhbm90aGVyIGF0dGVtcHQ7IHdhaXQgZm9yIHRoYXQgYXR0ZW1wdCByYXRoZXIgdGhhbiBjcmVhdGluZyBhIHBhcmFsbGVsIHJlc2VuZC4gQ29udGFjdCB0aGUgY2FsbGJhY2sgb3BlcmF0b3Igb25seSB3aGVuIHRoZSBhdHRlbXB0IGxpbWl0IGlzIHJlYWNoZWQgYW5kIHRoZSB0cnVzdGVkIHJldHJ5IHN0YXRlIGlzIEVYSEFVU1RFRC4gQ29ycmVsYXRlIHJlc3BvbnNlIHJlcXVlc3QsIGV2ZW50LCBvcmRlciBhbmQgYXR0ZW1wdCBjb3VudC4K"
+    },
+    {
+      "document_id": "callback-retry-contract-v2",
+      "title": "Callback failure classification and retry policy v2",
+      "relative_path": "knowledge/async-callback/callback-retry-contract-v2.md",
+      "version": "2.0.0",
+      "contract_versions": [
+        2
+      ],
+      "source": "local:orders-async-demo/contract-v2",
+      "sha256": "9ad3f5a67a5f40da986769c66a78317027d3e57803371a0674d3b14fe412e238",
+      "byte_length": 421,
+      "content_utf8": "Protocol v2 error handling. A 503 response is retriable only when the server records a retryable failure code and a current retry policy. Retry state SCHEDULED with retry_at is still pending. EXHAUSTED is actionable only when attempt_count reaches max_attempts and the failure response digest/event/request all match the current delivery row. This document describes method; current Domain Evidence decides the incident.\n",
+      "content_base64_exact_bytes": "UHJvdG9jb2wgdjIgZXJyb3IgaGFuZGxpbmcuIEEgNTAzIHJlc3BvbnNlIGlzIHJldHJpYWJsZSBvbmx5IHdoZW4gdGhlIHNlcnZlciByZWNvcmRzIGEgcmV0cnlhYmxlIGZhaWx1cmUgY29kZSBhbmQgYSBjdXJyZW50IHJldHJ5IHBvbGljeS4gUmV0cnkgc3RhdGUgU0NIRURVTEVEIHdpdGggcmV0cnlfYXQgaXMgc3RpbGwgcGVuZGluZy4gRVhIQVVTVEVEIGlzIGFjdGlvbmFibGUgb25seSB3aGVuIGF0dGVtcHRfY291bnQgcmVhY2hlcyBtYXhfYXR0ZW1wdHMgYW5kIHRoZSBmYWlsdXJlIHJlc3BvbnNlIGRpZ2VzdC9ldmVudC9yZXF1ZXN0IGFsbCBtYXRjaCB0aGUgY3VycmVudCBkZWxpdmVyeSByb3cuIFRoaXMgZG9jdW1lbnQgZGVzY3JpYmVzIG1ldGhvZDsgY3VycmVudCBEb21haW4gRXZpZGVuY2UgZGVjaWRlcyB0aGUgaW5jaWRlbnQuCg=="
+    }
+  ],
+  "absence_and_claim_boundary": {
+    "authorized_scope_versions": [
+      "1.0.0",
+      "2.0.0"
+    ],
+    "v1_4_document_registered_in_this_fixture": false,
+    "v1_4_absence_scope": "The isolated orders-e04-absence grant and the trusted callback-retry catalog at the locked Base. This does not prove global absence from other repositories or deployments.",
+    "two_conflicting_migration_notes_provided": false,
+    "user_claim_about_conflicting_notes": "UNVERIFIED_USER_ASSERTION_ONLY"
+  },
+  "evaluation_boundary": {
+    "frozen_question_modified": false,
+    "gold_or_rubric_in_model_context": false,
+    "expected_answer_in_model_context": false,
+    "tool_order_forced": false,
+    "task_binding": null,
+    "real_provider_authorized_by_this_manifest": false,
+    "fixture_outputs_are_real_model_scores": false
+  }
+}
