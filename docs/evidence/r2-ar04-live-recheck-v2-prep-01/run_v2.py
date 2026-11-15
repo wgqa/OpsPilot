@@ -53,13 +53,49 @@ FROZEN_FILES = {
     "docs/evidence/r2-ar04-long-context-journey-01/HISTORY_SNAPSHOT.json": "356512f611b046a04e33506a0fb1a88c6a08af93517b2134125dd6771b282c16",
     "docs/evidence/r2-ar04-long-context-journey-01/MODEL_REQUESTS.jsonl.gz": "96efd85b7d29d54938b1a4932321eff74bca7e8e56565c978f58a1e57d9a1792",
     "docs/evidence/abc-live-env-unblock-01/live_run_02/LIVE_REQUESTS.jsonl.gz": "80dab676295960017bf31ba25c1aef62657d0eb0c437aa0fa1f0f6f56a8da05c",
+    "docs/evidence/r2-ar04-live-retention-recheck-01/live_run_01/LIVE_REQUESTS.jsonl.gz": "3c6552bfe411a4bd362e355c7725f5185717fb621308cb0493dcd36aaa5d50f7",
     "docs/evidence/abc-live-env-unblock-01/live_run_02/LIVE_RESULTS.json": "29ff36295398475699c767ec826dc94331b7299b527ae69b41c5e995cce4f55b",
     "docs/evidence/abc-live-env-unblock-01/IMPLEMENTER_PRELIMINARY_ASSESSMENT.json": "d89336e80191dd0771d83b42dcca1039d5f321a503c365d9b76ba9efbf88750f",
 }
 FROZEN_FIRST_SUMMARY_SHA256 = {
-    "Q02-A": "815ce6e46122561c83ab227c6fbe1bb3322e99663d144fd5ccac84b483393a83",
+    "Q02-A": "2ef286e22a44b927352d3dd45797f34baa331bbe48ae65a247e2d56caf81a136",
     "Q02-B": "be035b0ff1894321a08a49dfbf9a934d163c2fcad62c409797281619221376ee",
     "Q06-B": "7d624dd829dbf786f749d08e4880f4df8a94906147dfc06d56c943fbff42b755",
+}
+FROZEN_REPLY_SOURCES = {
+    "Q02-A": {
+        "trace_path": "docs/evidence/r2-ar04-live-retention-recheck-01/live_run_01/LIVE_REQUESTS.jsonl.gz",
+        "trace_sha256": "3c6552bfe411a4bd362e355c7725f5185717fb621308cb0493dcd36aaa5d50f7",
+        "case_id": "Q02-A",
+        "logical_id": "Q02-A:SUMMARY:1",
+        "request_body_sha256": "c8bb2ae2573eb6c019e5acc0db912e7e0fd20b6b80c34790c70f8eef7710b3a7",
+        "provider_response_id": "c3435ff4-fc27-4ffb-b053-bbfcabc600e0",
+        "response_body_sha256": "8f2d2a23392ce7732b50a50633fdbf5fa3b47d395dd71759b578c90970999b6d",
+        "summary_text_sha256": "2ef286e22a44b927352d3dd45797f34baa331bbe48ae65a247e2d56caf81a136",
+        "response_model": "deepseek-flash",
+    },
+    "Q02-B": {
+        "trace_path": "docs/evidence/abc-live-env-unblock-01/live_run_02/LIVE_REQUESTS.jsonl.gz",
+        "trace_sha256": "80dab676295960017bf31ba25c1aef62657d0eb0c437aa0fa1f0f6f56a8da05c",
+        "case_id": "Q02-B",
+        "logical_id": "Q02-B:SUMMARY:1",
+        "request_body_sha256": "25fdf3c03b198d46ebc44055582d2ad2d1daf8a75e1aa12a9c1568ea9b9f8176",
+        "provider_response_id": "d52800ab-6315-4374-ae93-8ff98c5b20a2",
+        "response_body_sha256": "209feb98fade698d59d40deeb49950872ec3b79e01ebfeafaa8ebf7fa1659f5b",
+        "summary_text_sha256": "be035b0ff1894321a08a49dfbf9a934d163c2fcad62c409797281619221376ee",
+        "response_model": "deepseek-flash",
+    },
+    "Q06-B": {
+        "trace_path": "docs/evidence/abc-live-env-unblock-01/live_run_02/LIVE_REQUESTS.jsonl.gz",
+        "trace_sha256": "80dab676295960017bf31ba25c1aef62657d0eb0c437aa0fa1f0f6f56a8da05c",
+        "case_id": "Q06-B",
+        "logical_id": "Q06-B:SUMMARY:1",
+        "request_body_sha256": "2b804b493d1f1c27c881cfd8ea745b8d0a88798f101cf238ad8b85c8e53cd794",
+        "provider_response_id": "2a3e15cc-5127-468b-b892-9ce8d194459f",
+        "response_body_sha256": "832fa7ad11e2625c0b794cb6d1d55faffa5ea4218946f3734139685378ed8fab",
+        "summary_text_sha256": "7d624dd829dbf786f749d08e4880f4df8a94906147dfc06d56c943fbff42b755",
+        "response_model": "deepseek-flash",
+    },
 }
 PROTECTED_HISTORICAL_FILES = (
     "docs/evidence/r2-ar04-compaction-c06-hf01/RESULTS.json",
@@ -340,7 +376,7 @@ def build_runner():
         return result
     abc._run_case = run_case_with_run_identity
 
-    def mock_transport(_abc, case_id, first_summary):
+    def mock_transport(_abc, case_id, first_summary, historical_source=None):
         scenario = active_scenarios.get(case_id, "success")
         call_no = 0
 
@@ -377,8 +413,11 @@ def build_runner():
                     str(item.get("content", "")) for item in payload.get("messages", []) if item.get("role") == "system"
                 ) else "ANSWER",
                 "origin": origin,
-                "historical_response_id": "c3435ff4-fc27-4ffb-b053-bbfcabc600e0" if case_id == "Q02-A" and call_no == 1 else None,
+                "historical_reply_source": historical_source if origin == "FROZEN_HISTORICAL_LIVE_SUMMARY" else None,
+                "historical_response_id": historical_source["provider_response_id"] if origin == "FROZEN_HISTORICAL_LIVE_SUMMARY" else None,
+                "historical_response_body_sha256": historical_source["response_body_sha256"] if origin == "FROZEN_HISTORICAL_LIVE_SUMMARY" else None,
                 "historical_content_sha256": sha256(content) if origin == "FROZEN_HISTORICAL_LIVE_SUMMARY" else None,
+                "historical_summary_text_sha256": historical_source["summary_text_sha256"] if origin == "FROZEN_HISTORICAL_LIVE_SUMMARY" else None,
                 "mock_response_id": response_id,
                 "content_sha256": sha256(content),
             })
@@ -398,27 +437,115 @@ def build_runner():
     return legacy, abc, freeze, active_scenarios, reply_provenance, summary_counts
 
 
-def frozen_summary_for_case(legacy, case_id: str) -> str:
-    from retention_evidence import response_text
-    pairs = legacy.trace_index(legacy.OLD_TRACE)
-    summary = response_text(pairs, f"{case_id}:SUMMARY:1")
-    if not summary:
-        raise V2Stop(f"FROZEN_LIVE_SUMMARY_MISSING:{case_id}")
-    _expect_digest(f"historical_first_summary:{case_id}", sha256(summary), FROZEN_FIRST_SUMMARY_SHA256[case_id])
+def _read_trace_events(path: Path) -> list[dict[str, Any]]:
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        return [json.loads(line) for line in stream if line.strip()]
+
+
+def _validate_frozen_reply_events(
+    case_id: str,
+    source: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> str:
+    if source.get("case_id") != case_id:
+        raise V2Stop(f"FROZEN_REPLY_CASE_MISMATCH:{case_id}")
+    expected_logical_id = f"{case_id}:SUMMARY:1"
+    if source.get("logical_id") != expected_logical_id:
+        raise V2Stop(f"FROZEN_REPLY_LOGICAL_ID_MISMATCH:{case_id}")
+
+    matching = [event for event in events if event.get("logical_id") == expected_logical_id]
+    sends = [event for event in matching if event.get("event") == "SEND_STARTED"]
+    responses = [event for event in matching if event.get("event") == "RESPONSE_RECEIVED"]
+    if len(matching) != 2 or len(sends) != 1 or len(responses) != 1:
+        raise V2Stop(f"FROZEN_REPLY_TRACE_PAIR_INVALID:{case_id}")
+    send, response = sends[0], responses[0]
+    if any(event.get("case_id") != case_id for event in (send, response)):
+        raise V2Stop(f"FROZEN_REPLY_CASE_MISMATCH:{case_id}")
+    if any(event.get("purpose") != "SUMMARY" or event.get("mode") != "LIVE" for event in (send, response)):
+        raise V2Stop(f"FROZEN_REPLY_PURPOSE_OR_MODE_MISMATCH:{case_id}")
+
+    send_digest = send.get("request_body_sha256")
+    response_request_digest = response.get("request_body_sha256")
+    if send_digest != response_request_digest or send_digest != source.get("request_body_sha256"):
+        raise V2Stop(f"FROZEN_REPLY_REQUEST_RESPONSE_ASSOCIATION_MISMATCH:{case_id}")
+
+    response_payload = response.get("response_payload")
+    if not isinstance(response_payload, dict):
+        raise V2Stop(f"FROZEN_REPLY_RESPONSE_PAYLOAD_INVALID:{case_id}")
+    provider_id = response.get("provider_request_id")
+    payload_id = response_payload.get("id")
+    if provider_id != payload_id or provider_id != source.get("provider_response_id"):
+        raise V2Stop(f"FROZEN_REPLY_PROVIDER_RESPONSE_ID_DRIFT:{case_id}")
+    if response.get("response_body_sha256") != source.get("response_body_sha256"):
+        raise V2Stop(f"FROZEN_REPLY_RESPONSE_BODY_DIGEST_DRIFT:{case_id}")
+    if response.get("response_model") != source.get("response_model") or response_payload.get("model") != source.get("response_model"):
+        raise V2Stop(f"FROZEN_REPLY_MODEL_DRIFT:{case_id}")
+    if response.get("http_status") != 200 or response.get("finish_reason") != "stop":
+        raise V2Stop(f"FROZEN_REPLY_NOT_COMPLETE:{case_id}")
+
+    choices = response_payload.get("choices")
+    first_choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+    message = first_choice.get("message") if isinstance(first_choice, dict) else None
+    if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+        raise V2Stop(f"FROZEN_REPLY_SUMMARY_MISSING:{case_id}")
+    summary = message["content"]
+    actual_summary_sha = sha256(summary)
+    if actual_summary_sha != source.get("summary_text_sha256"):
+        raise V2Stop(f"FROZEN_REPLY_SUMMARY_DIGEST_DRIFT:{case_id}")
+    _expect_digest(f"historical_first_summary:{case_id}", actual_summary_sha, FROZEN_FIRST_SUMMARY_SHA256[case_id])
     return summary
 
 
-def run_mock(output: Path, *, scenario: dict[str, str] | None = None) -> dict[str, Any]:
+def load_frozen_reply_sources(
+    *,
+    root: Path = ROOT,
+    manifest: dict[str, dict[str, Any]] | None = None,
+    trace_event_loader=None,
+) -> dict[str, dict[str, Any]]:
+    """Validate every frozen live reply before the first MockTransport send."""
+    sources = manifest if manifest is not None else FROZEN_REPLY_SOURCES
+    event_loader = trace_event_loader or _read_trace_events
+    loaded: dict[str, dict[str, Any]] = {}
+    if set(sources) != set(CASE_MATRIX):
+        raise V2Stop("FROZEN_REPLY_CASE_SET_DRIFT")
+    for case_id in CASE_MATRIX:
+        source = sources[case_id]
+        path = root / str(source.get("trace_path", ""))
+        if not path.is_file():
+            raise V2Stop(f"FROZEN_REPLY_TRACE_MISSING:{case_id}")
+        _expect_digest(f"frozen_reply_trace:{case_id}", sha256(path.read_bytes()), str(source.get("trace_sha256", "")))
+        events = event_loader(path)
+        summary = _validate_frozen_reply_events(case_id, source, events)
+        loaded[case_id] = {**source, "summary_text": summary}
+    return loaded
+
+
+def run_mock(
+    output: Path,
+    *,
+    scenario: dict[str, str] | None = None,
+    reply_manifest: dict[str, dict[str, Any]] | None = None,
+    trace_event_loader=None,
+) -> dict[str, Any]:
     legacy, abc, freeze, scenarios, replies, summary_counts = build_runner()
     scenarios.update(scenario or {})
     history, questions, history_digest, questions_digest = abc.load_frozen_inputs()
-    first_summaries = {case: frozen_summary_for_case(legacy, case) for case in CASE_MATRIX}
+    frozen_replies = load_frozen_reply_sources(
+        manifest=reply_manifest, trace_event_loader=trace_event_loader,
+    )
+    first_summaries = {case: frozen_replies[case]["summary_text"] for case in CASE_MATRIX}
+    historical_sources = {
+        case: {key: value for key, value in frozen_replies[case].items() if key != "summary_text"}
+        for case in CASE_MATRIX
+    }
 
     # The historical helper accepts one first-summary string per Case.  Bind it
     # through a closure so each response is read from its own frozen live trace.
     old_transport_factory = legacy.mock_transport
     def case_transport(inner_abc, case_id, _ignored):
-        return old_transport_factory(inner_abc, case_id, first_summaries[case_id])
+        return old_transport_factory(
+            inner_abc, case_id, first_summaries[case_id], historical_sources[case_id],
+        )
     legacy.mock_transport = case_transport
 
     result = legacy.run_cases(

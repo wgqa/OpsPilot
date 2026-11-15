@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import gzip
 import json
 import sys
@@ -71,6 +72,12 @@ def test_full_mock_matrix_runs_current_assistant_and_persists_two_summaries(tmp_
     assert q02a_first["origin"] == "FROZEN_HISTORICAL_LIVE_SUMMARY"
     assert q02a_first["historical_response_id"] == "c3435ff4-fc27-4ffb-b053-bbfcabc600e0"
     assert q02a_first["historical_content_sha256"] == run_v2.FROZEN_FIRST_SUMMARY_SHA256["Q02-A"]
+    assert q02a_first["historical_reply_source"] == run_v2.FROZEN_REPLY_SOURCES["Q02-A"]
+    assert q02a_first["historical_reply_source"]["trace_path"].endswith(
+        "r2-ar04-live-retention-recheck-01/live_run_01/LIVE_REQUESTS.jsonl.gz"
+    )
+    assert q02a_first["historical_response_body_sha256"] == run_v2.FROZEN_REPLY_SOURCES["Q02-A"]["response_body_sha256"]
+    assert q02a_first["historical_summary_text_sha256"] == run_v2.FROZEN_FIRST_SUMMARY_SHA256["Q02-A"]
     assert all(item["origin"] != "REAL_PROVIDER_CALL_IN_THIS_RUN" for item in result["mock_reply_provenance"])
 
     q06 = _case(result, "Q06-B")
@@ -244,3 +251,45 @@ def test_c08_frozen_c06_red_and_f01_legacy_record_match_base():
     assert all(item["matches_base"] for item in snapshot.values())
     assert snapshot["docs/evidence/r2-ar04-compaction-c06-hf01/RESULTS.json"]["matches_base"]
     assert snapshot["docs/evidence/r2-ar04-base-diff-edge-gate-hf02/F01_RUN.txt"]["matches_base"]
+
+
+def _no_mock_dispatch(output: Path):
+    assert not (output / "MOCK_TRACE.jsonl.gz").exists()
+    assert not (output / "MOCK_COST_LEDGER.json").exists()
+    assert not (output / "MOCK_RESULTS.json").exists()
+
+
+def test_provenance_rejects_q02a_misattributed_abc_response_id_before_mock_send(tmp_path):
+    manifest = copy.deepcopy(run_v2.FROZEN_REPLY_SOURCES)
+    # This is the Q02-A summary response from the separate ABC live_run_02.
+    manifest["Q02-A"]["provider_response_id"] = "fa6d38a4-d50e-4735-9732-2c48bfc54746"
+    output = tmp_path / "wrong_response_id"
+    with pytest.raises(run_v2.V2Stop, match="FROZEN_REPLY_PROVIDER_RESPONSE_ID_DRIFT:Q02-A"):
+        run_v2.run_mock(output, reply_manifest=manifest)
+    _no_mock_dispatch(output)
+
+
+def test_provenance_rejects_changed_summary_body_with_original_digest_before_mock_send(tmp_path):
+    target = run_v2.ROOT / run_v2.FROZEN_REPLY_SOURCES["Q02-A"]["trace_path"]
+
+    def tampered_loader(path: Path):
+        events = copy.deepcopy(run_v2._read_trace_events(path))
+        if path.resolve() == target.resolve():
+            response = next(event for event in events if event.get("event") == "RESPONSE_RECEIVED")
+            response["response_payload"]["choices"][0]["message"]["content"] = '{"tampered":true}'
+            # Keep response_body_sha256 unchanged to model a body/metadata mismatch.
+        return events
+
+    output = tmp_path / "changed_body"
+    with pytest.raises(run_v2.V2Stop, match="FROZEN_REPLY_SUMMARY_DIGEST_DRIFT:Q02-A"):
+        run_v2.run_mock(output, trace_event_loader=tampered_loader)
+    _no_mock_dispatch(output)
+
+
+def test_provenance_rejects_swapped_q02a_q02b_sources_before_mock_send(tmp_path):
+    manifest = copy.deepcopy(run_v2.FROZEN_REPLY_SOURCES)
+    manifest["Q02-A"], manifest["Q02-B"] = manifest["Q02-B"], manifest["Q02-A"]
+    output = tmp_path / "swapped_case_sources"
+    with pytest.raises(run_v2.V2Stop, match="FROZEN_REPLY_CASE_MISMATCH:Q02-A"):
+        run_v2.run_mock(output, reply_manifest=manifest)
+    _no_mock_dispatch(output)
