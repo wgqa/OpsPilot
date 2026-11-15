@@ -78,6 +78,19 @@ def test_full_mock_matrix_runs_current_assistant_and_persists_two_summaries(tmp_
     )
     assert q02a_first["historical_response_body_sha256"] == run_v2.FROZEN_REPLY_SOURCES["Q02-A"]["response_body_sha256"]
     assert q02a_first["historical_summary_text_sha256"] == run_v2.FROZEN_FIRST_SUMMARY_SHA256["Q02-A"]
+    q02a_first_send = next(
+        event for event in _events(output / "MOCK_TRACE.jsonl.gz")
+        if event.get("event") == "RESPONSE_RECEIVED" and event.get("logical_id") == "Q02-A:SUMMARY:1"
+    )
+    q02a_first_body = q02a_first_send["response_payload"]["choices"][0]["message"]["content"]
+    assert run_v2.sha256(q02a_first_body) == run_v2.FROZEN_REPLY_SOURCES["Q02-A"]["summary_text_sha256"]
+    first_document = _case(result, "Q02-A")["persisted_summaries"][0]["document_by_sequence"]
+    assert any("endpoint=/callback" in item["text"] and item["source_sequences"] == [3]
+               for item in first_document["user_assertions"])
+    assert any("req-483" in item["text"] and item["source_sequences"] == [7]
+               for item in first_document["corrections"])
+    assert any("v1.2" in item["text"] and "v1.3" in item["text"] and item["source_sequences"] == [11]
+               for item in first_document["timeline"])
     assert all(item["origin"] != "REAL_PROVIDER_CALL_IN_THIS_RUN" for item in result["mock_reply_provenance"])
 
     q06 = _case(result, "Q06-B")
