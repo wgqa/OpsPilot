@@ -1,0 +1,3298 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-SUMMARY-FACT-RETENTION-HF-01",
+  "evidence_level": "FROZEN_LIVE_TRACE_AND_APPLICATION_REPLAY",
+  "frozen_live_trace": "docs/evidence/abc-live-env-unblock-01/live_run_02/LIVE_REQUESTS.jsonl.gz",
+  "frozen_live_results": "docs/evidence/abc-live-env-unblock-01/live_run_02/LIVE_RESULTS.json",
+  "trace_record_count": 42,
+  "trace_request_count": 21,
+  "trace_response_count": 21,
+  "provider_request_performed": false,
+  "cases": [
+    {
+      "case_id": "Q02-A",
+      "strategy": "HYBRID",
+      "evidence_level": "TRACE_STATIC_PLUS_FROZEN_PROVIDER_RESPONSE_REPLAY",
+      "classification": [
+        "endpoint_seq3:PERSISTENCE_COMPACTION",
+        "formal_request_correction_seq7:RETAINED_THROUGH_FINAL_PROMPT",
+        "protocol_and_parameter_change_seq11:PERSISTENCE_COMPACTION"
+      ],
+      "stages": {
+        "original_source_messages": {
+          "sequence_3_endpoint": {
+            "role": "user",
+            "body": "[GT:ASSERTION] 早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+            "body_sha256": "4d6b172a58f5d946a1739805b5003aa4de39d54b8be66be5c6d0e175a0392a21"
+          },
+          "sequence_7_formal_correction": {
+            "role": "user",
+            "body": "[GT:CORRECTION] 正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+            "body_sha256": "36de56ede5d6e22e3f61e5dc89f6d697f70525c068ed46791892bfcd3a77967a"
+          },
+          "sequence_11_protocol_change": {
+            "role": "user",
+            "body": "[GT:TIMELINE] 协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5，需标明部署版本未知。",
+            "body_sha256": "e378a37d28e1dbe98521bac66f64e03f3d628d189d02e46214f679e4563a99b0"
+          }
+        },
+        "first_summary_request": {
+          "request_sha256": "90381a715e3fa987ccd3f102e0dd37eb115e8d476e9611fb810a6d9caf43e561",
+          "input_fact_visibility": {
+            "endpoint_seq3": true,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "source_sequences": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "source_message_map_count": 16,
+          "missing_cited_source_sequences": []
+        },
+        "first_provider_summary": {
+          "response_sha256": "d04f26cd39e3272c272bb11c19648fbf418ad1b18f6b8c190e24bd45fce99e5c",
+          "provider_response_id": "fa6d38a4-d50e-4735-9732-2c48bfc54746",
+          "usage": {
+            "input_tokens": 4107,
+            "output_tokens": 482,
+            "total_tokens": 4589
+          },
+          "fact_visibility": {
+            "endpoint_seq3": true,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Request ID 由 req-482 更正为 req-483。",
+              "source_sequences": [
+                3,
+                7
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+              "source_sequences": [
+                3
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "application_persisted_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": false,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": false,
+            "contains_v1_3": false
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 511
+        },
+        "second_summary_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": false,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": false,
+            "contains_v1_3": false
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 269
+        },
+        "second_summary_request": {
+          "request_sha256": "c44cf3f7c1eadcd87c157b3fd0f9983c267ad8cf771d477444733fa05437e583",
+          "previous_summary_matches_replay_projection": true,
+          "previous_summary_fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": false,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": false,
+            "contains_v1_3": false
+          },
+          "previous_summary_relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "new_message_sequences": [
+            17,
+            18
+          ],
+          "new_message_fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": false,
+            "req_483": true,
+            "protocol_v1_2": false,
+            "protocol_v1_3": false,
+            "max_attempts_3": false,
+            "max_attempts_5": false
+          }
+        },
+        "second_provider_summary": {
+          "response_sha256": "eb1f7846518c93214df519e979efd93485dc91b5162fc0e0555e0a4fe03c6c77",
+          "provider_response_id": "5e59864b-158f-479a-9780-5b6a0a35c7b6",
+          "usage": {
+            "input_tokens": 3227,
+            "output_tokens": 364,
+            "total_tokens": 3591
+          },
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": false,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": false,
+            "contains_v1_3": false
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Synthetic read-only tool result fixture：req-483/evt-731，HTTP 202 ACCEPTED，Receiver=QUEUED，非完成证明。",
+              "source_sequences": [
+                18
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "final_answer_request": {
+          "request_sha256": "755695e95fa15ac7c9fec06149b2898a85ae32680cff43c7009c0708604ca37b",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": false,
+            "protocol_v1_3": false,
+            "max_attempts_3": false,
+            "max_attempts_5": false
+          },
+          "summary_refs": [
+            {
+              "covered_from_seq": 1,
+              "covered_to_seq": 18,
+              "digest": "4e4b420713eacb9ce7669b9f52d81809cd50032fdf66361ca90ec88afb31d6bd",
+              "source_attempt_id": "context-compression-90b17d75-7648-4978-925c-86b95e37517a",
+              "summary_id": "context-summary-bc95ec98-76e4-470d-b100-06efdc102370",
+              "version": 2
+            }
+          ],
+          "answer_context_blocks": [
+            {
+              "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+              "block_id": "trusted-control",
+              "category": "TRUSTED_CONTROL",
+              "estimated_tokens": 331,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "DOMAIN_TASK_STATE",
+              "block_id": "current-task-state",
+              "category": "CURRENT_TASK_STATE",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_DERIVED_CONTEXT",
+              "block_id": "summary:context-summary-bc95ec98-76e4-470d-b100-06efdc102370",
+              "category": "HISTORICAL_SUMMARY",
+              "estimated_tokens": 523,
+              "source_refs": [
+                "context-summary-bc95ec98-76e4-470d-b100-06efdc102370"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "CURRENT_AUTHORIZED_MCP_EVIDENCE",
+              "block_id": "current-facts",
+              "category": "CURRENT_FACTS",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-02a868e6-a3c2-4bf9-b53e-0bbd540c5a1a",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-02a868e6-a3c2-4bf9-b53e-0bbd540c5a1a"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-93d79fcb-6288-4dd6-9d23-3fe212443889",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-93d79fcb-6288-4dd6-9d23-3fe212443889"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-6364851c-2709-4733-848d-05e226317b50",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-6364851c-2709-4733-848d-05e226317b50"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-b79797e9-1739-4062-b4e1-be9536cc2e68",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 22,
+              "source_refs": [
+                "message-b79797e9-1739-4062-b4e1-be9536cc2e68"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-babb86ff-fb00-47f8-8b9c-8ef9048adaf8",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 24,
+              "source_refs": [
+                "message-babb86ff-fb00-47f8-8b9c-8ef9048adaf8"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "SOURCE_VALIDATED_ASSISTANT_HISTORY",
+              "block_id": "message:message-e72679b7-b144-4333-b0b6-578c04dea11c",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "source_refs": [
+                "message-e72679b7-b144-4333-b0b6-578c04dea11c"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-4b4f0b2a-b01d-4b69-9be2-fac82dd54efb",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 48,
+              "source_refs": [
+                "message-4b4f0b2a-b01d-4b69-9be2-fac82dd54efb"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-98b0b4cf-b56f-4092-86ff-8784bcf46426",
+              "category": "CURRENT_USER_INPUT",
+              "estimated_tokens": 19,
+              "source_refs": [
+                "message-98b0b4cf-b56f-4092-86ff-8784bcf46426"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "block_id": "message:message-b94fa23a-6c8e-4fea-88da-5e1cb5c49234",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-b94fa23a-6c8e-4fea-88da-5e1cb5c49234"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-f3aefc1b-00a4-402a-9ead-7c8825c361e5",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-f3aefc1b-00a4-402a-9ead-7c8825c361e5"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-2e790df6-b266-4958-9166-5dbe691a7b69",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-2e790df6-b266-4958-9166-5dbe691a7b69"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-d387dffe-f292-41e5-a6b4-75f249220fe6",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-d387dffe-f292-41e5-a6b4-75f249220fe6"
+              ],
+              "status": "EXCLUDED"
+            }
+          ]
+        },
+        "final_provider_answer": {
+          "provider_response_id": "5b95ab9c-9f55-4a0f-9867-0cea89b314cb",
+          "usage": {
+            "input_tokens": 4506,
+            "output_tokens": 187,
+            "total_tokens": 4693
+          },
+          "sha256": "d693f3e759e67aac3d0999eb689cd39e3ac696dfdc05395fa0a5ef949cec9e4a",
+          "text": "你问的“最早记录的 callback endpoint”，在目前可用的历史材料里没有给出具体 URL 或 endpoint 地址，因此无法确定最早记录的是哪一个。\n\n现有材料只能确认：\n\n- 历史只读快照涉及 Request ID=req-483、Event ID=evt-731；\n- 该快照显示 Delivery=HTTP 202 ACCEPTED、Receiver=QUEUED，时间点为 2026-11-14T12:00Z；\n- HTTP 202 和 QUEUED 都不代表接收方已完成处理，Receiver 完成状态仍未知；\n- 协议部署版本仍未知；\n- 没有确认外部处理方已处理，也没有修复或投递动作记录。\n\n如果你能提供包含 callback endpoint 的配置或日志材料，我可以帮你按时间排序找出最早记录；但粘贴材料本身只是待核验线索，不能直接当作当前业务事实。"
+        }
+      }
+    },
+    {
+      "case_id": "Q02-B",
+      "strategy": "ROLLING_SUMMARY",
+      "evidence_level": "TRACE_STATIC_PLUS_FROZEN_PROVIDER_RESPONSE_REPLAY",
+      "classification": [
+        "endpoint_seq3:PERSISTENCE_COMPACTION",
+        "formal_request_correction_seq7:PERSISTENCE_COMPACTION",
+        "protocol_and_parameter_change_seq11:FINAL_CONTEXT_SELECTION"
+      ],
+      "stages": {
+        "original_source_messages": {
+          "sequence_3_endpoint": {
+            "role": "user",
+            "body": "[GT:ASSERTION] 早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+            "body_sha256": "4d6b172a58f5d946a1739805b5003aa4de39d54b8be66be5c6d0e175a0392a21"
+          },
+          "sequence_7_formal_correction": {
+            "role": "user",
+            "body": "[GT:CORRECTION] 正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+            "body_sha256": "36de56ede5d6e22e3f61e5dc89f6d697f70525c068ed46791892bfcd3a77967a"
+          },
+          "sequence_11_protocol_change": {
+            "role": "user",
+            "body": "[GT:TIMELINE] 协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5，需标明部署版本未知。",
+            "body_sha256": "e378a37d28e1dbe98521bac66f64e03f3d628d189d02e46214f679e4563a99b0"
+          }
+        },
+        "first_summary_request": {
+          "request_sha256": "25fdf3c03b198d46ebc44055582d2ad2d1daf8a75e1aa12a9c1568ea9b9f8176",
+          "input_fact_visibility": {
+            "endpoint_seq3": true,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "source_sequences": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "source_message_map_count": 16,
+          "missing_cited_source_sequences": []
+        },
+        "first_provider_summary": {
+          "response_sha256": "209feb98fade698d59d40deeb49950872ec3b79e01ebfeafaa8ebf7fa1659f5b",
+          "provider_response_id": "d52800ab-6315-4374-ae93-8ff98c5b20a2",
+          "usage": {
+            "input_tokens": 4106,
+            "output_tokens": 494,
+            "total_tokens": 4600
+          },
+          "fact_visibility": {
+            "endpoint_seq3": true,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+              "source_sequences": [
+                3
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "application_persisted_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": false,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": false,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 495
+        },
+        "second_summary_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": false,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": false,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 278
+        },
+        "second_summary_request": {
+          "request_sha256": "df9b4151f1f4d2e57dc930a9c2c2bc2a5202a974d40d62b16641a5a87082c641",
+          "previous_summary_matches_replay_projection": true,
+          "previous_summary_fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": false,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": false,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "previous_summary_relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "new_message_sequences": [
+            17,
+            18
+          ],
+          "new_message_fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": false,
+            "req_483": true,
+            "protocol_v1_2": false,
+            "protocol_v1_3": false,
+            "max_attempts_3": false,
+            "max_attempts_5": false
+          }
+        },
+        "second_provider_summary": {
+          "response_sha256": "386a44ff324fdff019784b7a174393487a610492dc929533a2701dd53b8e74c2",
+          "provider_response_id": "3fbf8f45-4add-4cd9-86c0-b6fe557822f5",
+          "usage": {
+            "input_tokens": 3224,
+            "output_tokens": 360,
+            "total_tokens": 3584
+          },
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": false,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": false,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "SYNTHETIC 只读工具结果：req-483/evt-731，HTTP 202，Receiver=QUEUED。",
+              "source_sequences": [
+                18
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "final_answer_request": {
+          "request_sha256": "3c6ab2696e2cfa67686e439f05fe22fb041967ae06bb91fcf3d0ba2c4a8ce635",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": false,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "summary_refs": [
+            {
+              "covered_from_seq": 1,
+              "covered_to_seq": 18,
+              "digest": "2201e0102bbc2cc3dd50ff3aebf7e9dffa9e61f66e88d401882af3da32e9768c",
+              "source_attempt_id": "context-compression-70525c7b-61bf-45a2-b8a5-84be501ed670",
+              "summary_id": "context-summary-54d1dbb8-6b8d-4f8f-ac23-6a48e50bd28b",
+              "version": 2
+            }
+          ],
+          "answer_context_blocks": [
+            {
+              "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+              "block_id": "trusted-control",
+              "category": "TRUSTED_CONTROL",
+              "estimated_tokens": 331,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "DOMAIN_TASK_STATE",
+              "block_id": "current-task-state",
+              "category": "CURRENT_TASK_STATE",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_DERIVED_CONTEXT",
+              "block_id": "summary:context-summary-54d1dbb8-6b8d-4f8f-ac23-6a48e50bd28b",
+              "category": "HISTORICAL_SUMMARY",
+              "estimated_tokens": 522,
+              "source_refs": [
+                "context-summary-54d1dbb8-6b8d-4f8f-ac23-6a48e50bd28b"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "CURRENT_AUTHORIZED_MCP_EVIDENCE",
+              "block_id": "current-facts",
+              "category": "CURRENT_FACTS",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-09dac967-62ce-42d3-ab19-94597182c3fb",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-09dac967-62ce-42d3-ab19-94597182c3fb"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-fce1fbff-024a-425c-aaf5-819ef2bedbd2",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-fce1fbff-024a-425c-aaf5-819ef2bedbd2"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-b91899bd-eaa2-4011-a994-ecd6d966e103",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-b91899bd-eaa2-4011-a994-ecd6d966e103"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-4ef2b4c5-88c2-4da5-8ce9-0872449baca3",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 22,
+              "source_refs": [
+                "message-4ef2b4c5-88c2-4da5-8ce9-0872449baca3"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-e7db4797-0463-4026-9b22-8ceaae282a58",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 24,
+              "source_refs": [
+                "message-e7db4797-0463-4026-9b22-8ceaae282a58"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "SOURCE_VALIDATED_ASSISTANT_HISTORY",
+              "block_id": "message:message-361b905c-4c45-46bf-b3bb-f3da2c86b7a5",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "source_refs": [
+                "message-361b905c-4c45-46bf-b3bb-f3da2c86b7a5"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-0dcd853b-9d58-43ce-a514-e1ef28ac76b1",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 48,
+              "source_refs": [
+                "message-0dcd853b-9d58-43ce-a514-e1ef28ac76b1"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-cc4db58f-3d74-4301-93cd-38d61300dee9",
+              "category": "CURRENT_USER_INPUT",
+              "estimated_tokens": 19,
+              "source_refs": [
+                "message-cc4db58f-3d74-4301-93cd-38d61300dee9"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "block_id": "message:message-c7accec5-5d36-486c-8a81-72cfb61ca618",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-c7accec5-5d36-486c-8a81-72cfb61ca618"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-29545a50-0c85-48ea-827c-55674f5e8d8b",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-29545a50-0c85-48ea-827c-55674f5e8d8b"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-33bbeea3-ce26-48be-9b93-9ed1991e1f57",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-33bbeea3-ce26-48be-9b93-9ed1991e1f57"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-46d7763e-ea37-49e3-9612-a3afe31ae8e2",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-46d7763e-ea37-49e3-9612-a3afe31ae8e2"
+              ],
+              "status": "EXCLUDED"
+            }
+          ]
+        },
+        "final_provider_answer": {
+          "provider_response_id": "e6ec5787-7aee-49c2-82fe-4facf1014176",
+          "usage": {
+            "input_tokens": 4498,
+            "output_tokens": 243,
+            "total_tokens": 4741
+          },
+          "sha256": "5f169009d530026651dfcefa1ae683978a0e131a03a7a75f0064b9e51886b309",
+          "text": "根据目前可用的历史快照，**无法确定最早记录的 callback endpoint**。\n\n现有材料只包含：\n\n- 请求 ID：`req-483`\n- Event ID：`evt-731`\n- 最近一次 fixture 观察：`2026-11-14T12:00Z`，Delivery 为 HTTP 202，Receiver 为 `QUEUED`\n- Receiver 是否最终完成：未知\n\n这些记录没有给出 callback endpoint 的 URL、主机名或配置项，也没有 endpoint 的历史变更时间线，因此不能推断“最早记录”的是哪一个。HTTP 202 和 `QUEUED` 也只表示请求被接受/排队，不能证明接收方已处理完成。\n\n如需确认，建议在只读前提下核查：\n\n1. 该集成/订单的 callback endpoint 配置历史及变更时间；\n2. 与 `req-483` / `evt-731` 对应的投递记录中实际使用的 endpoint；\n3. 部署版本信息——目前仍为未知，不能用项目配置或 TaskBinding 版本代替线上部署版本。\n\n本轮没有重新查询业务状态，以上仅为对历史快照的说明。"
+        }
+      }
+    },
+    {
+      "case_id": "Q03-A",
+      "strategy": "HYBRID",
+      "evidence_level": "TRACE_STATIC_PLUS_FROZEN_PROVIDER_RESPONSE_REPLAY",
+      "classification": [
+        "endpoint_seq3:PERSISTENCE_COMPACTION",
+        "formal_request_correction_seq7:RETAINED_THROUGH_FINAL_PROMPT",
+        "protocol_and_parameter_change_seq11:FINAL_CONTEXT_SELECTION"
+      ],
+      "stages": {
+        "original_source_messages": {
+          "sequence_3_endpoint": {
+            "role": "user",
+            "body": "[GT:ASSERTION] 早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+            "body_sha256": "4d6b172a58f5d946a1739805b5003aa4de39d54b8be66be5c6d0e175a0392a21"
+          },
+          "sequence_7_formal_correction": {
+            "role": "user",
+            "body": "[GT:CORRECTION] 正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+            "body_sha256": "36de56ede5d6e22e3f61e5dc89f6d697f70525c068ed46791892bfcd3a77967a"
+          },
+          "sequence_11_protocol_change": {
+            "role": "user",
+            "body": "[GT:TIMELINE] 协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5，需标明部署版本未知。",
+            "body_sha256": "e378a37d28e1dbe98521bac66f64e03f3d628d189d02e46214f679e4563a99b0"
+          }
+        },
+        "first_summary_request": {
+          "request_sha256": "a2dc5261c297041dca13da98c1e6c7e0f2ae16df69576c3db166b5bb77d5324d",
+          "input_fact_visibility": {
+            "endpoint_seq3": true,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "source_sequences": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "source_message_map_count": 16,
+          "missing_cited_source_sequences": []
+        },
+        "first_provider_summary": {
+          "response_sha256": "dbeaefc08741cb52a7235a1955adbd7503ae4887fe4b463ef3bd13831d87bf9f",
+          "provider_response_id": "40570eec-d03d-4dc5-9a9a-855b303a6096",
+          "usage": {
+            "input_tokens": 4106,
+            "output_tokens": 477,
+            "total_tokens": 4583
+          },
+          "fact_visibility": {
+            "endpoint_seq3": true,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+              "source_sequences": [
+                3
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "application_persisted_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 501
+        },
+        "second_summary_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 292
+        },
+        "second_summary_request": {
+          "request_sha256": "2e5926205fe2cd7d43b6a055fcdc869042882f1240710ce8b2386959eccde49c",
+          "previous_summary_matches_replay_projection": true,
+          "previous_summary_fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "previous_summary_relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "new_message_sequences": [
+            17,
+            18
+          ],
+          "new_message_fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": false,
+            "req_483": true,
+            "protocol_v1_2": false,
+            "protocol_v1_3": false,
+            "max_attempts_3": false,
+            "max_attempts_5": false
+          }
+        },
+        "second_provider_summary": {
+          "response_sha256": "b0e92af0c913275ff764da88394afc6bb5757e7b0c2799a70fce394b833255a9",
+          "provider_response_id": "85813adf-0d5e-4a59-a966-21ceccebc4e4",
+          "usage": {
+            "input_tokens": 3250,
+            "output_tokens": 385,
+            "total_tokens": 3635
+          },
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "只读工具结果：req-483/evt-731，HTTP 202，Receiver=QUEUED，未完成。",
+              "source_sequences": [
+                18
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "final_answer_request": {
+          "request_sha256": "7e81feb39328813319eae9f212c16d75ddd316bc98b0eb83c89d1136c787d287",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "summary_refs": [
+            {
+              "covered_from_seq": 1,
+              "covered_to_seq": 18,
+              "digest": "f2abd96331122fb2cf501e649227df0e5714976162c80ffc146390ce5969ac99",
+              "source_attempt_id": "context-compression-31b9070a-c156-480b-b90d-61fd963feeeb",
+              "summary_id": "context-summary-aa31b56d-ed07-4f78-a157-d839b05492dc",
+              "version": 2
+            }
+          ],
+          "answer_context_blocks": [
+            {
+              "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+              "block_id": "trusted-control",
+              "category": "TRUSTED_CONTROL",
+              "estimated_tokens": 331,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "DOMAIN_TASK_STATE",
+              "block_id": "current-task-state",
+              "category": "CURRENT_TASK_STATE",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_DERIVED_CONTEXT",
+              "block_id": "summary:context-summary-aa31b56d-ed07-4f78-a157-d839b05492dc",
+              "category": "HISTORICAL_SUMMARY",
+              "estimated_tokens": 527,
+              "source_refs": [
+                "context-summary-aa31b56d-ed07-4f78-a157-d839b05492dc"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "CURRENT_AUTHORIZED_MCP_EVIDENCE",
+              "block_id": "current-facts",
+              "category": "CURRENT_FACTS",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-f2af0435-9bef-4d4b-ba20-d40d2a3a0776",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-f2af0435-9bef-4d4b-ba20-d40d2a3a0776"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-373a6889-0234-4df2-8416-f588bce15572",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-373a6889-0234-4df2-8416-f588bce15572"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-74ff3b8f-7770-4a92-8af9-2f80bd81cd41",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-74ff3b8f-7770-4a92-8af9-2f80bd81cd41"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-878bb664-3fbb-4803-a581-89deecec194a",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 22,
+              "source_refs": [
+                "message-878bb664-3fbb-4803-a581-89deecec194a"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-a066af68-8578-475e-9a49-fbe5d545a7c9",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 24,
+              "source_refs": [
+                "message-a066af68-8578-475e-9a49-fbe5d545a7c9"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "SOURCE_VALIDATED_ASSISTANT_HISTORY",
+              "block_id": "message:message-e4a6eacd-83e8-486f-ab78-13e086960e01",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "source_refs": [
+                "message-e4a6eacd-83e8-486f-ab78-13e086960e01"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-cb91a764-26b5-4598-a28a-46401949c065",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 48,
+              "source_refs": [
+                "message-cb91a764-26b5-4598-a28a-46401949c065"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-9da5e043-8215-4cdd-9a42-90d5241124bd",
+              "category": "CURRENT_USER_INPUT",
+              "estimated_tokens": 21,
+              "source_refs": [
+                "message-9da5e043-8215-4cdd-9a42-90d5241124bd"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "block_id": "message:message-9db78b36-8196-4fa9-a9e7-f9df9d914b50",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-9db78b36-8196-4fa9-a9e7-f9df9d914b50"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-d33b53ab-0d87-41ab-bfae-102762439c79",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-d33b53ab-0d87-41ab-bfae-102762439c79"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-01391100-1960-49fe-a6c8-20e1050fbbd7",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-01391100-1960-49fe-a6c8-20e1050fbbd7"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-fddab88d-a86c-4d78-8846-ce4bf73d774c",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-fddab88d-a86c-4d78-8846-ce4bf73d774c"
+              ],
+              "status": "EXCLUDED"
+            }
+          ]
+        },
+        "final_provider_answer": {
+          "provider_response_id": "0b542db6-2e0e-4b9b-ab9c-8f1d86ec39e3",
+          "usage": {
+            "input_tokens": 4496,
+            "output_tokens": 41,
+            "total_tokens": 4537
+          },
+          "sha256": "951beb849c3e9a5b173fc9355684e0a41adef247bb4bd5321bd3bf27baa2e23f",
+          "text": "正式更正后的 Request ID 是 **req-483**。此前录入的 req-482 是错误值；Event ID 仍为 **evt-731**，两者需保持区分。"
+        }
+      }
+    },
+    {
+      "case_id": "Q03-B",
+      "strategy": "ROLLING_SUMMARY",
+      "evidence_level": "TRACE_STATIC_PLUS_FROZEN_PROVIDER_RESPONSE_REPLAY",
+      "classification": [
+        "endpoint_seq3:PERSISTENCE_COMPACTION",
+        "formal_request_correction_seq7:RETAINED_THROUGH_FINAL_PROMPT",
+        "protocol_and_parameter_change_seq11:FINAL_CONTEXT_SELECTION"
+      ],
+      "stages": {
+        "original_source_messages": {
+          "sequence_3_endpoint": {
+            "role": "user",
+            "body": "[GT:ASSERTION] 早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+            "body_sha256": "4d6b172a58f5d946a1739805b5003aa4de39d54b8be66be5c6d0e175a0392a21"
+          },
+          "sequence_7_formal_correction": {
+            "role": "user",
+            "body": "[GT:CORRECTION] 正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+            "body_sha256": "36de56ede5d6e22e3f61e5dc89f6d697f70525c068ed46791892bfcd3a77967a"
+          },
+          "sequence_11_protocol_change": {
+            "role": "user",
+            "body": "[GT:TIMELINE] 协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5，需标明部署版本未知。",
+            "body_sha256": "e378a37d28e1dbe98521bac66f64e03f3d628d189d02e46214f679e4563a99b0"
+          }
+        },
+        "first_summary_request": {
+          "request_sha256": "eabbb6f67f322d6d45825dcf640a2670f4109a0fa8301904e2b10e30efae12bd",
+          "input_fact_visibility": {
+            "endpoint_seq3": true,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "source_sequences": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "source_message_map_count": 16,
+          "missing_cited_source_sequences": []
+        },
+        "first_provider_summary": {
+          "response_sha256": "67ff7ecd2a781517d5e95a1c1a3bf4ebbb72a262842114216c7da70f9f36064c",
+          "provider_response_id": "a025deb1-05d6-4a70-b5d9-09c0d56cd7d0",
+          "usage": {
+            "input_tokens": 4106,
+            "output_tokens": 473,
+            "total_tokens": 4579
+          },
+          "fact_visibility": {
+            "endpoint_seq3": true,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议更新 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+              "source_sequences": [
+                3
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "application_persisted_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议更新 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 509
+        },
+        "second_summary_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议更新 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 288
+        },
+        "second_summary_request": {
+          "request_sha256": "899c9f365b5ec18db6f647d31f95b414d166ebe251266c3c654117bb7d68605f",
+          "previous_summary_matches_replay_projection": true,
+          "previous_summary_fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "previous_summary_relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议更新 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "new_message_sequences": [
+            17,
+            18
+          ],
+          "new_message_fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": false,
+            "req_483": true,
+            "protocol_v1_2": false,
+            "protocol_v1_3": false,
+            "max_attempts_3": false,
+            "max_attempts_5": false
+          }
+        },
+        "second_provider_summary": {
+          "response_sha256": "6a20da151d846a4d22f358155544d1190cebb2e90123e45794b250547270df06",
+          "provider_response_id": "0022aaf2-1200-4456-b00a-3e8586ee2be4",
+          "usage": {
+            "input_tokens": 3246,
+            "output_tokens": 394,
+            "total_tokens": 3640
+          },
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "更正 Request ID 为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议更新 v1.2→v1.3，max_attempts 3→5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "SYNTHETIC read-only tool result: req-483, evt-731, HTTP 202, QUEUED; completion unresolved.",
+              "source_sequences": [
+                18
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "final_answer_request": {
+          "request_sha256": "5a20f7c83da5844a89227749cc2dd144e960fec7f4b3ddfdb94b340e9a00b15b",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "summary_refs": [
+            {
+              "covered_from_seq": 1,
+              "covered_to_seq": 18,
+              "digest": "9842f8c1a7069daf6caceee7b38f6386a377d386e4f52364b4ea2853ec4b0688",
+              "source_attempt_id": "context-compression-68591ce5-27ee-4ef0-97df-abf2e5367d64",
+              "summary_id": "context-summary-85466f6c-2d62-470f-97f1-c9fb2e31cd6b",
+              "version": 2
+            }
+          ],
+          "answer_context_blocks": [
+            {
+              "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+              "block_id": "trusted-control",
+              "category": "TRUSTED_CONTROL",
+              "estimated_tokens": 331,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "DOMAIN_TASK_STATE",
+              "block_id": "current-task-state",
+              "category": "CURRENT_TASK_STATE",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_DERIVED_CONTEXT",
+              "block_id": "summary:context-summary-85466f6c-2d62-470f-97f1-c9fb2e31cd6b",
+              "category": "HISTORICAL_SUMMARY",
+              "estimated_tokens": 507,
+              "source_refs": [
+                "context-summary-85466f6c-2d62-470f-97f1-c9fb2e31cd6b"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "CURRENT_AUTHORIZED_MCP_EVIDENCE",
+              "block_id": "current-facts",
+              "category": "CURRENT_FACTS",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-97026490-9776-4e9d-8eec-951b593ad798",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-97026490-9776-4e9d-8eec-951b593ad798"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-b6b09dcf-af2e-40e6-9640-753fd0a7368e",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-b6b09dcf-af2e-40e6-9640-753fd0a7368e"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-44e0c4bc-4a13-403f-8e55-ae6c9bba026f",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-44e0c4bc-4a13-403f-8e55-ae6c9bba026f"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-284c3912-bc5f-4eb7-baa2-1cb0a9785f54",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 22,
+              "source_refs": [
+                "message-284c3912-bc5f-4eb7-baa2-1cb0a9785f54"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-3264b0fa-085c-4e4a-b836-c7195560aa13",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 24,
+              "source_refs": [
+                "message-3264b0fa-085c-4e4a-b836-c7195560aa13"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "SOURCE_VALIDATED_ASSISTANT_HISTORY",
+              "block_id": "message:message-53b7f75d-bc49-4d66-b02f-764efb455caa",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "source_refs": [
+                "message-53b7f75d-bc49-4d66-b02f-764efb455caa"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-ea29e744-e5b0-4f2e-be5d-a8df4b2947d2",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 48,
+              "source_refs": [
+                "message-ea29e744-e5b0-4f2e-be5d-a8df4b2947d2"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-63898572-45aa-4909-93cc-0c310f052a63",
+              "category": "CURRENT_USER_INPUT",
+              "estimated_tokens": 21,
+              "source_refs": [
+                "message-63898572-45aa-4909-93cc-0c310f052a63"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "block_id": "message:message-ffb08d08-769b-4941-93d5-a56058bb6729",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-ffb08d08-769b-4941-93d5-a56058bb6729"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-2d38d827-85c3-4698-9f58-e1fa8ab3929a",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-2d38d827-85c3-4698-9f58-e1fa8ab3929a"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-fc1c8f41-0d32-4198-8c95-c4164c3a7163",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-fc1c8f41-0d32-4198-8c95-c4164c3a7163"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-f6664970-8f98-493d-a7d7-8dc40f948346",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-f6664970-8f98-493d-a7d7-8dc40f948346"
+              ],
+              "status": "EXCLUDED"
+            }
+          ]
+        },
+        "final_provider_answer": {
+          "provider_response_id": "a45091fd-c81a-4529-9323-b8463ce555f2",
+          "usage": {
+            "input_tokens": 4493,
+            "output_tokens": 105,
+            "total_tokens": 4598
+          },
+          "sha256": "f19aa69b7dc6b3b3a7ab8ab2cc076eaa609c15ebae2a405d4c282b541267b7eb",
+          "text": "正式更正后的 Request ID 是 **req-483**。此前出现的 req-482 是录入错误；Event ID 仍为 **evt-731**，两者需保持区分。\n\n补充说明：以上来自历史记录，不是本轮重新查询的业务状态。最新可引用的历史快照显示 Receiver=QUEUED（2026-11-14T12:00Z），因此接收方是否完成处理仍未知；HTTP 202 也不代表处理完成。协议部署版本仍未知。"
+        }
+      }
+    },
+    {
+      "case_id": "Q06-A",
+      "strategy": "HYBRID",
+      "evidence_level": "TRACE_STATIC_PLUS_FROZEN_PROVIDER_RESPONSE_REPLAY",
+      "classification": [
+        "endpoint_seq3:PERSISTENCE_COMPACTION",
+        "formal_request_correction_seq7:RETAINED_THROUGH_FINAL_PROMPT",
+        "protocol_and_parameter_change_seq11:FINAL_CONTEXT_SELECTION"
+      ],
+      "stages": {
+        "original_source_messages": {
+          "sequence_3_endpoint": {
+            "role": "user",
+            "body": "[GT:ASSERTION] 早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+            "body_sha256": "4d6b172a58f5d946a1739805b5003aa4de39d54b8be66be5c6d0e175a0392a21"
+          },
+          "sequence_7_formal_correction": {
+            "role": "user",
+            "body": "[GT:CORRECTION] 正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+            "body_sha256": "36de56ede5d6e22e3f61e5dc89f6d697f70525c068ed46791892bfcd3a77967a"
+          },
+          "sequence_11_protocol_change": {
+            "role": "user",
+            "body": "[GT:TIMELINE] 协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5，需标明部署版本未知。",
+            "body_sha256": "e378a37d28e1dbe98521bac66f64e03f3d628d189d02e46214f679e4563a99b0"
+          }
+        },
+        "first_summary_request": {
+          "request_sha256": "9d551496013b3ad02d7a8f45fbf15d2a21b831c361f24e000cebe51edc92008a",
+          "input_fact_visibility": {
+            "endpoint_seq3": true,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "source_sequences": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "source_message_map_count": 16,
+          "missing_cited_source_sequences": []
+        },
+        "first_provider_summary": {
+          "response_sha256": "a3925107263dbcb66158f289518fd78616cb3e0512ba88ec117b4778a7a07271",
+          "provider_response_id": "9253e073-87c9-4f8a-a07c-abe467835110",
+          "usage": {
+            "input_tokens": 4106,
+            "output_tokens": 465,
+            "total_tokens": 4571
+          },
+          "fact_visibility": {
+            "endpoint_seq3": true,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Request ID 正式更正为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议版本与 max_attempts 更新。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+              "source_sequences": [
+                3
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "application_persisted_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Request ID 正式更正为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议版本与 max_attempts 更新。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 511
+        },
+        "second_summary_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Request ID 正式更正为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议版本与 max_attempts 更新。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 276
+        },
+        "second_summary_request": {
+          "request_sha256": "77184b83f47c362e527e121b97af941ebd56ee783c6cb63b2bfec3f25a504502",
+          "previous_summary_matches_replay_projection": true,
+          "previous_summary_fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "previous_summary_relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Request ID 正式更正为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议版本与 max_attempts 更新。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "new_message_sequences": [
+            17,
+            18
+          ],
+          "new_message_fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": false,
+            "req_483": true,
+            "protocol_v1_2": false,
+            "protocol_v1_3": false,
+            "max_attempts_3": false,
+            "max_attempts_5": false
+          }
+        },
+        "second_provider_summary": {
+          "response_sha256": "235a1b64f2e9e90facd35a3e7e8798759ab8d7ecaac0ec4aa3322bd13258791d",
+          "provider_response_id": "a4e021d0-b5fa-4985-9388-0e2ca90ba7e5",
+          "usage": {
+            "input_tokens": 3234,
+            "output_tokens": 369,
+            "total_tokens": 3603
+          },
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "unresolved_items",
+              "text": "协议 v1.2→v1.3，max_attempts 3→5，部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Request ID 正式更正为 req-483。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议版本与 max_attempts 更新。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "只读工具结果：req-483/evt-731，HTTP 202，Receiver=QUEUED，未完成。",
+              "source_sequences": [
+                18
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "final_answer_request": {
+          "request_sha256": "55d9637edd4d224389b122ab91587c4f471b8d6e767c09497c8a83471a6d12de",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "summary_refs": [
+            {
+              "covered_from_seq": 1,
+              "covered_to_seq": 18,
+              "digest": "2c9b42d1db6b15689e50987b1bf0c43f12479d3d0e48792bdf40830b17c1dfea",
+              "source_attempt_id": "context-compression-5b350791-b0a5-478f-bcc1-aeafdfb6c3a2",
+              "summary_id": "context-summary-799a5d32-935c-4900-8c6d-0344170618a1",
+              "version": 2
+            }
+          ],
+          "answer_context_blocks": [
+            {
+              "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+              "block_id": "trusted-control",
+              "category": "TRUSTED_CONTROL",
+              "estimated_tokens": 331,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "DOMAIN_TASK_STATE",
+              "block_id": "current-task-state",
+              "category": "CURRENT_TASK_STATE",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_DERIVED_CONTEXT",
+              "block_id": "summary:context-summary-799a5d32-935c-4900-8c6d-0344170618a1",
+              "category": "HISTORICAL_SUMMARY",
+              "estimated_tokens": 497,
+              "source_refs": [
+                "context-summary-799a5d32-935c-4900-8c6d-0344170618a1"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "CURRENT_AUTHORIZED_MCP_EVIDENCE",
+              "block_id": "current-facts",
+              "category": "CURRENT_FACTS",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-84860d73-f2d8-4a2d-9aba-f785457fd10b",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-84860d73-f2d8-4a2d-9aba-f785457fd10b"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-e91c6eec-3200-4a23-8a64-be40655aa97b",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-e91c6eec-3200-4a23-8a64-be40655aa97b"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-16bb05e4-c934-42ac-aadb-8814f1219a78",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-16bb05e4-c934-42ac-aadb-8814f1219a78"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-39bbd5d1-9c65-4ae1-ba08-5a333dd922ce",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 22,
+              "source_refs": [
+                "message-39bbd5d1-9c65-4ae1-ba08-5a333dd922ce"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-f072adb0-08ab-4bfc-b5b9-55bf7f9bd236",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 24,
+              "source_refs": [
+                "message-f072adb0-08ab-4bfc-b5b9-55bf7f9bd236"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "SOURCE_VALIDATED_ASSISTANT_HISTORY",
+              "block_id": "message:message-2979cd3b-38fe-4774-a9a1-0f5dc1057a1e",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "source_refs": [
+                "message-2979cd3b-38fe-4774-a9a1-0f5dc1057a1e"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-028df75f-70d4-4732-abc0-cf129644b3b8",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 48,
+              "source_refs": [
+                "message-028df75f-70d4-4732-abc0-cf129644b3b8"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-b5a891e8-45f0-49b7-a86c-3dab2b55fe00",
+              "category": "CURRENT_USER_INPUT",
+              "estimated_tokens": 20,
+              "source_refs": [
+                "message-b5a891e8-45f0-49b7-a86c-3dab2b55fe00"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "block_id": "message:message-4ad39459-9050-423a-8dea-49c2fa0fb836",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-4ad39459-9050-423a-8dea-49c2fa0fb836"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-a5d7e46b-608f-4790-af62-157071aa6b5b",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-a5d7e46b-608f-4790-af62-157071aa6b5b"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-ef648701-9145-4ef3-848f-9fb933158780",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-ef648701-9145-4ef3-848f-9fb933158780"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-25236550-8d58-4ca5-8989-e3db0dacc4f7",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-25236550-8d58-4ca5-8989-e3db0dacc4f7"
+              ],
+              "status": "EXCLUDED"
+            }
+          ]
+        },
+        "final_provider_answer": {
+          "provider_response_id": "21ed3e19-3f8d-4d25-9f91-82d2288885dc",
+          "usage": {
+            "input_tokens": 4482,
+            "output_tokens": 199,
+            "total_tokens": 4681
+          },
+          "sha256": "17949b5301fc200ad62d612407b83645ee16e33a4c803a5c5f3fb733c7c2e6fb",
+          "text": "根据历史材料，协议版本的变化是：**v1.2 → v1.3**，同时 `max_attempts` 从 **3** 调整为 **5**。\n\n需要说明的几点：\n\n- 这些是历史会话中记录的信息，**不是本轮重新查询得到的当前业务事实**。\n- **线上实际部署的协议版本仍然未知**，不能由项目配置或历史记录推断。\n- 本轮没有新的业务观察；Receiver 完成状态仍为未知，最近一次历史快照显示 `Receiver=QUEUED`（2026-11-14T12:00Z），这不代表处理完成。\n- 相关标识保持区分：Request ID=`req-483`（`req-482` 为录入错误），Event ID=`evt-731`。\n\n如需确认当前实际生效的协议版本，建议在页面确认合法订单后，再对 `evt-731` 做一次只读核查。"
+        }
+      }
+    },
+    {
+      "case_id": "Q06-B",
+      "strategy": "ROLLING_SUMMARY",
+      "evidence_level": "TRACE_STATIC_PLUS_FROZEN_PROVIDER_RESPONSE_REPLAY",
+      "classification": [
+        "endpoint_seq3:PERSISTENCE_COMPACTION",
+        "formal_request_correction_seq7:RETAINED_THROUGH_FINAL_PROMPT",
+        "protocol_and_parameter_change_seq11:PERSISTENCE_COMPACTION"
+      ],
+      "stages": {
+        "original_source_messages": {
+          "sequence_3_endpoint": {
+            "role": "user",
+            "body": "[GT:ASSERTION] 早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+            "body_sha256": "4d6b172a58f5d946a1739805b5003aa4de39d54b8be66be5c6d0e175a0392a21"
+          },
+          "sequence_7_formal_correction": {
+            "role": "user",
+            "body": "[GT:CORRECTION] 正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+            "body_sha256": "36de56ede5d6e22e3f61e5dc89f6d697f70525c068ed46791892bfcd3a77967a"
+          },
+          "sequence_11_protocol_change": {
+            "role": "user",
+            "body": "[GT:TIMELINE] 协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5，需标明部署版本未知。",
+            "body_sha256": "e378a37d28e1dbe98521bac66f64e03f3d628d189d02e46214f679e4563a99b0"
+          }
+        },
+        "first_summary_request": {
+          "request_sha256": "2b804b493d1f1c27c881cfd8ea745b8d0a88798f101cf238ad8b85c8e53cd794",
+          "input_fact_visibility": {
+            "endpoint_seq3": true,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": true,
+            "protocol_v1_3": true,
+            "max_attempts_3": true,
+            "max_attempts_5": false
+          },
+          "source_sequences": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16
+          ],
+          "source_message_map_count": 16,
+          "missing_cited_source_sequences": []
+        },
+        "first_provider_summary": {
+          "response_sha256": "832fa7ad11e2625c0b794cb6d1d55faffa5ea4218946f3734139685378ed8fab",
+          "provider_response_id": "2a3e15cc-5127-468b-b892-9ce8d194459f",
+          "usage": {
+            "input_tokens": 4105,
+            "output_tokens": 482,
+            "total_tokens": 4587
+          },
+          "fact_visibility": {
+            "endpoint_seq3": true,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": true,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": true,
+            "contains_v1_3": true
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "协议从 v1.2 更新到 v1.3；max_attempts 从 3 改为 5。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Request ID 由 req-482 更正为 req-483。",
+              "source_sequences": [
+                3,
+                7
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "早期 API config endpoint=/callback, max_attempts=3; Request ID=req-482; Event ID=evt-731。",
+              "source_sequences": [
+                3
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "application_persisted_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": false,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": false,
+            "contains_v1_3": false
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 511
+        },
+        "second_summary_projection_replay": {
+          "evidence_level": "FROZEN_PROVIDER_RESPONSE_REPLAYED_THROUGH_BASE_CODE",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": false,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": false,
+            "contains_v1_3": false
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "estimated_tokens": 268
+        },
+        "second_summary_request": {
+          "request_sha256": "672c43976ad05917bdea553add175482bd7e6e0ba1c40b7bbe63c8c1a1099886",
+          "previous_summary_matches_replay_projection": true,
+          "previous_summary_fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": false,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": false,
+            "contains_v1_3": false
+          },
+          "previous_summary_relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ],
+          "new_message_sequences": [
+            17,
+            18
+          ],
+          "new_message_fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": false,
+            "req_483": true,
+            "protocol_v1_2": false,
+            "protocol_v1_3": false,
+            "max_attempts_3": false,
+            "max_attempts_5": false
+          }
+        },
+        "second_provider_summary": {
+          "response_sha256": "496d62fa846fdbe6ddd1d9861c5147086c719385c3038f5e09954659b0f7c16b",
+          "provider_response_id": "fbe83a59-852f-4e91-adbd-1a8001459bed",
+          "usage": {
+            "input_tokens": 3226,
+            "output_tokens": 333,
+            "total_tokens": 3559
+          },
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "formal_request_correction_seq7": true,
+            "protocol_and_parameter_change_seq11": false,
+            "deployment_version_unknown_seq11": true,
+            "contains_req_482": true,
+            "contains_req_483": true,
+            "contains_v1_2": false,
+            "contains_v1_3": false
+          },
+          "relevant_items": [
+            {
+              "field": "constraints",
+              "text": "需标明部署版本未知。",
+              "source_sequences": [
+                11
+              ]
+            },
+            {
+              "field": "corrections",
+              "text": "正式更正 Request ID=req-483；req-482 是录入错误；Event ID 仍为 evt-731。",
+              "source_sequences": [
+                7
+              ]
+            },
+            {
+              "field": "timeline",
+              "text": "Synthetic tool result: req-483, evt-731, HTTP 202, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                18
+              ]
+            },
+            {
+              "field": "user_assertions",
+              "text": "SYNTHETIC fixture: req-483, evt-731, HTTP 202 ACCEPTED, Receiver=QUEUED; 非完成证明。",
+              "source_sequences": [
+                14,
+                16
+              ]
+            }
+          ]
+        },
+        "final_answer_request": {
+          "request_sha256": "f70502d8c5009b689c920281530d8b1269970ad73dbd6c1609c3deb7043bc224",
+          "fact_visibility": {
+            "endpoint_seq3": false,
+            "req_482": true,
+            "req_483": true,
+            "protocol_v1_2": false,
+            "protocol_v1_3": false,
+            "max_attempts_3": false,
+            "max_attempts_5": false
+          },
+          "summary_refs": [
+            {
+              "covered_from_seq": 1,
+              "covered_to_seq": 18,
+              "digest": "6d9bc278d98e602170737fd3399d95de37da611cce5b2e58dd699c3d578622c2",
+              "source_attempt_id": "context-compression-829bf39b-91c0-47d0-95de-20a15ec3b0e7",
+              "summary_id": "context-summary-7081ad7e-b4a0-42a4-9699-c1a9cafa9861",
+              "version": 2
+            }
+          ],
+          "answer_context_blocks": [
+            {
+              "authority": "APPLICATION_DEFINED_SAFETY_POLICY",
+              "block_id": "trusted-control",
+              "category": "TRUSTED_CONTROL",
+              "estimated_tokens": 331,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "DOMAIN_TASK_STATE",
+              "block_id": "current-task-state",
+              "category": "CURRENT_TASK_STATE",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_DERIVED_CONTEXT",
+              "block_id": "summary:context-summary-7081ad7e-b4a0-42a4-9699-c1a9cafa9861",
+              "category": "HISTORICAL_SUMMARY",
+              "estimated_tokens": 520,
+              "source_refs": [
+                "context-summary-7081ad7e-b4a0-42a4-9699-c1a9cafa9861"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "CURRENT_AUTHORIZED_MCP_EVIDENCE",
+              "block_id": "current-facts",
+              "category": "CURRENT_FACTS",
+              "estimated_tokens": 21,
+              "source_refs": [],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-5647eb2e-9963-4257-97eb-c5fcc1cb754f",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-5647eb2e-9963-4257-97eb-c5fcc1cb754f"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-f9204b99-138f-48b6-a0b9-5d820bbb3092",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-f9204b99-138f-48b6-a0b9-5d820bbb3092"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-bd7545e2-7fd3-4959-b9ae-d4ab83c8ce17",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 23,
+              "source_refs": [
+                "message-bd7545e2-7fd3-4959-b9ae-d4ab83c8ce17"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-dcc0c172-340a-4e94-b47d-175c9b9eb206",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 22,
+              "source_refs": [
+                "message-dcc0c172-340a-4e94-b47d-175c9b9eb206"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-a5dd9012-18e6-45e7-86bd-27c7f7b23e6f",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 24,
+              "source_refs": [
+                "message-a5dd9012-18e6-45e7-86bd-27c7f7b23e6f"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "SOURCE_VALIDATED_ASSISTANT_HISTORY",
+              "block_id": "message:message-90f13a3a-bc61-4a39-8509-55e09d8ec25b",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "source_refs": [
+                "message-90f13a3a-bc61-4a39-8509-55e09d8ec25b"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-14fdfa3a-4c14-4cc0-a9de-33db17008ee6",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 48,
+              "source_refs": [
+                "message-14fdfa3a-4c14-4cc0-a9de-33db17008ee6"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "authority": "UNTRUSTED_USER_INPUT",
+              "block_id": "message:message-d1be6363-50f2-4097-9ce3-196bf7fb7b54",
+              "category": "CURRENT_USER_INPUT",
+              "estimated_tokens": 20,
+              "source_refs": [
+                "message-d1be6363-50f2-4097-9ce3-196bf7fb7b54"
+              ],
+              "status": "SELECTED"
+            },
+            {
+              "block_id": "message:message-009a8cc4-c869-4b7a-9165-90c9aebe52be",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-009a8cc4-c869-4b7a-9165-90c9aebe52be"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-37513cec-ea92-486a-89a4-9b5776116b10",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-37513cec-ea92-486a-89a4-9b5776116b10"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-f23a8f7b-9035-42e1-b8fd-a0daffb50bd9",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-f23a8f7b-9035-42e1-b8fd-a0daffb50bd9"
+              ],
+              "status": "EXCLUDED"
+            },
+            {
+              "block_id": "message:message-08970b94-dcf6-4009-ae0b-9c915c1386b0",
+              "category": "RECENT_INTERACTION",
+              "estimated_tokens": 4285,
+              "reason": "INPUT_TOKEN_BUDGET",
+              "source_refs": [
+                "message-08970b94-dcf6-4009-ae0b-9c915c1386b0"
+              ],
+              "status": "EXCLUDED"
+            }
+          ]
+        },
+        "final_provider_answer": {
+          "provider_response_id": "7e8b6ac4-85b8-4660-b58f-c5306699746e",
+          "usage": {
+            "input_tokens": 4498,
+            "output_tokens": 204,
+            "total_tokens": 4702
+          },
+          "sha256": "62d7b0ee1641039c13500fc1651e58f7c010f82ce49026585940562bc07dcf4f",
+          "text": "关于协议版本的变化，目前没有可核实的资料可以回答。\n\n现有材料中只有一条相关约束：**协议部署版本仍为未知**。历史快照里的 `Receiver=QUEUED`（2026-11-14T12:00Z）是接收方排队状态，与协议版本无关；它也不能说明协议是否发生过升级、回滚或配置变更。\n\n因此：\n\n- **协议版本历史**：未知，本轮没有查询到任何版本记录。\n- **当前部署版本**：未知，不能由项目配置或历史答复推断。\n- **接收方完成状态**：仍未解决（`unresolved_receiver_completion=true`），但这同样不提供版本信息。\n\n如需确认版本变化，建议在具备合法订单绑定的前提下，只读查询该集成/服务的版本发布记录或变更审计记录，并与 `req-483`、`evt-731` 的时间线对照。这属于建议的后续核查，本轮并未执行。"
+        }
+      }
+    }
+  ]
+}

@@ -1206,8 +1206,12 @@ def _compact_summary_document(value: Any) -> dict[str, Any]:
         refs = item.get(ref_key)
         if not isinstance(refs, list) or not refs:
             return None
+        clean_text = " ".join(item["text"].split())
+        text = clean_text[:max_chars]
+        if len(clean_text) > max_chars:
+            text = clean_text[:max(0, max_chars - 1)].rstrip() + "…"
         result: dict[str, Any] = {
-            "text": " ".join(item["text"].split())[:max_chars],
+            "text": text,
             ref_key: list(dict.fromkeys(refs))[:3],
         }
         if isinstance(item.get("sequence"), int) and not isinstance(item.get("sequence"), bool):
@@ -1227,34 +1231,166 @@ def _compact_summary_document(value: Any) -> dict[str, Any]:
     if token_count(result) > MAX_COMPRESSION_OUTPUT_TOKENS:
         raise TaskControlError("CONTEXT_SUMMARY_GOAL_EXCEEDS_OUTPUT_BUDGET")
 
-    def add_item(field: str, item: Any) -> bool:
-        accepted = result[field]
-        for max_chars in (100, 72, 48, 24):
-            candidate = normalized(item, max_chars)
+    candidates_by_field = {
+        field: value.get(field) if isinstance(value.get(field), list) else []
+        for field in fields
+    }
+    selected_by_index: dict[str, dict[int, dict[str, Any]]] = {field: {} for field in fields}
+
+    def add_index(
+        field: str, index: int, max_char_options: tuple[int, ...] = (100, 72, 48, 24),
+    ) -> bool:
+        items = candidates_by_field[field]
+        selected = selected_by_index[field]
+        if index in selected:
+            return True
+        if index < 0 or index >= len(items) or len(selected) >= 3:
+            return False
+        for max_chars in max_char_options:
+            candidate = normalized(items[index], max_chars)
             if candidate is None:
                 return False
-            trial = {**result, field: [candidate, *accepted]}
+            trial_selected = {**selected, index: candidate}
+            trial_items = [trial_selected[item_index] for item_index in sorted(trial_selected)]
+            trial = {**result, field: trial_items}
             if token_count(trial) <= MAX_COMPRESSION_OUTPUT_TOKENS:
-                accepted.insert(0, candidate)
-                result[field] = accepted
+                selected_by_index[field] = trial_selected
+                result[field] = trial_items
                 return True
         return False
 
-    # Preserve the newest item from every category first, then spend remaining tokens on detail.
-    for field in fields:
-        items = value.get(field)
-        if not isinstance(items, list) or not items:
+    def source_order(item: Any, fallback: int) -> int:
+        if not isinstance(item, dict):
+            return fallback
+        sequence = item.get("sequence")
+        if isinstance(sequence, int) and not isinstance(sequence, bool):
+            return sequence
+        refs = item.get("source_sequences")
+        if not isinstance(refs, list):
+            return fallback
+        numeric_refs = [ref for ref in refs if isinstance(ref, int) and not isinstance(ref, bool)]
+        return max(numeric_refs) if numeric_refs else fallback
+
+    def newest_index(items: list[Any]) -> int | None:
+        candidates = [index for index, item in enumerate(items) if isinstance(item, dict)]
+        return max(candidates, key=lambda index: source_order(items[index], index)) if candidates else None
+
+    def oldest_index(items: list[Any]) -> int | None:
+        candidates = [index for index, item in enumerate(items) if isinstance(item, dict)]
+        return min(candidates, key=lambda index: source_order(items[index], index)) if candidates else None
+
+    def source_refs(item: Any) -> set[str]:
+        if not isinstance(item, dict):
+            return set()
+        refs = item.get("source_sequences", item.get("source_message_ids", []))
+        return {str(ref) for ref in refs} if isinstance(refs, list) else set()
+
+    # Preserve source-diverse facts before spending space on optional detail: original
+    # user assertions, formal corrections, a self-contained timeline fact, current constraints,
+    # and unresolved work. Category and source references provide the signal; no domain
+    # strings are matched.
+    anchor_candidates: list[tuple[str, int, int]] = []
+    assertion_index = oldest_index(candidates_by_field["user_assertions"])
+    if assertion_index is not None:
+        anchor_candidates.append(("user_assertions", assertion_index, 48))
+    correction_index = oldest_index(candidates_by_field["corrections"])
+    if correction_index is not None:
+        anchor_candidates.append(("corrections", correction_index, 72))
+    goal_refs = source_refs(value.get("initial_goal"))
+    timeline_items = candidates_by_field["timeline"]
+    timeline_indices = [
+        index for index, item in enumerate(timeline_items)
+        if isinstance(item, dict) and not (source_refs(item) & goal_refs)
+    ]
+    timeline_index: int | None = None
+    if timeline_indices:
+        timeline_index = max(
+            timeline_indices,
+            key=lambda index: (
+                -len(source_refs(timeline_items[index])),
+                source_order(timeline_items[index], index),
+            ),
+        )
+    constraint_items = candidates_by_field["constraints"]
+    constraint_index = newest_index(constraint_items)
+    first_constraint_index = oldest_index(constraint_items)
+    unresolved_items = candidates_by_field["unresolved_items"]
+    unresolved_indices = [index for index, item in enumerate(unresolved_items) if isinstance(item, dict)]
+    unresolved_indices.sort(
+        key=lambda index: source_order(unresolved_items[index], index), reverse=True,
+    )
+    timeline_refs = source_refs(timeline_items[timeline_index]) if timeline_index is not None else set()
+    unresolved_same_source = [
+        index for index in unresolved_indices
+        if timeline_refs and source_refs(unresolved_items[index]) == timeline_refs
+    ]
+    composite_unresolved_index = max(
+        unresolved_same_source,
+        key=lambda index: len(str(unresolved_items[index].get("text", ""))),
+        default=None,
+    )
+    use_composite_unresolved = (
+        composite_unresolved_index is not None
+        and timeline_index is not None
+        and len(str(unresolved_items[composite_unresolved_index].get("text", "")))
+        > len(str(timeline_items[timeline_index].get("text", "")))
+    )
+    if timeline_index is not None and not use_composite_unresolved:
+        anchor_candidates.append(("timeline", timeline_index, 72))
+    if first_constraint_index is not None and first_constraint_index != constraint_index:
+        anchor_candidates.append(("constraints", first_constraint_index, 48))
+    if constraint_index is not None and not (
+        use_composite_unresolved
+        and source_refs(constraint_items[constraint_index]) == source_refs(unresolved_items[composite_unresolved_index])
+    ):
+        anchor_candidates.append(("constraints", constraint_index, 48))
+    unresolved_anchor_indices = list(unresolved_indices[:1])
+    if composite_unresolved_index is not None and composite_unresolved_index not in unresolved_anchor_indices:
+        unresolved_anchor_indices.append(composite_unresolved_index)
+    anchor_candidates.extend(
+        ("unresolved_items", index, 48) for index in unresolved_anchor_indices
+    )
+
+    # Reserve bounded text sizes for category anchors before optional detail. Truncated
+    # items are marked with an ellipsis; if even the shortest anchor cannot fit, fail
+    # instead of silently storing a summary that implies complete retention.
+    for field, index, preferred_chars in anchor_candidates:
+        if index in selected_by_index[field]:
             continue
-        add_item(field, items[-1])
-    for field in fields:
-        items = value.get(field)
-        if not isinstance(items, list):
-            continue
-        accepted = result[field]
-        for item in reversed(items[-6:-1]):
-            if len(accepted) >= 3:
-                break
-            add_item(field, item)
+        char_options = tuple(dict.fromkeys((preferred_chars, 48, 24)))
+        if not add_index(field, index, char_options):
+            candidate = normalized(candidates_by_field[field][index], 100)
+            if candidate is not None:
+                raise TaskControlError(
+                    "CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED",
+                    f"CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED:{field}:{index}",
+                )
+
+    # Spend remaining space in bounded round-robin passes so one busy category cannot
+    # consume the budget before another category's earlier source-linked fact is considered.
+    fill_order = (
+        "corrections", "constraints", "user_assertions", "timeline",
+        "unresolved_items", "rejected_hypotheses",
+    )
+    remaining_indices = {
+        field: [
+            index for index in reversed(range(max(0, len(candidates_by_field[field]) - 6), len(candidates_by_field[field])))
+            if index not in selected_by_index[field]
+        ]
+        for field in fields
+    }
+    while True:
+        added = False
+        for field in fill_order:
+            if len(selected_by_index[field]) >= 3:
+                continue
+            while remaining_indices[field]:
+                index = remaining_indices[field].pop(0)
+                if add_index(field, index):
+                    added = True
+                    break
+        if not added:
+            break
     return result
 
 
@@ -1316,6 +1452,7 @@ def _validate_summary_document(value: str, source_sequence_map: dict[str, str]) 
         ):
             raise TaskControlError("CONTEXT_SUMMARY_SOURCE_INVALID")
         item["source_message_ids"] = [source_sequence_map[str(ref)] for ref in refs]
+        item["sequence"] = max(refs)
         item.pop("source_sequences", None)
         return True
 

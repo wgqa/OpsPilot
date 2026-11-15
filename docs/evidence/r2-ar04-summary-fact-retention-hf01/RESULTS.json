@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-SUMMARY-FACT-RETENTION-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE_WITH_LIMITS",
+  "base": "1cba32753f22e0a610aa7654ab5dc6cddd94ccf2",
+  "branch": "codex/r2-ar04-summary-fact-retention-hf01",
+  "provider_requests_this_task": 0,
+  "task_cost_usd": 0,
+  "evidence_levels": {
+    "frozen_live_trace": "FROZEN_PROVIDER_TRACE_REVIEW",
+    "candidate_replay": "FROZEN_PROVIDER_OUTPUT_REPLAY_THROUGH_CANDIDATE_APPLICATION_L2",
+    "domain_integration": "ISOLATED_DOMAIN_FIXTURE_L2",
+    "tests": "AUTOMATED_TEST",
+    "code": "SOURCE_REVIEW",
+    "live_semantics_after_fix": "NOT_RUN"
+  },
+  "frozen_trace": {
+    "path": "docs/evidence/abc-live-env-unblock-01/live_run_02/LIVE_REQUESTS.jsonl.gz",
+    "sha256": "80dab676295960017bf31ba25c1aef62657d0eb0c437aa0fa1f0f6f56a8da05c",
+    "results_path": "docs/evidence/abc-live-env-unblock-01/live_run_02/LIVE_RESULTS.json",
+    "results_sha256": "29ff36295398475699c767ec826dc94331b7299b527ae69b41c5e995cce4f55b",
+    "ledger_path": "docs/evidence/abc-live-env-unblock-01/live_run_02/COST_LEDGER.json",
+    "ledger_sha256": "05900430e72772f281a3edfef79d92004b9bfa4628154c9824875a2913ef4cd7",
+    "records": 42,
+    "requests": 21,
+    "responses": 21,
+    "usage_tokens": {
+      "input": 82563,
+      "output": 6609
+    }
+  },
+  "frozen_pre_fix_reconstruction": {
+    "path": "docs/evidence/r2-ar04-summary-fact-retention-hf01/TRACE_RECONSTRUCTION_BEFORE.json",
+    "sha256": "e68924d3652306b7edd81a7f273d8dcda2ef55bbe8d587a183c83453953d3c26",
+    "modified": false,
+    "historic_classifications_preserved": true
+  },
+  "candidate_reconstruction": {
+    "path": "docs/evidence/r2-ar04-summary-fact-retention-hf01/TRACE_RECONSTRUCTION_AFTER.json",
+    "provider_requests": 0,
+    "cases": 6,
+    "candidate_target_facts_survive_two_application_projections": "6/6 cases for endpoint, formal correction, and protocol/parameter transition",
+    "estimated_summary_tokens_by_case": {
+      "Q02-A": 504,
+      "Q02-B": 500,
+      "Q03-A": 506,
+      "Q03-B": 499,
+      "Q06-A": 502,
+      "Q06-B": 509
+    },
+    "live_semantic_improvement_proven": false
+  },
+  "acceptance_tests": [
+    {
+      "id": "T01",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST + ISOLATED_DOMAIN_FIXTURE_L2",
+      "detail": "Frozen Q02-A/B endpoint facts survive candidate replay; HYBRID and ROLLING_SUMMARY two-round Domain Fixtures include endpoint=/callback and seq3 source mapping in the actual final application request."
+    },
+    {
+      "id": "T02",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST + ISOLATED_DOMAIN_FIXTURE_L2",
+      "detail": "Q03-A/B formal correction is retained; fixtures assert req-482, req-483, the entry-error reason, and seq5 mapped source."
+    },
+    {
+      "id": "T03",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST + ISOLATED_DOMAIN_FIXTURE_L2",
+      "detail": "Candidate replay and both strategy fixtures carry v1.2 -> v1.3 and max_attempts 3 -> 5 through two persisted rounds to the final application request."
+    },
+    {
+      "id": "T04",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST",
+      "detail": "A mixed summary retains endpoint, formal correction relation, protocol/parameter transition, no-write constraint and unresolved deployment/completion facts under 512 estimated tokens."
+    },
+    {
+      "id": "T05",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST + DOMAIN_CURRENTNESS",
+      "detail": "Existing invalidated-summary test rejects stale source material before model input; 1 passed."
+    },
+    {
+      "id": "T06",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST",
+      "detail": "Contradictory old/new endpoint and version values remain associated with distinct source sequences; the test does not merge them into a single current fact."
+    },
+    {
+      "id": "T07",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST",
+      "detail": "The normal mixed summary remains <=512 estimated tokens; a forced infeasible anchor raises CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED without mutating its input. No retry loop is invoked."
+    },
+    {
+      "id": "T08",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST",
+      "detail": "Existing strategy selection regression passes for ROLLING_SUMMARY and RECENT_WINDOW; two-round integration passes for HYBRID and ROLLING_SUMMARY. RECENT_WINDOW has no summary path in the covered strategy test."
+    },
+    {
+      "id": "T09",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_TEST + DOMAIN_CURRENTNESS",
+      "detail": "Fixture verifies validated source sequences map to exact persisted message IDs, summary version state transition, and current source validation. Existing currentness regressions also ran."
+    },
+    {
+      "id": "T10",
+      "status": "PASS",
+      "evidence_grade": "AUTOMATED_HASH_ASSERTION + HISTORICAL_TRACE",
+      "detail": "Frozen provider Trace/results/ledger, prior report/scoring files, pre-fix reconstruction and C06 RED/RESULTS hashes remain unchanged. The prior C06 RED is preserved, not rerun or reclassified."
+    }
+  ],
+  "protected_artifacts": {
+    "live_trace_and_results": "UNCHANGED",
+    "historical_cost_ledger": "UNCHANGED",
+    "historical_report_and_scoring": "UNCHANGED",
+    "pre_fix_reconstruction": "UNCHANGED",
+    "c06_red_and_results": "UNCHANGED",
+    "hash_test": "tests/test_ar04_summary_fact_retention_hf_01.py::test_frozen_provider_trace_results_ledger_and_c06_red_are_unchanged"
+  },
+  "protected_sha256": {
+    "live_trace": "80dab676295960017bf31ba25c1aef62657d0eb0c437aa0fa1f0f6f56a8da05c",
+    "live_results": "29ff36295398475699c767ec826dc94331b7299b527ae69b41c5e995cce4f55b",
+    "live_cost_ledger": "05900430e72772f281a3edfef79d92004b9bfa4628154c9824875a2913ef4cd7",
+    "prior_report": "2f2c05d7aa114c5b965c80921e90d64abbae8b7a5954c697f4fe69bc1f116e2a",
+    "prior_implementer_assessment": "d89336e80191dd0771d83b42dcca1039d5f321a503c365d9b76ba9efbf88750f",
+    "prior_verifier_results": "f56869a89e30fd154325b12d3dc51970606e7ae51d991b789fe5b73f37e1d530",
+    "pre_fix_reconstruction": "e68924d3652306b7edd81a7f273d8dcda2ef55bbe8d587a183c83453953d3c26",
+    "c06_red_trace": "a820169936e3b4df2a2ca3120a606cdcd2df09d7dff92d0c590da3ea9b8ae13f",
+    "c06_results": "c283bd91404f84b5908f528e8625bbe11e1f7c41dba13f71970ebacae88cc1e7"
+  },
+  "test_summary": {
+    "new_tests": "12 passed",
+    "targeted_existing_tests": "2 passed, 10 deselected; separate invalidation test 1 passed",
+    "related_regression_set": "64 passed, 1 failed",
+    "unrelated_failure": "tests/test_ar04c_f01_context_currentness.py::test_zero_tool_followup_can_explain_valid_historical_snapshot: KeyError 'completed_tools' at assertion for context['current_run']['completed_tools']; failure is in the untouched F01 Investigator context path. It was not rerun at Base, so regression status relative to Base is UNVERIFIED.",
+    "full_pytest": "NOT_RUN"
+  },
+  "final_scope": {
+    "production_files_changed": ["opspilot/domain/chat.py"],
+    "test_files_added": ["tests/test_ar04_summary_fact_retention_hf_01.py"],
+    "gold_or_historical_live_data_changed": false,
+    "production_database_or_external_write": false,
+    "main_merged": false,
+    "remaining_limit": "Application L2 retention is verified; post-fix live model semantic quality remains untested and requires separate authorization. The existing summary schema has no omission ledger: facts outside the selected anchors or beyond the bounded per-category item count may still be omitted without an explicit per-fact omission record. This candidate does not claim lossless or general-purpose fact retention."
+  }
+}

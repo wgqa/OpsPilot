@@ -1,0 +1,49 @@
+R2-AR04-SUMMARY-FACT-RETENTION-HF-01 — verification record
+Base: 1cba32753f22e0a610aa7654ab5dc6cddd94ccf2
+Provider calls this task: 0
+Cost this task: USD 0
+
+1) Frozen pre-fix failure reproduction (historical log; preserved, not rerun here)
+Command: recorded in RED_TEST_RUN_BEFORE.txt
+Result: 3 failed, 4 passed. The old helper lost the endpoint in Q02-A/Q02-B and the tested protocol/parameter fact in Q06-B. This is the before-state record.
+
+2) Candidate frozen Trace reconstruction (no Provider calls)
+Command: python -B docs/evidence/r2-ar04-summary-fact-retention-hf01/reconstruct_live_trace.py
+Exit: 0
+Result: parsed 21 frozen requests, 21 responses, 6 cases; target endpoint, formal correction, and protocol/parameter facts remain visible through two candidate application projections in 6/6 replays. Output: TRACE_RECONSTRUCTION_AFTER.json. This is frozen-output application replay, not a new model answer.
+
+3) New deterministic acceptance tests
+Command: python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/r2-ar04-summary-fact-retention-hf01/.pytest-precommit-final tests/test_ar04_summary_fact_retention_hf_01.py
+Exit: 0
+Result: 12 passed in 3.38s.
+
+4) Selected strategy/currentness tests
+Command: python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/r2-ar04-summary-fact-retention-hf01/.pytest-t05-t08-t09 tests/test_m302_context.py -k 'compression_source_change_is_rejected_before_provider_io or context_strategies_report_recent_window_and_rolling_summary'
+Exit: 0
+Result: 2 passed, 10 deselected in 4.09s.
+
+Command: python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/r2-ar04-summary-fact-retention-hf01/.pytest-t05-invalidation tests/test_ar04a_context_journey_01.py::test_ar04a_invalidated_summary_is_not_sent_to_the_model
+Exit: 0
+Result: 1 passed in 10.54s.
+
+5) Related regression set
+Command: python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/r2-ar04-summary-fact-retention-hf01/.pytest-related-final tests/test_m302_context.py tests/test_ar04a_context_journey_01.py tests/test_ar04c_f01_context_currentness.py tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py tests/test_m1_chat.py tests/test_ar02_assistant.py
+Exit: 1
+Result: 64 passed, 1 failed in 81.51s. Failure: `tests/test_ar04c_f01_context_currentness.py::test_zero_tool_followup_can_explain_valid_historical_snapshot`, `KeyError: 'completed_tools'` while asserting `context['current_run']['completed_tools'] == []`. The failing code path is F01 Investigator context construction, outside the changed file and outside the new chat summary test. It was not rerun at Base; whether pre-existing is UNVERIFIED. Full pytest was NOT RUN.
+
+6) Historical source-currentness and protected evidence assertion
+The commands above include the dedicated invalidated-summary regression and new test `test_frozen_provider_trace_results_ledger_and_c06_red_are_unchanged`. The latter checks SHA-256 values for the frozen original Provider Trace, results, ledger, earlier report/scoring, pre-fix reconstruction, and C06 RED/RESULTS.
+
+7) Earlier focused commands preserved for audit
+- `python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/r2-ar04-summary-fact-retention-hf01/.pytest-final-new tests/test_ar04_summary_fact_retention_hf_01.py` — 12 passed (3.30s).
+- `python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/r2-ar04-summary-fact-retention-hf01/.pytest-suite-final-new tests/test_ar04_summary_fact_retention_hf_01.py` — 7 passed (0.19s) at an earlier test revision; superseded by the 12-test final run.
+- `python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/r2-ar04-summary-fact-retention-hf01/.pytest-suite-new-2 tests/test_ar04_summary_fact_retention_hf_01.py -k 'domain or strategy'` — 2 passed, 7 deselected (3.31s), earlier revision.
+
+No live model, external MCP, production database, Gold or business write was used. No automatic retry behavior was changed. The only known related-suite failure is reported above, not converted into PASS.
+
+Candidate status: ACCEPTANCE_CANDIDATE_WITH_LIMITS. The tested facts survive candidate app compaction, but the existing summary schema does not preserve a structured per-fact omission ledger for all non-anchor details.
+
+8) Artifact and whitespace checks
+Command: Python JSON parse for RESULTS.json and TRACE_RECONSTRUCTION_AFTER.json; `git diff --check`
+Exit: 0
+Result: both JSON files parsed; RESULTS contains 10 T cases; reconstruction contains 6 cases with `provider_request_performed=false`; `git diff --check` reported no whitespace errors.
