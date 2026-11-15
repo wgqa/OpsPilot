@@ -1,0 +1,34 @@
+R2-AR04-LIVE-RETENTION-RECHECK-01
+Base e68fd3cd924dbad6bda69b9b9d02519ff0f3a3d7
+Scope: zero-cost preparation. Actual Provider requests 0. External MCP attempts 0. Provider cost USD 0.
+
+Commands ran from D:\学习\agent新项目\.worktrees\ar04a-context-journey-01 with Python 3.14.0, pytest 9.1.1, httpx 0.28.1, langchain-openai 1.7.2, langgraph 1.2.16 and tiktoken 0.14.0. The model inputs use the existing local encoding cache. Offline Runner modes deny non-loopback Python sockets. The model's underlying HTTP transport for all simulated calls is MockTransport.
+
+1. Final Mock over current production code
+$env:PYTHONUTF8 = '1'
+$dir = 'docs/evidence/r2-ar04-live-retention-recheck-01'
+python -B -s "$dir/run_recheck.py" mock --output "$dir/mock_run_04"
+Exit 0.
+{"mock_passed": true, "recorded_mock_requests": 9}
+Q02-A HYBRID, Q02-B ROLLING_SUMMARY, Q06-B ROLLING_SUMMARY each completed 2 summary calls and 1 answer. All 3 second summary requests matched the production projection of the first persisted summary. Each final answer request carried the current persisted summary with the required source-linked text. All answers used tool_choice=none. No MCP attempts. Initial iterative Mock runs mock_run_01/02/03 also completed with 9 Mock requests; mock_run_04 records the final code with the source digest stop check.
+
+2. Final zero-cost configuration preflight
+python -B -s "$dir/run_recheck.py" preflight --mock-results "$dir/mock_run_04/MOCK_RESULTS.json" --output "$dir/PREFLIGHT.json"
+Exit 0.
+{'OPSPILOT_MODEL_API_KEY': True, 'OPSPILOT_MODEL_NAME': True, 'OPSPILOT_MODEL_BASE_URL': True, 'OPSPILOT_MODEL_CONFIG_VERSION': False, 'OPSPILOT_MODEL_PRICE_VERSION': False, 'OPSPILOT_ASSISTANT_SERVICE_IDENTITY': False}
+{"status": "AWAITING_NEW_LIVE_PROVIDER_AUTHORIZATION", "provider_requests_sent": 0}
+The last three non-secret fields were supplied from the isolated task configuration. Effective presence was 6/6. An isolated Runtime Grant with case allowance USD 0.012645 bound to the expected database and Run. Both HTTP transports were forbidden-send MockTransport. Invocations 0. A Provider-authenticated request or key check is NOT_RUN. The early successful preflight, prior to adding the source stop test, is preserved locally as PREFLIGHT_INITIAL.json.
+
+3. Targeted tests on final Runner
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
+$env:LANGSMITH_TRACING = 'false'
+python -B -s -m pytest -q -p no:cacheprovider --basetemp "$dir/.pytest-preflight-03" "$dir/test_recheck.py" docs/evidence/abc-live-env-unblock-01/test_abc_runner.py tests/test_ar04_summary_fact_retention_hf_01.py tests/test_m302_context.py::test_compression_source_change_is_rejected_before_provider_io tests/test_product_01_runtime_grant_01.py::test_database_copy_cannot_reuse_runtime_grant_or_pool tests/test_product_01_runtime_grant_01.py::test_expired_grant_is_not_bound_and_zero_price_cannot_authorize_paid_calls
+Exit 0. 35 passed, 13 warnings in 11.04s.
+Coverage: 12 new tests, 8 ABC Runner tests, 12 HF-01 retention and frozen artifact tests, 1 pre-send source invalidation test, and 2 Runtime Grant tests. The warnings are LangSmith's Python 3.14 asyncio.iscoroutinefunction deprecation warnings.
+
+Initial test pass before the late-source stop test was 34 passed (exit 0, 7.59s). With the late-source injection the next run at --basetemp "$dir/.pytest-preflight-02" was 34 passed / 1 failed (exit 1, 11.02s). One summary was sent to MockTransport and later cases stayed NOT_STARTED. The legacy case helper raised KeyError for the absent final-answer Manifest, so the original status-only source classifier missed the precise reason. The final Runner reads the persisted compression source references against their message digests. The same failure injection then stopped with RECHECK_SOURCE_INVALIDATED, one simulated summary, no answer and no later Case dispatch. The raw legacy error and Domain compression attempt state remain in the test evidence.
+
+4. Completed evidence checks
+The 9 SEND_STARTED and 9 RESPONSE_RECEIVED records matched the 9 ledger slots in order. All were MockTransport, all outbound records excluded Authorization headers, and all 3 answers carried the current persisted source-linked summary. Simulated ledger settlement was USD 0.017150. SHA-256 of the final mock manifest matched the preflight reference. For all 3 cases the frozen prior real first summary contained the target and the second summary input and final answer prompt lacked it. The historical actual answers retained their preliminary SAFE_ABSTENTION label.
+
+Live recheck, live L2/L3 grading, provider account billing and full repository pytest: NOT_RUN.
