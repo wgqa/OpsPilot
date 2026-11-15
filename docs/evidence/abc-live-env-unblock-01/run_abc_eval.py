@@ -797,6 +797,32 @@ async def _run_case(*, case_root: Path, case_id: str, question_id: str, group: s
         answer_calls = [call for call in transport.calls if call["purpose"] == "ANSWER"]
         summary_calls = [call for call in transport.calls if call["purpose"] == "SUMMARY"]
         tool_observations = [event for event in assistant_trace if event.get("event") == "tool_observation"]
+        if not manifest["attempts"]:
+            failed_compression = next(
+                (attempt for attempt in reversed(summary_attempts) if attempt.get("status") == "FAILED"),
+                None,
+            )
+            reason = (
+                failed_compression.get("error_class")
+                if failed_compression is not None
+                else run_result.get("reason") or run_result.get("error") or "CHAT_ANSWER_MANIFEST_MISSING"
+            )
+            return {
+                "case_id": case_id,
+                "question_id": question_id,
+                "group": group,
+                "strategy": strategy,
+                "status": "STOPPED",
+                "error": str(reason)[:100],
+                "domain_stop_reason": str(reason)[:100],
+                "assistant_run_status": run_result.get("status"),
+                "answer_manifest_present": False,
+                "compression_attempts": summary_attempts,
+                "summary_calls": len(summary_calls),
+                "answer_calls": len(answer_calls),
+                "external_mcp_calls": 0,
+                "local_tool_observations": len(tool_observations),
+            }
         if group == "C" and (summary_calls or summary_attempts):
             raise RunnerStop("RECENT_WINDOW_MUST_NOT_SUMMARIZE")
         if group in {"A", "B"} and not summary_calls:

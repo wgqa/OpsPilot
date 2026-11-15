@@ -1224,7 +1224,19 @@ def _compact_summary_document(value: Any) -> dict[str, Any]:
     result = {"initial_goal": goal, **{field: [] for field in fields}}
 
     def token_count(document: dict[str, Any]) -> int:
-        return estimate_messages_tokens([{"role": "system", "content": _canonical(document)}])
+        measured: dict[str, Any] = {}
+        for key, value in document.items():
+            if isinstance(value, dict):
+                measured[key] = {item_key: item for item_key, item in value.items() if item_key != "sequence"}
+            elif isinstance(value, list):
+                measured[key] = [
+                    {item_key: item for item_key, item in entry.items() if item_key != "sequence"}
+                    if isinstance(entry, dict) else entry
+                    for entry in value
+                ]
+            else:
+                measured[key] = value
+        return estimate_messages_tokens([{"role": "system", "content": _canonical(measured)}])
 
     while token_count(result) > MAX_COMPRESSION_OUTPUT_TOKENS and len(result["initial_goal"]["text"]) > 32:
         result["initial_goal"]["text"] = result["initial_goal"]["text"][: max(32, len(result["initial_goal"]["text"]) // 2)]
@@ -1404,6 +1416,11 @@ def _compact_summary_document(value: Any) -> dict[str, Any]:
         restored = [full if entry is item else entry for entry in result[field]]
         if token_count({**result, field: restored}) <= MAX_COMPRESSION_OUTPUT_TOKENS:
             result[field] = restored
+
+    result["initial_goal"].pop("sequence", None)
+    for field in fields:
+        for item in result[field]:
+            item.pop("sequence", None)
     return result
 
 

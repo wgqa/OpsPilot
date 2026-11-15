@@ -113,7 +113,7 @@ def test_four_same_category_facts_compete_without_merging_corrections():
         assert projected[category][0]["text"] == item["text"]
 
 
-def test_valid_source_can_have_partial_text_at_the_real_output_budget():
+def test_redundant_sequence_metadata_removal_preserves_full_negated_constraint():
     original, sources = _validated(_document(
         constraints=[_item(NEGATED_CONSTRAINT, 2, 3, 4)],
         user_assertions=[_item("The request contained a callback replay identifier for the isolated webhook diagnostic.", 5)],
@@ -126,16 +126,16 @@ def test_valid_source_can_have_partial_text_at_the_real_output_budget():
     stored = persisted["constraints"][0]
     next_item = projected["constraints"][0]
     with_full_constraint = {**persisted, "constraints": [{**stored, "text": NEGATED_CONSTRAINT}]}
-    fidelity = "FULL" if next_item["text"] == NEGATED_CONSTRAINT else "PARTIAL"
     print(json.dumps({
-        "fidelity": fidelity, "original_tokens": _tokens(original),
+        "fidelity": "FULL" if next_item["text"] == NEGATED_CONSTRAINT else "PARTIAL",
+        "original_tokens": _tokens(original),
         "persisted_tokens": _tokens(persisted), "with_full_constraint_tokens": _tokens(with_full_constraint),
         "next_summary_tokens": _tokens(projected), "projected_constraint": next_item,
     }, ensure_ascii=False))
     assert chat.MAX_COMPRESSION_OUTPUT_TOKENS == 512
-    assert _tokens(original) > 512 and _tokens(with_full_constraint) > 512
+    assert _tokens(original) > 512 and _tokens(with_full_constraint) <= 512
     assert _tokens(persisted) <= 512 and _tokens(projected) <= 512
     assert stored["source_message_ids"] == [sources[str(seq)] for seq in (2, 3, 4)]
     assert next_item["source_sequences"] == [2, 3, 4]
-    assert stored["text"] == next_item["text"] and next_item["text"].endswith("…")
-    assert "not disabled" not in next_item["text"] and fidelity == "PARTIAL"
+    assert stored["text"] == next_item["text"] == NEGATED_CONSTRAINT
+    assert "not disabled" in next_item["text"]

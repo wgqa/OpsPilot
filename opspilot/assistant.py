@@ -2792,10 +2792,19 @@ async def _prepare_assistant_context_impl(
         except asyncio.CancelledError:
             raise
         except Exception as error:
+            error_code = getattr(error, "code", None)
+            if (
+                not isinstance(error, TaskControlError)
+                or not isinstance(error_code, str)
+                or not error_code.isascii()
+                or not error_code.replace("_", "").isalnum()
+            ):
+                error_code = type(error).__name__
+            error_code = error_code[:100]
             fail_chat_compression_attempt(
-                path, worker_id, attempt_id, type(error).__name__,
+                path, worker_id, attempt_id, error_code,
             )
-            return stop("CHAT_CONTEXT_COMPRESSION_FAILED")
+            return stop(error_code)
 
 
 async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,
