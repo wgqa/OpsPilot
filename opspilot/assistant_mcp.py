@@ -10,8 +10,19 @@ from opspilot.domain.assistant_knowledge import search
 from opspilot.domain.s3_mcp import build_s3_server
 from opspilot.domain.api import make_server
 
-async def run(path,run_id):
+async def run(path,run_id,registry_path=None):
     record,identity=read_run(path,run_id)
+    if registry_path is not None:
+        from pathlib import Path
+
+        candidate = Path(registry_path)
+        if (
+            candidate.is_symlink()
+            or not candidate.is_file()
+            or candidate.resolve().parent != Path(path).resolve().parent
+        ):
+            raise ValueError('ASSISTANT_KNOWLEDGE_REGISTRY_PATH_INVALID')
+        registry_path = candidate.resolve()
     api=None; thread=None
     if record['task_id']:
         api=make_server(path,identity.tenant_id,'127.0.0.1',0)
@@ -71,7 +82,10 @@ async def run(path,run_id):
         # A user version is a lookup preference. The effective lookup may
         # default to a trusted binding version; preserve those facts separately.
         lookup_version=contract_version if contract_version is not None else configured
-        result=search(path,actor,current['session_id'],query,contract_version=lookup_version)
+        result=search(
+            path, actor, current['session_id'], query,
+            contract_version=lookup_version, registry_path=registry_path,
+        )
         result['user_requested_contract_version']=contract_version
         result['requested_contract_version']=contract_version
         result['trusted_binding_contract_version']=configured
@@ -96,6 +110,7 @@ async def run(path,run_id):
         try:
             result = list_scoped_protocols(
                 path, actor, current['session_id'], topic=topic,
+                registry_path=registry_path,
             )
             result['success'] = True
             return result
@@ -136,6 +151,7 @@ async def run(path,run_id):
                 target_document_id=target_document_id,
                 base_version=str(base_version) if base_version is not None else None,
                 target_version=str(target_version) if target_version is not None else None,
+                registry_path=registry_path,
             ).to_dict()
             result['success'] = True
             return result
@@ -172,7 +188,7 @@ async def run(path,run_id):
             result = read_excerpt(
                 path, actor, current['session_id'], document_id=document_id,
                 version=version, query=query, start_line=start_line,
-                start_column=start_column,
+                start_column=start_column, registry_path=registry_path,
             )
             result['success'] = True
             return result
@@ -236,4 +252,5 @@ async def run(path,run_id):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--db',required=True);p.add_argument('--run-id',required=True)
-    a=p.parse_args();asyncio.run(run(a.db,a.run_id))
+    p.add_argument('--registry')
+    a=p.parse_args();asyncio.run(run(a.db,a.run_id,a.registry))

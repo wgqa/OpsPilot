@@ -663,17 +663,27 @@ def finish_runtime_replay(path,call_id,result,usage=None,*,status='OK'):
             (status,canonical_json(result),canonical_json(usage),utc_now(),call_id),
         )
 
-def sources_current(connection, run_id, *, allow_failed_chat_observations=False):
+def sources_current(
+    connection, run_id, *, allow_failed_chat_observations=False,
+    registry_path=None,
+):
     """Revalidate actual persisted sources; never trust a saved Prompt/answer."""
-    return _check_sources(connection, run_id, allow_failed_chat_observations=allow_failed_chat_observations)
+    return _check_sources(
+        connection, run_id,
+        allow_failed_chat_observations=allow_failed_chat_observations,
+        registry_path=registry_path,
+    )
 
 
-def s3_answer_sources_for_display(connection, run_id):
+def s3_answer_sources_for_display(connection, run_id, *, registry_path=None):
     """Check every tool source. A stale result is eligible only for Web history."""
-    return _check_sources(connection, run_id, answer_view=True)
+    return _check_sources(connection, run_id, answer_view=True, registry_path=registry_path)
 
 
-def _check_sources(connection, run_id, *, allow_failed_chat_observations=False, answer_view=False):
+def _check_sources(
+    connection, run_id, *, allow_failed_chat_observations=False,
+    answer_view=False, registry_path=None,
+):
     from opspilot.domain.assistant_knowledge import sources_current as knowledge_current
     from opspilot.domain.d2 import ScopeDenied
     from opspilot.domain.scoped_protocol_comparison import (
@@ -740,6 +750,7 @@ def _check_sources(connection, run_id, *, allow_failed_chat_observations=False, 
                     return False, 'PROTOCOL_DISCOVERY_RESULT_INVALID'
                 ok, reason = scoped_discovery_is_current(
                     connection, identity, run['session_id'], value,
+                    registry_path=registry_path,
                 )
                 if not ok:
                     return False, reason or 'PROTOCOL_DISCOVERY_SOURCE_INVALID'
@@ -748,6 +759,7 @@ def _check_sources(connection, run_id, *, allow_failed_chat_observations=False, 
                     return False, 'PROTOCOL_COMPARISON_RESULT_INVALID'
                 ok, reason = scoped_comparison_is_current(
                     connection, identity, run['session_id'], value,
+                    registry_path=registry_path,
                 )
                 if not ok:
                     return False, reason or 'PROTOCOL_COMPARISON_SOURCE_INVALID'
@@ -756,6 +768,7 @@ def _check_sources(connection, run_id, *, allow_failed_chat_observations=False, 
                     return False, 'PROTOCOL_EXCERPT_RESULT_INVALID'
                 ok, reason = scoped_protocol_excerpt_is_current(
                     connection, identity, run['session_id'], value,
+                    registry_path=registry_path,
                 )
                 if not ok:
                     return False, reason or 'PROTOCOL_EXCERPT_SOURCE_INVALID'
@@ -772,7 +785,10 @@ def _check_sources(connection, run_id, *, allow_failed_chat_observations=False, 
                 ):
                     return False, 'PROTOCOL_UPGRADE_SKILL_SOURCE_INVALID'
             elif isinstance(value,dict) and 'documents' in value:
-                ok,reason=knowledge_current(connection,identity,run['session_id'],value)
+                ok,reason=knowledge_current(
+                    connection, identity, run['session_id'], value,
+                    registry_path=registry_path,
+                )
                 if not ok:return False,reason
             elif answer_view:
                 return False, 'S3_HISTORY_SOURCE_UNVERIFIED'
@@ -782,13 +798,13 @@ def _check_sources(connection, run_id, *, allow_failed_chat_observations=False, 
     except Exception:
         return False,'ASSISTANT_SOURCE_SCOPE_INVALID'
 
-def history_sources(connection,run):
+def history_sources(connection,run,*,registry_path=None):
     """Return bounded prior source projections; never current observations for this Run."""
     output=[]
     remaining=MAX_HISTORY_SOURCE_RESULTS
     previous=connection.execute('SELECT r.run_id,r.task_id FROM task_runs r JOIN assistant_runs a ON a.run_id=r.run_id JOIN messages m ON m.message_id=r.source_message_id WHERE r.session_id=? AND r.tenant_id=? AND m.sequence < ? AND (r.task_id IS NULL OR r.task_id IS ?) ORDER BY m.sequence DESC LIMIT ?',(run['session_id'],run['tenant_id'],run['consumed_message_seq'],run['task_id'],MAX_HISTORY_RUNS)).fetchall()
     for old in previous:
-        valid,reason=sources_current(connection,old['run_id'])
+        valid,reason=sources_current(connection,old['run_id'],registry_path=registry_path)
         refs=[]
         omitted=0
         if valid:

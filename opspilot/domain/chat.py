@@ -2683,6 +2683,7 @@ def complete_chat_attempt(
     input_tokens: int | None,
     output_tokens: int | None,
     total_tokens: int | None,
+    knowledge_registry_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if not answer.strip():
         raise TaskControlError("CHAT_EMPTY_MODEL_RESPONSE")
@@ -2708,7 +2709,10 @@ def complete_chat_attempt(
         is_assistant_run = assistant_selected(connection, str(run['run_id']))
         if is_assistant_run:
             assistant_state(connection,str(run['run_id']),worker_id=worker_id)
-            valid,reason=assistant_sources_current(connection,str(run['run_id']))
+            valid,reason=assistant_sources_current(
+                connection, str(run['run_id']),
+                registry_path=knowledge_registry_path,
+            )
             if not valid:
                 raise TaskControlError(reason or 'ASSISTANT_SOURCE_INVALIDATED')
         existing = connection.execute("SELECT message_id FROM chat_run_answers WHERE run_id = ?", (run["run_id"],)).fetchone()

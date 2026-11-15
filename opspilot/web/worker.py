@@ -526,6 +526,7 @@ async def _dispatch_run(
     run: dict[str, object], worker_epoch: int | None = None, assistant_model_factory=None,
     assistant_experiment_id: str | None = None, assistant_runtime_enabled: bool = False,
     assistant_streaming_enabled: bool = False,
+    assistant_knowledge_registry_path: str | Path | None = None,
 ) -> None:
     from opspilot.domain.assistant import selected as assistant_selected
     with connect(db_path) as connection:
@@ -562,6 +563,7 @@ async def _dispatch_run(
                 db_path, checkpoint_path, worker_id, str(run["run_id"]), model=model,
                 experiment_id=assistant_experiment_id, runtime_grant_binding=runtime_binding,
                 worker_epoch=worker_epoch, streaming_enabled=assistant_streaming_enabled,
+                knowledge_registry_path=assistant_knowledge_registry_path,
             )
         finally:
             # The formal factory owns one explicit HTTPX client pair per Run.
@@ -594,6 +596,7 @@ async def run_worker(
     assistant_experiment_id: str | None = None,
     assistant_runtime_enabled: bool = False,
     assistant_streaming_enabled: bool = False,
+    assistant_knowledge_registry_path: str | Path | None = None,
 ) -> None:
     resolved_db = Path(db_path).resolve()
     resolved_checkpoint = Path(checkpoint_db_path).resolve()
@@ -672,7 +675,7 @@ async def run_worker(
             await _dispatch_run(
                 resolved_db, resolved_checkpoint, worker_id, executor_id, run, worker_epoch,
                 assistant_model_factory, assistant_experiment_id, assistant_runtime_enabled,
-                assistant_streaming_enabled,
+                assistant_streaming_enabled, assistant_knowledge_registry_path,
             )
         except asyncio.CancelledError:
             raise

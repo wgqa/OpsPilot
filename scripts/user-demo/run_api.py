@@ -65,7 +65,13 @@ def main() -> int:
     os.environ["OPSPILOT_DB_PATH"] = str(domain_path)
     os.environ["OPSPILOT_CHECKPOINT_DB_PATH"] = str(checkpoint_path)
     expected_origin = os.environ.get("OPSPILOT_WEB_ORIGIN", f"http://{host}:{port}")
-    app = create_app(expected_origin=expected_origin, assistant_model_factory=create_assistant_model)
+    app = create_app(
+        expected_origin=expected_origin,
+        assistant_model_factory=create_assistant_model,
+        assistant_knowledge_registry_path=(
+            os.environ.get("OPSPILOT_ASSISTANT_KNOWLEDGE_REGISTRY_PATH", "").strip() or None
+        ),
+    )
     server = UserDemoServer(
         uvicorn.Config(app, host=host, port=port, workers=1, reload=False, log_level="info"), app
     )

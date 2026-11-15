@@ -95,6 +95,10 @@ $emptyStdin = Join-Path $logs 'empty.stdin'
 $apiLauncher = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'run_api.py')).Path
 $profileService = if ($Profile -eq 'S2') { 'orders-demo-s2' } else { 'orders-demo' }
 $profileIntegration = if ($Profile -eq 'S2') { 'integration-s2-a' } else { 'integration-a' }
+$assistantKnowledgeRegistry = Join-Path $runtime 'assistant-access.json'
+$assistantKnowledgeRegistryPath = if (Test-Path -LiteralPath $assistantKnowledgeRegistry -PathType Leaf) {
+    (Resolve-Path -LiteralPath $assistantKnowledgeRegistry).Path
+} else { '' }
 $runtimeEnabled = if ($Mode -eq 'Live') { '1' } else { '0' }
 $providerEnabled = if ($Mode -eq 'Live') { '1' } else { '0' }
 $providerKey = if ($Mode -eq 'Live') { [string]$dotenv['OPSPILOT_MODEL_API_KEY'] } else { '' }
@@ -112,6 +116,7 @@ $overrides = @{
     OPSPILOT_ASSISTANT_PROVIDER_ENABLED = $providerEnabled
     OPSPILOT_LEGACY_PROVIDER_ENABLED = '0'
     OPSPILOT_ASSISTANT_EXPERIMENT_ID = ''
+    OPSPILOT_ASSISTANT_KNOWLEDGE_REGISTRY_PATH = $assistantKnowledgeRegistryPath
     OPSPILOT_MODEL_API_KEY = $providerKey
 }
 $apiCredentials = @{

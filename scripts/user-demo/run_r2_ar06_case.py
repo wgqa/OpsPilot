@@ -29,7 +29,7 @@ OBSERVATION_CONTRAST_CASE_ID = "OBSERVATION-CONTRAST-PROCESSED"
 OBSERVATION_CONTRAST_TARGET_EVENT_ID = "event-00000000-0000-4000-8000-000000000101"
 OBSERVATION_CONTRAST_DECOY_EVENT_ID = "event-00000000-0000-4000-8000-000000000102"
 SUPPORTED_CASES = {
-    "E02-H", "E05-D", "E06-H", "E07-D", OBSERVATION_CONTRAST_CASE_ID,
+    "E02-H", "E03-D", "E05-D", "E06-H", "E07-D", OBSERVATION_CONTRAST_CASE_ID,
 }
 EXPLORATORY_CASE_SOURCES = {OBSERVATION_CONTRAST_CASE_ID: "E07-D"}
 CASE_S3_PROFILES = {
@@ -130,12 +130,81 @@ def initialize_case_runtime(
         runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
     except ValueError as error:
         raise EvaluationPreflightError("USER_DEMO_RUNTIME_NAME_INVALID") from error
+    e03_registry = _e03_runtime_registry() if case_id == "E03-D" else None
     initialize_user_demo(
         runtime_dir,
         require_absent_directory=True,
         s3_fixture_profile=CASE_S3_PROFILES.get(case_id, "standard"),
     )
+    if e03_registry is not None:
+        registry_path = runtime_dir / "assistant-access.json"
+        try:
+            with registry_path.open("x", encoding="utf-8", newline="\n") as stream:
+                json.dump(e03_registry, stream, ensure_ascii=False, indent=2)
+                stream.write("\n")
+        except FileExistsError as error:
+            raise EvaluationPreflightError("E03_RUNTIME_REGISTRY_ALREADY_EXISTS") from error
     return runtime_dir
+
+
+def _e03_runtime_registry() -> dict[str, Any]:
+    """Derive the literal Gold project grant from the checked-in trusted catalog."""
+    catalog = ROOT / "knowledge" / "async-callback"
+    manifest_path = catalog / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise EvaluationPreflightError("E03_TRUSTED_MANIFEST_UNAVAILABLE") from error
+    required = {
+        "callback-retry-contract": ("1.0.0", "local:orders-async-demo/contract-v1"),
+        "callback-retry-contract-v2": ("2.0.0", "local:orders-async-demo/contract-v2"),
+    }
+    items = manifest.get("documents") if isinstance(manifest, dict) else None
+    if not isinstance(items, list):
+        raise EvaluationPreflightError("E03_TRUSTED_MANIFEST_INVALID")
+    refs: list[dict[str, str]] = []
+    for document_id, (version, source) in required.items():
+        rows = [row for row in items if isinstance(row, dict) and row.get("document_id") == document_id]
+        if len(rows) != 1:
+            raise EvaluationPreflightError("E03_TRUSTED_DOCUMENT_NOT_UNIQUE")
+        row = rows[0]
+        content_path = catalog / str(row.get("file", ""))
+        try:
+            actual_digest = hashlib.sha256(content_path.read_bytes()).hexdigest()
+        except OSError as error:
+            raise EvaluationPreflightError("E03_TRUSTED_DOCUMENT_UNAVAILABLE") from error
+        if (
+            row.get("version") != version
+            or row.get("source") != source
+            or row.get("digest") != actual_digest
+            or row.get("active") is not True
+        ):
+            raise EvaluationPreflightError("E03_TRUSTED_DOCUMENT_MANIFEST_MISMATCH")
+        refs.append({
+            "document_id": document_id,
+            "version": version,
+            "digest": actual_digest,
+            "source": source,
+        })
+    return {
+        "schema_version": 1,
+        "projects": [{
+            "project_id": "orders-async-demo",
+            "title": "E03 isolated protocol evaluation",
+            "tenant_id": "tenant-a",
+            "actor_ids": ["support-a"],
+            "roles": ["SUPPORT"],
+            "active": True,
+            "grant_version": 1,
+            "configured_contract_version": 2,
+            "document_ids": [row["document_id"] for row in refs],
+            "evaluation_fixture": {
+                "case_id": "E03-D",
+                "manifest": "knowledge/async-callback/manifest.json",
+                "documents": refs,
+            },
+        }],
+    }
 
 
 def _table_exists(connection, name: str) -> bool:
@@ -210,6 +279,28 @@ def inspect_case_runtime(
             **counts,
             "runtime_grant_present": grant_present,
         }
+        if case_id == "E03-D":
+            registry_path = runtime_dir / "assistant-access.json"
+            if registry_path.is_symlink() or not registry_path.is_file():
+                result["assistant_knowledge_registry"] = {"present": False, "valid": False}
+            else:
+                try:
+                    actual_registry = json.loads(registry_path.read_text(encoding="utf-8"))
+                    expected_registry = _e03_runtime_registry()
+                    valid_registry = actual_registry == expected_registry
+                except (OSError, json.JSONDecodeError, EvaluationPreflightError):
+                    actual_registry = {}
+                    valid_registry = False
+                result["assistant_knowledge_registry"] = {
+                    "present": True,
+                    "valid": valid_registry,
+                    "projects": [
+                        {"tenant_id": item.get("tenant_id"), "project_id": item.get("project_id"),
+                         "document_ids": item.get("document_ids", [])}
+                        for item in actual_registry.get("projects", [])
+                        if isinstance(item, dict)
+                    ] if isinstance(actual_registry, dict) else [],
+                }
         result["fresh"] = all(
             counts[key] == 0 for key in (
                 "sessions", "messages", "task_bindings", "task_runs",
@@ -407,6 +498,8 @@ def live_preflight(
     mismatch = _s3_fixture_mismatch(case_id, state)
     if mismatch:
         raise EvaluationPreflightError(mismatch)
+    if case_id == "E03-D" and not state.get("assistant_knowledge_registry", {}).get("valid"):
+        raise EvaluationPreflightError("E03_ISOLATED_KNOWLEDGE_REGISTRY_INVALID")
 
     runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
     _manifest_matches(runtime_name, runtime_dir, repo_root)
@@ -653,6 +746,8 @@ def _execute_case_once(
     mismatch = _s3_fixture_mismatch(case_id, pre_state)
     if mismatch:
         raise EvaluationPreflightError(mismatch)
+    if case_id == "E03-D" and not pre_state.get("assistant_knowledge_registry", {}).get("valid"):
+        raise EvaluationPreflightError("E03_ISOLATED_KNOWLEDGE_REGISTRY_INVALID")
     output = runtime_dir / "evidence" / f"{case_id}.json"
     result_output = runtime_dir / "evidence" / f"{case_id}.result.json"
     if output.exists() or result_output.exists():
@@ -677,6 +772,40 @@ def _execute_case_once(
     session_id = str(session.get("session_id", ""))
     if not session_id:
         raise EvaluationPreflightError("SESSION_ID_MISSING")
+
+    knowledge_scope: dict[str, Any] | None = None
+    if case_id == "E03-D":
+        scope_response = client.get(f"{api_origin}/api/sessions/{session_id}/assistant/scopes")
+        scope = _raise_for_status(scope_response, {200}, "E03_SCOPE_DISCOVERY")
+        items = scope.get("items")
+        if (
+            not isinstance(items, list)
+            or [item.get("project_id") for item in items if isinstance(item, dict)] != ["orders-async-demo"]
+            or scope.get("selected_project") != "orders-async-demo"
+            or items[0].get("configured_contract_version") != 2
+        ):
+            raise EvaluationPreflightError("E03_ISOLATED_PROJECT_SCOPE_MISMATCH")
+        selected_scope = client.put(
+            f"{api_origin}/api/sessions/{session_id}/assistant/scopes",
+            headers=write_headers,
+            json={"project_id": "orders-async-demo"},
+        )
+        selected = _raise_for_status(selected_scope, {200}, "E03_SCOPE_SELECTION")
+        if selected.get("selected_project") != "orders-async-demo":
+            raise EvaluationPreflightError("E03_ISOLATED_PROJECT_SCOPE_SELECTION_FAILED")
+        try:
+            runtime_registry = json.loads(
+                (runtime_dir / "assistant-access.json").read_text(encoding="utf-8")
+            )
+            e03_project = runtime_registry["projects"][0]
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
+            raise EvaluationPreflightError("E03_RUNTIME_REGISTRY_INVALID") from error
+        knowledge_scope = {
+            "project_id": "orders-async-demo",
+            "configured_contract_version": 2,
+            "grant_version": items[0].get("grant_version"),
+            "document_ids": list(e03_project.get("document_ids", [])),
+        }
 
     question = case["user_turns"][0]
     task_id: str | None = None
@@ -706,7 +835,11 @@ def _execute_case_once(
             },
             json={"body": question},
         )
-        label = "E05_MESSAGE_AND_RUN" if case_id == "E05-D" else "HOLDOUT_MESSAGE_AND_RUN"
+        label = (
+            "E05_MESSAGE_AND_RUN" if case_id == "E05-D" else
+            "E03_MESSAGE_AND_RUN" if case_id == "E03-D" else
+            "HOLDOUT_MESSAGE_AND_RUN"
+        )
         accepted = _raise_for_status(response, {202}, label)
     run_id = str(accepted.get("run_id", ""))
     if not run_id:
@@ -726,6 +859,8 @@ def _execute_case_once(
         raise EvaluationPreflightError("EXPORTED_RUN_SOURCE_LINK_MISMATCH")
     if task_id and not any(row.get("task_id") == task_id for row in trace.get("task_bindings", [])):
         raise EvaluationPreflightError("EXPORTED_TRUSTED_TASK_BINDING_MISSING")
+    if case_id == "E03-D" and (task_id is not None or trace.get("task_bindings")):
+        raise EvaluationPreflightError("E03_MUST_NOT_CREATE_TASK_BINDING")
     if task_id:
         binding = next(
             (row for row in trace.get("task_bindings", []) if row.get("task_id") == task_id),
@@ -757,6 +892,7 @@ def _execute_case_once(
         "session_id": session_id,
         "task_id": task_id,
         "run_id": run_id,
+        "knowledge_scope": knowledge_scope,
         "run_status": str(run.get("status", "UNKNOWN")),
         "run_failure_code": run.get("waiting_reason") if run.get("status") != "SUCCEEDED" else None,
         "terminal_timeout": timed_out,
@@ -812,6 +948,196 @@ def _local_support_password() -> str:
     return read_env().get("OPSPILOT_WEB_SUPPORT_PASSWORD", "").strip()
 
 
+def make_e03_fixture_model(*, tool_order: str = "compare_then_excerpt"):
+    """Create a deterministic offline model that chooses legal tools from results."""
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import AIMessage, ToolMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+    from pydantic import Field
+
+    if tool_order not in {"compare_then_excerpt", "excerpt_then_compare"}:
+        raise ValueError("E03_FIXTURE_TOOL_ORDER_INVALID")
+
+    class E03ProtocolFixtureModel(BaseChatModel):
+        tool_order: str = "compare_then_excerpt"
+        dispatch_count: int = 0
+        offered_tool_names: list[str] = Field(default_factory=list)
+        decisions: list[dict[str, Any]] = Field(default_factory=list)
+        seen: list[list[Any]] = Field(default_factory=list)
+
+        @property
+        def _llm_type(self) -> str:
+            return "R2_AR06_E03_PROTOCOL_FIXTURE"
+
+        def bind_tools(self, tools, **kwargs):
+            self.offered_tool_names = [tool.name for tool in tools]
+            return self
+
+        @staticmethod
+        def _payload(message):
+            value = message.content
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    return {}
+            while isinstance(value, dict) and set(value) == {"result"}:
+                value = value["result"]
+            return value if isinstance(value, dict) else {}
+
+        @classmethod
+        def _tool_results(cls, messages):
+            names_by_id = {
+                str(call.get("id")): str(call.get("name"))
+                for message in messages
+                for call in (getattr(message, "tool_calls", None) or [])
+            }
+            results = {}
+            for message in messages:
+                if isinstance(message, ToolMessage):
+                    name = getattr(message, "name", None) or names_by_id.get(str(message.tool_call_id))
+                    if name:
+                        results[str(name)] = cls._payload(message)
+            return results
+
+        def _tool(self, name: str, args: dict[str, Any]) -> ChatResult:
+            if name not in self.offered_tool_names:
+                raise AssertionError("Fixture selected a tool that was not offered by the Assistant MCP server.")
+            self.decisions.append({"action": "CALL", "tool": name, "args": args})
+            message = AIMessage(content="", tool_calls=[{
+                "name": name, "args": args,
+                "id": f"e03-fixture-{len(self.decisions)}",
+            }])
+            message.usage_metadata = {"input_tokens": 24, "output_tokens": 11, "total_tokens": 35}
+            return ChatResult(generations=[ChatGeneration(message=message)])
+
+        def _answer(self, payloads: dict[str, Any]) -> ChatResult:
+            discovery = payloads["list_scoped_protocol_documents"]
+            comparison = payloads["compare_scoped_protocols"]
+            excerpt_result = payloads["read_scoped_protocol_excerpt"]
+            base = comparison.get("base_ref", {})
+            target = comparison.get("target_ref", {})
+            source_ref = next(iter(excerpt_result.get("source_refs", [])), {})
+            excerpt = next(iter(excerpt_result.get("excerpts", [])), {})
+            document_map = {
+                row.get("document_id"): row
+                for row in discovery.get("protocol_documents", [])
+                if isinstance(row, dict)
+            }
+            if (
+                discovery.get("project_id") != "orders-async-demo"
+                or base.get("document_id") not in document_map
+                or target.get("document_id") not in document_map
+                or not source_ref.get("digest")
+                or source_ref.get("document_id") != target.get("document_id")
+            ):
+                raise AssertionError("Fixture answer lacks current authorized E03 document evidence.")
+            answer = (
+                "## 协议版本与原文依据\n"
+                f"授权资料项目为 {discovery['project_id']}。比较结果引用 "
+                f"{base['document_id']} v{base['version']}（{base['source']}，Digest {base['digest']}）与 "
+                f"{target['document_id']} v{target['version']}（{target['source']}，Digest {target['digest']}）。"
+                f"比较摘要：{comparison.get('summary')}。"
+                f"v2 原文摘录（{source_ref['document_id']} v{source_ref['version']}，"
+                f"{source_ref['source']}，行 {source_ref['line_start']}-{source_ref['line_end']}）："
+                f"“{excerpt.get('text', '')}”\n\n"
+                "## 升级影响与兼容风险\n"
+                "v1 将 503 与 TEMPORARY_UNAVAILABLE 视为可重试，并把 SCHEDULED 与 retry_at 解释为等待后续尝试；"
+                "v2 要求依据服务端记录的 retryable failure code 和当前 retry policy 判断，且只有 attempt_count 达到 max_attempts、"
+                "响应 digest/event/request 与当前 delivery row 匹配时，EXHAUSTED 才可作为处理依据。"
+                "兼容风险是旧客户端、错误分类、重试策略和重试耗尽条件的语义可能不同。"
+                "本题没有提供当前 JSON 配置或线上日志，因此不能断言某个线上字段需要怎样改值，也不能确认线上部署了哪个版本。\n\n"
+                "## 研发检查清单\n"
+                "1. 从可信发布环境确认线上实际 API 版本和当前 retry policy；本文档本身不能证明部署版本。\n"
+                "2. 对照 v2 明确 retryable failure code 与可重试错误映射，并测试 503 与不可重试错误。\n"
+                "3. 验证 attempt_count/max_attempts 边界及 SCHEDULED、retry_at、EXHAUSTED 的状态迁移。\n"
+                "4. 校验响应 digest、event、request 与当前 delivery row 的关联，覆盖错配负例。\n"
+                "5. 对旧、新客户端进行契约和回滚测试；未从线上环境核验前，将部署版本保持为未知。"
+            )
+            self.decisions.append({"action": "ANSWER"})
+            message = AIMessage(content=answer)
+            message.usage_metadata = {"input_tokens": 38, "output_tokens": 44, "total_tokens": 82}
+            return ChatResult(generations=[ChatGeneration(message=message)])
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            self.dispatch_count += 1
+            self.seen.append(list(messages))
+            payloads = self._tool_results(messages)
+            discovery = payloads.get("list_scoped_protocol_documents")
+            if discovery is None:
+                return self._tool("list_scoped_protocol_documents", {"topic": "callback retry"})
+            documents = discovery.get("protocol_documents", [])
+            old = next((row for row in documents if str(row.get("version", "")).startswith("1.")), None)
+            new = next((row for row in documents if str(row.get("version", "")).startswith("2.")), None)
+            if old is None or new is None:
+                raise AssertionError("Authorized callback retry v1/v2 documents were not discovered.")
+            comparison = payloads.get("compare_scoped_protocols")
+            excerpt = payloads.get("read_scoped_protocol_excerpt")
+            if self.tool_order == "excerpt_then_compare" and excerpt is None:
+                return self._tool("read_scoped_protocol_excerpt", {
+                    "document_id": new["document_id"], "version": new["version"],
+                    "query": "attempt_count",
+                })
+            if comparison is None:
+                return self._tool("compare_scoped_protocols", {
+                    "base_document_id": old["document_id"],
+                    "target_document_id": new["document_id"],
+                    "base_version": old["version"],
+                    "target_version": new["version"],
+                })
+            if excerpt is None:
+                return self._tool("read_scoped_protocol_excerpt", {
+                    "document_id": new["document_id"], "version": new["version"],
+                    "query": "attempt_count",
+                })
+            return self._answer(payloads)
+
+    return E03ProtocolFixtureModel(tool_order=tool_order)
+
+
+def run_e03_fixture(
+    runtime_name: str,
+    *,
+    api_origin: str = DEFAULT_API_ORIGIN,
+    web_origin: str = DEFAULT_WEB_ORIGIN,
+    timeout_seconds: float = 60,
+    tool_order: str = "compare_then_excerpt",
+) -> dict[str, Any]:
+    """Run E03 once through the formal Web API using only the local Fixture Model."""
+    from fastapi.testclient import TestClient
+    from runtime_paths import resolve_user_demo_runtime
+    from opspilot.web.app import create_app
+
+    case_id = "E03-D"
+    root = ROOT.resolve()
+    runtime_dir = resolve_user_demo_runtime(runtime_name, root=root)
+    preflight = _case_preflight_cli(argparse.Namespace(case_id=case_id, runtime_name=runtime_name), root=root)
+    registry_path = runtime_dir / "assistant-access.json"
+    password = _local_support_password()
+    if not password:
+        raise EvaluationPreflightError("SUPPORT_PASSWORD_NOT_CONFIGURED_LOCALLY")
+    api_origin = _loopback_url(api_origin, label="API_ORIGIN")
+    web_origin = _loopback_url(web_origin, label="WEB_ORIGIN")
+    model = make_e03_fixture_model(tool_order=tool_order)
+    app = create_app(
+        db_path=runtime_dir / "domain.sqlite3",
+        checkpoint_db_path=runtime_dir / "checkpoint.sqlite3",
+        start_worker=True,
+        credentials={"support-a": password},
+        expected_origin=web_origin,
+        assistant_model_factory=lambda: model,
+        assistant_runtime_enabled=False,
+        assistant_knowledge_registry_path=registry_path,
+    )
+    with TestClient(app, base_url=api_origin, raise_server_exceptions=False) as client:
+        result = execute_case(
+            client, case_id=case_id, runtime_name=runtime_name,
+            support_password=password, api_origin=api_origin, web_origin=web_origin,
+            root=root, execution_mode="FIXTURE", timeout_seconds=timeout_seconds,
+        )
+    return {"preflight": preflight, "result": result}
+
+
 def _case_preflight_cli(args: argparse.Namespace, *, root: str | Path | None = None) -> dict[str, Any]:
     state = inspect_case_runtime(args.case_id, args.runtime_name, root=root)
     if not state["fresh"]:
@@ -823,6 +1149,8 @@ def _case_preflight_cli(args: argparse.Namespace, *, root: str | Path | None = N
     mismatch = _s3_fixture_mismatch(args.case_id, state)
     if mismatch:
         raise EvaluationPreflightError(mismatch)
+    if args.case_id == "E03-D" and not state.get("assistant_knowledge_registry", {}).get("valid"):
+        raise EvaluationPreflightError("E03_ISOLATED_KNOWLEDGE_REGISTRY_INVALID")
     result = {
         "status": "OFFLINE_READY",
         "case_id": args.case_id,
@@ -834,6 +1162,7 @@ def _case_preflight_cli(args: argparse.Namespace, *, root: str | Path | None = N
         "event_id": state.get("delivery_event_id"),
         "delivery_status": state.get("delivery_status"),
         "receiver_status": state.get("receiver_status"),
+        "assistant_knowledge_registry": state.get("assistant_knowledge_registry"),
     }
     fixture_summary = _s3_fixture_summary(args.case_id, state)
     if fixture_summary is not None:
@@ -866,6 +1195,14 @@ def main(argv: list[str] | None = None) -> int:
     live.add_argument("--api-origin", default=DEFAULT_API_ORIGIN)
     live.add_argument("--web-origin", default=DEFAULT_WEB_ORIGIN)
     live.add_argument("--timeout-seconds", type=float, default=DEFAULT_RUN_TIMEOUT_SECONDS)
+
+    fixture = sub.add_parser("run-fixture", help="Run E03 through the formal API with a local Fixture Model; no Provider call.")
+    fixture.add_argument("--case-id", required=True, choices=("E03-D",))
+    fixture.add_argument("--runtime-name", required=True)
+    fixture.add_argument("--api-origin", default=DEFAULT_API_ORIGIN)
+    fixture.add_argument("--web-origin", default=DEFAULT_WEB_ORIGIN)
+    fixture.add_argument("--timeout-seconds", type=float, default=60)
+    fixture.add_argument("--tool-order", choices=("compare_then_excerpt", "excerpt_then_compare"), default="compare_then_excerpt")
     args = parser.parse_args(argv)
 
     try:
@@ -903,6 +1240,17 @@ def main(argv: list[str] | None = None) -> int:
                 )
             print(json.dumps(result, ensure_ascii=False))
             return 0
+
+        if args.command == "run-fixture":
+            result = run_e03_fixture(
+                args.runtime_name,
+                api_origin=args.api_origin,
+                web_origin=args.web_origin,
+                timeout_seconds=args.timeout_seconds,
+                tool_order=args.tool_order,
+            )
+            print(json.dumps(result, ensure_ascii=False))
+            return 0 if not result["result"]["terminal_timeout"] else 3
 
         if args.authorized_case_id != args.case_id:
             raise EvaluationPreflightError("LIVE_AUTHORIZATION_CASE_MISMATCH")

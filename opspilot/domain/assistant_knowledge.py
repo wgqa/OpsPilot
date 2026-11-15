@@ -31,10 +31,10 @@ class KnowledgeScopeDenied(TaskControlError):
     pass
 
 
-def _registry() -> list[dict[str, Any]]:
+def _registry(registry_path: str | Path | None = None) -> list[dict[str, Any]]:
     """Reload on every access; malformed policy cannot become a permission."""
     try:
-        value = json.loads(Path(REGISTRY).read_text(encoding="utf-8"))
+        value = json.loads(Path(registry_path or REGISTRY).read_text(encoding="utf-8"))
         if type(value.get("schema_version")) is not int or value["schema_version"] != 1:
             raise ValueError("Unsupported registry")
         projects = value["projects"]
@@ -74,14 +74,17 @@ def _session(connection: sqlite3.Connection, identity: TrustedIdentity, session_
         raise KnowledgeScopeDenied("SESSION_SCOPE_DENIED")
 
 
-def _allowed(identity: TrustedIdentity) -> list[dict[str, Any]]:
-    return [p for p in _registry() if p["active"] and p["tenant_id"] == identity.tenant_id
+def _allowed(identity: TrustedIdentity, registry_path: str | Path | None = None) -> list[dict[str, Any]]:
+    return [p for p in _registry(registry_path) if p["active"] and p["tenant_id"] == identity.tenant_id
             and identity.actor_id in p["actor_ids"] and identity.role in p["roles"]]
 
 
-def _scope(connection: sqlite3.Connection, identity: TrustedIdentity, session_id: str) -> tuple[list[dict[str, Any]], str | None]:
+def _scope(
+    connection: sqlite3.Connection, identity: TrustedIdentity, session_id: str,
+    registry_path: str | Path | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
     _session(connection, identity, session_id)
-    projects = _allowed(identity)
+    projects = _allowed(identity, registry_path)
     current = connection.execute(
         "SELECT project_id FROM assistant_session_scopes WHERE session_id=?", (session_id,),
     ).fetchone()
@@ -96,10 +99,12 @@ def get_session_project(
     db: sqlite3.Connection | str | Path,
     identity: TrustedIdentity,
     session_id: str,
+    *,
+    registry_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Return the currently selected project after rechecking Session and grant."""
     if isinstance(db, sqlite3.Connection):
-        projects, selected = _scope(db, identity, session_id)
+        projects, selected = _scope(db, identity, session_id, registry_path)
         if selected is None:
             raise KnowledgeScopeDenied(
                 "KNOWLEDGE_SCOPE_SELECTION_REQUIRED" if projects else "KNOWLEDGE_SCOPE_DENIED"
@@ -107,7 +112,7 @@ def get_session_project(
         return next(project for project in projects if project["project_id"] == selected)
 
     with connect(db) as connection:
-        projects, selected = _scope(connection, identity, session_id)
+        projects, selected = _scope(connection, identity, session_id, registry_path)
         if selected is None:
             raise KnowledgeScopeDenied(
                 "KNOWLEDGE_SCOPE_SELECTION_REQUIRED" if projects else "KNOWLEDGE_SCOPE_DENIED"
@@ -127,10 +132,13 @@ def _projection(projects: list[dict[str, Any]], selected: str | None) -> dict[st
     }
 
 
-def list_scopes(path: str | Path, identity: TrustedIdentity, session_id: str) -> dict[str, Any]:
+def list_scopes(
+    path: str | Path, identity: TrustedIdentity, session_id: str, *,
+    registry_path: str | Path | None = None,
+) -> dict[str, Any]:
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        projects, selected = _scope(connection, identity, session_id)
+        projects, selected = _scope(connection, identity, session_id, registry_path)
         if selected is not None:
             connection.execute(
                 "INSERT INTO assistant_session_scopes(session_id,project_id,selected_at) VALUES (?,?,?) "
@@ -141,11 +149,14 @@ def list_scopes(path: str | Path, identity: TrustedIdentity, session_id: str) ->
         return _projection(projects, selected)
 
 
-def select_scope(path: str | Path, identity: TrustedIdentity, session_id: str, project_id: str) -> dict[str, Any]:
+def select_scope(
+    path: str | Path, identity: TrustedIdentity, session_id: str, project_id: str, *,
+    registry_path: str | Path | None = None,
+) -> dict[str, Any]:
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
         _session(connection, identity, session_id)
-        projects = _allowed(identity)
+        projects = _allowed(identity, registry_path)
         if project_id not in {p["project_id"] for p in projects}:
             raise KnowledgeScopeDenied("KNOWLEDGE_SCOPE_DENIED")
         connection.execute(
@@ -162,12 +173,13 @@ def _documents(project: dict[str, Any], contract_version: int | None = None) -> 
 
 
 def search(path: str | Path, identity: TrustedIdentity, session_id: str, query: str,
-           contract_version: int | None = None) -> dict[str, Any]:
+           contract_version: int | None = None, *,
+           registry_path: str | Path | None = None) -> dict[str, Any]:
     if contract_version is not None and (type(contract_version) is not int or contract_version < 1):
         raise ValueError("Requested contract version must be a positive integer preference")
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
-        projects, selected = _scope(connection, identity, session_id)
+        projects, selected = _scope(connection, identity, session_id, registry_path)
         if selected is None:
             raise KnowledgeScopeDenied("KNOWLEDGE_SCOPE_SELECTION_REQUIRED" if projects else "KNOWLEDGE_SCOPE_DENIED")
         project = next(p for p in projects if p["project_id"] == selected)
@@ -205,10 +217,11 @@ def search(path: str | Path, identity: TrustedIdentity, session_id: str, query: 
 
 
 def sources_current(connection: sqlite3.Connection, identity: TrustedIdentity,
-                    session_id: str, result: dict[str, Any]) -> tuple[bool, str | None]:
+                    session_id: str, result: dict[str, Any], *,
+                    registry_path: str | Path | None = None) -> tuple[bool, str | None]:
     """Revalidate persisted tool refs; never trust old JSON as a current grant."""
     try:
-        projects, selected = _scope(connection, identity, session_id)
+        projects, selected = _scope(connection, identity, session_id, registry_path)
         if not isinstance(result, dict) or result.get("project_id") != selected:
             return False, "KNOWLEDGE_SESSION_SCOPE_CHANGED"
         project = next((p for p in projects if p["project_id"] == selected), None)

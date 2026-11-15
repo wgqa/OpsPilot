@@ -1,0 +1,52 @@
+R2-AR06-E03-EVAL-EXEC-01 offline execution evidence
+Date: 2026-11-15 (local workspace date)
+Branch: codex/r2-ar06-e03-eval-exec-01
+Base: 0852c2d4896cd49f036a1751a62b6082ed768faa
+Real Provider calls: 0
+Runtime Grant created: no
+Business writes: 0
+
+1) Compile check
+Command:
+python -m py_compile opspilot/assistant.py opspilot/assistant_mcp.py opspilot/domain/assistant.py opspilot/domain/assistant_knowledge.py opspilot/domain/scoped_protocol_comparison.py opspilot/domain/chat.py opspilot/web/app.py opspilot/web/worker.py scripts/user-demo/run_api.py scripts/user-demo/run_r2_ar06_case.py tests/test_r2_ar06_e03_eval_exec.py
+Result: PASS (exit 0)
+
+2) E03 isolated positive/negative tests, first attempt
+Command:
+python -m pytest tests/test_r2_ar06_e03_eval_exec.py -q
+Result: ERROR during pytest tmp_path setup, 6/6 tests did not run. Windows denied access to the default pytest temp root with WinError 5. No product test ran in this attempt.
+
+3) E03 isolated positive/negative tests, diagnostic attempt
+Command:
+python -m pytest tests/test_r2_ar06_e03_eval_exec.py -q --basetemp .runtime/pytest-r2-e03-20261115-01
+Result: 5 failed, 1 passed. Findings were test-setup/Fixture issues: nested Fixture Model did not capture its strategy as a Pydantic default; cross-tenant scope is represented as an empty allowed-scope projection rather than an exception; one test used an unpacked-away root variable. Fixed before final run; no Gold or production authorization was changed.
+
+4) E03 isolated positive/negative tests, final
+Command:
+python -m pytest tests/test_r2_ar06_e03_eval_exec.py -q --basetemp .runtime/pytest-r2-e03-20261115-05
+Result: 6 passed in 15.91s. This is the final E03 targeted result, including a direct cross-tenant protocol-discovery refusal assertion.
+Coverage: two distinct legal tool orders; same-project access; no TaskBinding; cross-tenant denial; unauthorized document denial; other-Runtime non-inheritance; revocation/source invalidation; stored Digest mismatch; deployment-version boundary; outside-Runtime registry path rejection.
+
+5) Existing scoped Knowledge / Agent / Runner / Assistant regressions
+Command:
+python -m pytest tests/test_ar03_02_scoped_protocol_comparison.py tests/test_r2_ar03_integrated_journey_01.py tests/test_r2_ar06_auto_live_eval.py tests/test_ar02_assistant.py -q --basetemp .runtime/pytest-r2-e03-regressions-20261115-01
+Result: 42 passed in 52.78s.
+
+6) Actual isolated Runner execution
+Command:
+python scripts/user-demo/run_r2_ar06_case.py prepare --case-id E03-D --runtime-name user-demo-r2-e03-fixture-20261115-01
+Result: ISOLATED_RUNTIME_CREATED; fresh=true; Runtime Grant=false; Provider requests=0.
+
+Command:
+python scripts/user-demo/run_r2_ar06_case.py preflight --case-id E03-D --runtime-name user-demo-r2-e03-fixture-20261115-01 --mode offline
+Result: OFFLINE_READY; isolated registry valid; project orders-async-demo; tenant-a; documents callback-retry-contract and callback-retry-contract-v2; Provider requests=0; UNKNOWN=0.
+
+Command:
+python scripts/user-demo/run_r2_ar06_case.py run-fixture --case-id E03-D --runtime-name user-demo-r2-e03-fixture-20261115-01
+Result: Run SUCCEEDED; Runner assessment UNVERIFIED; TaskBinding=null; Provider send grants=0; Provider responses=0; UNKNOWN=0; MCP calls=3 (list_scoped_protocol_documents, compare_scoped_protocols, read_scoped_protocol_excerpt); Fixture Model dispatches=4; Fixture Token metadata=110 input / 77 output / 187 total; elapsed=1989ms.
+Session: session-e1c940f4-e999-4e2d-934f-eec43c78dbae
+Run: run-79fb648f-9de5-4f55-ae18-e73fd34f529f
+Trace SHA256: b37ad0f1b4561a1e7a7ad57095b45d2b3200967fd8cdf8def5fff163ff933ae7
+Result SHA256: e826d1e3908a1c070726f700ff8658af840d3160d9461ef34d98eb8c47ba7609
+
+The checked-in trace and result are redacted exports from this new synthetic Runtime. No pre-existing Demo Runtime, Gold, Rubric, or historical Trace was reset or overwritten.

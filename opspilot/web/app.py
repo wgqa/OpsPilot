@@ -166,6 +166,7 @@ def create_app(
     assistant_experiment_id: str | None = None,
     assistant_runtime_enabled: bool | None = None,
     assistant_streaming_enabled: bool = False,
+    assistant_knowledge_registry_path: str | Path | None = None,
 ) -> FastAPI:
     from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
 
@@ -195,6 +196,22 @@ def create_app(
     if resolved_runtime_enabled and resolved_experiment is not None:
         raise ValueError("ASSISTANT_RUNTIME_AND_EXPERIMENT_SCOPES_CONFLICT")
     resolved_db = database_path(str(db_path) if db_path is not None else None)
+    raw_knowledge_registry = (
+        assistant_knowledge_registry_path
+        if assistant_knowledge_registry_path is not None
+        else os.environ.get("OPSPILOT_ASSISTANT_KNOWLEDGE_REGISTRY_PATH", "").strip() or None
+    )
+    resolved_knowledge_registry = None
+    if raw_knowledge_registry is not None:
+        candidate = Path(raw_knowledge_registry).expanduser()
+        runtime_directory = Path(resolved_db).resolve().parent
+        if (
+            candidate.is_symlink()
+            or not candidate.is_file()
+            or candidate.resolve().parent != runtime_directory
+        ):
+            raise ValueError("ASSISTANT_KNOWLEDGE_REGISTRY_PATH_INVALID")
+        resolved_knowledge_registry = candidate.resolve()
     checkpoint_path = Path(checkpoint_db_path or os.environ.get("OPSPILOT_CHECKPOINT_DB_PATH") or DEFAULT_CHECKPOINT_DB_PATH)
     if not checkpoint_path.is_absolute():
         checkpoint_path = Path(__file__).resolve().parents[2] / checkpoint_path
@@ -244,6 +261,7 @@ def create_app(
                     assistant_experiment_id=resolved_experiment,
                     assistant_runtime_enabled=resolved_runtime_enabled,
                     assistant_streaming_enabled=assistant_streaming_enabled,
+                    assistant_knowledge_registry_path=resolved_knowledge_registry,
                 ),
                 name="opspilot-domain-run-worker",
             )
@@ -275,6 +293,7 @@ def create_app(
     app.state.assistant_experiment_id = resolved_experiment
     app.state.assistant_runtime_enabled = resolved_runtime_enabled
     app.state.assistant_streaming_enabled = assistant_streaming_enabled
+    app.state.assistant_knowledge_registry_path = resolved_knowledge_registry
     app.state.assistant_model_factory = assistant_model_factory
     app.state.worker_task = None
     app.state.worker_id = None
@@ -743,13 +762,19 @@ def create_app(
     @app.get("/api/sessions/{session_id}/assistant/scopes")
     async def assistant_scopes(session_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
         from opspilot.domain.assistant_knowledge import list_scopes, KnowledgeScopeDenied
-        try: return list_scopes(resolved_db,context.identity,session_id)
+        try: return list_scopes(
+            resolved_db, context.identity, session_id,
+            registry_path=resolved_knowledge_registry,
+        )
         except KnowledgeScopeDenied as error: raise HTTPException(status_code=403,detail=str(error)) from error
 
     @app.put("/api/sessions/{session_id}/assistant/scopes")
     async def assistant_select_scope(session_id: str, body: AssistantScopeRequest,context: AuthContext = Depends(write_user)) -> dict[str, Any]:
         from opspilot.domain.assistant_knowledge import select_scope, KnowledgeScopeDenied
-        try:return select_scope(resolved_db,context.identity,session_id,body.project_id)
+        try:return select_scope(
+            resolved_db, context.identity, session_id, body.project_id,
+            registry_path=resolved_knowledge_registry,
+        )
         except KnowledgeScopeDenied as error:raise HTTPException(status_code=403,detail=str(error)) from error
 
     @app.post("/api/sessions/{session_id}/assistant/order",status_code=202)
@@ -780,6 +805,7 @@ def create_app(
             # model context through this opt-in.
             valid,reason=current_sources(
                 connection, run_id, allow_failed_chat_observations=True,
+                registry_path=resolved_knowledge_registry,
             )
             items=[]
             for call in connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' ORDER BY created_at",(run_id,)):
@@ -933,9 +959,15 @@ def create_app(
                             ) or item["answer_run_id"] != chat_answer["run_id"]:
                                 valid, reason = False, "S3_HISTORY_SOURCE_UNVERIFIED"
                             else:
-                                valid, reason = s3_answer_sources_for_display(connection, chat_answer["run_id"])
+                                valid, reason = s3_answer_sources_for_display(
+                                    connection, chat_answer["run_id"],
+                                    registry_path=resolved_knowledge_registry,
+                                )
                         else:
-                            valid, reason = sources_current(connection, chat_answer["run_id"])
+                            valid, reason = sources_current(
+                                connection, chat_answer["run_id"],
+                                registry_path=resolved_knowledge_registry,
+                            )
                     if chat_answer and (valid or not s3_bound):
                         memory_current, memory_reason = personal_memory_answer_is_current(
                             connection, message_id=row["message_id"], tenant_id=context.identity.tenant_id,

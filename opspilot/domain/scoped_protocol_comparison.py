@@ -221,6 +221,7 @@ def compare_scoped_protocols(
     base_version: str | None = None,
     target_version: str | None = None,
     catalog_dirs: Sequence[Path | str] | None = None,
+    registry_path: Path | str | None = None,
     as_of: datetime | str | None = None,
     allow_inapplicable: bool = True,
 ) -> ScopedProtocolComparisonResult:
@@ -244,7 +245,7 @@ def compare_scoped_protocols(
         raise InvalidReferenceError("Target document ID must be a non-empty string")
 
     # 1. Authorize session and retrieve active project definition
-    project = get_session_project(db, identity, session_id)
+    project = get_session_project(db, identity, session_id, registry_path=registry_path)
 
     # 2. Document authorization gate
     allowed_doc_ids = set(project.get("document_ids", []))
@@ -297,6 +298,7 @@ def compare_scoped_protocols_safe(
     base_version: str | None = None,
     target_version: str | None = None,
     catalog_dirs: Sequence[Path | str] | None = None,
+    registry_path: Path | str | None = None,
     as_of: datetime | str | None = None,
     allow_inapplicable: bool = True,
 ) -> dict[str, Any]:
@@ -311,6 +313,7 @@ def compare_scoped_protocols_safe(
             base_version=base_version,
             target_version=target_version,
             catalog_dirs=catalog_dirs,
+            registry_path=registry_path,
             as_of=as_of,
             allow_inapplicable=allow_inapplicable,
         )
@@ -346,6 +349,7 @@ def scoped_comparison_is_current(
     comparison_result: dict[str, Any] | ScopedProtocolComparisonResult,
     *,
     catalog_dirs: Sequence[Path | str] | None = None,
+    registry_path: Path | str | None = None,
 ) -> tuple[bool, str | None]:
     """Revalidate that a previously executed scoped comparison remains valid under current state.
 
@@ -373,7 +377,7 @@ def scoped_comparison_is_current(
 
         # 2. Check session and active project in SQLite
         try:
-            project = get_session_project(db, identity, session_id)
+            project = get_session_project(db, identity, session_id, registry_path=registry_path)
         except KnowledgeScopeDenied as err:
             return False, str(err)
 
@@ -421,6 +425,7 @@ def scoped_comparison_is_current(
                 base_version=str(base_ref.get("version")),
                 target_version=str(target_ref.get("version")),
                 catalog_dirs=catalog_dirs,
+                registry_path=registry_path,
             ).to_dict()
         except (DocumentIntegrityError, DocumentNotFoundError, DocumentExpiredError):
             return False, "DOCUMENT_INTEGRITY_OR_EXPIRED"
@@ -522,6 +527,7 @@ def list_scoped_protocols(
     *,
     topic: str | None = None,
     catalog_dirs: Sequence[Path | str] | None = None,
+    registry_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """List and discover authorized protocol documents and versions under the authenticated session.
 
@@ -533,7 +539,7 @@ def list_scoped_protocols(
     5. Grouping into protocol families with versions for easy Agent discovery.
     6. Epistemic boundary: discovery results do not prove cluster deployment state.
     """
-    project = get_session_project(db, identity, session_id)
+    project = get_session_project(db, identity, session_id, registry_path=registry_path)
     allowed_doc_ids = set(project.get("document_ids", []))
 
     resolved_catalogs = _ensure_catalog_dirs(catalog_dirs)
@@ -708,6 +714,7 @@ def read_scoped_protocol_excerpt(
     start_line: int = 1,
     start_column: int = 1,
     catalog_dirs: Sequence[Path | str] | None = None,
+    registry_path: Path | str | None = None,
 ) -> dict[str, Any]:
     """Read bounded original text from a document currently authorized for this Session.
 
@@ -723,7 +730,7 @@ def read_scoped_protocol_excerpt(
     if not isinstance(query, str) or not query.strip() or len(query) > 200:
         raise InvalidReferenceError("INVALID_PROTOCOL_EXCERPT_QUERY")
 
-    project = get_session_project(db, identity, session_id)
+    project = get_session_project(db, identity, session_id, registry_path=registry_path)
     if document_id not in set(project.get("document_ids", [])):
         raise DocumentNotAuthorizedError("DOCUMENT_NOT_AUTHORIZED")
 
@@ -779,6 +786,7 @@ def scoped_protocol_excerpt_is_current(
     excerpt_result: dict[str, Any],
     *,
     catalog_dirs: Sequence[Path | str] | None = None,
+    registry_path: Path | str | None = None,
 ) -> tuple[bool, str | None]:
     """Recheck current grant, catalog digest, excerpt text and source locations."""
     try:
@@ -801,6 +809,7 @@ def scoped_protocol_excerpt_is_current(
             start_line=excerpt_result.get("start_line"),
             start_column=excerpt_result.get("start_column"),
             catalog_dirs=catalog_dirs,
+            registry_path=registry_path,
         )
         supplied = {key: value for key, value in excerpt_result.items() if key != "success"}
         if canonical_json(supplied) != canonical_json(current):
@@ -817,6 +826,7 @@ def scoped_discovery_is_current(
     discovery_result: dict[str, Any],
     *,
     catalog_dirs: Sequence[Path | str] | None = None,
+    registry_path: Path | str | None = None,
 ) -> tuple[bool, str | None]:
     """Revalidate that previously executed protocol discovery remains valid under current state.
 
@@ -841,7 +851,7 @@ def scoped_discovery_is_current(
             return False, "ACTOR_MISMATCH"
 
         try:
-            project = get_session_project(db, identity, session_id)
+            project = get_session_project(db, identity, session_id, registry_path=registry_path)
         except KnowledgeScopeDenied as err:
             return False, str(err)
 
@@ -888,6 +898,7 @@ def scoped_discovery_is_current(
             db, identity, session_id,
             topic=discovery_result.get("topic"),
             catalog_dirs=catalog_dirs,
+            registry_path=registry_path,
         )
         supplied = {key: value for key, value in discovery_result.items() if key != "success"}
         if canonical_json(supplied) != canonical_json(current):

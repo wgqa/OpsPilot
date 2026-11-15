@@ -1426,7 +1426,8 @@ def _fit_tool_messages_to_budget(
 
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,
-                 reserved_tokens=0,runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False):
+                 reserved_tokens=0,runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False,
+                 knowledge_registry_path=None):
         self.path,self.run_id,self.worker_id,self.client,self.specs,self.trace=path,run_id,worker_id,client,specs,trace
         self.run,self.actor=domain.read_run(path,run_id,worker_id=worker_id)
         self.model_id=model_id
@@ -1435,6 +1436,7 @@ class Loop(AgentMiddleware):
         self.runtime_grant_binding=runtime_grant_binding
         self.worker_epoch=worker_epoch
         self.streaming_enabled=bool(streaming_enabled)
+        self.knowledge_registry_path=knowledge_registry_path
         self.streaming_started=False
         self.personal_memory_was_sent=False
 
@@ -1620,8 +1622,10 @@ class Loop(AgentMiddleware):
         with connect(self.path) as c:
             run,_=domain.state(c,self.run_id,worker_id=self.worker_id)
             prepared=_prepare_context(c,c.execute('SELECT * FROM task_runs WHERE run_id=?',(self.run_id,)).fetchone(),self.model_id,self.path,reserved_tokens=self.reserved_tokens,include_memories=include_memories)
-            prior=domain.history_sources(c,run)
-            own_valid,reason=domain.sources_current(c,self.run_id)
+            prior=domain.history_sources(c,run,registry_path=self.knowledge_registry_path)
+            own_valid,reason=domain.sources_current(
+                c, self.run_id, registry_path=self.knowledge_registry_path,
+            )
             if not own_valid: raise TaskControlError(reason)
             current = {'run_id': self.run_id, 'completed_tools': [], 'business_observations': []}
             for call in c.execute(
@@ -1662,7 +1666,9 @@ class Loop(AgentMiddleware):
                 pre_binding_history=run['task_id'] is not None and row['answer_task_id'] is None
                 if not selected and not pre_binding_history:
                     continue
-                if domain.selected(c,row['run_id']) and domain.sources_current(c,row['run_id'])[0]:
+                if domain.selected(c,row['run_id']) and domain.sources_current(
+                    c, row['run_id'], registry_path=self.knowledge_registry_path,
+                )[0]:
                     item={
                         'run_id':row['run_id'],'answer_message_id':row['message_id'],
                         'source_message_id':row['source_message_id'],'sequence':row['sequence'],
@@ -2264,7 +2270,9 @@ class Loop(AgentMiddleware):
         if not fresh:
             self._settle_cached_campaign_dispatch('MCP', row['logical_key'])
             with connect(self.path) as c:
-                if not domain.sources_current(c,self.run_id)[0]:
+                if not domain.sources_current(
+                    c, self.run_id, registry_path=self.knowledge_registry_path,
+                )[0]:
                     self._activity('TOOL_COMPLETED', activity_status='FAILED', tool_name=name,
                                    duration_ms=int((time.monotonic() - tool_started) * 1000))
                     raise TaskControlError('ASSISTANT_CACHED_SOURCE_INVALIDATED')
@@ -2325,7 +2333,8 @@ class Loop(AgentMiddleware):
             return ToolMessage(content=canonical_json({'error':str(error),'authority':'TOOL_REFUSAL_NOT_FACT'}),tool_call_id=call['id'])
 
 async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,experiment_id=None,
-                        runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False):
+                        runtime_grant_binding=None,worker_epoch=None,streaming_enabled=False,
+                        knowledge_registry_path=None):
     from opspilot.domain.execution_budget import begin_execution_interval,end_execution_interval
     from opspilot.web.worker import _heartbeat_budget
     run,_=domain.read_run(path,run_id,worker_id=worker_id)
@@ -2334,6 +2343,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
             path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
             experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
             worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
+            knowledge_registry_path=knowledge_registry_path,
         )
     remaining=begin_execution_interval(path,run['task_id'])
     stopped=asyncio.Event()
@@ -2345,6 +2355,7 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
                 path,checkpoint_path,worker_id,run_id,model=model,trace=trace,
                 experiment_id=experiment_id,runtime_grant_binding=runtime_grant_binding,
                 worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
+                knowledge_registry_path=knowledge_registry_path,
             ),min(60,remaining/1000),
         )
     except (asyncio.TimeoutError,TaskControlError) as error:
@@ -2787,7 +2798,7 @@ async def _prepare_assistant_context_impl(
 
 async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace=None,
                          experiment_id=None,runtime_grant_binding=None,worker_epoch=None,
-                         streaming_enabled=False):
+                         streaming_enabled=False,knowledge_registry_path=None):
     trace=trace or (lambda event,**values:None)
     run,actor=domain.read_run(path,run_id,worker_id=worker_id)
     if model is None:
@@ -2803,7 +2814,10 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         with connect(path) as c:
             c.execute("UPDATE chat_attempts SET status='STREAMING' WHERE attempt_id=? AND status='INTERRUPTED'",(delivery,))
     model_id=getattr(model,'model_name',model._llm_type)
-    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV,AR04C_TOKEN_ENV,AR04C_RECHECK_TOKEN_ENV,PRODUCT_01_TOKEN_ENV}})
+    mcp_args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id]
+    if knowledge_registry_path is not None:
+        mcp_args.extend(['--registry',str(knowledge_registry_path)])
+    params=StdioServerParameters(command=sys.executable,args=mcp_args,cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV,AR04C_TOKEN_ENV,AR04C_RECHECK_TOKEN_ENV,PRODUCT_01_TOKEN_ENV}})
     async with Client(params) as client:
         listed=await client.list_tools()
         specs=[];tools=[]
@@ -2913,6 +2927,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
             reserved_tokens=base_reserved,runtime_grant_binding=runtime_grant_binding,
             worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
+            knowledge_registry_path=knowledge_registry_path,
         )
         _,probe_payload=probe.context()
         reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(domain.source_context_for_model(probe_payload)))+4
@@ -2931,6 +2946,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,
             reserved_tokens=reserved_tokens,runtime_grant_binding=runtime_grant_binding,
             worker_epoch=worker_epoch,streaming_enabled=streaming_enabled,
+            knowledge_registry_path=knowledge_registry_path,
         )
         prepared,_=loop.context()
         initial,_,_=loop._fresh_context_prefix(prepared)
@@ -2962,7 +2978,14 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
                     ensure_chat_stream_matches_answer(path, worker_id, delivery, text)
                     publish_assistant_activity(path, worker_id, run_id, "SAVING_ANSWER")
                 usage=final.usage_metadata or {}
-                result=complete_chat_attempt(path,worker_id,delivery,text,provider_response_id=final.id,input_tokens=usage.get('input_tokens'),output_tokens=usage.get('output_tokens'),total_tokens=usage.get('total_tokens'))
+                result=complete_chat_attempt(
+                    path, worker_id, delivery, text,
+                    provider_response_id=final.id,
+                    input_tokens=usage.get('input_tokens'),
+                    output_tokens=usage.get('output_tokens'),
+                    total_tokens=usage.get('total_tokens'),
+                    knowledge_registry_path=knowledge_registry_path,
+                )
                 personal_context_used = bool(
                     getattr(loop, 'personal_memory_was_sent', False)
                     or any(str(item.get('memory_type', '')) == 'PERSONAL'
