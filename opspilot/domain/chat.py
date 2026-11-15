@@ -1391,6 +1391,19 @@ def _compact_summary_document(value: Any) -> dict[str, Any]:
                     break
         if not added:
             break
+
+    # The short anchor lengths make room for other facts during selection. Use
+    # spare tokens to restore complete text within the existing 100-char limit.
+    for field, index, _ in anchor_candidates:
+        item = selected_by_index[field].get(index)
+        if item is None or not item["text"].endswith("…"):
+            continue
+        full = normalized(candidates_by_field[field][index], 100)
+        if full is None or full["text"].endswith("…"):
+            continue
+        restored = [full if entry is item else entry for entry in result[field]]
+        if token_count({**result, field: restored}) <= MAX_COMPRESSION_OUTPUT_TOKENS:
+            result[field] = restored
     return result
 
 

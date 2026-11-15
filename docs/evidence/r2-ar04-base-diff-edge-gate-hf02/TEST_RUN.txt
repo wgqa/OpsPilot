@@ -1,0 +1,90 @@
+R2-AR04-BASE-DIFF-EDGE-GATE-HF-02
+Worktree: D:\学习\agent新项目\.worktrees\ar04a-context-journey-01
+HF-02 Base: ecbd7d3ebfebc3cb4ea1f75cbf4cfae6e7786011
+F01 comparison: 1cba32753f22e0a610aa7654ab5dc6cddd94ccf2 ↔ ecbd7d3ebfebc3cb4ea1f75cbf4cfae6e7786011
+Environment: D:\python\python.exe 3.14.0, SQLite 3.50.4, pytest 9.1.1. 71 pinned packages match requirements.lock.txt.
+Provider requests / external MCP / cost: 0 / 0 / USD 0. Fixtures use local SQLite/Checkpoint and local MCP where specified.
+
+Commands below ran from the worktree root. The runner logs each full child command, cwd, stdout/stderr, and exit. It uses a fresh temporary directory, isolated child environment, local cl100k_base cache and a preflighted Python non-loopback socket guard. Each command uses a new output filename on repeat. No Git worktree is added for the comparisons. Pytest display padding at line ends was trimmed in the two logs with multiline assertion diffs.
+
+1. F01 comparison
+python -B -s docs/evidence/r2-ar04-base-diff-edge-gate-hf02/run_offline_checks.py f01 docs/evidence/r2-ar04-base-diff-edge-gate-hf02/F01_RUN.txt
+Runner exit 1. Base, HEAD, HEAD, Base each collected one case and exited 1 with KeyError: 'completed_tools' at line 87. Complete output in F01_RUN.txt.
+
+2. Edges before the patch
+python -B -s docs/evidence/r2-ar04-base-diff-edge-gate-hf02/run_offline_checks.py edge-compare docs/evidence/r2-ar04-base-diff-edge-gate-hf02/EDGE_BEFORE_RUN.txt
+Runner exit 1. Old Base 3 passed (exit 0). ecbd7d3 3 failed (exit 1). The three failures are exact-text mismatches with intact citations. One non-target case was deselected in each checkout at this test revision. Full source text and actual excerpts in EDGE_BEFORE_RUN.txt.
+
+3. Candidate regression on an exported checkout, first run
+python -B -s docs/evidence/r2-ar04-base-diff-edge-gate-hf02/run_offline_checks.py regression docs/evidence/r2-ar04-base-diff-edge-gate-hf02/REGRESSION_RUN.txt
+Runner exit 1. The runner at this revision exported ecbd7d3 and copied only the patched chat.py and new edge test into that checkout. Edge 5 passed (exit 0), prior retention 11 passed and 1 failed (exit 1), Context/currentness/Grant/Assistant 64 passed and 1 failed (exit 1, F01), C06/revocation 6 passed (exit 0).
+Additional failure in this run: the prior frozen-artifact byte hash check saw LIVE_RESULTS.json as SHA-256 97a077a059fb358555604e870a7f30dec588866587bd32e2daf5228aa1872856 after fresh Windows LF → CRLF checkout. Existing worktree bytes and Git blob both have SHA-256 29ff36295398475699c767ec826dc94331b7299b527ae69b41c5e995cce4f55b. All three have identical normalized content. This test depends on the byte representation of historical files. REGRESSION_RUN.txt preserves the failed check.
+
+4. Candidate regression on the existing worktree, final run
+python -B -s docs/evidence/r2-ar04-base-diff-edge-gate-hf02/run_offline_checks.py regression docs/evidence/r2-ar04-base-diff-edge-gate-hf02/REGRESSION_WORKTREE_RUN.txt
+Runner exit 1 from the previously attributed F01 failure. This run kept the original evidence bytes and used fresh temporary databases with the same isolated test environment. The candidate chat.py and new test byte hashes match the first regression run.
+Group 1: new edge tests, 5 passed, 0.16s, exit 0.
+Group 2: existing HF-01 retention tests and frozen evidence hashes, 12 passed, 3.78s, exit 0.
+Group 3: Context/currentness/Grant/Assistant, 64 passed and 1 failed (F01), 96.58s, exit 1.
+Group 4: C06 and revocation before Provider boundary, 6 passed, 76.42s, exit 0.
+Final total: 87 passed, 1 known failure. Related outputs include pre-send source revalidation, invalidated summary exclusion, bounded strategies, revoked Grant, UNKNOWN handling, and local Mock Transport. Per-test status and dependency deprecation warnings are in REGRESSION_WORKTREE_RUN.txt.
+
+5. Read-only verification of the four F01 persisted requests
+@'
+import json, sqlite3
+from pathlib import Path
+folder = Path('docs/evidence/r2-ar04-base-diff-edge-gate-hf02')
+line = next(line for line in (folder/'F01_RUN.txt').read_text(encoding='utf-8').splitlines() if line.startswith('scratch: '))
+root = Path(line.removeprefix('scratch: '))
+for group in ('1-base-f01','2-head-f01','3-head-f01','4-base-f01'):
+    path, = (root / group).glob('test_zero_tool_followup_can_ex[0-9]/domain.sqlite3')
+    with sqlite3.connect(path.as_uri()+'?mode=ro', uri=True) as db:
+        run_id, status = db.execute('SELECT run_id,status FROM task_runs ORDER BY consumed_message_seq DESC LIMIT 1').fetchone()
+        request_json, = db.execute("SELECT request_json FROM assistant_calls WHERE run_id=? AND kind='MODEL'", (run_id,)).fetchone()
+        mcp_count, = db.execute("SELECT COUNT(*) FROM assistant_calls WHERE run_id=? AND kind='MCP'", (run_id,)).fetchone()
+        stored = json.loads(request_json)
+        text = stored['messages'][0]['data']['content'].split('WORK_CONTEXT\n', 1)[1]
+        context, _ = json.JSONDecoder().raw_decode(text)
+        audit_current = stored['source_refs']['current_run']
+        projected = context['current_run']
+        assert projected['run_id'] == run_id and audit_current['run_id'] == run_id
+        assert status == 'SUCCEEDED' and mcp_count == 0 and audit_current['completed_tools'] == []
+        assert 'completed_tools' not in projected and projected['business_observations'] == []
+        assert any(old['snapshots'] for old in context['history_sources'])
+        print(f'{group}: run={status} mcp={mcp_count} audit_completed_tools={audit_current["completed_tools"]} prompt_keys={sorted(projected)} kept_prior_snapshot={True}')
+'@ | python -B -s -
+Exit 0. For each of the four groups, run=SUCCEEDED, mcp=0, audit_completed_tools=[], prompt_keys=['business_observations', 'description', 'run_id'], kept_prior_snapshot=True.
+
+6. Frozen first response replay, without writing historical artifacts
+$scratchLine = Get-Content -Encoding UTF8 docs/evidence/r2-ar04-base-diff-edge-gate-hf02/REGRESSION_WORKTREE_RUN.txt | Select-String '^scratch: '
+$env:PYTHONPATH = Join-Path $scratchLine.Line.Substring(9) 'offline'
+$env:PYTHONUTF8 = '1'
+@'
+import json, runpy, sys
+assert 'sitecustomize' in sys.modules
+evidence = runpy.run_path('docs/evidence/r2-ar04-summary-fact-retention-hf01/reconstruct_live_trace.py')
+pairs = evidence['_request_pair_index'](evidence['_read_jsonl_gzip'](evidence['TRACE_PATH']))
+rows = json.loads(evidence['RESULTS_PATH'].read_text(encoding='utf-8'))['rows']
+for row in rows:
+    case_id = row['input_manifest']['case_id']
+    if case_id not in evidence['CASES']:
+        continue
+    case = evidence['_analyze_case'](case_id, pairs, row)
+    replay = case['candidate_replay']
+    flags = replay['target_facts_survive_two_application_compactions']
+    persistence = case['stages']['application_persisted_projection_replay']['estimated_tokens']
+    projection = case['stages']['second_summary_projection_replay']['estimated_tokens']
+    assert all(flags.values()) and persistence <= 512 and projection <= 512, (case_id, flags)
+    assert replay['facts_after_candidate_second_projection']['deployment_version_unknown_seq11']
+    assert replay['facts_after_candidate_second_projection']['formal_request_correction_reason_seq7']
+    print(case_id, persistence, projection, json.dumps(flags))
+'@ | python -B -s -
+Exit 0. All three target facts are true in all six replays. Correction reason and unknown deployment checks passed. Token estimates, first compaction / second projection:
+Q02-A 507 / 293
+Q02-B 507 / 284
+Q03-A 506 / 289
+Q03-B 499 / 286
+Q06-A 503 / 274
+Q06-B 509 / 291
+
+Full repository pytest, L3 live model, external MCP and browser: NOT_RUN.
