@@ -1,0 +1,15 @@
+E09-D offline readiness verification
+Date: 2026-11-15
+Real Provider requests: 0
+Command: python -m pytest tests/test_r2_ar06_e09_readiness.py tests/test_ar04a_context_journey_01.py tests/test_ar04a_compression_budget_hf_01.py tests/test_ar04a_compression_cancel_hf_01.py tests/test_m302_context.py tests/test_m4_c1_s3_prompt.py --basetemp .runtime/.pytest-e09-d-20261115-final -q
+
+................................                                         [100%]
+32 passed in 178.66s (0:02:58)
+
+Exit code: 0
+
+Prior fixture iteration note (not part of the 32-test command above): a 10-turn Taskless flow followed by a separate TaskBinding acknowledgement Run and a separate current-query Run reached CHAT_ATTEMPTS_EXHAUSTED under the existing three-attempt total. The original console capture was not persisted. The final fixture puts the current-state question in the trusted binding request's initial_message; no production attempt limit changed. The final 32-test run verifies the resulting one-Run binding/query flow.
+
+Manifest timestamp was corrected to the actual recording time 2026-11-15T12:26:05Z; the E09 test was rerun against this manifest and final trace link: 2 passed in 30.86s (see E09_MANIFEST_RERUN_LOG.txt).
+
+Final verification after adding direct tenant isolation coverage: 33 passed in 187.82s. Full console output: E09_FINAL_GREEN_LOG.txt. The preceding RED had 1 fixture alias failure and 32 passed; focused E09 regression then passed 3/3. Full RED and GREEN outputs remain in E09_FINAL_REGRESSION_LOG.txt, E09_TENANT_TEST_LOG.txt, and E09_FINAL_GREEN_LOG.txt.

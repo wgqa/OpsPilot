@@ -1,0 +1,49 @@
+Final E09-D isolation and Context regression
+Date: 2026-11-15
+Real Provider requests: 0
+Command: python -m pytest tests/test_r2_ar06_e09_readiness.py tests/test_ar04a_context_journey_01.py tests/test_ar04a_compression_budget_hf_01.py tests/test_ar04a_compression_cancel_hf_01.py tests/test_m302_context.py tests/test_m4_c1_s3_prompt.py --basetemp .runtime/.pytest-e09-d-20261115-final-isolation -q
+
+..F..............................                                        [100%]
+================================== FAILURES ===================================
+___________ test_e09_taskless_summary_is_not_visible_across_tenants ___________
+
+tmp_path = WindowsPath('D:/OpsPilot-LIVE-02-FIX-01-HF02/.runtime/.pytest-e09-d-20261115-final-isolation/test_e09_taskless_summary_is_n0')
+
+    def test_e09_taskless_summary_is_not_visible_across_tenants(tmp_path: Path):
+        """A persisted Taskless Summary remains confined to its owner and tenant."""
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+
+        runtime_root = tmp_path / "repo"
+        runtime_root.mkdir(parents=True)
+        runtime_dir = runtime_root / ".runtime" / "e09-tenant-isolation"
+>       result = _run_e09(runtime_dir, runtime_root)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_r2_ar06_e09_readiness.py:578:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_r2_ar06_e09_readiness.py:368: in _run_e09
+    exported = export_session(session_id, trace_path, runtime_name=runtime_name,
+scripts\user-demo\export_live_evidence.py:191: in export_session
+    repo_root, db_path, evidence_dir = _selected_runtime_paths(runtime_name, root)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scripts\user-demo\export_live_evidence.py:97: in _selected_runtime_paths
+    runtime_dir = resolve_user_demo_runtime(runtime_name, root=repo_root)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+runtime_name = 'e09-tenant-isolation'
+root = WindowsPath('D:/OpsPilot-LIVE-02-FIX-01-HF02/.runtime/.pytest-e09-d-20261115-final-isolation/test_e09_taskless_summary_is_n0/repo')
+
+    def resolve_user_demo_runtime(runtime_name: str, *, root: str | Path | None = None) -> Path:
+        """Resolve a single allowlisted directory name directly beneath repo `.runtime`."""
+        if not isinstance(runtime_name, str) or not _RUNTIME_NAME.fullmatch(runtime_name):
+>           raise UserDemoRuntimePathError("USER_DEMO_RUNTIME_NAME_INVALID")
+E           runtime_paths.UserDemoRuntimePathError: USER_DEMO_RUNTIME_NAME_INVALID
+
+scripts\user-demo\runtime_paths.py:27: UserDemoRuntimePathError
+=========================== short test summary info ===========================
+FAILED tests/test_r2_ar06_e09_readiness.py::test_e09_taskless_summary_is_not_visible_across_tenants
+1 failed, 32 passed in 195.83s (0:03:15)
+
+Exit code: 1
