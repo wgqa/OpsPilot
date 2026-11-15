@@ -1,0 +1,30 @@
+BASE: 85c6eb5a199836b107d953db513b012d2d9aa99c
+BRANCH: codex/r2-ar06-e08-h-readiness-01
+RUNTIME: user-demo-r2-e08h-live-prime-20261115
+
+PRE-RUN
+- `python scripts/user-demo/run_r2_ar06_case.py preflight --case-id E08-H --runtime-name user-demo-r2-e08h-live-prime-20261115 --mode offline`
+  OFFLINE_HISTORY_PRIMED; prior target Receiver QUEUED v2; current target PROCESSED v3; decoy QUEUED; old source BUSINESS_SOURCE_INVALIDATED; Provider sends 0; UNKNOWN 0.
+- Read-only Domain and Checkpoint `PRAGMA quick_check`: both `ok`.
+- `python scripts/user-demo/runtime_admin.py configure --runtime-name user-demo-r2-e08h-live-prime-20261115`
+  Interactive Runtime Grant created: USD 0.060000, expires 2026-11-15T12:30:00Z. No request sent by configuration.
+- `python scripts/user-demo/runtime_admin.py preflight --runtime-name user-demo-r2-e08h-live-prime-20261115`
+  ACTIVE; USD 0.060000 available; per-call max reserve USD 0.006058; sends 0; UNKNOWN 0.
+- `./scripts/user-demo/Start-UserDemo.ps1 -Profile S1 -Mode Live -RuntimeName user-demo-r2-e08h-live-prime-20261115`
+  API, Worker, frontend ready on loopback. Startup sends no Provider request.
+- `python scripts/user-demo/run_r2_ar06_case.py preflight --case-id E08-H --runtime-name user-demo-r2-e08h-live-prime-20261115 --mode live --authorized-max-cost-usd 0.06`
+  READY_FOR_EXPLICIT_CASE_RUN; worst-case eight-dispatch reserve USD 0.048464; matching E08 target and decoy; no new TaskBinding.
+
+FORMAL RUN — SUBMITTED ONCE
+- `python scripts/user-demo/run_r2_ar06_case.py run-live --case-id E08-H --runtime-name user-demo-r2-e08h-live-prime-20261115 --authorized-case-id E08-H --authorized-max-cost-usd 0.06`
+- Run `run-12b1e067-ae7a-4fde-beb1-009adef23772`: SUCCEEDED, no timeout.
+- Provider sends 2, responses 2, UNKNOWN 0, retries/resubmissions 0.
+- Input 7,866; output 736; total 8,602; settled application estimate USD 0.003244; remaining USD 0.056756.
+- MCP 3 successful read calls; Observations 3; Evidence 3.
+
+POST-RUN
+- `./scripts/user-demo/Stop-UserDemo.ps1 -RuntimeName user-demo-r2-e08h-live-prime-20261115`
+  Graceful shutdown reported for API, Worker and frontend; data retained.
+- `python scripts/user-demo/runtime_admin.py summary --runtime-name user-demo-r2-e08h-live-prime-20261115`
+  Pool ACTIVE; settled USD 0.003244; open/UNKNOWN USD 0; remaining USD 0.056756; sends 2; UNKNOWN 0.
+- No browser automation, no business write, no Gold/Rubric/production-code change, no main merge.
