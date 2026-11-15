@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-LIVE-RECHECK-V2-PREP-01",
+  "evidence_level": "IMPLEMENTER_OFFLINE_PYTEST_AND_MOCKTRANSPORT",
+  "provider_requests": 0,
+  "provider_cost_usd": "0.00",
+  "external_mcp_calls": 0,
+  "cases": [
+    {
+      "id": "C01",
+      "name": "Domain summary persistence failure",
+      "status": "PASS",
+      "injection": "TaskControlError(V2_INJECTED_DOMAIN_PERSISTENCE_FAILURE) during complete_chat_compression_attempt",
+      "observed": {
+        "stop_reason": "V2_INJECTED_DOMAIN_PERSISTENCE_FAILURE",
+        "recorded_mock_requests": 1,
+        "answer_manifest": false,
+        "answer_requests": 0,
+        "later_cases": ["NOT_STARTED", "NOT_STARTED"]
+      },
+      "test": "test_c01_domain_task_control_error_stops_without_manifest_or_followup"
+    },
+    {
+      "id": "C02",
+      "name": "Source invalidation between summary rounds",
+      "status": "PASS",
+      "injection": "Change seq3 message body digest after first summary persistence and before the second summary send boundary",
+      "observed": {
+        "stop_reason": "RECHECK_SOURCE_INVALIDATED",
+        "first_summary_persisted_before_invalidation": true,
+        "recorded_mock_requests": 1,
+        "answer_requests": 0,
+        "later_cases": ["NOT_STARTED", "NOT_STARTED"]
+      },
+      "test": "test_c02_source_invalidation_between_summary_rounds_blocks_final_prompt"
+    },
+    {
+      "id": "C03",
+      "name": "512 Token output and global reserve bounds",
+      "status": "PASS",
+      "injection": "Return usage completion_tokens=513 with requested max_tokens=512; separately set shared ledger cap below one request reserve",
+      "observed": {
+        "output_violation_stop_reason": "PROVIDER_USAGE_OVER_TOKEN_CAP",
+        "requests_started_after_output_violation": 1,
+        "second_summary_and_answer_sent": false,
+        "insufficient_global_reserve_rejected_before_send": true,
+        "requests_started_after_reserve_rejection": 0
+      },
+      "tests": [
+        "test_c03_512_output_cap_violation_stops_before_second_summary",
+        "test_c03_shared_budget_rejects_reservation_before_dispatch"
+      ]
+    },
+    {
+      "id": "C04",
+      "name": "Unknown send state",
+      "status": "PASS",
+      "injection": "HTTPX MockTransport raises ReadTimeout after the one-shot reservation",
+      "observed": {
+        "stop_reason": "UNKNOWN_SEND_STATE_NO_RETRY",
+        "request_status": "UNKNOWN",
+        "reserved_budget_retained": true,
+        "send_started_events": 1,
+        "send_unknown_events": 1,
+        "later_cases": ["NOT_STARTED", "NOT_STARTED"]
+      },
+      "test": "test_c04_unknown_send_is_reserved_and_never_retried_or_followed"
+    },
+    {
+      "id": "C05",
+      "name": "Historical authorization reuse",
+      "status": "PASS",
+      "injection": "Pass historical task authorization string and request unsupported live CLI mode",
+      "observed": {
+        "historical_authorization_accepted": false,
+        "live_cli_mode_available": false,
+        "result": "LIVE_DISPATCH_NOT_IMPLEMENTED_REQUIRES_SEPARATE_AUTHORIZATION_AND_RUNNER"
+      },
+      "test": "test_c05_legacy_authorization_cannot_enable_v2_live_dispatch"
+    },
+    {
+      "id": "C06",
+      "name": "Frozen source and version drift",
+      "status": "PASS",
+      "injection": "Mutate pinned question/Gold content, chat.py or assistant.py blob, model, output cap, tool schema, prompt prefix, and fail the integrated guard at the first send boundary",
+      "observed": {
+        "digest_and_blob_mismatches_rejected": true,
+        "model_and_tool_contract_mismatches_rejected": true,
+        "integrated_guard_failure_recorded_requests": 0,
+        "provider_requests_sent": 0
+      },
+      "test": "test_c06_input_model_tool_and_source_drift_are_rejected_before_send"
+    },
+    {
+      "id": "C07",
+      "name": "Partial fact and source attribution",
+      "status": "PASS",
+      "observed": {
+        "max_attempts_seq3": "PARTIAL",
+        "protocol_and_max_attempts_transition_seq11": "COMPLETE_TEXT_WITH_SOURCE",
+        "seq11_does_not_upgrade_seq3": true
+      },
+      "tests": [
+        "test_full_mock_matrix_runs_current_assistant_and_persists_two_summaries",
+        "test_c07_partial_early_value_never_upgrades_from_later_source"
+      ]
+    },
+    {
+      "id": "C08",
+      "name": "C06 RED and F01 legacy isolation",
+      "status": "PASS",
+      "observed": {
+        "protected_historical_git_blobs_match_base": true,
+        "C06_RED_results_trace_and_test_log_unchanged": true,
+        "F01_completed_tools_legacy_record_unchanged": true
+      },
+      "test": "test_c08_frozen_c06_red_and_f01_legacy_record_match_base"
+    }
+  ],
+  "test_totals": {
+    "tests": 10,
+    "passed": 10,
+    "failed": 0,
+    "exit_code": 0,
+    "log": "TEST_RUN_PYTEST_FINAL.txt"
+  },
+  "independent_main_agent_review": "NOT_PERFORMED"
+}
