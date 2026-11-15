@@ -1,0 +1,35 @@
+E03-D FIRST LIVE RUN - COMMAND/OUTPUT RECORD
+
+Runtime was confirmed absent before creation. Ports 8000 and 5173 had no listeners. No existing Runtime was reset.
+
+COMMAND: python scripts/user-demo/run_r2_ar06_case.py prepare --case-id E03-D --runtime-name user-demo-r2-e03-live01
+OUTPUT: ISOLATED_RUNTIME_CREATED; fresh=true; runtime_grant_present=false; provider_requests=0.
+
+COMMAND: python scripts/user-demo/run_r2_ar06_case.py preflight --case-id E03-D --runtime-name user-demo-r2-e03-live01 --mode offline
+OUTPUT: OFFLINE_READY; registry valid; project orders-async-demo; tenant-a; documents callback-retry-contract and callback-retry-contract-v2; provider_requests=0; unknown_requests=0.
+
+COMMAND: python scripts/user-demo/runtime_admin.py configure --runtime-name user-demo-r2-e03-live01
+INTERACTIVE CONFIG: budget USD 0.060000; expiry 2026-11-15T07:00:00Z; existing exact confirmation accepted. Output: ACTIVE Grant created; no Provider request sent; max-request reserve USD 0.006058.
+
+COMMAND: python scripts/user-demo/runtime_admin.py preflight --runtime-name user-demo-r2-e03-live01
+OUTPUT: passed; deepseek-flash; pool ACTIVE; available USD 0.060000; max-request reserve USD 0.006058; provider-sends=0; unknown=0.
+
+COMMAND: .\scripts\user-demo\Start-UserDemo.ps1 -Mode Live -RuntimeName user-demo-r2-e03-live01
+OUTPUT: API and Worker ready at http://127.0.0.1:8000; frontend HTTP ready at http://127.0.0.1:5173; selected isolated Domain and Checkpoint paths; no Provider request at startup.
+
+COMMAND: python scripts/user-demo/run_r2_ar06_case.py preflight --case-id E03-D --runtime-name user-demo-r2-e03-live01 --mode live --authorized-max-cost-usd 0.06
+OUTPUT: READY_FOR_EXPLICIT_CASE_RUN; provider_requests_so_far=0; unknown_requests=0; grant and authorized cap USD 0.060000; maximum dispatches=8; worst-case Run reserve USD 0.048464; task_binding_created=false.
+
+COMMAND: python scripts/user-demo/run_r2_ar06_case.py run-live --case-id E03-D --runtime-name user-demo-r2-e03-live01 --authorized-case-id E03-D --authorized-max-cost-usd 0.06
+OUTPUT: single E03-D Run SUCCEEDED; 3 Provider sends/3 responses; 0 UNKNOWN; 11,501 input / 1,732 output / 13,233 total tokens; settled USD 0.005530; 3 MCP calls; no TaskBinding; elapsed 14,333 ms. Runner Result JSON contains full structured outcome.
+
+COMMAND: .\scripts\user-demo\Stop-UserDemo.ps1 -RuntimeName user-demo-r2-e03-live01
+OUTPUT: API, Worker, and frontend graceful shutdown; Session, messages, Domain DB, Checkpoint DB, and logs retained.
+
+COMMAND: python scripts/user-demo/runtime_admin.py summary --runtime-name user-demo-r2-e03-live01
+OUTPUT: limit USD 0.060000; settled USD 0.005530; open/UNKNOWN USD 0; available USD 0.054470; Provider sends 3; UNKNOWN 0; expiry 2026-11-15T07:00:00Z.
+
+COMMAND: python scripts/user-demo/export_live_evidence.py --runtime-name user-demo-r2-e03-live01 --session-id session-874029ef-cedb-4416-933a-c940f952d0e0 --actor-id support-a --output .runtime/user-demo-r2-e03-live01/evidence/E03-D.live.trace.json
+OUTPUT: redacted export created; messages=2; runs=1; calls=6; observations=0; evidence=0; session memories=0. Export redaction flags confirm secret values excluded.
+
+No retries or resubmissions. No browser automation, external business write, additional Runtime, or additional Provider request was performed.
