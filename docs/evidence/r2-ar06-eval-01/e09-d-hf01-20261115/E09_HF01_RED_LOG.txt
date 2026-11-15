@@ -1,0 +1,21 @@
+R2-AR06-E09-D-HF01 baseline RED record
+Base: 321e6a5d450dbe15c44aa227286de51000d92017
+Provider requests: 0
+
+Before changing E09FixtureModel, the new focused assertions reproduced both reported fixture defects:
+
+1. First-turn future-information leak:
+   test_e09_fixture_reply_uses_only_material_visible_in_that_turn failed because the first-turn reply already contained max_attempts=5 and `claimed v1`, although only turn 1 was passed to the fixture model.
+
+2. Summary source drift:
+   test_e09_fixture_summary_preserves_first_claim_source_and_records_explicit_correction failed because a repeated claim at sequence 8 replaced its original source sequence 3. The same regression test includes a later explicit-correction check; the baseline run stopped at the earlier repeated-source assertion, so the correction assertion was not reached in that RED invocation.
+
+The first combined pytest attempt reported 2 failed, 2 deselected, 1 setup error. The setup error was Windows pytest's default temporary directory permission failure (`WinError 5` under the user's AppData Temp path), so the end-to-end case was rerun with an unused, isolated `--basetemp` under this Runtime worktree. This environment error was not treated as a product result.
+
+Independent preserved v3 evidence was also inspected without changing it:
+- Original config message: sequence 3, message `message-f4da1a27-ec7d-411f-b847-eea9c3b3c899`, digest `02f68b6e2013589ea1344709cbac9d5bda5b8ddc5bf5155c888a1bcfe389cd6a`.
+- v3 current Summary version 3 pointed the assertion to sequence 5, message `message-92823d03-1ebc-4101-b442-b7aa1a2905ba`, digest `909acfdb967f6dd8714adaeb65443e5f60a7ebfc2e325a19ef7e059e0608f1bd`.
+
+The first post-change integration attempt also failed an older test assertion requiring the complete raw first-turn text in the Task-bound Run. That assertion conflicted with the stated scope boundary: Taskless Summary must not cross into a Task-bound request. The current Run did include the latest pre-binding goal/source review and HTTP 202 material; the test now checks those visible inputs while separately asserting that no Taskless Summary is injected. Original failure output is preserved in `E09_HF01_INITIAL_ASSERTION_FAILURE_LOG.txt`.
+
+These RED records are retained as history. No old v3 Trace, Gold, or prior report was edited.
