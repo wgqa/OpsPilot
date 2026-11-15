@@ -38,7 +38,8 @@ from opspilot.domain.database import connect
 from opspilot.domain.d2 import canonical_json, digest_json, reserve_attempt, finish_attempt, record_tool_observation
 from opspilot.domain.chat import (
     prepare_chat_attempt, complete_chat_attempt, fail_chat_attempt,
-    _prepare_context, record_chat_limit_in_transaction, MAX_COMPRESSION_OUTPUT_TOKENS,
+    _prepare_context, record_chat_limit_in_transaction,
+    MAX_COMPRESSION_GENERATION_TOKENS,
     ensure_chat_stream_matches_answer, publish_assistant_activity,
 )
 from opspilot.domain.context_engineering import (
@@ -2374,11 +2375,21 @@ async def run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trace
 def _compression_model(model, runtime_grant_binding=None):
     """Bind the compression output cap without losing the Provider's pinned wire options."""
     extra_body = dict(getattr(model, "extra_body", None) or {})
-    cap = MAX_COMPRESSION_OUTPUT_TOKENS
+    cap = MAX_COMPRESSION_GENERATION_TOKENS
     if runtime_grant_binding is not None:
         cap = min(cap, int(runtime_grant_binding["max_output_tokens"]))
     extra_body["max_tokens"] = cap
     return model.bind(extra_body=extra_body)
+
+
+def _compression_output_failure(finish_reason, usage, requested_cap):
+    """Reject known incomplete or over-cap summaries before Domain persistence."""
+    if finish_reason == "length":
+        return "CONTEXT_SUMMARY_OUTPUT_TRUNCATED"
+    output_tokens = usage.get("output_tokens") if isinstance(usage, dict) else None
+    if type(output_tokens) is int and output_tokens > int(requested_cap):
+        return "CONTEXT_SUMMARY_OUTPUT_LIMIT_EXCEEDED"
+    return None
 
 
 def _cached_compression_result(call):
@@ -2605,9 +2616,9 @@ async def _prepare_assistant_context_impl(
                 "purpose": "CONTEXT_COMPRESSION",
                 "model_id": model_id,
                 "max_output_tokens": min(
-                    MAX_COMPRESSION_OUTPUT_TOKENS,
+                    MAX_COMPRESSION_GENERATION_TOKENS,
                     int(runtime_grant_binding["max_output_tokens"])
-                    if runtime_grant_binding is not None else MAX_COMPRESSION_OUTPUT_TOKENS,
+                    if runtime_grant_binding is not None else MAX_COMPRESSION_GENERATION_TOKENS,
                 ),
                 "messages": compression["messages"],
             }
@@ -2752,6 +2763,14 @@ async def _prepare_assistant_context_impl(
                     if runtime_grant_binding is not None:
                         mark_delivered(path, str(runtime_dispatch["request_key"]))
                     state["settled"] = True
+                    output_failure = _compression_output_failure(
+                        metadata.get("finish_reason"), usage, wire["max_output_tokens"],
+                    )
+                    if output_failure:
+                        fail_chat_compression_attempt(
+                            path, worker_id, attempt_id, output_failure,
+                        )
+                        return stop(output_failure)
                 except asyncio.CancelledError:
                     raise
                 except BaseException as error:

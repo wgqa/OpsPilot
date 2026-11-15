@@ -133,6 +133,8 @@ def test_redundant_sequence_metadata_removal_preserves_full_negated_constraint()
         "next_summary_tokens": _tokens(projected), "projected_constraint": next_item,
     }, ensure_ascii=False))
     assert chat.MAX_COMPRESSION_OUTPUT_TOKENS == 512
+    assert chat.MAX_PERSISTED_SUMMARY_TOKENS == 512
+    assert chat.MAX_COMPRESSION_GENERATION_TOKENS == 1024
     assert _tokens(original) > 512 and _tokens(with_full_constraint) <= 512
     assert _tokens(persisted) <= 512 and _tokens(projected) <= 512
     assert stored["source_message_ids"] == [sources[str(seq)] for seq in (2, 3, 4)]

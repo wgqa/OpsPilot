@@ -41,7 +41,7 @@ def _run(db_path, key, *, session_id=None, worker_id=None):
 
 def _provision(
     db_path, *, total=100_000, expires_delta=timedelta(days=1),
-    input_rate=1_000_000, output_rate=1_000_000,
+    input_rate=1_000_000, output_rate=1_000_000, output_tokens=2_048,
 ):
     from opspilot.domain.assistant_runtime_grant import provision_default_grant
 
@@ -53,7 +53,7 @@ def _provision(
         model_config_version=MODEL_CONFIG["OPSPILOT_MODEL_CONFIG_VERSION"],
         price_version=MODEL_CONFIG["OPSPILOT_MODEL_PRICE_VERSION"],
         input_rate_micro_per_million=input_rate, output_rate_micro_per_million=output_rate,
-        max_input_tokens=12_000, max_output_tokens=2_048, total_limit_usd_micro=total,
+        max_input_tokens=12_000, max_output_tokens=output_tokens, total_limit_usd_micro=total,
         valid_from=(now - timedelta(days=2)).isoformat().replace("+00:00", "Z"),
         expires_at=(now + expires_delta).isoformat().replace("+00:00", "Z"),
         evidence_ref="offline task-card fixture", evidence_digest="a" * 64,
@@ -68,6 +68,71 @@ def _worker(db_path):
     worker.acquire()
     worker.register()
     return worker
+
+
+def test_1024_summary_runtime_grant_reserves_the_new_shared_envelope(demo_db, monkeypatch):
+    from opspilot.domain.assistant_runtime_grant import (
+        _cost_micro, bind_run, provision_default_grant, runtime_config_from_env, spend_summary,
+        validate_http_request,
+    )
+    from opspilot.domain.database import connect
+
+    _configure(monkeypatch)
+    _provision(
+        demo_db, total=60_000, input_rate=300_000, output_rate=1_200_000,
+        output_tokens=1024,
+    )
+    summary_reserve = _cost_micro(12_000, 1024, 300_000, 1_200_000)
+    answer_reserve = _cost_micro(12_000, 512, 300_000, 1_200_000)
+    full_grant_reserve = _cost_micro(12_000, 2_048, 300_000, 1_200_000)
+    assert (summary_reserve, answer_reserve, full_grant_reserve) == (4_829, 4_215, 6_058)
+    assert 6 * summary_reserve + 3 * answer_reserve == 41_619
+    assert 9 * summary_reserve == 43_461 < 60_000
+    assert 9 * full_grant_reserve == 54_522 < 60_000
+    worker = _worker(demo_db)
+    try:
+        run = _run(demo_db, "summary-headroom-1024", worker_id=worker.owner_id)
+        binding = bind_run(demo_db, run["run_id"], runtime_config_from_env())
+        summary_payload = {
+            "purpose": "CONTEXT_COMPRESSION", "model_id": "deepseek-flash",
+            "max_output_tokens": 1024,
+            "messages": [{"role": "user", "content": "Offline summary fixture"}],
+        }
+        call, dispatch, _ = _call(
+            demo_db, run, worker.owner_id, binding,
+            logical_key="context-compression:headroom",
+            payload=summary_payload,
+        )
+        assert dispatch["reserved_usd_micro"] == 4_829
+        assert spend_summary(demo_db)["committed_or_reserved_usd_micro"] == 4_829
+
+        summary_wire = json.dumps({
+            "model": "deepseek-flash", "messages": summary_payload["messages"],
+            "max_tokens": 1024, "thinking": {"type": "disabled"}, "stream": False,
+        }, separators=(",", ":")).encode()
+        _, summary_cap = validate_http_request(
+            "https://api.deepseek.com/chat/completions", "POST", summary_wire, binding,
+        )
+        assert summary_cap == 1024
+
+        # The same grant can retain a narrower frozen answer cap of 512.
+        answer_wire = json.dumps({
+            "model": "deepseek-flash", "messages": [{"role": "user", "content": "offline"}],
+            "max_tokens": 512, "thinking": {"type": "disabled"}, "stream": False,
+        }, separators=(",", ":")).encode()
+        _, answer_cap = validate_http_request(
+            "https://api.deepseek.com/chat/completions", "POST", answer_wire, binding,
+        )
+        assert answer_cap == 512
+        with connect(demo_db) as connection:
+            row = connection.execute(
+                "SELECT max_output_tokens,reserved_usd_micro FROM assistant_runtime_spends WHERE assistant_call_id=?",
+                (call["call_id"],),
+            ).fetchone()
+        assert int(row["max_output_tokens"]) == 1024
+        assert int(row["reserved_usd_micro"]) == 4_829
+    finally:
+        worker.release()
 
 
 def _call(db_path, run, worker_id, binding, logical_key="answer:one", payload=None):

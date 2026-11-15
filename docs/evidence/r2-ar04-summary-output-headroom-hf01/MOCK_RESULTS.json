@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-SUMMARY-OUTPUT-HEADROOM-HF-01",
+  "provider_requests": 0,
+  "provider_cost_usd": "0.00",
+  "cases": [
+    {
+      "case": "Q02-B historical incomplete reply",
+      "evidence_level": "HISTORICAL_PROVIDER_RESPONSE_REPLAYED_VIA_MOCKTRANSPORT",
+      "requested_summary_tokens": 1024,
+      "actual_historical_output_tokens": 512,
+      "finish_reason": "length",
+      "historical_domain_error": "CONTEXT_SUMMARY_INVALID_JSON",
+      "historical_runner_stop_reason": "PROVIDER_OUTPUT_NOT_COMPLETE",
+      "historical_failure_record_modified": false,
+      "result": "STOPPED",
+      "error": "CONTEXT_SUMMARY_OUTPUT_TRUNCATED",
+      "domain_summary_persisted": false,
+      "source_trace_sha256": "6c6d5b8d006c775a4393894b59ce5a8b722aa89a71c8ca427868a2b8c3db20e2",
+      "provider_response_id": "9a2e0db7-153f-4419-91b2-416d2e7ef9ff",
+      "content_sha256": "6c4da759c0c27112b4db6fa2984cd171c7e4420f7a006328be8a767c48e40f3d"
+    },
+    {
+      "case": "synthetic complete summary above 512",
+      "evidence_level": "SYNTHETIC_FIXTURE_THROUGH_ASSISTANT_DOMAIN_MOCK_PATH",
+      "requested_summary_tokens": 1024,
+      "fixture_output_tokens": 700,
+      "finish_reason": "stop",
+      "input_text_token_estimate_over_512": true,
+      "result": "SUCCEEDED",
+      "domain_summary_persisted": true,
+      "persisted_summary_token_estimate": 226,
+      "answer_request_cap_unchanged": true,
+      "not_a_real_provider_response": true
+    },
+    {
+      "case": "synthetic response usage above 1024",
+      "evidence_level": "SYNTHETIC_FIXTURE_THROUGH_ASSISTANT_DOMAIN_MOCK_PATH",
+      "requested_summary_tokens": 1024,
+      "fixture_output_tokens": 1025,
+      "result": "STOPPED",
+      "error": "CONTEXT_SUMMARY_OUTPUT_LIMIT_EXCEEDED",
+      "domain_summary_persisted": false,
+      "not_a_real_provider_response": true
+    },
+    {
+      "case": "Runtime Grant bound and reserve",
+      "evidence_level": "ISOLATED_RUNTIME_GRANT_TEST",
+      "summary_grant_cap": 1024,
+      "summary_request_cap": 1024,
+      "answer_request_cap": 512,
+      "single_request_reserved_usd_micro": 4829,
+      "request_above_grant_rejected": true
+    },
+    {
+      "case": "Q02-A early facts and Q02-B/Q06-B source fidelity",
+      "evidence_level": "OFFLINE_FIXTURE_AND_FROZEN_TRACE_ASSERTIONS",
+      "result": "PASS",
+      "provider_semantic_quality_claimed": false
+    },
+    {
+      "case": "C06 compression regression gate",
+      "evidence_level": "OFFLINE_REGRESSION_TEST",
+      "result": "PASS",
+      "historical_red_artifact_modified": false
+    }
+  ],
+  "trace_path": "MOCK_TRACE.jsonl.gz",
+  "trace_sha256": "651400d3f67415efa2c85edc727ce7a64760c68e8af0010ebc42b784b6991641"
+}

@@ -122,7 +122,7 @@ def test_required_anchor_budget_failure_is_explicit_and_does_not_mutate_input(
     empty_tokens = estimate_messages_tokens([{
         "role": "system", "content": TRACE_RECONSTRUCTOR._canonical(empty_compacted),
     }])
-    monkeypatch.setattr(chat_domain, "MAX_COMPRESSION_OUTPUT_TOKENS", empty_tokens + 1)
+    monkeypatch.setattr(chat_domain, "MAX_PERSISTED_SUMMARY_TOKENS", empty_tokens + 1)
     with pytest.raises(TaskControlError) as error:
         chat_domain._compact_summary_document(document)
     assert error.value.code == "CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED"
