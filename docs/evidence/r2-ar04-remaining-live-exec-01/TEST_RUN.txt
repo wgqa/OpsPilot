@@ -1,0 +1,54 @@
+R2-AR04-REMAINING-LIVE-EXEC-01 — Stop A test and preflight log
+Worktree: D:\学习\agent新项目\.worktrees\ar04a-context-journey-01
+Branch: codex/r2-ar04-live-admission-hf01
+Code commit: ae74ef505849deed65677fed1dd45e13f7b1dad3
+Provider requests: 0; Provider cost: USD 0.00; external MCP: 0
+
+1) Mock binding, Provider path/response, full Assistant-boundary, task ID, and frozen-gate suite
+Command:
+python -m pytest -q docs/evidence/r2-ar04-live-admission-hf01/test_live_admission_hf01.py -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-mock-binding-hf01
+Exit: 0
+Result: 32 passed in 13.37s.
+
+2) Existing remaining-gate and ABC Adapter regression suite
+Command:
+python -m pytest -q docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py docs/evidence/abc-live-env-unblock-01/test_abc_runner.py -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-mock-binding-existing
+Exit: 0
+Result: 19 passed in 35.04s.
+
+3) Fresh full two-case Mock run using the Runner's fixed default path
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py mock
+Exit: 0
+Result: 2/2 cases; 4 Mock summaries; 2 Mock answers; 6 total Mock requests; zero Provider requests; USD 0.00. Output is `docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_06/`. Runner SHA-256 `019cdc40c7b81aa425beaeeb37f766e3e898eb5de41a057692a6510bd643708c` exactly matches the Runner source committed at `ae74ef5`.
+
+4) Preflight using the default pinned Mock path
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --output docs/evidence/r2-ar04-remaining-live-exec-01/LIVE_PREFLIGHT_DEFAULT.json
+Exit: 0
+Result: `READY_FOR_NEW_LIVE_AUTHORIZATION`; bound path `docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_06/MOCK_RESULTS.json`; Mock SHA-256 `eb816117c24da41f5df8c409fe1fcca2fb483438fc9dd19db9178a9c3f4f4734`; Provider 0; USD 0.00; no authorization created.
+
+5) Preflight using the explicit same Mock path
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --mock-results docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_06/MOCK_RESULTS.json --output docs/evidence/r2-ar04-remaining-live-exec-01/LIVE_PREFLIGHT_EXPLICIT.json
+Exit: 0
+Result: `READY_FOR_NEW_LIVE_AUTHORIZATION`; path and Mock SHA-256 exactly match the default-path Preflight.
+
+6) Wrong Mock file rejected at CLI boundary
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --mock-results docs/evidence/r2-ar04-live-admission-hf01/mock_run_05/MOCK_RESULTS.json --output docs/evidence/r2-ar04-remaining-live-exec-01/REJECTED_WRONG_PATH_PREFLIGHT.json
+Result: JSON status `BLOCKED`, reason `AUTH_MOCK_RESULTS_PATH_MISMATCH`; native Python exit code 2; output file not created.
+
+7) Current committed frozen gate
+Command:
+python -X utf8 -c "import runpy; m=runpy.run_path('docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py'); x=m['_task_assert_frozen'](); print({'status':'PASS','head':x.get('candidate_head_at_check'),'adapter_blob':x.get('provider_adapter_blob'),'historical_files_match_base':x.get('protected_historical_files_match_base')})"
+Exit: 0
+Result: HEAD `ae74ef505849deed65677fed1dd45e13f7b1dad3`; frozen Gate PASS; production blobs and historical files match their pins.
+
+8) Source/artifact integrity
+- `mock_run_04` SHA-256 remained `4fd424b215276916b97f7eb47c70a04be324385cba7f01636eb744d36d6df219`.
+- `mock_run_05` SHA-256 remained `7cf2086a0e894c94a2947f049fc7f5ed5b1c4e3be7bb0201cfc2008a974bfb49`.
+- New Mock trace parsed as 12 valid JSONL events, including six `SEND_STARTED` events; compressed trace SHA-256 is recorded in source evidence and the file is preserved in mock_run_06.
+- `git diff --check` passed before commit. Final evidence changes are JSON/text only; no protected input or production path changed.
+
+Not run by design: official price lookup for a future Live send, effective authorization creation, API authentication, real Provider requests, semantic scoring, external MCP, production database access, and business writes. Stop at A pending independent review.
