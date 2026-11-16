@@ -32,6 +32,8 @@ import run_v2 as v2
 
 TASK = "R2-AR04-REMAINING-LIVE-GATE-01"
 BASE_SHA = "fa4cd8a7ea6dd36babccbbfc5fcdb7a179729fd3"
+REVIEW_TASK_ID = "R2-AR04-LIVE-ADMISSION-HF-01"
+REVIEW_BASE_SHA = "bf9e5d84f4aa2e57d1f195dbe7933d74c5586a3b"
 CASE_MATRIX = ("Q02-B", "Q06-B")
 SUMMARY_REQUEST_LIMIT = 4
 ANSWER_REQUEST_LIMIT = 2
@@ -48,6 +50,8 @@ PRICE_VERSION = "deepseek-v4.1-flash-1017-peak-2026-11-15"
 MODEL_VERSION = "DeepSeek-V4.1-Flash-1017"
 CHAT_BLOB = "f78ff94586af56b94b9585c5e7f8abeb5b006ad6"
 ASSISTANT_BLOB = "288559c6e9b77549939501f4cedb1a8097a79918"
+ABC_RUNNER_PATH = ROOT / "docs/evidence/abc-live-env-unblock-01/run_abc_eval.py"
+ABC_RUNNER_BLOB = "479c5f0e4724eea9dfa12ed025c438f3a9f9b85c"
 MOCK_DIR = EVIDENCE_DIR / "mock_run_04"
 MOCK_RESULTS_PATH = MOCK_DIR / "MOCK_RESULTS.json"
 PREFLIGHT_PATH = EVIDENCE_DIR / "PREFLIGHT.json"
@@ -103,7 +107,10 @@ FROZEN_SOURCE_FILES = {
 
 def _git(*args: str) -> str:
     import subprocess
-    return subprocess.check_output(["git", *args], cwd=ROOT, text=True, stderr=subprocess.STDOUT).strip()
+    return subprocess.check_output(
+        ["git", "-c", "core.safecrlf=false", *args],
+        cwd=ROOT, text=True, stderr=subprocess.STDOUT,
+    ).strip()
 
 
 def _task_assert_frozen() -> dict[str, Any]:
@@ -112,15 +119,21 @@ def _task_assert_frozen() -> dict[str, Any]:
     try:
         _git("cat-file", "-e", f"{BASE_SHA}^{{commit}}")
         _git("merge-base", "--is-ancestor", BASE_SHA, "HEAD")
+        _git("cat-file", "-e", f"{REVIEW_BASE_SHA}^{{commit}}")
+        _git("merge-base", "--is-ancestor", REVIEW_BASE_SHA, "HEAD")
     except Exception as error:
         raise GateStop("TASK_BASE_MISSING_OR_NOT_ANCESTOR") from error
     if _git("rev-list", "--merges", f"{BASE_SHA}..HEAD"):
         raise GateStop("MERGE_AFTER_TASK_BASE_BLOCKED")
     allowed = f"docs/evidence/{EVIDENCE_DIR.name}/"
+    review_evidence = "docs/evidence/r2-ar04-live-admission-hf01/"
+    adapter_path = "docs/evidence/abc-live-env-unblock-01/run_abc_eval.py"
     for diff_args in (("diff", "--name-only", BASE_SHA, "--"),
                       ("diff", "--cached", "--name-only", BASE_SHA, "--")):
         changed = [p for p in _git(*diff_args).splitlines() if p]
-        outside = [p for p in changed if not p.startswith(allowed)]
+        outside = [p for p in changed if not (
+            p.startswith(allowed) or p.startswith(review_evidence) or p == adapter_path
+        )]
         if outside:
             raise GateStop("TASK_DIFF_OUTSIDE_NEW_EVIDENCE:" + ",".join(outside))
     with _task_contract():
@@ -130,6 +143,9 @@ def _task_assert_frozen() -> dict[str, Any]:
         "opspilot/assistant.py": ASSISTANT_BLOB,
     }:
         raise GateStop("CURRENT_PRODUCTION_BLOB_PIN_MISMATCH")
+    actual_adapter_blob = _git("hash-object", f"--path={adapter_path}", adapter_path)
+    if actual_adapter_blob != ABC_RUNNER_BLOB:
+        raise GateStop("PROVIDER_ADAPTER_BLOB_DRIFT")
     governance = {
         "PROJECT_NORTH_STAR.md": "43dabda468506717c6956e676dfad4304c4f38e6",
         "AGENTS.md": "807b928686a4dd2cac7b15b3c354b9943c93c910",
@@ -141,8 +157,11 @@ def _task_assert_frozen() -> dict[str, Any]:
         raise GateStop("GOVERNANCE_BLOB_DRIFT")
     return {
         "task_base_sha": BASE_SHA,
+        "review_task_id": REVIEW_TASK_ID,
+        "review_base_sha": REVIEW_BASE_SHA,
         "candidate_head_at_check": _git("rev-parse", "HEAD"),
         "production_blobs": freeze["production_blobs"],
+        "provider_adapter_blob": actual_adapter_blob,
         "governance_blobs": actual,
         "frozen_input_sha256": freeze["frozen_input_sha256"],
         "protected_historical_files_match_base": all(
@@ -381,7 +400,8 @@ def _strict_mock_passed(result: dict[str, Any], *, require_task_metrics: bool = 
     if not require_task_metrics:
         return True
     return bool(
-        actual == expected and len(grants) == len(CASE_MATRIX)
+        actual == expected and result.get("review_task_id") == REVIEW_TASK_ID
+        and len(grants) == len(CASE_MATRIX)
         and all(g.get("max_output_tokens") == SUMMARY_OUTPUT_TOKENS for g in grants)
         and sum(g.get("total_limit_usd_micro", 0) for g in grants) == SHARED_GRANT_RESERVE_USD_MICRO
         and result.get("runner_sha256") == _sha256(Path(__file__).read_bytes())
@@ -414,6 +434,7 @@ def run_mock(output: Path = MOCK_DIR, *, scenario: dict[str, str] | None = None)
     result.update({
         "schema_version": 1,
         "task": TASK,
+        "review_task_id": REVIEW_TASK_ID,
         "base_sha": BASE_SHA,
         "candidate_head_at_run": _git("rev-parse", "HEAD"),
         "runner_sha256": _sha256(Path(__file__).read_bytes()),
@@ -440,7 +461,7 @@ def run_mock(output: Path = MOCK_DIR, *, scenario: dict[str, str] | None = None)
 
 
 AUTH_FIELDS = {
-    "schema_version", "authorization_id", "task", "base_sha", "actual_live_send_authorized",
+    "schema_version", "authorization_id", "task", "review_task_id", "base_sha", "actual_live_send_authorized",
     "authorized_at_utc", "expires_at_utc", "provider", "model_alias", "published_model_version",
     "case_order", "summary_request_limit", "answer_request_limit", "provider_request_limit",
     "hard_cap_usd_micro", "automatic_retries", "external_mcp", "tool_choice", "max_input_tokens_per_request",
@@ -471,6 +492,8 @@ def validate_authorization_manifest(manifest: dict[str, Any], *, now: datetime |
         raise GateStop("NEW_TASK_SPECIFIC_LIVE_AUTHORIZATION_REQUIRED")
     if set(manifest) != AUTH_FIELDS:
         raise GateStop("AUTH_MANIFEST_SCHEMA_MISMATCH")
+    if manifest.get("review_task_id") != REVIEW_TASK_ID:
+        raise GateStop("AUTH_REVIEW_TASK_ID_MISMATCH")
     if manifest.get("schema_version") != 1 or manifest.get("actual_live_send_authorized") is not True:
         raise GateStop("LIVE_SEND_CONSENT_REQUIRED")
     if not isinstance(manifest.get("authorization_id"), str) or not manifest["authorization_id"].strip():
@@ -517,6 +540,7 @@ def validate_authorization_manifest(manifest: dict[str, Any], *, now: datetime |
     pins = manifest.get("artifact_pins")
     if not isinstance(pins, dict) or set(pins) != {
         "runner_sha256", "mock_results_sha256", "source_manifest_sha256", "chat_blob", "assistant_blob",
+        "provider_adapter_blob",
     }:
         raise GateStop("AUTH_ARTIFACT_PINS_SCHEMA_MISMATCH")
     current_pins = {
@@ -526,6 +550,7 @@ def validate_authorization_manifest(manifest: dict[str, Any], *, now: datetime |
         if (EVIDENCE_DIR / "SOURCE_MANIFEST.json").is_file() else None,
         "chat_blob": CHAT_BLOB,
         "assistant_blob": ASSISTANT_BLOB,
+        "provider_adapter_blob": ABC_RUNNER_BLOB,
     }
     if pins != current_pins:
         raise GateStop("AUTH_ARTIFACT_OR_PRODUCTION_BLOB_DRIFT")
@@ -550,6 +575,7 @@ def _mock_passed(path: Path) -> tuple[dict[str, Any], bool]:
     result = json.loads(path.read_text(encoding="utf-8"))
     valid = bool(result.get("case_matrix_passed") and _strict_mock_passed(result))
     valid = valid and result.get("task") == TASK and result.get("base_sha") == BASE_SHA
+    valid = valid and result.get("review_task_id") == REVIEW_TASK_ID
     return result, valid
 
 
@@ -574,11 +600,21 @@ def run_preflight(mock_path: Path = MOCK_RESULTS_PATH, output_path: Path = PREFL
     else:
         legacy_reuse_blocked = False
         legacy_rejection = "UNEXPECTEDLY_ACCEPTED"
-    ready = bool(env_ready and budget_ready and legacy_reuse_blocked)
+    review_id_probe = {"task": REVIEW_TASK_ID, "base_sha": BASE_SHA}
+    try:
+        validate_authorization_manifest(review_id_probe)
+    except GateStop as error:
+        review_id_reuse_blocked = error.args[0] == "NEW_TASK_SPECIFIC_LIVE_AUTHORIZATION_REQUIRED"
+        review_id_rejection = error.args[0]
+    else:
+        review_id_reuse_blocked = False
+        review_id_rejection = "UNEXPECTEDLY_ACCEPTED"
+    ready = bool(env_ready and budget_ready and legacy_reuse_blocked and review_id_reuse_blocked)
     report = {
         **raw,
         "schema_version": 1,
         "task": TASK,
+        "review_task_id": REVIEW_TASK_ID,
         "base_sha": BASE_SHA,
         "status": "READY_FOR_NEW_LIVE_AUTHORIZATION" if ready else "BLOCKED_BEFORE_PROVIDER_SEND",
         "technical_preflight_passed": ready,
@@ -603,6 +639,8 @@ def run_preflight(mock_path: Path = MOCK_RESULTS_PATH, output_path: Path = PREFL
         "mock_case_matrix_passed": passed,
         "historical_authorization_reuse_blocked": legacy_reuse_blocked,
         "historical_authorization_rejection": legacy_rejection,
+        "review_task_id_rejected_as_authorization_identity": review_id_reuse_blocked,
+        "review_task_id_rejection": review_id_rejection,
         "new_authorization_created": False,
         "actual_provider_requests_sent": 0,
         "provider_requests_sent": 0,
@@ -651,7 +689,7 @@ def run_live(authorization_path: Path, *, mock_path: Path = MOCK_RESULTS_PATH,
                 live_preflight={"technical_preflight_passed": True, **preflight},
             )
         result.update({
-            "task": TASK, "base_sha": BASE_SHA,
+            "task": TASK, "review_task_id": REVIEW_TASK_ID, "base_sha": BASE_SHA,
             "authorization_manifest_sha256": auth_summary["authorization_manifest_sha256"],
             "request_caps": list(_ACTIVE_METRICS["request_caps"]),
             "runtime_grant_caps": list(_ACTIVE_METRICS["grants"]),

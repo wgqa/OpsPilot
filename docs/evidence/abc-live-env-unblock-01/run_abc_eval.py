@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -85,6 +85,75 @@ class RunnerStop(RuntimeError):
     pass
 
 
+def _provider_endpoint_signature(value: str) -> tuple[str, str, int, str] | None:
+    """Accept only the configured DeepSeek origin and its documented API base paths."""
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return None
+    host = parsed.hostname.lower() if parsed.hostname else ""
+    if (
+        parsed.scheme.lower() != "https"
+        or host != "api.deepseek.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or port not in {None, 443}
+        or parsed.path not in {"", "/", "/v1", "/v1/"}
+    ):
+        return None
+    base_path = "/v1" if parsed.path.rstrip("/") == "/v1" else ""
+    return "https", host, 443, base_path
+
+
+def _request_matches_provider_endpoint(request: httpx.Request, expected_endpoint: str) -> bool:
+    expected = _provider_endpoint_signature(expected_endpoint)
+    if expected is None:
+        return False
+    try:
+        parsed = urlsplit(str(request.url))
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    host = parsed.hostname.lower() if parsed.hostname else ""
+    actual_port = 443 if port is None else port
+    expected_path = expected[3] + "/chat/completions"
+    raw_path = request.url.raw_path.partition(b"?")[0]
+    host_header = request.headers.get("host")
+    valid_host_header = host_header is None or host_header.lower() in {
+        expected[1], f"{expected[1]}:443",
+    }
+    return bool(
+        request.method == "POST"
+        and parsed.scheme.lower() == expected[0]
+        and host == expected[1]
+        and actual_port == expected[2]
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.query
+        and not parsed.fragment
+        and parsed.path == expected_path
+        and raw_path == expected_path.encode("ascii")
+        and valid_host_header
+    )
+
+
+def _response_contains_tool_call(choices: Any) -> bool:
+    if not isinstance(choices, list):
+        return False
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        if choice.get("finish_reason") == "tool_calls":
+            return True
+        message = choice.get("message")
+        if isinstance(message, dict) and ("tool_calls" in message or "function_call" in message):
+            return True
+    return False
+
+
 def canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -146,7 +215,7 @@ def _canonicalize_official_endpoint() -> bool:
     another host/path into an allowed endpoint.
     """
     raw = os.environ.get("OPSPILOT_MODEL_BASE_URL", "").strip()
-    parsed = urlparse(raw)
+    parsed = urlsplit(raw)
     if (
         parsed.scheme != "https" or parsed.hostname != "api.deepseek.com"
         or parsed.port not in (None, 443) or parsed.username is not None
@@ -454,7 +523,8 @@ class BudgetedAsyncTransport(httpx.AsyncBaseTransport):
 
     def __init__(self, *, inner: httpx.AsyncBaseTransport, ledger: GlobalBudgetLedger,
                  case_id: str, mode: str, trace_path: Path, secret: str = "",
-                 question_row: dict[str, Any] | None = None):
+                 question_row: dict[str, Any] | None = None,
+                 expected_endpoint: str = ENDPOINT):
         self.inner = inner
         self.ledger = ledger
         self.case_id = case_id
@@ -462,6 +532,7 @@ class BudgetedAsyncTransport(httpx.AsyncBaseTransport):
         self.trace_path = trace_path
         self.secret = secret
         self.question_row = question_row or {}
+        self.expected_endpoint = expected_endpoint
         self._send_lock = threading.Lock()
         self.calls: list[dict[str, Any]] = []
 
@@ -472,9 +543,9 @@ class BudgetedAsyncTransport(httpx.AsyncBaseTransport):
             raise RunnerStop("REQUEST_BODY_INVALID_JSON") from error
         if not isinstance(payload, dict):
             raise RunnerStop("REQUEST_BODY_NOT_OBJECT")
-        url = request.url
-        if (request.method != "POST" or url.scheme != "https" or url.host != "api.deepseek.com"
-                or url.path != "/chat/completions" or url.query or url.fragment):
+        if not _request_matches_provider_endpoint(request, self.expected_endpoint):
+            raise RunnerStop("PROVIDER_ENDPOINT_OR_METHOD_MISMATCH")
+        if request.method != "POST":
             raise RunnerStop("PROVIDER_ENDPOINT_OR_METHOD_MISMATCH")
         if payload.get("model") != MODEL or payload.get("thinking") != {"type": "disabled"}:
             raise RunnerStop("FROZEN_MODEL_OR_THINKING_MODE_MISMATCH")
@@ -554,6 +625,39 @@ class BudgetedAsyncTransport(httpx.AsyncBaseTransport):
                 })
                 raise
 
+            if 300 <= http_status < 400:
+                # Do not expose a redirect response to the SDK: a configured
+                # follow_redirects policy must not create a second request to
+                # a destination selected by Provider response headers.
+                response_digest = sha256(raw_response)
+                stored_response = _redact_bytes(raw_response, self.secret)
+                response_id = str(response_headers.get("x-request-id") or "") or None
+                self.ledger.finish(
+                    logical_id, status="USAGE_UNKNOWN", http_status=http_status,
+                    provider_request_id=response_id, response_model=None, usage=None,
+                    settled_usd_micro=None, finish_reason=None,
+                    error=f"HTTP_{http_status}_REDIRECT_NOT_FOLLOWED",
+                    stop_reason="PROVIDER_REDIRECT_BLOCKED",
+                )
+                append_gzip_jsonl(self.trace_path, {
+                    "event": "RESPONSE_REDIRECT_BLOCKED",
+                    "mode": self.mode,
+                    "case_id": self.case_id,
+                    "logical_id": logical_id,
+                    "purpose": purpose,
+                    "request_body_sha256": body_digest,
+                    "response_body_sha256": response_digest,
+                    "http_status": http_status,
+                    "provider_request_id": response_id,
+                    "usage": None,
+                    "status": "USAGE_UNKNOWN",
+                    "stop_reason": "PROVIDER_REDIRECT_BLOCKED",
+                    "redirect_location_recorded": False,
+                    "authorization_header_recorded": False,
+                    "response_body": stored_response.decode("utf-8", errors="replace"),
+                })
+                raise RunnerStop("PROVIDER_REDIRECT_BLOCKED")
+
             secret_in_response = bool(self.secret and self.secret.encode("utf-8") in raw_response)
             stored_response = _redact_bytes(raw_response, self.secret)
             response_digest = sha256(raw_response)
@@ -566,7 +670,7 @@ class BudgetedAsyncTransport(httpx.AsyncBaseTransport):
                     logical_id, status="USAGE_UNKNOWN", http_status=http_status,
                     provider_request_id=None, response_model=None, usage=None,
                     settled_usd_micro=None, finish_reason=None,
-                    error="RESPONSE_BODY_INVALID", stop_reason="RESPONSE_BODY_OR_USAGE_INVALID",
+                    error="RESPONSE_BODY_INVALID", stop_reason="PROVIDER_RESPONSE_INVALID",
                 )
                 append_gzip_jsonl(self.trace_path, {
                     "event": "RESPONSE_INVALID",
@@ -577,17 +681,19 @@ class BudgetedAsyncTransport(httpx.AsyncBaseTransport):
                     "response_body": stored_response.decode("utf-8", errors="replace"),
                     "authorization_header_recorded": False,
                 })
-                return httpx.Response(http_status, headers={"content-type": "application/json"}, content=stored_response, request=request)
+                raise RunnerStop("PROVIDER_RESPONSE_INVALID")
 
             choices = response_payload.get("choices")
-            choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+            choice = choices[0] if isinstance(choices, list) and len(choices) == 1 and isinstance(choices[0], dict) else {}
             message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
             finish_reason = choice.get("finish_reason") if isinstance(choice.get("finish_reason"), str) else None
+            tool_response = _response_contains_tool_call(choices)
             provider_id = str(response_payload.get("id") or "") or None
             response_model = str(response_payload.get("model") or "") or None
             usage = _response_usage(response_payload)
             settled = None
-            if usage is not None and usage["input_tokens"] <= MAX_INPUT_TOKENS and usage["output_tokens"] <= MAX_OUTPUT_TOKENS:
+            if (usage is not None and usage["input_tokens"] <= MAX_INPUT_TOKENS
+                    and usage["output_tokens"] <= int(payload["max_tokens"])):
                 settled = _ceil_cost_micro(usage["input_tokens"], usage["output_tokens"])
 
             stop_reason = None
@@ -601,12 +707,16 @@ class BudgetedAsyncTransport(httpx.AsyncBaseTransport):
                 stop_reason, status, error_code = "PROVIDER_USAGE_OVER_TOKEN_CAP", "USAGE_VIOLATION", "USAGE_EXCEEDS_REQUEST_CAP"
             elif response_model not in {MODEL, MODEL_VERSION, MODEL_VERSION.lower()}:
                 stop_reason, status, error_code = "PROVIDER_MODEL_VERSION_DRIFT", "MODEL_DRIFT", "RESPONSE_MODEL_MISMATCH"
+            elif tool_response or finish_reason == "tool_calls":
+                stop_reason, status, error_code = "UNEXPECTED_TOOL_CALL", "TOOL_CALL_BLOCKED", "TOOL_CALL_NOT_EXECUTED"
+            elif not isinstance(choices, list) or len(choices) != 1:
+                stop_reason, status, error_code = "PROVIDER_RESPONSE_INVALID", "RESPONSE_INVALID", "CHOICE_COUNT_OR_SHAPE_INVALID"
+            elif message.get("role") != "assistant" or not isinstance(message.get("content"), str):
+                stop_reason, status, error_code = "PROVIDER_RESPONSE_INVALID", "RESPONSE_INVALID", "ASSISTANT_TEXT_CONTENT_INVALID"
             elif finish_reason != "stop":
                 stop_reason, status, error_code = "PROVIDER_OUTPUT_NOT_COMPLETE", "INCOMPLETE", f"FINISH_REASON_{finish_reason or 'MISSING'}"
             elif secret_in_response:
                 stop_reason, status, error_code = "SECRET_IN_PROVIDER_RESPONSE", "REDACTED_RESPONSE", "SECRET_REDACTED_FROM_RESPONSE"
-            elif isinstance(message.get("tool_calls"), list) and message["tool_calls"]:
-                stop_reason, status, error_code = "UNEXPECTED_TOOL_CALL", "TOOL_CALL_BLOCKED", "TOOL_CALL_NOT_EXECUTED"
             elif purpose == "SUMMARY" and not isinstance(message.get("content"), str):
                 stop_reason, status, error_code = "SUMMARY_CONTENT_INVALID", "SUMMARY_INVALID", "SUMMARY_CONTENT_MISSING"
             elif purpose == "SUMMARY":
@@ -653,18 +763,11 @@ class BudgetedAsyncTransport(httpx.AsyncBaseTransport):
                 "response_payload": response_payload,
                 "authorization_header_recorded": False,
             })
-            if stop_reason == "UNEXPECTED_TOOL_CALL":
-                # Preserve the original Provider response in the trace but never
-                # return a tool call to the Assistant's local MCP dispatcher.
-                blocked = dict(response_payload)
-                blocked_choices = [dict(item) for item in choices]
-                blocked_message = dict(message)
-                blocked_message.pop("tool_calls", None)
-                blocked_message["content"] = "[evaluation stopped: unexpected tool call suppressed]"
-                blocked_choices[0]["message"] = blocked_message
-                blocked_choices[0]["finish_reason"] = "stop"
-                blocked["choices"] = blocked_choices
-                stored_response = canonical(blocked).encode("utf-8")
+            if stop_reason:
+                # Keep Provider usage, response ID, status, and body in the
+                # durable evaluation trace and ledger, but never return a
+                # nonconforming response to the Assistant or tool dispatcher.
+                raise RunnerStop(stop_reason)
             return httpx.Response(
                 http_status,
                 headers={"content-type": str(response_headers.get("content-type", "application/json"))},
@@ -774,6 +877,7 @@ async def _run_case(*, case_root: Path, case_id: str, question_id: str, group: s
         transport = BudgetedAsyncTransport(
             inner=inner, ledger=ledger, case_id=case_id, mode=mode,
             trace_path=trace_path, secret=api_key, question_row=question_row,
+            expected_endpoint=config["endpoint"],
         )
         sync_forbidden = httpx.MockTransport(
             lambda _request: (_ for _ in ()).throw(AssertionError("sync Provider transport forbidden"))
@@ -1118,6 +1222,7 @@ async def _run_case_with_mock_factory(*, case_root: Path, case_id: str, question
         budgeted = BudgetedAsyncTransport(
             inner=inner, ledger=ledger, case_id=case_id, mode="MOCK",
             trace_path=trace_path, secret="offline-only-not-a-real-key", question_row=question_row,
+            expected_endpoint=config["endpoint"],
         )
         sync_forbidden = httpx.MockTransport(
             lambda _request: (_ for _ in ()).throw(AssertionError("sync Provider transport forbidden"))
