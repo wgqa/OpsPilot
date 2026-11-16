@@ -1,0 +1,50 @@
+R2-AR04-STOP-B-EVIDENCE-SCOPE-HF-02 — zero-cost test and preflight log
+Base: d9d432a9de1c434ba8864d988b3047cd982f439b
+Implementation commit: cf46d6ffba872257124fc993c21ccd7a33b7435e
+Provider requests: 0; Provider cost: USD 0.00; external MCP: 0
+
+1) Focused freeze allowlist / simulated drift regressions
+Command:
+python -m pytest -q docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py::test_task_freeze_allows_approved_execution_evidence_and_rejects_other_evidence docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py::test_simulated_historical_frozen_file_drift_remains_blocked docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py::test_production_blob_drift_is_not_accepted -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-stopb-scope-hf02-targeted
+Exit: 0
+Result: 3 passed in 1.71s.
+
+2) Full related Gate, HF-01 admission, Provider Adapter, URL, response, Task ID and Runtime Grant regressions
+Command:
+python -m pytest -q docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py docs/evidence/r2-ar04-live-admission-hf01/test_live_admission_hf01.py docs/evidence/abc-live-env-unblock-01/test_abc_runner.py -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-stopb-scope-hf02-related
+Exit: 0
+Result: 53 passed in 49.33s.
+
+3) Full two-case Mock CLI run (new fixed default mock_run_07)
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py mock
+Exit: 0
+Result: Q02-B and Q06-B passed; four Mock summaries, two Mock answers; zero Provider requests/cost and zero MCP. Runner SHA-256 equals the Runner SHA in MOCK_RESULTS.json.
+
+4) Post-implementation-commit Mock regeneration attempt
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py mock
+Exit: 1
+Result: `FileExistsError` from `exist_ok=False` because mock_run_07 already exists. It stopped before any output file write; the completed Mock artifact was preserved and verified. The original run already has the exact current Runner SHA-256. This attempt did not send a Provider request.
+
+5) Exploratory Preflight probes before implementation commit (same modified Runner bytes)
+Commands:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --output docs/evidence/r2-ar04-remaining-live-exec-01/LIVE_PREFLIGHT_HF02_DEFAULT.json
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --mock-results docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_07/MOCK_RESULTS.json --output docs/evidence/r2-ar04-remaining-live-exec-01/LIVE_PREFLIGHT_HF02_EXPLICIT.json
+Exit: 0 for both
+Result: Both returned READY_FOR_NEW_LIVE_AUTHORIZATION and bound the same mock_run_07 path and digest. These are retained as preliminary probes; post-commit checks follow.
+
+6) Default-path Preflight after implementation commit
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --output docs/evidence/r2-ar04-remaining-live-exec-01/LIVE_PREFLIGHT_HF02_CODE_DEFAULT.json
+Exit: 0
+Result: READY_FOR_NEW_LIVE_AUTHORIZATION; Mock path and digest match fixed mock_run_07; no effective authorization or Provider send.
+
+7) Explicit same-path Preflight after implementation commit
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --mock-results docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_07/MOCK_RESULTS.json --output docs/evidence/r2-ar04-remaining-live-exec-01/LIVE_PREFLIGHT_HF02_CODE_EXPLICIT.json
+Exit: 0
+Result: READY_FOR_NEW_LIVE_AUTHORIZATION; exact same bound path and Mock digest as default Preflight.
+
+8) Rechecks required after final candidate evidence commit
+Run `_task_assert_frozen()` directly and run default plus explicit-path Preflight against mock_run_07 after the final candidate commit. No authorization creation or Live mode is part of this task.
