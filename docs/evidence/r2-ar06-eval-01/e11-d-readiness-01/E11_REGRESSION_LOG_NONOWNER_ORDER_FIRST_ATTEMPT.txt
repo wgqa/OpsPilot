@@ -1,0 +1,174 @@
+.......................F                                                 [100%]
+================================== FAILURES ===================================
+___ test_m203_09_real_web_route_requires_owner_and_exposes_submit_operation ___
+
+demo_db = WindowsPath('D:/OpsPilot-LIVE-02-FIX-01-HF02/.pytest-e11-d-readiness-regression-20261116e/test_m203_09_real_web_route_re0/domain.sqlite3')
+live_api = 'http://127.0.0.1:64525'
+
+    def test_m203_09_real_web_route_requires_owner_and_exposes_submit_operation(
+        demo_db: Path, live_api: str,
+    ) -> None:
+        ready = _make_ready_draft(demo_db, live_api, "m203-09")
+        with connect(demo_db) as connection:
+            connection.execute(
+                "INSERT INTO trusted_operators(actor_id,tenant_id,role) VALUES('support-a-peer','tenant-a','SUPPORT')",
+            )
+        module = importlib.import_module("opspilot.web.app")
+        app = module.create_app(
+            db_path=demo_db,
+            start_worker=False,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+        )
+        with TestClient(app, raise_server_exceptions=False) as client:
+            login = client.post(
+                "/api/auth/login",
+                headers={"Origin": ORIGIN},
+                json={"actor_id": "support-a", "password": PASSWORDS["support-a"]},
+            )
+            assert login.status_code == 200
+            headers = {
+                "Origin": ORIGIN,
+                "X-CSRF-Token": login.json()["csrf_token"],
+                "Idempotency-Key": "m203-operation-web-09",
+            }
+            task_id = str(ready["task_id"])
+            handoff = client.get(f"/api/tasks/{task_id}/handoff")
+            assert handoff.status_code == 200, handoff.text
+            draft = ready["draft"]
+            assert isinstance(draft, dict)
+            response = client.post(
+                f"/api/tasks/{task_id}/handoff/submit",
+                headers=headers,
+                json={
+                    "operation_id": "m203-operation-web-09",
+                    "draft_id": draft["draft_id"],
+                    "draft_digest": draft["content_digest"],
+                    "expected_control_revision": ready["control_revision"],
+                    "handoff_kind": "SCOPE_REVIEW",
+                },
+            )
+            assert response.status_code == 202, response.text
+            assert response.json()["business_outcome"] == "SCOPE_ESCALATED"
+            receipt_id = response.json()["receipt_id"]
+            replay = client.post(
+                f"/api/tasks/{task_id}/handoff/submit",
+                headers=headers,
+                json={
+                    "operation_id": "m203-operation-web-09",
+                    "draft_id": draft["draft_id"],
+                    "draft_digest": draft["content_digest"],
+                    "expected_control_revision": ready["control_revision"],
+                    "handoff_kind": "SCOPE_REVIEW",
+                },
+            )
+            assert replay.status_code == 200 and replay.json()["replayed"] is True
+            assert replay.json()["receipt_id"] == receipt_id
+    
+            altered = client.post(
+                f"/api/tasks/{task_id}/handoff/submit",
+                headers={**headers, "Idempotency-Key": "m203-operation-web-09-other"},
+                json={
+                    "operation_id": "m203-operation-web-09-other",
+                    "draft_id": draft["draft_id"],
+                    "draft_digest": "0" * 64,
+                    "expected_control_revision": ready["control_revision"],
+                    "handoff_kind": "SCOPE_REVIEW",
+                },
+            )
+            assert altered.status_code == 409 and altered.json() == {"code": "QUEUE_ALREADY_ACCEPTED"}
+    
+            extra_field = client.post(
+                f"/api/tasks/{task_id}/handoff/submit",
+                headers={**headers, "Idempotency-Key": "m203-operation-web-extra"},
+                json={
+                    "operation_id": "m203-operation-web-extra",
+                    "draft_id": draft["draft_id"],
+                    "draft_digest": draft["content_digest"],
+                    "expected_control_revision": ready["control_revision"],
+                    "handoff_kind": "SCOPE_REVIEW",
+                    "receiver": "attacker-controlled",
+                },
+            )
+            assert extra_field.status_code == 422 and extra_field.json() == {"code": "INVALID_REQUEST"}
+            mismatch = client.post(
+                f"/api/tasks/{task_id}/handoff/submit",
+                headers={**headers, "Idempotency-Key": "different-key"},
+                json={
+                    "operation_id": "m203-operation-web-mismatch",
+                    "draft_id": draft["draft_id"],
+                    "draft_digest": draft["content_digest"],
+                    "expected_control_revision": ready["control_revision"],
+                    "handoff_kind": "SCOPE_REVIEW",
+                },
+            )
+            assert mismatch.status_code == 422 and mismatch.json() == {"code": "IDEMPOTENCY_KEY_MISMATCH"}
+    
+            forbidden_origin = client.post(
+                f"/api/tasks/{task_id}/handoff/submit",
+                headers={**headers, "Origin": "http://evil.example"},
+                json={
+                    "operation_id": "m203-operation-web-origin",
+                    "draft_id": draft["draft_id"],
+                    "draft_digest": draft["content_digest"],
+                    "expected_control_revision": ready["control_revision"],
+                    "handoff_kind": "SCOPE_REVIEW",
+                },
+            )
+            assert forbidden_origin.status_code == 403
+            forbidden_csrf = client.post(
+                f"/api/tasks/{task_id}/handoff/submit",
+                headers={**headers, "X-CSRF-Token": "invalid"},
+                json={
+                    "operation_id": "m203-operation-web-csrf",
+                    "draft_id": draft["draft_id"],
+                    "draft_digest": draft["content_digest"],
+                    "expected_control_revision": ready["control_revision"],
+                    "handoff_kind": "SCOPE_REVIEW",
+                },
+            )
+            assert forbidden_csrf.status_code == 403
+    
+            # A natural-language chat message remains read-only and cannot enqueue work.
+            chat = client.post(
+                f"/api/sessions/{ready['session_id']}/messages",
+                headers={**headers, "Idempotency-Key": "m203-chat-says-submit"},
+                json={"body": "�õģ��ύ��", "task_id": task_id, "input_kind": "CHAT_READONLY"},
+            )
+            assert chat.status_code == 202, chat.text
+    
+            approver = TestClient(app, raise_server_exceptions=False)
+            support_b = TestClient(app, raise_server_exceptions=False)
+            support_peer = TestClient(app, raise_server_exceptions=False)
+            try:
+                peer_headers = _login_for_test(support_peer, "support-a-peer")
+                assert support_peer.get(f"/api/tasks/{task_id}/handoff").status_code == 404
+                non_owner_submit = support_peer.post(
+                    f"/api/tasks/{task_id}/handoff/submit",
+                    headers={**peer_headers, "Idempotency-Key": "m203-operation-web-non-owner"},
+                    json={
+                        "operation_id": "m203-operation-web-non-owner",
+                        "draft_id": draft["draft_id"],
+                        "draft_digest": draft["content_digest"],
+                        "expected_control_revision": ready["control_revision"],
+                        "handoff_kind": "SCOPE_REVIEW",
+                    },
+                )
+                assert non_owner_submit.status_code == 403
+>               assert _counts(demo_db, task_id) == {
+                    "queue": 0, "receipts": 0, "submit_outbox": 0, "commands": 0, "scope_writes": 0,
+                }
+E               AssertionError: assert {'queue': 1, ...ands': 1, ...} == {'queue': 0, ...ands': 0, ...}
+E                 
+E                 Omitting 1 identical items, use -vv to show
+E                 Differing items:
+E                 {'commands': 1} != {'commands': 0}
+E                 {'queue': 1} != {'queue': 0}
+E                 {'submit_outbox': 1} != {'submit_outbox': 0}
+E                 {'receipts': 1} != {'receipts': 0}
+E                 Use -v to get more diff
+
+tests\test_m2_03_handoff.py:638: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_m2_03_handoff.py::test_m203_09_real_web_route_requires_owner_and_exposes_submit_operation
+1 failed, 23 passed in 20.94s

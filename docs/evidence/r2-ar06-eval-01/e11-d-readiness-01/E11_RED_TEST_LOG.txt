@@ -1,0 +1,72 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________ test_ar05_same_session_assistant_to_s2_handoff_receipt ____________
+
+demo_db = WindowsPath('D:/OpsPilot-LIVE-02-FIX-01-HF02/.pytest-e11-d-readiness-red-20261116c/test_ar05_same_session_assista0/domain.sqlite3')
+tmp_path = WindowsPath('D:/OpsPilot-LIVE-02-FIX-01-HF02/.pytest-e11-d-readiness-red-20261116c/test_ar05_same_session_assista0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000021DF2BA7BB0>
+
+    def test_ar05_same_session_assistant_to_s2_handoff_receipt(
+        demo_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Formal API -> Assistant -> Task Worker -> task-bound MCP -> trusted S2 Queue."""
+        import opspilot.investigator as investigator
+    
+        question = _frozen_e11_question()
+        reset_fixture(demo_db, "S2_SCOPE_DENIED")
+        _S2InvestigatorFixture.instances.clear()
+        _install_scope_write_audit(demo_db)
+        monkeypatch.setattr(investigator, "ChatOpenAI", _S2InvestigatorFixture)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-placeholder")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "offline-deterministic-model")
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_LEGACY_PROVIDER_ENABLED", "1")
+        checkpoint_db = tmp_path / "ar05-s2-checkpoint.sqlite3"
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=checkpoint_db,
+            start_worker=False,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=_AssistantAnswerModel,
+        )
+    
+        def dispatch(run_id: str) -> None:
+            worker = SingleInstanceWorker(demo_db)
+            worker.acquire()
+            worker.register()
+            try:
+                selected = next_worker_run(demo_db)
+                assert selected is not None and str(selected["run_id"]) == run_id
+                asyncio.run(_dispatch_run(
+                    demo_db, checkpoint_db, worker.owner_id, "executor-a", selected,
+                    worker_epoch=worker.epoch, assistant_model_factory=_AssistantAnswerModel,
+                ))
+            finally:
+                worker.release()
+    
+        with TestClient(app, raise_server_exceptions=False) as client:
+            headers = _login(client)[1]
+            session_id = _session(client, headers)
+    
+            chat = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "ar05-s2-original-question"},
+                json={"body": question, "task_id": None},
+            )
+            assert chat.status_code == 202, chat.text
+            origin_message_id = str(chat.json()["message_id"])
+            dispatch(str(chat.json()["run_id"]))
+            chat_run = client.get(f"/api/runs/{chat.json()['run_id']}").json()
+            assert chat_run["execution_core"] == "ASSISTANT_V1"
+>           assert chat_run["status"] == "SUCCEEDED", chat_run
+E           AssertionError: {'run_id': 'run-3f32da60-b2c6-46c8-899c-004dd8b1beaf', 'task_id': None, 'session_id': 'session-b842a144-1619-4564-bc81-0511412051ea', 'source_message_id': 'message-9267c82d-f6fe-45a6-8c7c-cdff420e7ea2', ...}
+E           assert 'FAILED' == 'SUCCEEDED'
+E             
+E             - SUCCEEDED
+E             + FAILED
+
+tests\test_ar05_s2_assistant_handoff_01.py:214: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar05_s2_assistant_handoff_01.py::test_ar05_same_session_assistant_to_s2_handoff_receipt
+1 failed in 3.31s

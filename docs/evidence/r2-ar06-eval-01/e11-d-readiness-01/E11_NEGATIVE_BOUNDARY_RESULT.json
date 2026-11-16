@@ -1,0 +1,60 @@
+{
+  "suite_result": {
+    "command": "python -m pytest -q tests/test_ar05_s2_assistant_handoff_01.py tests/test_m2_02_s2_diagnosis.py tests/test_m2_03_handoff.py --basetemp=.pytest-e11-d-readiness-regression-20261116h",
+    "passed": 24,
+    "failed": 0
+  },
+  "coverage": [
+    {
+      "boundary": "403 without matching current Authz",
+      "test": "test_m2_02_403_probe_without_matching_current_authz_never_diagnoses",
+      "expected": "NEED_MORE; no DiagnosisReceipt or draft",
+      "introduced_here": true
+    },
+    {
+      "boundary": "stale/mismatched prior Authz after a newer Probe",
+      "test": "test_m2_02_latest_probe_supersedes_stale_probe_and_old_request_evidence",
+      "expected": "NEED_MORE until Authz for the latest Request ID; old request cannot diagnose",
+      "introduced_assertion_here": true
+    },
+    {
+      "boundary": "401 vs 404 vs stale grant/policy",
+      "test": "test_m2_02_s2_gate_keeps_401_404_and_stale_policy_distinct",
+      "expected": "401 remains S1; 404 inconclusive; stale versions need fresh evidence",
+      "existing regression": true
+    },
+    {
+      "boundary": "bad Draft digest / stale Control Revision",
+      "test": "test_m203_submit_rejects_bad_draft_digest_and_control_revision_before_write",
+      "expected": "DRAFT_STALE / TASK_CONTROL_STALE; no Queue, Receipt, Outbox, Command, or Scope write",
+      "introduced_here": true
+    },
+    {
+      "boundary": "non-owner SUPPORT read/submit",
+      "test": "test_m203_09_real_web_route_requires_owner_and_exposes_submit_operation",
+      "expected": "same-tenant non-owner GET hidden as 404 and submit denied 403, no side effects",
+      "introduced_here": true
+    },
+    {
+      "boundary": "cross-tenant/approver/owner route rules",
+      "test": "test_m203_09_real_web_route_requires_owner_and_exposes_submit_operation",
+      "expected": "existing route checks remain in the passing regression",
+      "existing regression": true
+    },
+    {
+      "boundary": "idempotent submit and lost-response replay",
+      "test": "test_m203_06_two_os_processes_racing_one_business_key_create_one_receipt; test_m203_11_precommit_failure_points_roll_back_and_postcommit_loss_replays",
+      "expected": "single business Receipt/Queue/Outbox; replay returns existing Receipt",
+      "existing regression": true
+    },
+    {
+      "boundary": "ordinary chat does not implicitly bind task or submit handoff",
+      "test": "test_ar05_same_session_assistant_to_s2_handoff_receipt",
+      "expected": "ordinary CHAT_READONLY completes with durable linked answer; task is created only by explicit Task API action",
+      "introduced_here": true
+    }
+  ],
+  "provider_requests": 0,
+  "external_business_writes": 0,
+  "production_code_changed": false
+}

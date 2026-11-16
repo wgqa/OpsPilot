@@ -43,7 +43,7 @@ def _install_scope_write_audit(db_path: Path) -> None:
 
 
 def _capture_s2_probe(
-    db_path: Path, live_api: str, scenario: str, prefix: str,
+    db_path: Path, live_api: str, scenario: str, prefix: str, *, include_authz: bool = True,
 ) -> tuple[str, str, dict[str, object], list[str]]:
     reset_fixture(db_path, scenario)  # type: ignore[arg-type]
     identity = trusted_identity(db_path, "support-a")
@@ -81,7 +81,7 @@ def _capture_s2_probe(
         status="OK", result=probe,
     )
     evidence_ids = [str(probe_observation["evidence_id"])]
-    if probe["facts"]["http_status"] == 403:
+    if probe["facts"]["http_status"] == 403 and include_authz:
         request_id = str(probe["facts"]["request_id"])
         authz = get_scope_authz_facts_fact(db_path, task_id, request_id)
         authz_attempt, _ = reserve_attempt(
@@ -289,6 +289,30 @@ def test_m2_02_s2_gate_keeps_401_404_and_stale_policy_distinct(
         ).fetchone()[0] == 0
 
 
+def test_m2_02_403_probe_without_matching_current_authz_never_diagnoses(
+    demo_db: Path, live_api: str,
+) -> None:
+    """HTTP 403 is only a symptom until same-Run current Authz matches its request."""
+    from opspilot.domain.s2_diagnosis import evaluate_s2_evidence_gate
+
+    task_id, run_id, probe, evidence = _capture_s2_probe(
+        demo_db, live_api, "S2_SCOPE_DENIED", "m2-02-probe-only", include_authz=False,
+    )
+    assert probe["facts"]["http_status"] == 403
+    gate = evaluate_s2_evidence_gate(demo_db, task_id, evidence, run_id=run_id)
+    assert gate["decision"] == "NEED_MORE"
+    assert gate["reason_code"] == "S2_CURRENT_AUTHZ_DECISION_REQUIRED"
+    assert gate["missing_predicates"] == ["matching_scope_authz_decision"]
+    assert gate["request_id"] == probe["facts"]["request_id"]
+    with connect(demo_db) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM s2_diagnosis_receipts WHERE task_id=?", (task_id,),
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM s2_handoff_drafts WHERE task_id=?", (task_id,),
+        ).fetchone()[0] == 0
+
+
 def test_m2_02_stale_s2_evidence_at_exhausted_budget_is_terminal(
     demo_db: Path, live_api: str,
 ) -> None:
@@ -354,6 +378,11 @@ def test_m2_02_latest_probe_supersedes_stale_probe_and_old_request_evidence(
         status="OK", result=fresh_probe,
     )
     request_id = str(fresh_probe["facts"]["request_id"])
+    unmatched_gate = evaluate_s2_evidence_gate(demo_db, task_id, run_id=run_id)
+    assert unmatched_gate["decision"] == "NEED_MORE"
+    assert unmatched_gate["reason_code"] == "S2_CURRENT_AUTHZ_DECISION_REQUIRED"
+    assert unmatched_gate["request_id"] == request_id
+
     authz = get_scope_authz_facts_fact(demo_db, task_id, request_id)
     authz_attempt, _ = reserve_attempt(
         demo_db, task_id, "MCP", MAX_MCP_ATTEMPTS, call_id="m2-02-current-probe-authz-call",

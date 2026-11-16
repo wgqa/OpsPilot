@@ -1,0 +1,19 @@
+Base: c960becd81c277e6fae9b2f1c4b8a5691ebcbb62
+
+RED (before test-only bind_tools compatibility fix):
+  python -m pytest -q tests/test_ar05_s2_assistant_handoff_01.py --basetemp=.pytest-e11-d-readiness-red-20261116c
+  1 failed in 3.31s; CHAT_READONLY Run FAILED with ASSISTANT_STOP:NotImplementedError:, no response ID, no Usage, 0 durable answer rows. See E11_RED_RESULT.json and E11_RED_TEST_LOG.txt.
+
+GREEN (after test fixture fix and stronger persistence assertions):
+  $env:AR05_S2_HANDOFF_TRACE_PATH='docs/evidence/r2-ar06-eval-01/e11-d-readiness-01/E11_ASSISTANT_AND_TASK_TRACE.json'; python -m pytest -q tests/test_ar05_s2_assistant_handoff_01.py --basetemp=.pytest-e11-d-readiness-green-20261116d
+  1 passed in 5.07s. The persisted trace contains both successful Runs and the local submit boundary.
+
+Final affected regression:
+  python -m pytest -q tests/test_ar05_s2_assistant_handoff_01.py tests/test_m2_02_s2_diagnosis.py tests/test_m2_03_handoff.py --basetemp=.pytest-e11-d-readiness-regression-20261116h
+  24 passed, 0 failed in 20.15s.
+
+Preserved intermediate failures: E11_REGRESSION_LOG_NONOWNER_FIRST_ATTEMPT.txt and E11_REGRESSION_LOG_NONOWNER_ORDER_FIRST_ATTEMPT.txt document test expectation/setup corrections; the route returns 404 for hidden read and 403 for non-owner submit. They were corrected in tests only.
+
+All pytest base directories were isolated. Pre-existing E10 and E11 pytest folders were left untouched.
+Provider HTTP requests: 0. Runtime Grants created: 0. External business writes: 0.
+Fixture usage metadata only: 292 input + 70 output = 362 tokens; this is not Provider Usage or billed spend.

@@ -36,6 +36,7 @@ from opspilot.domain.task_control import (
 
 PASSWORDS = {
     "support-a": "support-test-password",
+    "support-a-peer": "support-a-peer-test-password",
     "approver-a": "approver-test-password",
     "support-b": "support-b-test-password",
     "approver-b": "approver-b-test-password",
@@ -320,6 +321,24 @@ def test_m203_05_same_operation_with_changed_payload_is_rejected_without_side_ef
     assert _counts(demo_db, str(ready["task_id"]))["submit_outbox"] == 1
 
 
+def test_m203_submit_rejects_bad_draft_digest_and_control_revision_before_write(
+    demo_db: Path, live_api: str,
+) -> None:
+    for prefix, override, expected_code in (
+        ("m203-bad-digest", {"draft_digest": "0" * 64}, "DRAFT_STALE"),
+        ("m203-bad-revision", None, "TASK_CONTROL_STALE"),
+    ):
+        ready = _make_ready_draft(demo_db, live_api, prefix)
+        if override is None:
+            override = {"expected_control_revision": int(ready["control_revision"]) + 1}
+        with pytest.raises(Exception) as error:
+            _submit(demo_db, ready, f"{prefix}-operation", **override)
+        assert getattr(error.value, "code", None) == expected_code
+        assert _counts(demo_db, str(ready["task_id"])) == {
+            "queue": 0, "receipts": 0, "submit_outbox": 0, "commands": 0, "scope_writes": 0,
+        }
+
+
 def test_m203_07_current_policy_change_invalidates_frozen_draft_before_handoff(
     demo_db: Path, live_api: str,
 ) -> None:
@@ -470,6 +489,10 @@ def test_m203_09_real_web_route_requires_owner_and_exposes_submit_operation(
     demo_db: Path, live_api: str,
 ) -> None:
     ready = _make_ready_draft(demo_db, live_api, "m203-09")
+    with connect(demo_db) as connection:
+        connection.execute(
+            "INSERT INTO trusted_operators(actor_id,tenant_id,role) VALUES('support-a-peer','tenant-a','SUPPORT')",
+        )
     module = importlib.import_module("opspilot.web.app")
     app = module.create_app(
         db_path=demo_db,
@@ -494,6 +517,25 @@ def test_m203_09_real_web_route_requires_owner_and_exposes_submit_operation(
         assert handoff.status_code == 200, handoff.text
         draft = ready["draft"]
         assert isinstance(draft, dict)
+        with TestClient(app, raise_server_exceptions=False) as support_peer:
+            peer_headers = _login_for_test(support_peer, "support-a-peer")
+            assert support_peer.get(f"/api/tasks/{task_id}/handoff").status_code == 404
+            non_owner_submit = support_peer.post(
+                f"/api/tasks/{task_id}/handoff/submit",
+                headers={**peer_headers, "Idempotency-Key": "m203-operation-web-non-owner"},
+                json={
+                    "operation_id": "m203-operation-web-non-owner",
+                    "draft_id": draft["draft_id"],
+                    "draft_digest": draft["content_digest"],
+                    "expected_control_revision": ready["control_revision"],
+                    "handoff_kind": "SCOPE_REVIEW",
+                },
+            )
+            assert non_owner_submit.status_code == 403
+            assert _counts(demo_db, task_id) == {
+                "queue": 0, "receipts": 0, "submit_outbox": 0, "commands": 0, "scope_writes": 0,
+            }
+
         response = client.post(
             f"/api/tasks/{task_id}/handoff/submit",
             headers=headers,
