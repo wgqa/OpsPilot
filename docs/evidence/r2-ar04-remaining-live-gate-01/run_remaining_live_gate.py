@@ -176,9 +176,12 @@ def _task_contract():
     names = (
         "BASE_SHA", "TASK", "CASE_MATRIX", "REQUEST_CAP", "MAX_OUTPUT_TOKENS",
         "SUMMARY_OUTPUT_CAP_TOKENS", "CHAT_BLOB", "ASSISTANT_BLOB", "FROZEN_REPLY_SOURCES",
-        "_mock_matrix_passed", "build_runner",
+        "_mock_matrix_passed", "build_runner", "PROTECTED_DIFF_PATHS",
     )
     previous = {name: getattr(v2, name) for name in names}
+    adapter_scope = "docs/evidence/abc-live-env-unblock-01"
+    if previous["PROTECTED_DIFF_PATHS"].count(adapter_scope) != 1:
+        raise GateStop("V2_PROTECTED_PATH_LAYOUT_DRIFT")
     v2.BASE_SHA = BASE_SHA
     v2.TASK = TASK
     v2.CASE_MATRIX = CASE_MATRIX
@@ -188,6 +191,12 @@ def _task_contract():
     v2.CHAT_BLOB = CHAT_BLOB
     v2.ASSISTANT_BLOB = ASSISTANT_BLOB
     v2.FROZEN_REPLY_SOURCES = {case: previous["FROZEN_REPLY_SOURCES"][case] for case in CASE_MATRIX}
+    # The outer task gate permits only the exact adapter file in this directory;
+    # remove the broad directory pathspec here so V2 can still enforce all other
+    # protected paths and its pinned historical-file hashes.
+    v2.PROTECTED_DIFF_PATHS = tuple(
+        path for path in previous["PROTECTED_DIFF_PATHS"] if path != adapter_scope
+    )
     v2._mock_matrix_passed = lambda result: _strict_mock_passed(
         result, require_task_metrics="request_caps" in result,
     )

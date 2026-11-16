@@ -51,5 +51,9 @@ Adapter 先记录 Provider 响应、Usage、Response ID、状态和 Trace，再�
 
 - 未做真实 Provider 身份验证、实时价格核验或模型语义评分。
 - 一次宽泛的 `pytest -k ar04` 扫描因长用例无进展被中止，退出码 1，不计为 PASS；本报告只认定列明的定向回归结果。
-- 开发过程中早期预检和 Mock Digest 曾失败；相关初始 JSON/Mock 输出保留在本目录，没有覆盖。最终结论仅引用新鲜 `mock_run_04` 和 `LIVE_PREFLIGHT_04_FINAL.json`。
+- 开发过程中早期预检和 Mock Digest 曾失败；相关初始 JSON/Mock 输出保留在本目录，没有覆盖。首次候选引用 `mock_run_04`；后续冻结门禁复核后，以 `mock_run_05` 和 `LIVE_PREFLIGHT_05_FINAL.json` 作为最新结果。
 - 不修改生产 Context / Assistant / Domain 逻辑；不改历史结果；不合并 main。
+
+## 后续冻结门禁复核
+
+提交后的直接冻结检查发现 V2 的目录级保护与本任务唯一允许修改的 Provider Adapter 路径冲突。已在任务适配层为该目录级 pathspec 加入精确例外；外层任务门禁仍只准许 Adapter 文件，V2 的其他保护路径和历史文件哈希检查继续生效。完整复现、修复及新鲜运行记录见 [VERIFICATION_ADDENDUM.md](VERIFICATION_ADDENDUM.md) 与 [TEST_RUN_02.txt](TEST_RUN_02.txt)。最终复核使用 `mock_run_05` 和 `LIVE_PREFLIGHT_05_FINAL.json`，结果仍为零费用 `READY_FOR_NEW_LIVE_AUTHORIZATION`。

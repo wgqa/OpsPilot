@@ -1,0 +1,52 @@
+R2-AR04-LIVE-ADMISSION-HF-01 post-push freeze recheck
+Worktree: D:\学习\agent新项目\.worktrees\ar04a-context-journey-01
+Previous candidate HEAD at recheck: 2be4729fa10b02ad4562ab5d0169fdcf271b3e8e
+Provider requests: 0; Provider cost: USD 0.00
+
+Finding reproduction before the fix:
+
+1) Direct frozen-gate call
+Command:
+python -c "import runpy; m=runpy.run_path('docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py'); x=m['_task_assert_frozen'](); print({'freeze':'PASS','base_sha':x.get('base_sha')})"
+Exit: 1
+Result: V2Stop: PRODUCTION_OR_HISTORICAL_EVIDENCE_DIFF_FROM_BASE.
+
+2) Exact frozen-gate regression test
+Command:
+python -m pytest -q docs/evidence/r2-ar04-live-admission-hf01/test_live_admission_hf01.py::test_adapter_source_is_pinned_and_only_task_scoped_paths_are_allowed -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-admission-hf01-frozen-check
+Exit: 1
+Result: failed before the fix with the same V2 protected-directory error.
+
+Post-fix verification:
+
+3) Exact frozen-gate regression test
+Command:
+python -m pytest -q docs/evidence/r2-ar04-live-admission-hf01/test_live_admission_hf01.py::test_adapter_source_is_pinned_and_only_task_scoped_paths_are_allowed -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-admission-hf01-frozen-check-02
+Exit: 0
+Result: 1 passed in 0.94s.
+
+4) HF-01 route, redirect, response validation, authorization and Assistant-boundary tests
+Command:
+python -m pytest -q docs/evidence/r2-ar04-live-admission-hf01/test_live_admission_hf01.py -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-admission-hf01-final-tests-04
+Exit: 0
+Result: 31 passed in 12.73s.
+
+5) Existing remaining-gate and ABC Adapter regressions
+Command:
+python -m pytest -q docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py docs/evidence/abc-live-env-unblock-01/test_abc_runner.py -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-admission-hf01-existing-04
+Exit: 0
+Result: 19 passed in 35.43s.
+
+6) Fresh full Mock matrix; output path is new and does not overwrite earlier runs
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py mock --output docs/evidence/r2-ar04-live-admission-hf01/mock_run_05
+Exit: 0
+Result: COMPLETED; Q02-B and Q06-B succeeded; four summaries; two answers; six Mock requests; zero Provider requests; zero MCP. Runner source SHA-256: f60fa228a2fe8530963c66b18bd5674ecdf8465dd96d1886d05a3d3937da5647.
+
+7) Fresh zero-cost preflight bound to mock_run_05
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --mock-results docs/evidence/r2-ar04-live-admission-hf01/mock_run_05/MOCK_RESULTS.json --output docs/evidence/r2-ar04-live-admission-hf01/LIVE_PREFLIGHT_05_FINAL.json
+Exit: 0
+Result: READY_FOR_NEW_LIVE_AUTHORIZATION; Mock matrix passed; runtime Grant bindable; new authorization not created; live dispatch not performed; zero Provider requests; USD 0.00. Official prices still require a fresh check before any future send.
+
+Original `TEST_RUN.txt`, prior Mock runs, failed preflight artifacts and historical experiment records were not changed.
