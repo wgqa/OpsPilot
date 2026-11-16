@@ -1,0 +1,67 @@
+R2-AR04-LIVE-PRESEND-ROOTCAUSE-01 — offline verification record
+
+Checkout
+  Branch: codex/r2-ar04-live-admission-hf01
+  Base: fa4cd8a7ea6dd36babccbbfc5fcdb7a179729fd3
+  Evidence HEAD at start: aa43f7f4e88898299c97cb8df793dd9ef76a9fcf
+  No branch reset or worktree creation performed.
+
+Historical baseline reproduction (performed before changing the Runner)
+  Method: isolated Python harness calling the real Assistant/Domain run_cases path
+          with mode=LIVE, a test-only authorization validator, and a forced
+          httpx.MockTransport in place of AsyncHTTPTransport.
+  Frozen input: Q02-B, 29 rows, history SHA-256
+                b949ffd93d2aa019c5e22fe59720a5c8bd6ea34b82bf8e7e371dd9289f943b67.
+  Pre-fix Runner SHA-256: e31956fb0ec381458f5271d4ccbf580daf36a54c69737ee8fcd59eba65976a1e.
+  Result: request cap passed at 1024; test-only auth stub passed; nested freeze
+          check raised GateStop/V2_PROTECTED_PATH_LAYOUT_DRIFT; Mock handler 0;
+          ledger starts 0; Domain stored CHAT_CONTEXT_COMPRESSION_FAILED.
+  Provider requests: 0. Output retained only redacted metadata/digests; no Prompt,
+  API key, Authorization header, or authorization manifest was saved.
+
+Initial test attempts (retained for transparency)
+  Command: pytest -q docs/evidence/r2-ar04-live-presend-rootcause-01/test_live_presend_rootcause.py docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py
+  Exit: 1. Result: 10 passed, 6 setup errors. Pytest's default Windows temp root
+  raised PermissionError (WinError 5) before the affected tests could start.
+
+  Command: pytest -q --basetemp=.pytest-rootcauses-01 docs/evidence/r2-ar04-live-presend-rootcause-01/test_live_presend_rootcause.py docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py
+  Exit: 1. Result: 17 passed, 1 failed because the in-repository basetemp caused
+  `_mock_results_reference()` to return a repository-relative path while the
+  existing assertion expected an absolute path. This was a test-environment path
+  assumption, not a runtime failure.
+
+  Command: pytest -q --basetemp=.pytest-tmp-presend-2 docs/evidence/r2-ar04-live-presend-rootcause-01/test_live_presend_rootcause.py::test_live_shaped_assistant_path_is_fully_intercepted_by_mock_transport
+  Exit: 0. Result: 1 passed in 17.36s. A later full run supersedes this focused run.
+
+Final relevant regression suite
+  Command: pytest -q --basetemp=..\pytest-ar04-presend-final2 docs/evidence/r2-ar04-live-presend-rootcause-01/test_live_presend_rootcause.py docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py
+  Exit: 0. Result: 19 passed in 59.33s.
+  Coverage: reentrant frozen check; safe error-code boundary; stale mock digest
+  rejection; exact new evidence-prefix allowance; full two-case Assistant/Domain
+  Live-shaped replay with six forced MockTransport responses; adapter Blob drift
+  stops before dispatch; output caps; source revocation; UNKNOWN/no-retry; old
+  authorization rejection; frozen path and production Blob protections.
+
+Intermediate isolated Mock evidence after the first Runner change
+  `mock_run_08` was generated before adding the exact root-cause evidence-prefix
+  allowance. It is preserved unchanged and is not accepted by the final Runner.
+  SHA-256: 0e1c7892380fd45545f06aab1c9c99b3d6a2841a012a7630923e81346bcc4b49.
+
+Final isolated Mock evidence bound to the final Runner
+  Command: python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py mock --output docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_09
+  Exit: 0 (`mock_exit=0`). Result: case_matrix_passed=true; 6 Mock requests;
+  Provider requests 0; cost USD 0.00. Mock runs 04 through 08 were not changed.
+  Runner SHA-256: 5e7cd43b83de56f37504d82f95da3880ac57c262044a4edba8e3525ab2427923
+  MOCK_RESULTS SHA-256: 1ecff482b0ce8089c47c9d8fd42d206b46b0076a995a8b4a0cf74bec7c66938a
+
+Zero-cost preflight
+  Command: python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --output docs/evidence/r2-ar04-live-presend-rootcause-01/PREFLIGHT.json
+  Exit: 0. Status: READY_FOR_NEW_LIVE_AUTHORIZATION. No new authorization was
+  created, no paid identity check was performed, Provider requests 0, cost USD
+  0.00, external MCP 0, production DB writes 0. The preflight reused the frozen
+  prior price snapshot and explicitly requires a fresh official price check before
+  any future send.
+
+No `live` command was run. No valid Authorization Manifest was created or loaded.
+No real Provider, external MCP, business write, production code, Gold, historical
+Trace, old cost ledger, or C06 RED evidence was changed.

@@ -52,7 +52,7 @@ CHAT_BLOB = "f78ff94586af56b94b9585c5e7f8abeb5b006ad6"
 ASSISTANT_BLOB = "288559c6e9b77549939501f4cedb1a8097a79918"
 ABC_RUNNER_PATH = ROOT / "docs/evidence/abc-live-env-unblock-01/run_abc_eval.py"
 ABC_RUNNER_BLOB = "479c5f0e4724eea9dfa12ed025c438f3a9f9b85c"
-MOCK_DIR = EVIDENCE_DIR / "mock_run_07"
+MOCK_DIR = EVIDENCE_DIR / "mock_run_09"
 MOCK_RESULTS_PATH = MOCK_DIR / "MOCK_RESULTS.json"
 PREFLIGHT_PATH = EVIDENCE_DIR / "PREFLIGHT.json"
 LIVE_RUN_PATH = EVIDENCE_DIR / "live_run_01"
@@ -60,6 +60,15 @@ LIVE_RUN_PATH = EVIDENCE_DIR / "live_run_01"
 
 class GateStop(RuntimeError):
     """A frozen input, budget or authorization boundary stopped the run."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        # Assistant's context-compression boundary preserves only safe error
+        # codes. Keep path-bearing diagnostics in the exception message, but
+        # expose only a bounded identifier across that boundary.
+        if (isinstance(reason, str) and len(reason) <= 100 and reason.isascii()
+                and reason.replace("_", "").isalnum()):
+            self.code = reason
 
 
 def _sha256(value: bytes | str) -> str:
@@ -148,13 +157,15 @@ def _task_assert_frozen() -> dict[str, Any]:
     allowed = f"docs/evidence/{EVIDENCE_DIR.name}/"
     review_evidence = "docs/evidence/r2-ar04-live-admission-hf01/"
     execution_evidence = "docs/evidence/r2-ar04-remaining-live-exec-01/"
+    root_cause_evidence = "docs/evidence/r2-ar04-live-presend-rootcause-01/"
     adapter_path = "docs/evidence/abc-live-env-unblock-01/run_abc_eval.py"
     for diff_args in (("diff", "--name-only", BASE_SHA, "--"),
                       ("diff", "--cached", "--name-only", BASE_SHA, "--")):
         changed = [p for p in _git(*diff_args).splitlines() if p]
         outside = [p for p in changed if not (
             p.startswith(allowed) or p.startswith(review_evidence)
-            or p.startswith(execution_evidence) or p == adapter_path
+            or p.startswith(execution_evidence) or p.startswith(root_cause_evidence)
+            or p == adapter_path
         )]
         if outside:
             raise GateStop("TASK_DIFF_OUTSIDE_NEW_EVIDENCE:" + ",".join(outside))
@@ -193,8 +204,23 @@ def _task_assert_frozen() -> dict[str, Any]:
     }
 
 
+_TASK_CONTRACT_DEPTH = 0
+
+
 @contextmanager
 def _task_contract():
+    global _TASK_CONTRACT_DEPTH
+    if _TASK_CONTRACT_DEPTH:
+        # _task_assert_frozen() re-enters this context while the outer task
+        # contract is active. The outer entry has already checked the
+        # adapter path layout and installed the narrowed V2 protected paths.
+        _TASK_CONTRACT_DEPTH += 1
+        try:
+            yield
+        finally:
+            _TASK_CONTRACT_DEPTH -= 1
+        return
+
     names = (
         "BASE_SHA", "TASK", "CASE_MATRIX", "REQUEST_CAP", "MAX_OUTPUT_TOKENS",
         "SUMMARY_OUTPUT_CAP_TOKENS", "CHAT_BLOB", "ASSISTANT_BLOB", "FROZEN_REPLY_SOURCES",
@@ -307,9 +333,11 @@ def _task_contract():
         return (legacy, abc, *rest)
 
     v2.build_runner = build_task_runner
+    _TASK_CONTRACT_DEPTH = 1
     try:
         yield
     finally:
+        _TASK_CONTRACT_DEPTH = 0
         for name, value in previous.items():
             setattr(v2, name, value)
 

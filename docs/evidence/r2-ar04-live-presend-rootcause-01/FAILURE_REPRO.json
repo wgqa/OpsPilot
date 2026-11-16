@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-LIVE-PRESEND-ROOTCAUSE-01",
+  "candidate_head_at_offline_reproduction": "aa43f7f4e88898299c97cb8df793dd9ef76a9fcf",
+  "failure_execution_head": "cd8b2a5055d2b5bd2dc219740cd14f99b2b702af",
+  "frozen_base": "fa4cd8a7ea6dd36babccbbfc5fcdb7a179729fd3",
+  "pre_fix_runner_sha256": "e31956fb0ec381458f5271d4ccbf580daf36a54c69737ee8fcd59eba65976a1e",
+  "historical_failure": {
+    "evidence": "docs/evidence/r2-ar04-remaining-live-gate-01/live_run_01/LIVE_RESULTS.json",
+    "sha256": "4b4915eee9f0fceec0dac560b1e95c10c6c13c44a6e6f01146d2427462f8eb3a",
+    "status": "STOPPED",
+    "stop_reason": "CHAT_CONTEXT_COMPRESSION_FAILED",
+    "case_id": "Q02-B",
+    "compression_attempts": 1,
+    "summary_request_cap_recorded": 1024,
+    "estimated_input_tokens": 6000,
+    "answer_manifest_present": false,
+    "provider_requests_started": 0,
+    "ledger": {
+      "evidence": "docs/evidence/r2-ar04-remaining-live-gate-01/live_run_01/COST_LEDGER.json",
+      "sha256": "9822ff1bd9109f9e821a8c191c6272f95ff7f5a7956049f5dc733fdfd7898ad9",
+      "all_slots_not_sent_final": true,
+      "send_started_events": 0
+    },
+    "historical_raw_exception_preserved": false
+  },
+  "frozen_q02b_inputs": {
+    "history_rows": 29,
+    "history_sha256": "b949ffd93d2aa019c5e22fe59720a5c8bd6ea34b82bf8e7e371dd9289f943b67",
+    "source_manifest_sha256": "c2ac084686f113eb0f9782557ff83eb4dd983007072de56512d065c2b83446ba",
+    "historical_trace_sha256": "80dab676295960017bf31ba25c1aef62657d0eb0c437aa0fa1f0f6f56a8da05c"
+  },
+  "pre_fix_offline_reproduction": {
+    "evidence_level": "ISOLATED_ASSISTANT_DOMAIN_RUN_WITH_HTTPX_MOCKTRANSPORT_AND_TEST_ONLY_AUTH_VALIDATOR",
+    "mode": "LIVE-shaped; actual HTTP transport replaced with MockTransport",
+    "model_alias": "deepseek-flash",
+    "endpoint_host": "api.deepseek.com",
+    "runtime_config": "nonsecret isolated ABC Mock config; model alias and endpoint match the frozen Runner, API key is an offline placeholder",
+    "authorization_manifest_created_or_loaded": false,
+    "authorization_validator_stub_calls": 1,
+    "mock_handler_calls": 0,
+    "provider_network_requests": 0,
+    "first_successful_checks": [
+      "request body JSON decode",
+      "SUMMARY purpose detection",
+      "_assert_request_cap(max_tokens=1024)",
+      "request_caps metric append",
+      "test-only authorization validator stub"
+    ],
+    "first_failed_check": {
+      "function": "_task_contract",
+      "condition": "PROTECTED_DIFF_PATHS must contain the broad adapter scope exactly once",
+      "observed_scope_count": 0,
+      "exception_type": "GateStop",
+      "error_code": "V2_PROTECTED_PATH_LAYOUT_DRIFT",
+      "pre_fix_source_line": 206
+    },
+    "not_reached": [
+      "PurposeCappedTransport parent _validate_request",
+      "BudgetedAsyncTransport._validate_request",
+      "GlobalBudgetLedger.next_slot",
+      "GlobalBudgetLedger.start_send",
+      "SEND_STARTED trace event",
+      "httpx.MockTransport handler"
+    ],
+    "assistant_domain_observation": {
+      "compression_attempt_status": "FAILED",
+      "compression_attempt_error_class": "CHAT_CONTEXT_COMPRESSION_FAILED",
+      "summary_id": null,
+      "answer_manifest_present": false
+    },
+    "captured_stack_frames": [
+      {"file": "run_remaining_live_gate.py", "line": 161, "function": "_task_assert_frozen"},
+      {"file": "contextlib.py", "line": 141, "function": "__enter__"},
+      {"file": "run_remaining_live_gate.py", "line": 206, "function": "_task_contract"}
+    ]
+  },
+  "mock_vs_live_path": {
+    "mock": {
+      "per_request_authorization_and_freeze_block": "SKIPPED_BY_MODE_BRANCH",
+      "parent_budget_validation_reached": true,
+      "ledger_start_send_reached": true,
+      "accepted_mock_run": "docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_07/MOCK_RESULTS.json",
+      "accepted_mock_sha256": "84bdf25e883215cb059ab1f82681ff9a0a1b26a9d0ca1e3dcb52a85b95b3b94b",
+      "recorded_mock_requests": 6,
+      "provider_requests": 0
+    },
+    "live_before_fix": {
+      "per_request_authorization_and_freeze_block": "EXECUTED",
+      "parent_budget_validation_reached": false,
+      "ledger_start_send_reached": false,
+      "mock_handler_calls": 0,
+      "provider_requests": 0
+    }
+  },
+  "post_fix_offline_replay": {
+    "runner_sha256": "5e7cd43b83de56f37504d82f95da3880ac57c262044a4edba8e3525ab2427923",
+    "mock_results_path": "docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_09/MOCK_RESULTS.json",
+    "mock_results_sha256": "1ecff482b0ce8089c47c9d8fd42d206b46b0076a995a8b4a0cf74bec7c66938a",
+    "evidence_level": "FULL_ASSISTANT_DOMAIN_PATH_WITH_HTTPX_MOCKTRANSPORT_AND_TEST_ONLY_AUTH_VALIDATOR",
+    "case_results": {"completed": 2, "total": 2},
+    "mock_transport_responses": 6,
+    "summary_requests": 4,
+    "answer_requests": 2,
+    "actual_provider_network_requests": 0,
+    "authorization_manifest_created_or_loaded": false,
+    "external_mcp_calls": 0,
+    "local_tool_observations": 0,
+    "target_facts_visible_with_source": true
+  },
+  "post_fix_negative_full_path": {
+    "injected_failure": "adapter Blob mismatch before dispatch",
+    "assistant_domain_error_class": "PROVIDER_ADAPTER_BLOB_DRIFT",
+    "request_cap_recorded": true,
+    "authorization_validator_stub_passed": true,
+    "mock_handler_calls": 0,
+    "ledger_send_started": false,
+    "later_case_started": false
+  },
+  "safety": {
+    "production_code_changed": false,
+    "gold_or_historical_trace_changed": false,
+    "historical_live_ledger_changed": false,
+    "ended_authorization_reused": false,
+    "new_paid_authorization_created": false,
+    "provider_requests": 0,
+    "cost_usd": "0.00",
+    "external_mcp_calls": 0,
+    "business_writes": 0
+  }
+}

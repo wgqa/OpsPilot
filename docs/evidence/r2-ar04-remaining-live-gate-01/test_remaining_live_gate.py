@@ -139,7 +139,7 @@ def test_shared_authorization_budget_enforces_reserve_floor_and_hard_ceiling():
 
 
 def test_task_freeze_allows_approved_execution_evidence_and_rejects_other_evidence(monkeypatch):
-    assert gate.MOCK_DIR.name == "mock_run_07"
+    assert gate.MOCK_DIR.name == "mock_run_09"
     freeze = gate._task_assert_frozen()
     assert freeze["candidate_head_at_check"] == gate._git("rev-parse", "HEAD")
 
@@ -153,6 +153,19 @@ def test_task_freeze_allows_approved_execution_evidence_and_rejects_other_eviden
     monkeypatch.setattr(gate, "_git", with_unapproved_evidence)
     with pytest.raises(gate.GateStop, match="TASK_DIFF_OUTSIDE_NEW_EVIDENCE:docs/evidence/unapproved-audit/INJECTED.json"):
         gate._task_assert_frozen()
+
+
+def test_task_freeze_allows_only_this_root_cause_evidence_prefix(monkeypatch):
+    original_git = gate._git
+
+    def with_root_cause_evidence(*args):
+        if args and args[0] == "diff" and "--name-only" in args:
+            return "docs/evidence/r2-ar04-live-presend-rootcause-01/FAILURE_REPRO.json"
+        return original_git(*args)
+
+    monkeypatch.setattr(gate, "_git", with_root_cause_evidence)
+    freeze = gate._task_assert_frozen()
+    assert freeze["candidate_head_at_check"] == gate._git("rev-parse", "HEAD")
 
 
 def test_simulated_historical_frozen_file_drift_remains_blocked(monkeypatch):
