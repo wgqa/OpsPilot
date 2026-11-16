@@ -1,0 +1,51 @@
+R2-AR06-E10-H-READINESS-01 — offline test log
+Date: 2026-11-16
+Base: 335346c3c96b06e3de65c70c1096eb5ae1961a6b
+Branch: codex/r2-ar06-e10-h-readiness-01
+
+Final GREEN
+===========
+1) E10 journey, isolated pytest temp DB:
+   python -m pytest tests/test_r2_ar06_e10_readiness.py -q --basetemp .pytest-e10-h-readiness-20261116-09
+   Result: 1 passed in 11.16s (pre-final no-observation control).
+
+2) Final E10 journey, isolated pytest temp DB, including taskless/no-memory/no-observation control:
+   python -m pytest tests/test_r2_ar06_e10_readiness.py -q --basetemp .pytest-e10-h-readiness-20261116-12
+   Result: 1 passed in 11.53s.
+
+3) Final E10 journey and evidence capture in newly initialized named Runtime:
+   Environment: OPSPILOT_E10_RUNTIME_NAME=user-demo-r2-e10h-readiness-02
+               OPSPILOT_E10_EVIDENCE_DIR=<absolute path to this evidence directory>
+   python -m pytest tests/test_r2_ar06_e10_readiness.py -q --basetemp .pytest-e10-h-readiness-20261116-13
+   Result: 1 passed in 11.68s. Runtime was absent before the command; initializer refused reuse. Runtime directory and its Domain/Checkpoint DB are retained.
+
+4) Related existing lifecycle and owner/tenant regressions:
+   python -m pytest tests/test_ar04b_memory_journey_01.py tests/test_m303_semantic_memory.py tests/test_c01_b2_a_personal_memory.py -q --basetemp .pytest-e10-h-readiness-20261116-06
+   Result: 29 passed in 115.86s.
+   Coverage includes AR04B cross-task Semantic Memory, cross-tenant exclusion, revoke before Provider boundary, revocation after checkpoint load, revocation after send blocking answer commit, Semantic Memory lifecycle, and Personal Memory owner isolation/settings.
+
+Distinct passing test cases: 30 total across the E10 journey (1/1) and related regression set (29/29). The final E10 journey was run against both an ephemeral DB and a distinct new named offline Runtime; the later .14 run revalidated the serialization change in an ephemeral DB. An earlier six-Run fixture iteration on `user-demo-r2-e10h-readiness-01` is retained separately; final evidence is from `-02`.
+
+Initial RED / harness diagnostics (all retained here; none was a production Memory failure)
+===========================================================================================
+- `python -m pytest tests/test_r2_ar06_e10_readiness.py -q` did not reach test setup: Windows denied enumeration of the default `%TEMP%\pytest-of-tu me manques` directory (`PermissionError: [WinError 5]`). All subsequent runs used a new, explicitly checked repository-local `--basetemp`; no historical pytest directory was cleaned or overwritten.
+- First repo-local harness run failed when the test reused the support CSRF headers after logging in as approver (`403 CSRF_REJECTED`). The fixture helper was corrected to re-authenticate support after the approver session replaced the test client's cookie.
+- Next harness run failed in evidence grouping with `TypeError: string indices must be integers`; event rows were corrected to group as lists by `memory_id`.
+- Next harness run asserted the wrong literal order name. The actual isolated MCP result was service `orders-async-demo`, order `ar02-order`; assertions now use the trusted binding, returned order ID and same Event ID.
+- First valid capture incorrectly aggregated `assistant_calls.usage_json` as a dict (stored shape is a list) and searched for a non-existent legacy context block ID. The actual request rows were inspected; aggregation now uses persisted per-call usage and the existing `EXTERNAL_GUIDANCE` Context block. Final evidence reports 228 Fixture tokens overall and 279 estimated Memory context tokens in the ON arm. No Provider usage was ever inferred from these values.
+- The framework stores a `provider_response_id` field even for the injected Fixture Model. The evidence projection aliases that value to `fixture_framework_trace_id` so it cannot be mistaken for a real Provider response identifier; no Provider was called.
+- Final no-memory/no-observation control had no TaskBinding, selected Memory or MCP call, and completed with an explicitly unknown business status.
+
+Security / side effects
+=======================
+- Final fixture model calls: 13; local read-only MCP calls: 6.
+- Real Provider sends: 0. Runtime Grants: 0. Spend rows: 0. Application and provider spend: USD 0.
+- Protected business writes (diagnosis, action intent, action ledger, handoff receipt): 0.
+- No Gold/Rubric/Evaluation Protocol change, no production source change, no E09 data access, no Live launcher, no browser automation, and no main merge.
+
+5) Final artifact serialization regression after adding the no-memory/no-observation Session and run references:
+   python -m py_compile tests/test_r2_ar06_e10_readiness.py
+   python -m pytest tests/test_r2_ar06_e10_readiness.py -q --basetemp .pytest-e10-h-readiness-20261116-14
+   Result: 1 passed in 12.51s. This used an ephemeral isolated DB and sent no Provider requests.
+
+Evidence cross-check: NO_MEMORY_NO_OBSERVATION run run-8c4fae0f-1fcc-441d-92cf-70a3478cd043 is linked to Session session-f03b5c92-d65c-4cc3-a632-578b181beef8; its persisted Context Manifest has zero selected Memory refs and zero TaskBinding. The named Runtime capture remains user-demo-r2-e10h-readiness-02; this last run validated artifact serialization without reusing or modifying that Runtime.
