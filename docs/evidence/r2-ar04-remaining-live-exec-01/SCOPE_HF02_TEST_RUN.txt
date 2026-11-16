@@ -46,5 +46,20 @@ python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py p
 Exit: 0
 Result: READY_FOR_NEW_LIVE_AUTHORIZATION; exact same bound path and Mock digest as default Preflight.
 
-8) Rechecks required after final candidate evidence commit
-Run `_task_assert_frozen()` directly and run default plus explicit-path Preflight against mock_run_07 after the final candidate commit. No authorization creation or Live mode is part of this task.
+8) Direct full freeze check and Preflight after evidence candidate commit `a9beb7d7a6aaaab731849d02ae23d6384260ee91`
+Direct freeze command:
+python -X utf8 -c "import sys,json; sys.path.insert(0,'docs/evidence/r2-ar04-remaining-live-gate-01'); import run_remaining_live_gate as g; x=g._task_assert_frozen(); print(json.dumps({'status':'PASS','candidate_head_at_check':x['candidate_head_at_check'],'task_base_sha':x['task_base_sha'],'production_blobs':x['production_blobs'],'provider_adapter_blob':x['provider_adapter_blob'],'governance_blobs':x['governance_blobs'],'protected_historical_files_match_base':x['protected_historical_files_match_base'],'protected_paths_diff_from_base':x['protected_paths_diff_from_base']}))"
+Exit: 0
+Result: PASS at HEAD `a9beb7d7a6aaaab731849d02ae23d6384260ee91`; both production blobs, Provider Adapter, governance blobs and protected-history checks matched; no protected-path diff.
+
+Default-path Preflight command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --output <OS_TEMP>\opspilot-stopb-hf02-final-candidate-default.json
+Exit: 0
+Result: READY_FOR_NEW_LIVE_AUTHORIZATION; fixed mock_run_07 path and SHA match; Runtime Grant bindable; no authorization, Provider request, MCP call or production write.
+
+Explicit same-path Preflight command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --mock-results docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_07/MOCK_RESULTS.json --output <OS_TEMP>\opspilot-stopb-hf02-final-candidate-explicit.json
+Exit: 0
+Result: READY_FOR_NEW_LIVE_AUTHORIZATION; exact same Mock path and SHA as default Preflight.
+
+No authorization creation or Live mode is part of this task. These direct checks occurred after candidate commit `a9beb7d`; this final test-log-only commit is followed by the same checks again.
