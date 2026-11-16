@@ -1,0 +1,30 @@
+Task: R2-AR04-REMAINING-LIVE-EXEC-01
+Candidate at send: cd8b2a5055d2b5bd2dc219740cd14f99b2b702af
+
+Pre-send checks:
+- git rev-parse HEAD / branch: PASS (cd8b2a5055d2b5bd2dc219740cd14f99b2b702af / codex/r2-ar04-live-admission-hf01)
+- remote branch read: PASS; exact SHA confirmed (cd8b2a5055d2b5bd2dc219740cd14f99b2b702af); one earlier read reset and a read-only retry succeeded
+- _task_assert_frozen / source manifest / protected blobs: PASS (captured in SEND_GATE.json and Runner results)
+- default and explicit same-Mock zero-cost Preflight: PASS; both bind mock_run_07 SHA 84bdf25e883215cb059ab1f82681ff9a0a1b26a9d0ca1e3dcb52a85b95b3b94b
+- official DeepSeek pricing/model check: PASS; snapshot PRICE_SNAPSHOT_LIVE.json
+- Runtime Grant binding / effective non-secret config: PASS; API key presence true, value not emitted
+- send gate: PASS; SEND_GATE.json
+
+Live command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py live --authorization <isolated local one-time manifest> --mock-results docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_07/MOCK_RESULTS.json --output docs/evidence/r2-ar04-remaining-live-gate-01/live_run_01
+Exit code: 1 (Runner recorded STOPPED; no Provider error response).
+
+Run evidence:
+- runner status: STOPPED
+- stop reason: CHAT_CONTEXT_COMPRESSION_FAILED
+- provider_requests_started: 0
+- summary/answer requests: 0/0
+- all 6 ledger slots: NOT_SENT_FINAL
+- settled/reserved/unknown cost: USD 0 / USD 0 / 0
+- Live Request Trace: not created; no SEND_STARTED event
+- Q02-B: STOPPED before first Provider dispatch; Q06-B: NOT_STARTED
+- no retries or subsequent Provider requests
+
+Operational preservation:
+- The two pre-existing tracked Preflight artifacts were restored to their exact HEAD blobs and verified by git diff. The current run's reports are preserved under new names. No production source, Gold, or prior Provider Trace was modified.
+- No tests were rerun after the failed Live invocation; only local artifact inspection and evidence writing followed.
