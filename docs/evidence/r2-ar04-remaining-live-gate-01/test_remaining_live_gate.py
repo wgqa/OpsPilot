@@ -75,13 +75,17 @@ def test_two_case_full_assistant_domain_mock_uses_split_output_caps(tmp_path):
                for row in historical)
 
 
-def test_preflight_is_zero_cost_and_rejects_prior_task_authorization(tmp_path):
+def test_preflight_is_zero_cost_and_rejects_prior_task_authorization(tmp_path, monkeypatch):
     mock_dir = tmp_path / "mock_run"
     mock = gate.run_mock(mock_dir)
-    report = gate.run_preflight(mock_dir / "MOCK_RESULTS.json", tmp_path / "PREFLIGHT.json")
+    mock_path = mock_dir / "MOCK_RESULTS.json"
+    monkeypatch.setattr(gate, "MOCK_RESULTS_PATH", mock_path)
+    report = gate.run_preflight(output_path=tmp_path / "PREFLIGHT.json")
     assert mock["case_matrix_passed"] is True
     assert report["status"] == "READY_FOR_NEW_LIVE_AUTHORIZATION"
     assert report["mock_case_matrix_passed"] is True
+    assert report["mock_results_path"] == mock_path.resolve().as_posix()
+    assert report["mock_results_sha256"] == gate._sha256(mock_path.read_bytes())
     assert report["historical_authorization_reuse_blocked"] is True
     assert report["new_authorization_created"] is False
     assert report["provider_requests_sent"] == 0
@@ -106,11 +110,15 @@ def test_historical_authorization_task_is_rejected(legacy_task):
         gate.validate_authorization_manifest({"task": legacy_task, "base_sha": "historical"})
 
 
-def test_missing_authorization_blocks_live_before_output_or_send(tmp_path):
+def test_missing_authorization_blocks_live_before_output_or_send(tmp_path, monkeypatch):
     missing = tmp_path / "missing.json"
     output = tmp_path / "live_run"
+    mock_path = tmp_path / "pinned-mock" / "MOCK_RESULTS.json"
+    mock_path.parent.mkdir()
+    mock_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(gate, "MOCK_RESULTS_PATH", mock_path)
     with pytest.raises(gate.GateStop, match="NEW_TASK_SPECIFIC_LIVE_AUTHORIZATION_REQUIRED"):
-        gate.run_live(missing, mock_path=tmp_path / "missing-mock.json", output_path=output)
+        gate.run_live(missing, output_path=output)
     assert not output.exists()
 
 

@@ -381,6 +381,71 @@ def test_authorization_proposal_is_non_executable():
         gate.validate_authorization_manifest(proposal)
 
 
+def test_mock_results_auth_preflight_and_live_share_one_pinned_file(tmp_path, monkeypatch):
+    assert gate.MOCK_DIR == gate.EVIDENCE_DIR / "mock_run_06"
+    assert gate.MOCK_RESULTS_PATH == gate.MOCK_DIR / "MOCK_RESULTS.json"
+    pinned = tmp_path / "mock_run_06" / "MOCK_RESULTS.json"
+    pinned.parent.mkdir()
+    pinned.write_text('{"case_matrix_passed":true}\n', encoding="utf-8")
+    pinned_digest = gate._sha256(pinned.read_bytes())
+    alternate = tmp_path / "mock_run_05" / "MOCK_RESULTS.json"
+    alternate.parent.mkdir()
+    alternate.write_text('{"case_matrix_passed":false}\n', encoding="utf-8")
+    assert gate._sha256(alternate.read_bytes()) != pinned_digest
+
+    monkeypatch.setattr(gate, "MOCK_RESULTS_PATH", pinned)
+    assert gate._require_pinned_mock_results_path(None) == pinned.resolve()
+    assert gate._require_pinned_mock_results_path(pinned) == pinned.resolve()
+
+    seen_paths = []
+    original_preflight = gate.run_preflight
+
+    def capture_preflight(mock_path=None, output_path=None):
+        seen_paths.append(mock_path)
+        return {"status": "READY_FOR_NEW_LIVE_AUTHORIZATION"}
+
+    monkeypatch.setattr(gate, "run_preflight", capture_preflight)
+    assert gate.main(["preflight", "--output", str(tmp_path / "default.json")]) == 0
+    assert gate.main([
+        "preflight", "--mock-results", str(pinned), "--output", str(tmp_path / "explicit.json"),
+    ]) == 0
+    assert seen_paths == [pinned, pinned]
+    monkeypatch.setattr(gate, "run_preflight", original_preflight)
+
+    manifest_with_old_pin = {
+        "task": gate.TASK,
+        "base_sha": gate.BASE_SHA,
+        "artifact_pins": {
+            "mock_results_path": gate._mock_results_reference(pinned),
+            "mock_results_sha256": pinned_digest,
+        },
+    }
+    with pytest.raises(gate.GateStop, match="AUTH_MOCK_RESULTS_PATH_MISMATCH"):
+        gate.validate_authorization_manifest(manifest_with_old_pin, mock_path=alternate)
+    with pytest.raises(gate.GateStop, match="AUTH_MOCK_RESULTS_PATH_MISMATCH"):
+        gate.run_preflight(mock_path=alternate, output_path=tmp_path / "rejected-preflight.json")
+    with pytest.raises(gate.GateStop, match="AUTH_MOCK_RESULTS_PATH_MISMATCH"):
+        gate.main([
+            "preflight", "--mock-results", str(alternate),
+            "--output", str(tmp_path / "rejected-cli-preflight.json"),
+        ])
+
+    missing_auth = tmp_path / "missing-auth.json"
+    live_output = tmp_path / "must-not-start"
+    with pytest.raises(gate.GateStop, match="AUTH_MOCK_RESULTS_PATH_MISMATCH"):
+        gate.run_live(missing_auth, mock_path=alternate, output_path=live_output)
+    assert not live_output.exists()
+    assert not (tmp_path / "rejected-preflight.json").exists()
+    assert not (tmp_path / "rejected-cli-preflight.json").exists()
+    for output_name, kwargs in (
+        ("default-live", {}),
+        ("explicit-live", {"mock_path": pinned}),
+    ):
+        with pytest.raises(gate.GateStop, match="NEW_TASK_SPECIFIC_LIVE_AUTHORIZATION_REQUIRED"):
+            gate.run_live(missing_auth, output_path=tmp_path / output_name, **kwargs)
+        assert not (tmp_path / output_name).exists()
+
+
 def test_adapter_source_is_pinned_and_only_task_scoped_paths_are_allowed():
     freeze = gate._task_assert_frozen()
     assert freeze["provider_adapter_blob"] == gate.ABC_RUNNER_BLOB

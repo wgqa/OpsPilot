@@ -52,7 +52,7 @@ CHAT_BLOB = "f78ff94586af56b94b9585c5e7f8abeb5b006ad6"
 ASSISTANT_BLOB = "288559c6e9b77549939501f4cedb1a8097a79918"
 ABC_RUNNER_PATH = ROOT / "docs/evidence/abc-live-env-unblock-01/run_abc_eval.py"
 ABC_RUNNER_BLOB = "479c5f0e4724eea9dfa12ed025c438f3a9f9b85c"
-MOCK_DIR = EVIDENCE_DIR / "mock_run_04"
+MOCK_DIR = EVIDENCE_DIR / "mock_run_06"
 MOCK_RESULTS_PATH = MOCK_DIR / "MOCK_RESULTS.json"
 PREFLIGHT_PATH = EVIDENCE_DIR / "PREFLIGHT.json"
 LIVE_RUN_PATH = EVIDENCE_DIR / "live_run_01"
@@ -65,6 +65,26 @@ class GateStop(RuntimeError):
 def _sha256(value: bytes | str) -> str:
     raw = value if isinstance(value, bytes) else value.encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _mock_results_reference(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        # Temporary paths are useful in isolated tests; a live authorization
+        # still requires the single repository-pinned path below.
+        return resolved.as_posix()
+
+
+def _require_pinned_mock_results_path(path: Path | None) -> Path:
+    expected = MOCK_RESULTS_PATH.resolve()
+    candidate = expected if path is None else Path(path)
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    if candidate.resolve() != expected:
+        raise GateStop("AUTH_MOCK_RESULTS_PATH_MISMATCH")
+    return expected
 
 
 def _ceil_cost_micro(input_tokens: int, output_tokens: int) -> int:
@@ -494,7 +514,10 @@ def _validate_auth_hard_cap(value: Any) -> int:
     return value
 
 
-def validate_authorization_manifest(manifest: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+def validate_authorization_manifest(
+    manifest: dict[str, Any], *, now: datetime | None = None, mock_path: Path | None = None,
+) -> dict[str, Any]:
+    mock_path = _require_pinned_mock_results_path(mock_path)
     if not isinstance(manifest, dict):
         raise GateStop("TASK_SPECIFIC_LIVE_AUTHORIZATION_REQUIRED")
     if manifest.get("task") != TASK or manifest.get("base_sha") != BASE_SHA:
@@ -548,13 +571,14 @@ def validate_authorization_manifest(manifest: dict[str, Any], *, now: datetime |
         raise GateStop("OFFICIAL_PRICE_EXCEEDS_RESERVED_ENVELOPE")
     pins = manifest.get("artifact_pins")
     if not isinstance(pins, dict) or set(pins) != {
-        "runner_sha256", "mock_results_sha256", "source_manifest_sha256", "chat_blob", "assistant_blob",
-        "provider_adapter_blob",
+        "runner_sha256", "mock_results_path", "mock_results_sha256", "source_manifest_sha256",
+        "chat_blob", "assistant_blob", "provider_adapter_blob",
     }:
         raise GateStop("AUTH_ARTIFACT_PINS_SCHEMA_MISMATCH")
     current_pins = {
         "runner_sha256": _sha256(Path(__file__).read_bytes()),
-        "mock_results_sha256": _sha256(MOCK_RESULTS_PATH.read_bytes()) if MOCK_RESULTS_PATH.is_file() else None,
+        "mock_results_path": _mock_results_reference(mock_path),
+        "mock_results_sha256": _sha256(mock_path.read_bytes()) if mock_path.is_file() else None,
         "source_manifest_sha256": _sha256((EVIDENCE_DIR / "SOURCE_MANIFEST.json").read_bytes())
         if (EVIDENCE_DIR / "SOURCE_MANIFEST.json").is_file() else None,
         "chat_blob": CHAT_BLOB,
@@ -573,11 +597,12 @@ def validate_authorization_manifest(manifest: dict[str, Any], *, now: datetime |
     }
 
 
-def load_authorization(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def load_authorization(path: Path, *, mock_path: Path | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     if not path.is_file():
         raise GateStop("NEW_TASK_SPECIFIC_LIVE_AUTHORIZATION_REQUIRED")
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    return manifest, validate_authorization_manifest(manifest)
+    pinned_mock_path = _require_pinned_mock_results_path(mock_path)
+    return manifest, validate_authorization_manifest(manifest, mock_path=pinned_mock_path)
 
 
 def _mock_passed(path: Path) -> tuple[dict[str, Any], bool]:
@@ -588,7 +613,12 @@ def _mock_passed(path: Path) -> tuple[dict[str, Any], bool]:
     return result, valid
 
 
-def run_preflight(mock_path: Path = MOCK_RESULTS_PATH, output_path: Path = PREFLIGHT_PATH) -> dict[str, Any]:
+def run_preflight(
+    mock_path: Path | None = None, output_path: Path = PREFLIGHT_PATH,
+) -> dict[str, Any]:
+    mock_path = _require_pinned_mock_results_path(mock_path)
+    if not mock_path.is_file():
+        raise GateStop("PINNED_MOCK_RESULTS_MISSING")
     freeze = _task_assert_frozen()
     _assert_source_manifest(freeze)
     mock, passed = _mock_passed(mock_path)
@@ -645,6 +675,7 @@ def run_preflight(mock_path: Path = MOCK_RESULTS_PATH, output_path: Path = PREFL
             "price_must_be_rechecked_before_live_send": True,
         },
         "mock_results_sha256": _sha256(mock_path.read_bytes()),
+        "mock_results_path": _mock_results_reference(mock_path),
         "mock_case_matrix_passed": passed,
         "historical_authorization_reuse_blocked": legacy_reuse_blocked,
         "historical_authorization_rejection": legacy_rejection,
@@ -666,13 +697,17 @@ def run_preflight(mock_path: Path = MOCK_RESULTS_PATH, output_path: Path = PREFL
     return report
 
 
-def run_live(authorization_path: Path, *, mock_path: Path = MOCK_RESULTS_PATH,
+def run_live(authorization_path: Path, *, mock_path: Path | None = None,
              output_path: Path = LIVE_RUN_PATH) -> dict[str, Any]:
     global _ACTIVE_AUTHORIZATION_PATH, _ACTIVE_METRICS
+    mock_path = _require_pinned_mock_results_path(mock_path)
+    if not mock_path.is_file():
+        raise GateStop("PINNED_MOCK_RESULTS_MISSING")
     _task_assert_frozen()
-    manifest, auth_summary = load_authorization(authorization_path)
+    manifest, auth_summary = load_authorization(authorization_path, mock_path=mock_path)
     mock, passed = _mock_passed(mock_path)
-    if manifest["artifact_pins"]["mock_results_sha256"] != _sha256(mock_path.read_bytes()):
+    mock_results_sha256 = _sha256(mock_path.read_bytes())
+    if manifest["artifact_pins"]["mock_results_sha256"] != mock_results_sha256:
         raise GateStop("AUTH_MOCK_RESULT_DIGEST_MISMATCH")
     if not passed:
         raise GateStop("FRESH_TWO_CASE_FULL_MOCK_REQUIRED_BEFORE_LIVE")
@@ -683,7 +718,10 @@ def run_live(authorization_path: Path, *, mock_path: Path = MOCK_RESULTS_PATH,
         preflight = run_preflight(mock_path, Path(temp) / "PREFLIGHT.json")
     if not preflight.get("technical_preflight_passed"):
         raise GateStop("CURRENT_ZERO_COST_RUNTIME_PREFLIGHT_FAILED")
-    load_authorization(authorization_path)
+    if (preflight.get("mock_results_path") != _mock_results_reference(mock_path)
+            or preflight.get("mock_results_sha256") != mock_results_sha256):
+        raise GateStop("LIVE_PREFLIGHT_MOCK_BINDING_MISMATCH")
+    load_authorization(authorization_path, mock_path=mock_path)
     _task_assert_frozen()
     _ACTIVE_AUTHORIZATION_PATH = authorization_path
     _ACTIVE_METRICS = {"request_caps": [], "grants": []}
@@ -700,6 +738,8 @@ def run_live(authorization_path: Path, *, mock_path: Path = MOCK_RESULTS_PATH,
         result.update({
             "task": TASK, "review_task_id": REVIEW_TASK_ID, "base_sha": BASE_SHA,
             "authorization_manifest_sha256": auth_summary["authorization_manifest_sha256"],
+            "mock_results_path": _mock_results_reference(mock_path),
+            "mock_results_sha256": mock_results_sha256,
             "request_caps": list(_ACTIVE_METRICS["request_caps"]),
             "runtime_grant_caps": list(_ACTIVE_METRICS["grants"]),
             "live_dispatch_performed": True,
