@@ -382,9 +382,17 @@ def test_authorization_proposal_is_non_executable():
 
 
 def test_mock_results_auth_preflight_and_live_share_one_pinned_file(tmp_path, monkeypatch):
-    assert gate.MOCK_DIR == gate.EVIDENCE_DIR / "mock_run_06"
+    assert gate.MOCK_DIR == gate.EVIDENCE_DIR / "mock_run_07"
     assert gate.MOCK_RESULTS_PATH == gate.MOCK_DIR / "MOCK_RESULTS.json"
-    pinned = tmp_path / "mock_run_06" / "MOCK_RESULTS.json"
+    assert gate._require_pinned_mock_results_path(
+        gate.EVIDENCE_DIR / "mock_run_07" / "MOCK_RESULTS.json"
+    ) == gate.MOCK_RESULTS_PATH.resolve()
+    with pytest.raises(gate.GateStop, match="AUTH_MOCK_RESULTS_PATH_MISMATCH"):
+        gate._require_pinned_mock_results_path(
+            gate.EVIDENCE_DIR / "mock_run_06" / "MOCK_RESULTS.json"
+        )
+
+    pinned = tmp_path / "mock_run_07" / "MOCK_RESULTS.json"
     pinned.parent.mkdir()
     pinned.write_text('{"case_matrix_passed":true}\n', encoding="utf-8")
     pinned_digest = gate._sha256(pinned.read_bytes())

@@ -138,6 +138,38 @@ def test_shared_authorization_budget_enforces_reserve_floor_and_hard_ceiling():
         gate._validate_auth_hard_cap(gate.HARD_CAP_USD_MICRO + 1)
 
 
+def test_task_freeze_allows_approved_execution_evidence_and_rejects_other_evidence(monkeypatch):
+    assert gate.MOCK_DIR.name == "mock_run_07"
+    freeze = gate._task_assert_frozen()
+    assert freeze["candidate_head_at_check"] == gate._git("rev-parse", "HEAD")
+
+    original_git = gate._git
+
+    def with_unapproved_evidence(*args):
+        if args[:2] == ("diff", "--name-only"):
+            return "docs/evidence/unapproved-audit/INJECTED.json"
+        return original_git(*args)
+
+    monkeypatch.setattr(gate, "_git", with_unapproved_evidence)
+    with pytest.raises(gate.GateStop, match="TASK_DIFF_OUTSIDE_NEW_EVIDENCE:docs/evidence/unapproved-audit/INJECTED.json"):
+        gate._task_assert_frozen()
+
+
+def test_simulated_historical_frozen_file_drift_remains_blocked(monkeypatch):
+    original_git = gate.v2._git
+    protected = gate.v2.PROTECTED_HISTORICAL_FILES[0]
+
+    def with_changed_protected_hash(*args):
+        if (len(args) >= 3 and args[0] == "hash-object"
+                and args[1] == f"--path={protected}" and args[2] == protected):
+            return "0" * 40
+        return original_git(*args)
+
+    monkeypatch.setattr(gate.v2, "_git", with_changed_protected_hash)
+    with pytest.raises(gate.v2.V2Stop, match="FROZEN_DIGEST_DRIFT:protected:"):
+        gate._task_assert_frozen()
+
+
 def test_production_blob_drift_is_not_accepted(monkeypatch):
     monkeypatch.setattr(gate, "CHAT_BLOB", "0" * 40)
     with pytest.raises(Exception, match="PRODUCTION_CHAT_BLOB_DRIFT|CHAT_BLOB|SOURCE_BLOB|FROZEN_DIGEST_DRIFT"):

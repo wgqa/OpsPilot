@@ -52,7 +52,7 @@ CHAT_BLOB = "f78ff94586af56b94b9585c5e7f8abeb5b006ad6"
 ASSISTANT_BLOB = "288559c6e9b77549939501f4cedb1a8097a79918"
 ABC_RUNNER_PATH = ROOT / "docs/evidence/abc-live-env-unblock-01/run_abc_eval.py"
 ABC_RUNNER_BLOB = "479c5f0e4724eea9dfa12ed025c438f3a9f9b85c"
-MOCK_DIR = EVIDENCE_DIR / "mock_run_06"
+MOCK_DIR = EVIDENCE_DIR / "mock_run_07"
 MOCK_RESULTS_PATH = MOCK_DIR / "MOCK_RESULTS.json"
 PREFLIGHT_PATH = EVIDENCE_DIR / "PREFLIGHT.json"
 LIVE_RUN_PATH = EVIDENCE_DIR / "live_run_01"
@@ -147,12 +147,14 @@ def _task_assert_frozen() -> dict[str, Any]:
         raise GateStop("MERGE_AFTER_TASK_BASE_BLOCKED")
     allowed = f"docs/evidence/{EVIDENCE_DIR.name}/"
     review_evidence = "docs/evidence/r2-ar04-live-admission-hf01/"
+    execution_evidence = "docs/evidence/r2-ar04-remaining-live-exec-01/"
     adapter_path = "docs/evidence/abc-live-env-unblock-01/run_abc_eval.py"
     for diff_args in (("diff", "--name-only", BASE_SHA, "--"),
                       ("diff", "--cached", "--name-only", BASE_SHA, "--")):
         changed = [p for p in _git(*diff_args).splitlines() if p]
         outside = [p for p in changed if not (
-            p.startswith(allowed) or p.startswith(review_evidence) or p == adapter_path
+            p.startswith(allowed) or p.startswith(review_evidence)
+            or p.startswith(execution_evidence) or p == adapter_path
         )]
         if outside:
             raise GateStop("TASK_DIFF_OUTSIDE_NEW_EVIDENCE:" + ",".join(outside))
