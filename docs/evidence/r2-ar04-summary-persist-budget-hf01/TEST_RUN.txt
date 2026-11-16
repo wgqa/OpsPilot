@@ -1,0 +1,92 @@
+R2-AR04 summary persistence budget — offline verification
+Base: 24ab8bc9b4dfc910a36b2096c549a1987f739d4b
+Environment: Windows, Python 3.14.0, tiktoken 0.14.0 (cl100k_base), pytest 9.1.1, httpx 0.28.1.
+
+Direct replay on the unmodified Base Domain
+  python -B docs/evidence/r2-ar04-summary-persist-budget-hf01/replay_budget.py
+  Exit 0 (diagnostic completed). The captured production exception is
+  CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED:unresolved_items:2.
+  Report saved as BASE_REPLAY.json before editing chat.py.
+
+Candidate direct replay
+  python -B docs/evidence/r2-ar04-summary-persist-budget-hf01/replay_budget.py
+  Exit 0. Reproduced the baseline measurements from the unchanged ID compactor.
+  python -B docs/evidence/r2-ar04-summary-persist-budget-hf01/replay_budget.py --candidate
+  Exit 0. Report saved as CANDIDATE_REPLAY.json. Full summary at 494 tokens.
+  A 515-token variant stopped with the original error.
+
+Pytest setup
+  Invoked pytest.main in a fresh Python process with -B, -p no:cacheprovider,
+  and --basetemp <new OS temporary directory>/pytest.
+  The socket audit guard rejected non-loopback DNS/connect calls.
+  The final invocations also replaced provision_default_grant with a raising
+  stub. LangSmith tracing disabled. Existing optional Trace writers disabled.
+  Each invocation used a separate temporary directory. No live credentials,
+  grants, Provider APIs, production databases, or external MCP were used.
+
+Initial targeted test development runs, tests/test_ar04_summary_persist_budget_hf_01.py
+  Exit 1: 2 passed, 4 fixture errors in 1.26s. The fixture omitted three required
+  Usage arguments when completing synthetic history turns. Fixture fixed.
+  Exit 1: 5 passed, 1 failed in 4.77s. Source revocation excluded the summary,
+  with the earlier transitive USER_MESSAGE_SOURCE_CHANGED guard firing. The
+  test now asserts that observed reason and checks INVALID plus prompt exclusion.
+
+Core suite (exit 0)
+  -q tests/test_ar04_summary_persist_budget_hf_01.py
+     tests/test_ar04_summary_fact_retention_hf_01.py
+     tests/test_ar04_summary_fact_retention_edges_hf_02.py
+     tests/test_ar04_live_summary_persist_hf_01.py::test_frozen_live_summary_domain_replay_records_message_id_budget_sensitivity
+     tests/test_m302_context.py
+  ...................................                                      [100%]
+  35 passed in 31.85s
+
+Exact replay suite repeated with final evidence reader (exit 0)
+  -q tests/test_ar04_summary_persist_budget_hf_01.py
+  ......                                                                   [100%]
+  6 passed in 4.64s (rerun, already included in the core total)
+
+First extended suite attempt
+  -q tests/test_r2_ar04_compaction_c06_hf_01.py
+     tests/test_ar04a_context_journey_01.py
+     tests/test_ar04a_compression_budget_hf_01.py::test_original_q02_b_512_token_truncation_still_stops_without_persistence
+     tests/test_ar04a_compression_budget_hf_01.py::test_valid_summary_over_512_generation_tokens_is_domain_compacted_to_512
+     tests/test_ar04a_compression_budget_hf_01.py::test_summary_usage_above_1024_stops_before_domain_persistence
+     tests/test_ar04a_compression_budget_hf_01.py::test_compression_generation_cap_respects_runtime_grant_ceiling
+     tests/test_ar04a_compression_cancel_hf_01.py
+  Exit -1 (process stopped). The first test reported a dot. The isolated process was stopped after the next
+  test stopped making progress. Before stopping it, a read-only query of that
+  test's temporary C06 SQLite found 15 SUCCEEDED chat runs, 15 SUCCEEDED chat
+  attempts and 2 SUCCEEDED compression attempts. This interrupted invocation
+  provides no complete pytest result.
+
+Extended suite replayed in fresh processes (all exit 0)
+  Common options: -v -o faulthandler_timeout=35 -p no:cacheprovider --basetemp <new temp>/pytest.
+  1. tests/test_r2_ar04_compaction_c06_hf_01.py::test_t04_c06_assistant_excerpt_still_compresses_twice_and_answers
+     PASSED [100%]
+     1 passed in 20.78s
+  2. tests/test_r2_ar04_compaction_c06_hf_01.py
+     tests/test_ar04a_context_journey_01.py
+     tests/test_ar04a_compression_budget_hf_01.py::test_original_q02_b_512_token_truncation_still_stops_without_persistence
+     tests/test_ar04a_compression_budget_hf_01.py::test_valid_summary_over_512_generation_tokens_is_domain_compacted_to_512
+     tests/test_ar04a_compression_budget_hf_01.py::test_summary_usage_above_1024_stops_before_domain_persistence
+     tests/test_ar04a_compression_budget_hf_01.py::test_compression_generation_cap_respects_runtime_grant_ceiling
+     --deselect=tests/test_r2_ar04_compaction_c06_hf_01.py::test_t04_c06_assistant_excerpt_still_compresses_twice_and_answers
+     The four remaining C06 tests, four Context journey tests and four budget tests passed.
+     12 passed, 1 deselected in 105.05s (0:01:45)
+  3. tests/test_ar04a_compression_cancel_hf_01.py
+     UNKNOWN in-flight, no resend on recovery, second-compression cancellation,
+     and cancellation during reservation passed.
+     4 passed in 39.78s
+
+Final result: 52 distinct selected tests passed (35 + 1 + 12 + 4).
+The isolated replay suite also passed a separate six-test rerun.
+The interrupted grouped run's cause was not established. The exact C06 test
+and all its companion tests completed in fresh processes.
+F01 completed_tools legacy test and full repository suite: not run.
+
+Integrity checks
+  No diff in the original Live 01/02, historical Gold or C06 evidence,
+  frozen Runner and mock_run_09, or production Assistant.
+  Live 02 Trace SHA-256: 6c5d60bce519aad6ce60af1b647845117ca754685320dbc4040c734087672e9a
+  Live 02 Cost Ledger SHA-256: 16aff25f3b1d7adf8b176c9c9c332d01ade453949c7b8c94e15617769def08f4
+  Provider sends: 0. Fee USD 0. Runtime Grant and Live authorization creation: 0.

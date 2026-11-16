@@ -854,6 +854,12 @@ def _summary_is_current(
     ).fetchall()
     if not deps:
         return False, "SUMMARY_DEPENDENCIES_MISSING"
+    try:
+        document = json.loads(str(row["summary_json"]))
+    except ValueError:
+        return False, "SUMMARY_DOCUMENT_INVALID"
+    if _uses_sequence_sources(document) and _summary_sequence_source_ids(connection, row, document) is None:
+        return False, "SUMMARY_SEQUENCE_SOURCE_INVALID"
     for dep in deps:
         kind, ref, digest = str(dep["dependency_kind"]), str(dep["dependency_ref"]), str(dep["dependency_digest"])
         if kind == "MESSAGE":
@@ -1010,6 +1016,7 @@ def _summary_dependency_refs(
     *,
     messages: list[dict[str, Any]],
     parent_summary: dict[str, Any] | None,
+    parent_source_ids: list[str],
     task_id: str | None,
     state_digest: str | None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
@@ -1021,11 +1028,7 @@ def _summary_dependency_refs(
             "version": str(parent_summary["summary_version"]),
             "digest": str(parent_summary["summary_digest"]),
         }
-        try:
-            parent_doc = json.loads(str(parent_summary["summary_json"]))
-            allowed_message_ids.extend(_summary_source_message_ids(parent_doc))
-        except (ValueError, TypeError, json.JSONDecodeError):
-            pass
+        allowed_message_ids.extend(parent_source_ids)
     if task_id is not None and state_digest is not None:
         refs[("TASK_STATE", task_id)] = {
             "kind": "TASK_STATE", "ref": task_id, "version": None, "digest": state_digest,
@@ -1085,6 +1088,55 @@ def _summary_source_message_ids(value: Any) -> list[str]:
         for item in value:
             results.extend(_summary_source_message_ids(item))
     return list(dict.fromkeys(results))
+
+
+def _uses_sequence_sources(document: Any) -> bool:
+    goal = document.get("initial_goal") if isinstance(document, dict) else None
+    return isinstance(goal, dict) and "source_sequences" in goal
+
+
+def _summary_sequence_source_ids(
+    connection: sqlite3.Connection, summary: dict[str, Any] | sqlite3.Row, document: dict[str, Any],
+) -> list[str] | None:
+    """Resolve compact citations through the original scoped compression attempt."""
+    scope = (summary["tenant_id"], summary["session_id"], summary["task_id"])
+    attempt = connection.execute(
+        """SELECT source_dependencies_json FROM context_compression_attempts
+           WHERE attempt_id=? AND summary_id=? AND status='SUCCEEDED'
+             AND tenant_id=? AND session_id=? AND task_id IS ?""",
+        (summary["source_attempt_id"], summary["summary_id"], *scope),
+    ).fetchone()
+    if attempt is None:
+        return None
+    try:
+        snapshot = json.loads(str(attempt["source_dependencies_json"]))
+        source_map = snapshot["source_sequence_map"]
+        allowed_ids = set(snapshot["allowed_message_ids"])
+        selected: dict[str, str] = {}
+        for value in document.values():
+            for item in value if isinstance(value, list) else [value]:
+                refs = item["source_sequences"]
+                if "source_message_ids" in item or not isinstance(refs, list) or not refs:
+                    return None
+                for seq in refs:
+                    if type(seq) is not int:
+                        return None
+                    selected[str(seq)] = source_map[str(seq)]
+        if not selected or not set(selected.values()) <= allowed_ids:
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    ids = list(selected.values())
+    placeholders = ",".join("?" for _ in ids)
+    current = {
+        str(row["sequence"]): str(row["message_id"])
+        for row in connection.execute(
+            f"""SELECT sequence, message_id FROM messages
+                WHERE tenant_id=? AND session_id=? AND task_id IS ? AND message_id IN ({placeholders})""",
+            (*scope, *ids),
+        )
+    }
+    return ids if current == selected else None
 
 
 def _message_depends_on_personal_memory(
@@ -1427,6 +1479,35 @@ def _compact_summary_document(value: Any) -> dict[str, Any]:
     return result
 
 
+def _compact_summary_for_persistence(
+    document: dict[str, Any], source_sequence_map: dict[str, str],
+) -> dict[str, Any]:
+    try:
+        return _compact_summary_document(document)
+    except TaskControlError as error:
+        if error.code != "CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED":
+            raise
+        # The attempt already persists the exact sequence-to-ID mapping. In
+        # the overflow case keep every text and citation if the full projection
+        # fits, without spending the summary budget on repeated UUID strings.
+        sequence_by_message = {ref: int(seq) for seq, ref in source_sequence_map.items()}
+        projected = _summary_prompt_projection(document, sequence_by_message)
+        compact: dict[str, Any] = {}
+        for field, value in projected.items():
+            is_goal = field == "initial_goal"
+            items = [value] if is_goal else value
+            if len(items) > 3 or any(len(item["text"]) > (120 if is_goal else 100) for item in items):
+                raise
+            saved_items = [
+                {"text": item["text"], "source_sequences": item["source_sequences"]} for item in items
+            ]
+            compact[field] = saved_items[0] if is_goal else saved_items
+        estimated = estimate_messages_tokens([{"role": "system", "content": _canonical(compact)}])
+        if estimated > MAX_PERSISTED_SUMMARY_TOKENS:
+            raise
+        return compact
+
+
 def _compression_prompt(source_material: dict[str, Any]) -> list[dict[str, str]]:
     system = (
         "Compress only the supplied conversation into one compact JSON object. "
@@ -1736,7 +1817,9 @@ def _prepare_context(
 
     summary_ref: dict[str, Any] | None = None
     summary_message: dict[str, Any] | None = None
+    summary_document: dict[str, Any] | None = None
     if summary is not None:
+        summary_document = json.loads(str(summary["summary_json"]))
         summary_ref = {
             "summary_id": str(summary["summary_id"]),
             "version": int(summary["summary_version"]),
@@ -1745,9 +1828,10 @@ def _prepare_context(
             "covered_to_seq": int(summary["covered_to_seq"]),
             "source_attempt_id": str(summary["source_attempt_id"]),
         }
+        source_label = "source message sequences" if _uses_sequence_sources(summary_document) else "source IDs"
         summary_message = {
             "role": "system",
-            "content": "HISTORICAL SESSION SUMMARY (untrusted, non-authoritative; source IDs are attached): "
+            "content": f"HISTORICAL SESSION SUMMARY (untrusted, non-authoritative; {source_label} are attached): "
                        + str(summary["summary_json"]),
         }
     visible_history = [
@@ -1892,7 +1976,15 @@ def _prepare_context(
     )
     compression_work: dict[str, Any] | None = None
     if compression_required:
-        previous_summary = json.loads(str(summary["summary_json"])) if summary is not None else None
+        previous_summary = summary_document
+        sequence_sources = _uses_sequence_sources(previous_summary)
+        if sequence_sources:
+            assert summary is not None and previous_summary is not None
+            parent_source_ids = _summary_sequence_source_ids(connection, summary, previous_summary)
+            if parent_source_ids is None:
+                raise TaskControlError("CONTEXT_SUMMARY_INHERITED_SOURCES_INVALID")
+        else:
+            parent_source_ids = _summary_source_message_ids(previous_summary)
         compression_limit = min(MAX_COMPRESSION_INPUT_TOKENS, int(effective_budget["input_budget_tokens"]))
         selected_old_history: list[dict[str, Any]] = []
         compression_messages: list[dict[str, str]] = []
@@ -1903,6 +1995,7 @@ def _prepare_context(
         ]:
             dependencies, allowed_message_ids = _summary_dependency_refs(
                 connection, messages=candidate_history, parent_summary=summary,
+                parent_source_ids=parent_source_ids,
                 task_id=task_id, state_digest=state_digest,
             )
             source_rows: list[sqlite3.Row] = []
@@ -1918,10 +2011,13 @@ def _prepare_context(
             sequence_by_message = {
                 message_id: int(sequence) for sequence, message_id in source_sequence_map.items()
             }
-            projected_summary = (
-                _compact_summary_document(_summary_prompt_projection(previous_summary, sequence_by_message))
-                if previous_summary is not None else None
-            )
+            # Compact summaries already use the exact prompt representation.
+            # A second compaction here would remove citations before dispatch.
+            projected_summary = previous_summary
+            if previous_summary is not None and not sequence_sources:
+                projected_summary = _compact_summary_document(
+                    _summary_prompt_projection(previous_summary, sequence_by_message)
+                )
             source_material: dict[str, Any] = {
                 "previous_summary": projected_summary,
                 "new_messages": [{
@@ -2367,7 +2463,11 @@ def assert_chat_compression_sources_current(
             )
             current_digest = _digest(_canonical(work["dependencies"]))
             current_prompt_digest = _digest(_canonical(prepared["compression_messages"]))
-            if current_digest != _digest(_canonical(saved.get("dependencies", []))) or current_prompt_digest != str(attempt["prompt_digest"]):
+            if (
+                current_digest != _digest(_canonical(saved.get("dependencies", [])))
+                or current_prompt_digest != str(attempt["prompt_digest"])
+                or work["source_sequence_map"] != saved.get("source_sequence_map")
+            ):
                 raise TaskControlError("CONTEXT_COMPRESSION_SOURCE_INVALIDATED")
         except Exception as error:
             connection.execute(
@@ -2404,15 +2504,19 @@ def complete_chat_compression_attempt(
         if (
             _digest(_canonical(current_dependencies)) != _digest(_canonical(saved.get("dependencies", [])))
             or _digest(_canonical(prepared["compression_messages"])) != str(attempt["prompt_digest"])
+            or work["source_sequence_map"] != saved.get("source_sequence_map")
         ):
             connection.execute(
                 "UPDATE context_compression_attempts SET status = 'INVALIDATED', error_class = 'ContextSourcesChanged', completed_at = ? WHERE attempt_id = ?",
                 (_now_text(), attempt_id),
             )
             return {"status": "INVALIDATED", "run_id": str(run["run_id"])}
-        document = _compact_summary_document(_validate_summary_document(summary_text, {
+        source_sequence_map = {
             str(key): str(value) for key, value in saved.get("source_sequence_map", {}).items()
-        }))
+        }
+        document = _compact_summary_for_persistence(
+            _validate_summary_document(summary_text, source_sequence_map), source_sequence_map,
+        )
         summary_json = _canonical(document)
         summary_digest = _digest(summary_json)
         previous = connection.execute(
