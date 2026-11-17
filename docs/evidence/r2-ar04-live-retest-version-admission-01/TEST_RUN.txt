@@ -1,0 +1,27 @@
+R2-AR04 Live Retest Version Admission — Test Record
+
+Scope: offline only. No real Provider request, paid authorization, external MCP, or production database write.
+
+1) Initial preparation diagnostic
+Command:
+  python -B docs/evidence/r2-ar04-live-retest-version-admission-01/run_versioned_admission.py prepare
+Result: Mock completed, 6 MockTransport sends, 0 Provider requests; preflight returned BLOCKED_BEFORE_PROVIDER_SEND because the provisional Task ID and Review ID were identical and the review-as-authorization rejection probe was ambiguous. Initial evidence is retained in mock_run_01/, SOURCE_MANIFEST_INITIAL.json, and PREFLIGHT_INITIAL.json. This run is diagnostic only.
+Exit status: 1 (prepare reports non-ready preflight as failure).
+
+2) Initial test implementation
+Command:
+  python -B -m pytest -q docs/evidence/r2-ar04-live-retest-version-admission-01/test_versioned_admission.py
+Result: 1 failed, 2 passed, 2 errors, exit 1. The test had one stale local variable and used pytest's machine temp fixture, which was inaccessible in this Windows environment. No Provider request occurred. Both test harness issues were corrected; no production code changed.
+
+3) Corrected versioned preparation
+Command:
+  python -B docs/evidence/r2-ar04-live-retest-version-admission-01/run_versioned_admission.py prepare
+Result: READY_FOR_NEW_LIVE_AUTHORIZATION; 2/2 Cases; 4 summary + 2 answer MockTransport sends; 0 Provider requests; USD 0.00; no valid authorization created.
+Exit status: 0.
+
+4) Focused offline acceptance tests
+Command:
+  python -B -m pytest -q docs/evidence/r2-ar04-live-retest-version-admission-01/test_versioned_admission.py
+Result: 5 passed, exit 0. Tests validate current source pins, candidate HEAD binding, six MockTransport ledger slots, response trace count, target facts and citations, Q06-B PARTIAL handling, mock/source digest binding, fresh zero-cost preflight, old authorization rejection and alternate Mock path rejection.
+
+The final candidate HEAD check and the same test command are repeated after the candidate commit; the final observed HEAD and exit status are reported with the acceptance candidate.
