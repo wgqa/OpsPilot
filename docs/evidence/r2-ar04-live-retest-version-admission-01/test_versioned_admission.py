@@ -148,3 +148,22 @@ def test_preflight_rejects_interchanged_mock_artifact() -> None:
         with pytest.raises(gate.GateStop, match="AUTH_MOCK_RESULTS_PATH_MISMATCH"):
             runner.run_preflight(altered, output)
         assert not output.exists()
+
+
+def test_full_two_case_mock_send_path_runs_on_current_head() -> None:
+    current_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=runner.ROOT, text=True,
+    ).strip()
+    with tempfile.TemporaryDirectory(prefix="ar04-final-head-mock-", dir=runner.EVIDENCE_DIR) as temp:
+        output = Path(temp) / "mock"
+        result = gate.run_mock(output)
+        ledger = read_json(output / "MOCK_COST_LEDGER.json")
+        assert result["candidate_head_at_run"] == current_head
+        assert result["runner_sha256"] == runner._sha256(SCRIPT)
+        assert result["case_matrix_passed"] is True
+        assert result["recorded_requests"] == 6
+        assert result["summary_requests"] == 4 and result["answer_requests"] == 2
+        assert result["provider_requests_sent"] == 0
+        assert result["external_mcp_calls"] == 0
+        assert len(ledger["slots"]) == 6
+        assert all(row.get("transport") == "httpx.MockTransport" for row in ledger["slots"])
