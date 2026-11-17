@@ -22,6 +22,11 @@ Exit status: 0.
 4) Focused offline acceptance tests
 Command:
   python -B -m pytest -q docs/evidence/r2-ar04-live-retest-version-admission-01/test_versioned_admission.py
-Result: 5 passed, exit 0. Tests validate current source pins, candidate HEAD binding, six MockTransport ledger slots, response trace count, target facts and citations, Q06-B PARTIAL handling, mock/source digest binding, fresh zero-cost preflight, old authorization rejection and alternate Mock path rejection.
+Result at the initial candidate tree: 5 passed, exit 0. Tests validate current source pins, candidate HEAD binding, six MockTransport ledger slots, response trace count, target facts and citations, Q06-B PARTIAL handling, mock/source digest binding, fresh zero-cost preflight, old authorization rejection and alternate Mock path rejection.
 
-The final candidate HEAD check and the same test command are repeated after the candidate commit; the final observed HEAD and exit status are reported with the acceptance candidate.
+5) Full integration on committed candidate HEAD `dbdb31f`
+Command:
+  python -B -m pytest -q docs/evidence/r2-ar04-live-retest-version-admission-01/test_versioned_admission.py
+Result: 6 passed in 16.59s, exit 0. The added test constructs both full Assistant/Domain Cases at the current `git rev-parse HEAD`, installs the external-network audit guard, and confirms all six validated sends reached `httpx.MockTransport`. A fresh isolated zero-cost preflight also passed inside this run. The Mock output is temporary and does not overwrite the canonical bound Mock or any prior evidence.
+
+The test command is run once more after the evidence-log commit; that final observed HEAD and result are reported with the acceptance candidate.
