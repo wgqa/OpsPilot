@@ -1,0 +1,7 @@
+# Version Binding and Rollback Note
+
+`FROZEN_INPUTS.json` binds this offline integration evidence to source base `ba146c8c6707ff60673d62b6375248e1551a2796`, production `chat.py` Blob `6a57360de6f5579fa65dc008de4fcf37148c43f0`, and the listed `assistant.py`, governance and frozen evidence digests. Run `python -B docs/evidence/r2-ar04-summary-persist-integration-01/verify_frozen_inputs.py` before relying on the evidence. The verifier is read-only and is not an authorization artifact.
+
+The existing Live Runner is frozen to its older `chat.py` Blob and will reject the current source under its strict drift check. A future retest needs a separately reviewed runner version whose authorization, preflight and per-request checks all bind the new production Blobs and current source/evidence digest. This note does not grant permission to create or use such an authorization.
+
+Rollback across the persisted compact-summary representation is unverified. The historical implementation's recursive source collector reads `source_message_ids`; it does not resolve a sequence citation through the owning compression attempt's scoped source map. The current implementation includes `_summary_sequence_source_ids()` for that resolution. Therefore do not reopen/recompact a current sequence-cited summary using the old code and assume provenance remains intact. Rebuild from preserved raw history or validate a dedicated migration before any rollback. This task did not attempt a rollback or change stored historical data.
