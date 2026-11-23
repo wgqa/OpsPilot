@@ -154,6 +154,11 @@ def current_conditions(connection, run):
         or run["consumed_message_seq"] < control["applied_critical_message_seq"]
     ):
         raise TaskControlError("TASK_CONDITIONS_STALE")
+    return active_from_snapshot(connection, snapshot, task_id, run["tenant_id"], run["session_id"])
+
+
+def active_from_snapshot(connection, snapshot, task_id, tenant_id, session_id):
+    """Read applied conditions for an already authorized Task and Session."""
     active = []
     for item in snapshot.values():
         if item["state"] != "ACTIVE":
@@ -168,12 +173,12 @@ def current_conditions(connection, run):
                  AND m.task_id=i.task_id AND m.body_digest=i.input_digest
                  AND json_extract(o.payload_json, '$.control_revision')=?""",
             (item["confirmation_message_id"], item["confirmation_sequence"], task_id,
-             run["tenant_id"], run["session_id"], item["applied_revision"]),
+             tenant_id, session_id, item["applied_revision"]),
         ).fetchone()
         if confirmation is None:
             raise TaskControlError("TASK_CONDITION_CONFIRMATION_INVALID")
         source = _condition_source(
-            connection, item, task_id, run["tenant_id"], run["session_id"], item["confirmation_sequence"],
+            connection, item, task_id, tenant_id, session_id, item["confirmation_sequence"],
         )
         active.append({
             key: item[key] for key in ("item_id", "version", "state", "source_message_id",

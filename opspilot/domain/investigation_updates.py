@@ -97,13 +97,7 @@ def classify_input(
 ) -> dict[str, Any]:
     """Ask the configured provider for a narrow, untrusted intent label and summary."""
     from langchain_core.messages import HumanMessage, SystemMessage
-    from langchain_openai import ChatOpenAI
-
-    from opspilot.config import MODEL_API_KEY
-
-    resolved_key = (api_key or os.environ.get(MODEL_API_KEY, "")).strip()
-    if not model_id.strip() or not resolved_key:
-        raise RuntimeError("MODEL_CONFIGURATION_MISSING")
+    model = input_classifier_model(model_id, api_key=api_key, base_url=base_url)
     context = {
         "conversation": prepared["conversation"],
         "current_user_message": prepared["source_message"],
@@ -116,16 +110,6 @@ def classify_input(
         "model_id": model_id,
         "input": context,
     })
-    model = ChatOpenAI(
-        model=model_id,
-        api_key=resolved_key,
-        base_url=base_url or os.environ.get("OPSPILOT_MODEL_BASE_URL") or None,
-        temperature=0,
-        max_tokens=256,
-        timeout=30,
-        max_retries=0,
-        include_response_headers=True,
-    )
     response = model.invoke([
         SystemMessage(content=CLASSIFIER_SYSTEM_PROMPT),
         HumanMessage(content=_canonical(context)),
@@ -175,6 +159,25 @@ def classify_input(
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
     }
+
+
+def input_classifier_model(model_id, *, api_key=None, base_url=None, review_output_limit=None):
+    from langchain_openai import ChatOpenAI
+    from urllib.parse import urlsplit
+    from opspilot.config import MODEL_API_KEY
+
+    key = (api_key or os.environ.get(MODEL_API_KEY, "")).strip()
+    if not model_id.strip() or not key:
+        raise RuntimeError("MODEL_CONFIGURATION_MISSING")
+    endpoint = base_url or os.environ.get("OPSPILOT_MODEL_BASE_URL") or None
+    options = {"max_tokens": review_output_limit or 256}
+    if review_output_limit is not None and endpoint and urlsplit(endpoint).hostname == "api.deepseek.com":
+        # Match the Assistant's native DeepSeek contract for the review call.
+        options = {"extra_body": {"max_tokens": review_output_limit, "thinking": {"type": "disabled"}}}
+    return ChatOpenAI(
+        model=model_id, api_key=key, base_url=endpoint, temperature=0, timeout=30,
+        max_retries=0, include_response_headers=True, **options,
+    )
 
 
 def _prior_task_input(connection: sqlite3.Connection, task_id: str) -> str:
@@ -239,6 +242,8 @@ def reserve_assessment(
                WHERE tenant_id = ? AND task_id = ? AND source_message_id = ?""",
             (identity.tenant_id, task_id, source_message_id),
         ).fetchone()
+        if existing is not None and existing["condition_review_json"] is not None:
+            return {"should_call_model": False, "fallback_reason": "CONDITION_REVIEW_ALREADY_EXISTS"}
         if existing is not None and str(existing["status"]) != "FAILED":
             return _public_assessment(connection, existing)
         source_chat = connection.execute(
@@ -594,7 +599,8 @@ def list_assessments(
         _require_support_owner(connection, identity, task_id)
         rows = connection.execute(
             """SELECT * FROM investigation_update_assessments
-               WHERE tenant_id = ? AND actor_id = ? AND task_id = ? ORDER BY created_at, assessment_id""",
+               WHERE tenant_id = ? AND actor_id = ? AND task_id = ? AND condition_review_json IS NULL
+               ORDER BY created_at, assessment_id""",
             (identity.tenant_id, identity.actor_id, task_id),
         ).fetchall()
         return {"items": [_public_assessment(connection, row) for row in rows]}
@@ -614,7 +620,8 @@ def _proposal_for_confirmation(
             """SELECT a.*, m.body, m.session_id AS source_session_id
                FROM investigation_update_assessments a JOIN messages m
                  ON m.message_id = a.source_message_id AND m.tenant_id = a.tenant_id
-               WHERE a.assessment_id = ? AND a.tenant_id = ? AND a.actor_id = ? AND a.task_id = ?""",
+               WHERE a.assessment_id = ? AND a.tenant_id = ? AND a.actor_id = ? AND a.task_id = ?
+                 AND a.condition_review_json IS NULL""",
             (proposal_id, identity.tenant_id, identity.actor_id, task_id),
         ).fetchone()
         if row is None or str(row["intent"] or "") != "CRITICAL_CORRECTION":
@@ -667,6 +674,7 @@ def cancel_assessment(
     proposal_id: str,
     operation_id: str,
     idempotency_key: str,
+    condition_review: bool = False,
 ) -> dict[str, Any]:
     if idempotency_key != operation_id:
         raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
@@ -674,23 +682,30 @@ def cancel_assessment(
         connection.execute("BEGIN IMMEDIATE")
         _verify_identity(connection, identity)
         _require_support_owner(connection, identity, task_id)
+        if condition_review:
+            from opspilot.domain.condition_review import _scope
+
+            _scope(connection, identity, task_id)
         row = connection.execute(
             """SELECT * FROM investigation_update_assessments
-               WHERE assessment_id = ? AND tenant_id = ? AND actor_id = ? AND task_id = ?""",
-            (proposal_id, identity.tenant_id, identity.actor_id, task_id),
+               WHERE assessment_id = ? AND tenant_id = ? AND actor_id = ? AND task_id = ?
+                 AND (condition_review_json IS NOT NULL) = ?""",
+            (proposal_id, identity.tenant_id, identity.actor_id, task_id, condition_review),
         ).fetchone()
-        if row is None or str(row["intent"] or "") != "CRITICAL_CORRECTION":
+        if row is None or (not condition_review and str(row["intent"] or "") != "CRITICAL_CORRECTION"):
             raise TaskControlError("UPDATE_PROPOSAL_NOT_FOUND")
         if str(row["operation_id"]) != operation_id:
             raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
         if str(row["status"]) == "CANCELLED":
             return {"status": "CANCELLED", "proposal_id": proposal_id, "replayed": True}
-        if str(row["status"]) != "PENDING_CONFIRMATION":
+        cancellable = {"PENDING_CONFIRMATION", "NO_UPDATE"} if condition_review else {"PENDING_CONFIRMATION"}
+        if row["status"] not in cancellable:
             raise TaskControlError("UPDATE_PROPOSAL_ALREADY_RESOLVED")
         connection.execute(
             """UPDATE investigation_update_assessments SET status = 'CANCELLED', cancelled_at = ?, completed_at = ?
-               WHERE assessment_id = ? AND status = 'PENDING_CONFIRMATION'""",
-            (_now(), _now(), proposal_id),
+               WHERE assessment_id = ? AND status = ?""",
+            (_now(), _now(), proposal_id, row["status"]),
         )
-        _resolve_source_chat_route(connection, row, mode="FALLBACK", now=_now())
+        if not condition_review:
+            _resolve_source_chat_route(connection, row, mode="FALLBACK", now=_now())
         return {"status": "CANCELLED", "proposal_id": proposal_id, "replayed": False}

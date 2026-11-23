@@ -39,6 +39,7 @@ from opspilot.web.schemas import (
     S3HandoffSubmitRequest,
     SemanticMemoryCandidateRequest, InvestigationUpdateProposalRequest,
     InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest, SessionMessageRequest,
+    ConditionReviewConfirmRequest,
 )
 
 
@@ -95,6 +96,7 @@ _STATUS_BY_CODE = {
     "TASK_CONDITION_VERSION_CONFLICT": 409,
     "TASK_CONDITION_CAPACITY_EXCEEDED": 409,
     "TASK_CONDITION_SOURCE_INVALID": 404,
+    "CONDITION_REVIEW_SOURCE_INVALID": 404,
     "ASSESSMENT_IN_PROGRESS": 409,
     "UPDATE_ASSESSMENT_NOT_ACTIVE": 409,
     "UPDATE_ASSESSMENT_RETRY_LIMIT": 409,
@@ -154,6 +156,7 @@ def create_app(
     heartbeat_seconds: float = 10.0,
     assistant_model_factory=None,
     assistant_experiment_id: str | None = None,
+    condition_model_factory=None,
 ) -> FastAPI:
     from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
 
@@ -816,6 +819,110 @@ def create_app(
                 item.pop("command_id", None)
                 items.append(item)
         return {"items": items}
+
+    @app.get("/api/tasks/{task_id}/condition-review")
+    async def get_condition_review(
+        task_id: str, context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.condition_review import get_review
+        from opspilot.domain.d2 import ScopeDenied
+
+        try:
+            return get_review(resolved_db, context.identity, task_id)
+        except ScopeDenied as error:
+            raise TaskControlError("CONDITION_REVIEW_SOURCE_INVALID") from error
+
+    @app.post("/api/tasks/{task_id}/condition-review")
+    async def discover_task_conditions(
+        task_id: str, body: InvestigationUpdateProposalRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.config import MODEL_API_KEY, MODEL_NAME
+        from opspilot.domain.condition_review import (
+            MAX_OUTPUT, assert_ready_to_discover, get_review, reserve_review, settle_review,
+        )
+        from opspilot.domain.d2 import ScopeDenied
+        from opspilot.domain.investigation_updates import input_classifier_model
+
+        if require_idempotency_key(idempotency_key) != body.source_message_id:
+            raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
+        model_id = os.environ.get(MODEL_NAME, "").strip()
+        available = condition_model_factory is not None or (
+            resolved_experiment is None
+            and bool(model_id and os.environ.get(MODEL_API_KEY, "").strip())
+        )
+        try:
+            prepared = await asyncio.to_thread(
+                reserve_review, resolved_db, context.identity, task_id, body.source_message_id,
+                model_id or "test-fixture", model_available=available,
+            )
+            if prepared is not None:
+                response = None
+                failure = None
+                model = None
+                try:
+                    await asyncio.to_thread(assert_ready_to_discover, resolved_db, context.identity, task_id, prepared)
+                    model = (condition_model_factory() if condition_model_factory is not None
+                             else input_classifier_model(model_id, review_output_limit=MAX_OUTPUT))
+                    response = await model.ainvoke(prepared["messages"])
+                except TaskControlError as error:
+                    failure = error.code
+                except ScopeDenied:
+                    failure = "CONDITION_REVIEW_SOURCE_INVALID"
+                except Exception:
+                    failure = "UPDATE_MODEL_UNAVAILABLE"
+                finally:
+                    async_client = getattr(model, "http_async_client", None)
+                    sync_client = getattr(model, "http_client", None)
+                    if async_client is not None:
+                        await async_client.aclose()
+                    if sync_client is not None:
+                        sync_client.close()
+                await asyncio.to_thread(
+                    settle_review, resolved_db, context.identity, task_id, prepared, response, failure=failure,
+                )
+            return await asyncio.to_thread(get_review, resolved_db, context.identity, task_id)
+        except ScopeDenied as error:
+            raise TaskControlError("CONDITION_REVIEW_SOURCE_INVALID") from error
+
+    @app.post("/api/tasks/{task_id}/condition-review/{review_id}/confirm")
+    async def confirm_task_conditions(
+        task_id: str, review_id: str, body: ConditionReviewConfirmRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.condition_review import confirm_review
+        from opspilot.domain.d2 import ScopeDenied
+
+        if require_idempotency_key(idempotency_key) != body.operation_id:
+            raise TaskControlError("IDEMPOTENCY_KEY_MISMATCH")
+        try:
+            return confirm_review(
+                resolved_db, context.identity, task_id, review_id, body.operation_id, body.selected_ids,
+            )
+        except ScopeDenied as error:
+            raise TaskControlError("CONDITION_REVIEW_SOURCE_INVALID") from error
+
+    @app.post("/api/tasks/{task_id}/condition-review/{review_id}/cancel")
+    async def cancel_task_conditions(
+        task_id: str, review_id: str, body: InvestigationUpdateCancelRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.condition_review import get_review
+        from opspilot.domain.d2 import ScopeDenied
+        from opspilot.domain.investigation_updates import cancel_assessment
+
+        try:
+            cancel_assessment(
+                resolved_db, context.identity, task_id=task_id, proposal_id=review_id,
+                operation_id=body.operation_id, idempotency_key=require_idempotency_key(idempotency_key),
+                condition_review=True,
+            )
+            return get_review(resolved_db, context.identity, task_id)
+        except ScopeDenied as error:
+            raise TaskControlError("CONDITION_REVIEW_SOURCE_INVALID") from error
 
     @app.post("/api/tasks/{task_id}/investigation-updates/proposals")
     async def assess_investigation_update(

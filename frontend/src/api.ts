@@ -82,6 +82,33 @@ export interface InvestigationUpdateProposal {
   provenance: 'USER_INPUT_UNTRUSTED';
 }
 
+export interface ConditionCandidate {
+  id: string;
+  slot: string;
+  action: 'ADD' | 'REPLACE' | 'REVOKE' | 'ACTIVE' | 'CONFLICT' | 'HYPOTHESIS' | 'QUOTE' | 'UNCERTAIN';
+  sequence: number;
+  source_text: string | null;
+  current_text: string | null;
+}
+
+export interface ConditionReview {
+  id: string;
+  status: string;
+  operation_id: string;
+  source_message_id: string;
+  candidates: ConditionCandidate[];
+  coverage: { messages_read: number; excerpted: number; invalid: number; budget_omitted: number; older_history_exists: boolean };
+  partial: boolean;
+  reason: string | null;
+  run_id: string | null;
+  application_state: string | null;
+}
+
+export interface ConditionReviewState {
+  active: Array<{ slot: string; text: string; version: number; sequence: number }>;
+  review: ConditionReview | null;
+}
+
 export interface InvestigationUpdateAssessment {
   assessment_id: string;
   proposal_id: string | null;
@@ -384,6 +411,34 @@ export const api = {
   investigationUpdates(taskId: string) {
     return request<{ items: InvestigationUpdateAssessment[] }>(
       `/api/tasks/${encodeURIComponent(taskId)}/investigation-updates`,
+    );
+  },
+  conditionReview(taskId: string) {
+    return request<ConditionReviewState>(`/api/tasks/${encodeURIComponent(taskId)}/condition-review`);
+  },
+  discoverConditions(taskId: string, sourceId: string, csrf: string) {
+    return request<ConditionReviewState>(`/api/tasks/${encodeURIComponent(taskId)}/condition-review`, {
+      method: 'POST',
+      headers: { ...writeHeaders(csrf), 'Idempotency-Key': sourceId },
+      body: JSON.stringify({ source_message_id: sourceId }),
+    });
+  },
+  confirmConditions(taskId: string, review: ConditionReview, selectedIds: string[], csrf: string) {
+    return request<{ run_id: string }>(
+      `/api/tasks/${encodeURIComponent(taskId)}/condition-review/${encodeURIComponent(review.id)}/confirm`, {
+        method: 'POST',
+        headers: { ...writeHeaders(csrf), 'Idempotency-Key': review.operation_id },
+        body: JSON.stringify({ operation_id: review.operation_id, selected_ids: selectedIds }),
+      },
+    );
+  },
+  cancelConditions(taskId: string, review: ConditionReview, csrf: string) {
+    return request<ConditionReviewState>(
+      `/api/tasks/${encodeURIComponent(taskId)}/condition-review/${encodeURIComponent(review.id)}/cancel`, {
+        method: 'POST',
+        headers: { ...writeHeaders(csrf), 'Idempotency-Key': review.operation_id },
+        body: JSON.stringify({ operation_id: review.operation_id }),
+      },
     );
   },
   confirmTaskUpdate(taskId: string, proposal: InvestigationUpdateProposal, csrf: string) {

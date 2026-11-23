@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import TaskConditionReview from './TaskConditionReview.vue';
 import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
 import { acknowledgeAssistantOperation, beginAssistantOperation } from './assistant-entry';
 import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
@@ -58,6 +59,7 @@ const reconnectCount = ref(0);
 const reconnectPaused = ref(false);
 const narrowInspectorOpen = ref(false);
 const conversationEnd = ref<HTMLElement | null>(null);
+const messageComposer = ref<HTMLTextAreaElement | null>(null);
 
 let eventSource: EventSource | null = null;
 let reconnectTimer: number | undefined;
@@ -73,6 +75,11 @@ const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const isApprover = computed(() => user.value?.role === 'APPROVER');
 const useProfessionalAssistant = computed(() => professionalMode.value
   && (!taskId.value || String(inspector.value?.task.service_id ?? '') === 'orders-async-demo'));
+const conditionReviewSource = computed(() => messages.value.reduce<MessageItem | undefined>((latest, item) => {
+  if (item.task_id === taskId.value && item.role === 'USER' && item.input_kind === 'CHAT_READONLY'
+      && (!latest || item.sequence > latest.sequence)) return item;
+  return latest;
+}, undefined)?.message_id ?? '');
 const latestBusinessRun = computed(() => inspector.value?.runs.find((run) => run.kind !== 'CHAT_READONLY') ?? null);
 const currentTaskStatus = computed(() => String(inspector.value?.trusted_state.task_status ?? inspector.value?.task.status ?? ''));
 const conversationProjection = computed(() => projectConversation({
@@ -836,6 +843,26 @@ async function confirmInvestigationUpdate(proposal: InvestigationUpdateProposal)
   } finally {
     busy.value = false;
   }
+}
+
+async function conditionReviewAccepted(runId: string): Promise<void> {
+  busy.value = true;
+  notice.value = '已受理所选任务条件，正在等待新一轮调查应用。';
+  try {
+    await refreshSessionMessagesOnly();
+    await watchRun(runId);
+    await refreshInspector();
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function editConditionSource(text: string): Promise<void> {
+  if (!draft.value.trim()) draft.value = text;
+  await nextTick();
+  messageComposer.value?.focus();
 }
 
 async function cancelInvestigationUpdate(proposal: InvestigationUpdateProposal): Promise<void> {
@@ -1630,10 +1657,14 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="composer-wrap">
+          <TaskConditionReview v-if="taskId && useProfessionalAssistant && canCreateTask && csrf"
+            :key="taskId" :task-id="taskId" :source-id="conditionReviewSource" :csrf="csrf"
+            :busy="busy" :revision="String(inspector?.trusted_state.control_revision ?? '')"
+            @accepted="conditionReviewAccepted" @edit="editConditionSource" />
           <div v-if="notice" class="notice-line" role="status">{{ notice }} <button v-if="reconnectPaused" type="button" @click="reconnectEvents">重新连接事件流</button></div>
           <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}<button v-if="errorMessage.includes('登录状态')" type="button" @click="logout">重新登录</button></div>
           <form class="composer" @submit.prevent="sendMessage">
-            <textarea v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" :placeholder="useProfessionalAssistant ? '提出技术问题、粘贴日志，或接着上一轮继续…' : '询问当前证据、任务状态，或继续上一轮对话…'" @keydown.enter="submitOnEnter"></textarea>
+            <textarea ref="messageComposer" v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" :placeholder="useProfessionalAssistant ? '提出技术问题、粘贴日志，或接着上一轮继续…' : '询问当前证据、任务状态，或继续上一轮对话…'" @keydown.enter="submitOnEnter"></textarea>
             <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 正式业务输入更正需要确认</span><button v-if="useProfessionalAssistant && taskId && canCreateTask" class="text-button" type="button" data-testid="assistant-critical-correction" :disabled="!draft.trim() || busy || !csrf" @click="correctionDraft = draft; submitCriticalCorrection()">将此条作为正式更正</button><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
           </form>
           <div class="composer-footnote">回答只解释已授权信息。审批、修复和交付需要后续的可信控制流程。</div>

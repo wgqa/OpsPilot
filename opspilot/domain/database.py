@@ -1018,7 +1018,8 @@ CREATE TABLE IF NOT EXISTS investigation_update_assessments (
     created_at TEXT NOT NULL,
     completed_at TEXT,
     confirmed_at TEXT,
-    cancelled_at TEXT
+    cancelled_at TEXT,
+    condition_review_json TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_investigation_update_task
     ON investigation_update_assessments(tenant_id, task_id, created_at);
@@ -1084,7 +1085,7 @@ def initialize(path: str | Path) -> None:
         from opspilot.domain.assistant_knowledge import SCHEMA as ASSISTANT_KNOWLEDGE_SCHEMA
         connection.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + S3_SCHEMA + S3_HANDOFF_SCHEMA + S3_HISTORY_SCHEMA + S3_ANSWER_SCHEMA + ASSISTANT_SCHEMA + ASSISTANT_KNOWLEDGE_SCHEMA)
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version > 18:
+        if version > 19:
             raise RuntimeError(f"Unsupported Domain schema version: {version}.")
         if version < 1:
             # A pre-vNext Task is safe to initialize at revision 0 only when the new
@@ -1448,6 +1449,11 @@ def initialize(path: str | Path) -> None:
             connection.execute("PRAGMA user_version = 17")
         if version < 18:
             connection.execute("PRAGMA user_version = 18")
+        if version < 19:
+            columns = {str(row["name"]) for row in connection.execute("PRAGMA table_info(investigation_update_assessments)")}
+            if "condition_review_json" not in columns:
+                connection.execute("ALTER TABLE investigation_update_assessments ADD COLUMN condition_review_json TEXT")
+            connection.execute("PRAGMA user_version = 19")
 
 
 def reset_fixture(path: str | Path, scenario: Scenario) -> None:

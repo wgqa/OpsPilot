@@ -64,6 +64,10 @@ class InvestigationUpdateCancelRequest(StrictModel):
     operation_id: str = Field(min_length=1, max_length=200)
 
 
+class ConditionReviewConfirmRequest(InvestigationUpdateCancelRequest):
+    selected_ids: list[str] = Field(min_length=1, max_length=16)
+
+
 class AbortTaskRequest(StrictModel):
     reason: str = Field(min_length=1, max_length=500)
 

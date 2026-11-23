@@ -1201,13 +1201,17 @@ def admit_task_message(
                     if str(proposal["status"]) != "PENDING_CONFIRMATION":
                         raise TaskControlError("UPDATE_PROPOSAL_ALREADY_RESOLVED")
                     source = connection.execute(
-                        """SELECT body, body_digest FROM messages WHERE message_id = ? AND task_id = ?
+                        """SELECT body, body_digest, sequence FROM messages WHERE message_id = ? AND task_id = ?
                            AND tenant_id = ? AND session_id = ? AND input_kind = 'CHAT_READONLY'
                            AND role = 'USER'""",
                         (proposal["source_message_id"], task_id, identity.tenant_id, session_id),
                     ).fetchone()
                     if source is None or str(source["body"]) != body or str(source["body_digest"]) != str(proposal["source_digest"]):
                         raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+                    if proposal["condition_review_json"] is not None:
+                        from opspilot.domain.condition_review import validate_review_selection
+
+                        validate_review_selection(connection, proposal, source, condition_changes)
                     if int(control["control_revision"]) != expected_control_revision:
                         connection.execute(
                             """UPDATE investigation_update_assessments SET status = 'STALE', completed_at = ?
