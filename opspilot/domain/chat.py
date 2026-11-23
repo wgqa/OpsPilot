@@ -460,6 +460,48 @@ def _current_memories(
     return memories
 
 
+# The accepting command and its Run attest the message's original scope.
+# In particular, a NULL task on a message alone does not make it shared.
+_USER_MESSAGE_ORIGIN = """
+    JOIN sessions s ON s.session_id = m.session_id AND s.tenant_id = m.tenant_id
+    JOIN commands c ON c.command_id = m.command_id AND c.message_id = m.message_id
+      AND c.tenant_id = m.tenant_id AND c.actor_id = s.owner_id
+      AND c.accepted_status = 'ACCEPTED'
+      AND (
+        (c.command_kind = m.input_kind AND c.target_ref = COALESCE(m.task_id, m.session_id))
+        OR (c.command_kind = 'CREATE_TASK' AND c.target_ref = m.session_id
+            AND m.task_id IS NOT NULL AND m.input_kind = 'CHAT_READONLY')
+      )
+    JOIN task_runs origin ON origin.run_id = c.run_id AND origin.command_id = c.command_id
+      AND origin.source_message_id = m.message_id AND origin.consumed_message_seq = m.sequence
+      AND origin.session_id = m.session_id AND origin.tenant_id = m.tenant_id
+      AND origin.task_id IS m.task_id
+"""
+
+
+def _scoped_user_message(connection, message_id, session_id, tenant_id, task_id):
+    return connection.execute(
+        f"""SELECT m.* FROM messages m {_USER_MESSAGE_ORIGIN}
+            WHERE m.message_id = ? AND m.session_id = ? AND m.tenant_id = ? AND m.role = 'USER'
+              AND (m.task_id IS ? OR (m.task_id IS NULL AND m.input_kind = 'CHAT_READONLY'))""",
+        (message_id, session_id, tenant_id, task_id),
+    ).fetchone()
+
+
+def _run_source_message(connection, run):
+    source = _scoped_user_message(
+        connection, run["source_message_id"], run["session_id"], run["tenant_id"], run["task_id"],
+    )
+    if (
+        source is None or source["task_id"] != run["task_id"]
+        or source["command_id"] != run["command_id"]
+        or source["sequence"] != run["consumed_message_seq"]
+        or _digest(str(source["body"])) != source["body_digest"]
+    ):
+        return None
+    return source
+
+
 def _message_source_valid(
     connection: sqlite3.Connection,
     row: sqlite3.Row,
@@ -476,9 +518,22 @@ def _message_source_valid(
     model_source_cache: dict[str, tuple[bool, str | None]] | None = None,
 ) -> tuple[bool, str | None]:
     from opspilot.domain.assistant import sources_current as assistant_sources_current
-    assistant_run = connection.execute("SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?",(row["message_id"],)).fetchone()
-    if assistant_run:
-        valid, reason = assistant_sources_current(connection, assistant_run["run_id"])
+    answer_run = connection.execute(
+        """SELECT r.*, ar.run_id AS assistant_run_id FROM chat_run_answers a
+           JOIN task_runs r ON r.run_id = a.run_id
+           LEFT JOIN assistant_runs ar ON ar.run_id = r.run_id
+           WHERE a.message_id = ? AND a.body_digest = ? AND r.task_id IS ? AND r.session_id = ? AND r.tenant_id = ?
+             AND r.status = 'SUCCEEDED' AND r.consumed_message_seq < ?""",
+        (row["message_id"], row["body_digest"], task_id, session_id, tenant_id, row["sequence"]),
+    ).fetchone()
+    if (
+        answer_run is None or row["task_id"] != task_id or row["session_id"] != session_id
+        or row["tenant_id"] != tenant_id or _digest(str(row["body"])) != row["body_digest"]
+        or _run_source_message(connection, answer_run) is None
+    ):
+        return False, "ANSWER_RUN_SCOPE_INVALID"
+    if answer_run["assistant_run_id"]:
+        valid, reason = assistant_sources_current(connection, answer_run["run_id"])
         if not valid:
             return False, reason
     visiting_messages = set(message_seen or ())
@@ -500,15 +555,11 @@ def _message_source_valid(
         kind, ref = str(source["source_kind"]), str(source["source_ref"])
         digest = str(source["source_digest"])
         if kind == "MESSAGE":
-            source_message = connection.execute(
-                """SELECT body_digest, task_id, input_kind FROM messages WHERE message_id = ? AND session_id = ?
-                   AND tenant_id = ? AND role = 'USER' AND input_kind IN ('CHAT_READONLY', 'CORRECT_TASK_INPUT')""",
-                (ref, session_id, tenant_id),
-            ).fetchone()
-            if source_message is None or str(source_message["body_digest"]) != digest:
-                return False, "USER_MESSAGE_SOURCE_CHANGED"
-            if str(source_message["input_kind"]) == "CORRECT_TASK_INPUT" and str(source_message["task_id"]) != task_id:
+            source_message = _scoped_user_message(connection, ref, session_id, tenant_id, task_id)
+            if source_message is None:
                 return False, "USER_MESSAGE_TASK_SCOPE_CHANGED"
+            if source_message["body_digest"] != digest or _digest(str(source_message["body"])) != digest:
+                return False, "USER_MESSAGE_SOURCE_CHANGED"
         elif kind == "EVIDENCE":
             current = evidence_by_id.get(ref)
             if current is None or str(current["digest"]) != digest:
@@ -632,6 +683,25 @@ def _message_source_valid(
     return True, None
 
 
+def session_answer_current(connection, run, message_id):
+    """Check a shared answer in its original scope before using its excerpt."""
+    answer = connection.execute(
+        """SELECT m.*, a.run_id AS answer_run_id, a.attempt_id AS answer_attempt_id
+           FROM messages m JOIN chat_run_answers a ON a.message_id = m.message_id
+           WHERE m.message_id = ? AND m.tenant_id = ? AND m.session_id = ?
+             AND m.task_id IS NULL AND m.role = 'ASSISTANT' AND m.sequence < ?""",
+        (message_id, run["tenant_id"], run["session_id"], run["consumed_message_seq"]),
+    ).fetchone()
+    if answer is None:
+        return None
+    valid, _ = _message_source_valid(
+        connection, answer, session_id=run["session_id"], tenant_id=run["tenant_id"],
+        task_id=None, state_digest=None, evidence_by_id={}, evidence_exclusion_reasons={},
+        memories_by_id={},
+    )
+    return answer if valid else None
+
+
 def _summary_is_current(
     connection: sqlite3.Connection,
     summary_id: str,
@@ -672,16 +742,10 @@ def _summary_is_current(
     for dep in deps:
         kind, ref, digest = str(dep["dependency_kind"]), str(dep["dependency_ref"]), str(dep["dependency_digest"])
         if kind == "MESSAGE":
-            source = connection.execute(
-                """SELECT body_digest, role, input_kind, tenant_id, session_id, task_id
-                   FROM messages WHERE message_id = ?""", (ref,),
-            ).fetchone()
+            source = _scoped_user_message(connection, ref, session_id, tenant_id, task_id)
             if (
-                source is None or str(source["tenant_id"]) != tenant_id
-                or str(source["session_id"]) != session_id
-                or (str(source["task_id"]) if source["task_id"] is not None else None) != task_id
-                or str(source["role"]) != "USER" or str(source["input_kind"]) not in {"CHAT_READONLY", "CORRECT_TASK_INPUT"}
-                or str(source["body_digest"]) != digest
+                source is None or source["body_digest"] != digest
+                or _digest(str(source["body"])) != digest
             ):
                 return False, "SUMMARY_MESSAGE_SOURCE_INVALID"
         elif kind == "ASSISTANT_MESSAGE":
@@ -706,7 +770,10 @@ def _summary_is_current(
                 return False, reason or "SUMMARY_ASSISTANT_DEPENDENCY_INVALID"
         elif kind == "MODEL_ATTEMPT":
             attempt = connection.execute(
-                "SELECT status, provider_response_id FROM chat_attempts WHERE attempt_id = ?", (ref,),
+                """SELECT a.status, a.provider_response_id FROM chat_attempts a JOIN task_runs r ON r.run_id = a.run_id
+                   WHERE a.attempt_id = ? AND r.tenant_id = ? AND r.session_id = ? AND r.task_id IS ?
+                     AND a.tenant_id = r.tenant_id AND a.session_id = r.session_id AND a.task_id IS r.task_id""",
+                (ref, tenant_id, session_id, task_id),
             ).fetchone()
             if (
                 attempt is None or str(attempt["status"]) != "SUCCEEDED"
@@ -1053,13 +1120,8 @@ def _prepare_context(
 ) -> dict[str, Any]:
     tenant_id, session_id = str(run["tenant_id"]), str(run["session_id"])
     task_id = str(run["task_id"]) if run["task_id"] is not None else None
-    source_message_id = str(run["source_message_id"] or "")
-    source_message = connection.execute(
-        """SELECT * FROM messages WHERE message_id = ? AND session_id = ? AND tenant_id = ?
-           AND role = 'USER' AND input_kind = 'CHAT_READONLY'""",
-        (source_message_id, session_id, tenant_id),
-    ).fetchone()
-    if source_message is None:
+    source_message = _run_source_message(connection, run)
+    if source_message is None or source_message["input_kind"] != "CHAT_READONLY":
         raise TaskControlError("CHAT_SOURCE_MESSAGE_INVALID")
     session = connection.execute(
         "SELECT owner_id FROM sessions WHERE session_id = ? AND tenant_id = ?",
@@ -1129,9 +1191,11 @@ def _prepare_context(
     memories_by_id = {str(item["memory_id"]): item for item in memories}
 
     user_rows = connection.execute(
-        """SELECT * FROM messages WHERE session_id = ? AND tenant_id = ? AND role = 'USER'
-           AND input_kind = 'CHAT_READONLY' AND sequence <= ? ORDER BY sequence DESC LIMIT ?""",
-        (session_id, tenant_id, int(source_message["sequence"]), MAX_CHAT_HISTORY_MESSAGES),
+        f"""SELECT m.* FROM messages m {_USER_MESSAGE_ORIGIN}
+            WHERE m.session_id = ? AND m.tenant_id = ? AND m.role = 'USER'
+              AND m.input_kind = 'CHAT_READONLY' AND (m.task_id IS NULL OR m.task_id = ?)
+              AND m.sequence <= ? ORDER BY m.sequence DESC LIMIT ?""",
+        (session_id, tenant_id, task_id, int(source_message["sequence"]), MAX_CHAT_HISTORY_MESSAGES),
     ).fetchall()
     history: list[dict[str, Any]] = [{
         "message_id": str(item["message_id"]), "role": "user", "sequence": int(item["sequence"]),
@@ -1146,7 +1210,7 @@ def _prepare_context(
             ("m.input_kind = 'CORRECT_TASK_INPUT'", "DESC", "LATEST_FORMAL_CORRECTION"),
         ):
             anchor = connection.execute(
-                f"""SELECT m.* FROM messages m JOIN commands c ON c.command_id = m.command_id
+                f"""SELECT m.* FROM messages m {_USER_MESSAGE_ORIGIN}
                     WHERE m.tenant_id = ? AND m.session_id = ? AND m.task_id = ? AND m.role = 'USER'
                       AND m.sequence <= ? AND {predicate} ORDER BY m.sequence {direction} LIMIT 1""",
                 (tenant_id, session_id, task_id, int(source_message["sequence"])),
@@ -1165,10 +1229,12 @@ def _prepare_context(
            FROM chat_run_answers a JOIN messages m ON m.message_id = a.message_id
            JOIN task_runs r ON r.run_id = a.run_id
            WHERE r.session_id = ? AND r.tenant_id = ? AND m.sequence < ? AND m.role = 'ASSISTANT'
-             AND ((r.task_id = ?) OR (r.task_id IS NULL AND ? IS NULL))
+             AND r.task_id IS ? AND m.task_id IS r.task_id
+             AND m.session_id = r.session_id AND m.tenant_id = r.tenant_id
            ORDER BY m.sequence DESC LIMIT ?""",
-        (session_id, tenant_id, int(source_message["sequence"]), task_id, task_id, MAX_CHAT_HISTORY_MESSAGES),
+        (session_id, tenant_id, int(source_message["sequence"]), task_id, MAX_CHAT_HISTORY_MESSAGES),
     ).fetchall()
+    model_source_cache: dict[str, tuple[bool, str | None]] = {}
     for message in assistant_rows:
         valid, reason = _message_source_valid(
             connection, message, session_id=session_id, tenant_id=tenant_id,
@@ -1176,6 +1242,7 @@ def _prepare_context(
             evidence_by_id=evidence_by_id,
             evidence_exclusion_reasons=evidence_exclusion_reasons,
             memories_by_id=memories_by_id,
+            model_source_cache=model_source_cache,
         )
         if valid:
             history.append({
@@ -2290,13 +2357,19 @@ def complete_chat_attempt(
                VALUES (?, ?, ?, ?, ?, ?)""",
             (str(run["run_id"]), assistant_id, attempt_id, str(manifest["manifest_id"]), body_digest, now),
         )
-        selected_user_ids = json.loads(str(manifest["selected_message_ids_json"]))
-        for message_id in selected_user_ids:
+        selected_message_ids = json.loads(str(manifest["selected_message_ids_json"]))
+        for message_id in selected_message_ids:
             source_message = connection.execute(
-                "SELECT role, input_kind, body_digest FROM messages WHERE message_id = ? AND session_id = ?",
-                (str(message_id), str(run["session_id"])),
+                "SELECT role, body_digest FROM messages WHERE message_id = ? AND session_id = ? AND tenant_id = ?",
+                (str(message_id), str(run["session_id"]), str(run["tenant_id"])),
             ).fetchone()
-            if source_message is not None and str(source_message["role"]) == "USER" and str(source_message["input_kind"]) in {"CHAT_READONLY", "CORRECT_TASK_INPUT"}:
+            if source_message is None:
+                raise TaskControlError("CHAT_CONTEXT_MESSAGE_SOURCE_INVALID")
+            if source_message["role"] == "USER":
+                if _scoped_user_message(
+                    connection, message_id, run["session_id"], run["tenant_id"], run["task_id"],
+                ) is None:
+                    raise TaskControlError("CHAT_CONTEXT_MESSAGE_SOURCE_INVALID")
                 connection.execute(
                     """INSERT OR IGNORE INTO chat_message_sources
                        (message_id, source_kind, source_ref, source_version, source_digest)

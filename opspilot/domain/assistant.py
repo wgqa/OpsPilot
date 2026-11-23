@@ -332,6 +332,7 @@ def finish(path,call_id,status,result=None,usage=None,observation=None):
 def sources_current(connection, run_id):
     """Revalidate actual persisted sources; never trust a saved Prompt/answer."""
     from opspilot.domain.assistant_knowledge import sources_current as knowledge_current
+    from opspilot.domain.chat import _run_source_message, session_answer_current
     from opspilot.domain.scoped_protocol_comparison import (
         scoped_comparison_is_current,
         scoped_discovery_is_current,
@@ -340,11 +341,34 @@ def sources_current(connection, run_id):
     from opspilot.domain.s3 import current_s3_evidence, get_s3_binding
     try:
         run,identity=state(connection,run_id,active=False)
+        if _run_source_message(connection, run) is None:
+            return False, "CHAT_SOURCE_MESSAGE_INVALID"
         if run['task_id']:
             get_s3_binding(connection,run['task_id'])
             control=connection.execute('SELECT control_revision,terminal_state FROM task_controls WHERE task_id=?',(run['task_id'],)).fetchone()
             if control['terminal_state']!='ACTIVE' or control['control_revision']!=run['expected_control_revision']:
                 return False,'TASK_CONTROL_CHANGED'
+            # Shared answer excerpts live in WORK_CONTEXT, outside the normal
+            # chat history manifest. Check their original lineage on reuse.
+            checked_answers = {}
+            calls = connection.execute(
+                """SELECT DISTINCT json_extract(request_json, '$.source_refs.prior_answers') AS prior_answers
+                   FROM assistant_calls WHERE run_id=? AND kind='MODEL' AND status='OK'""",
+                (run_id,),
+            ).fetchall()
+            for call in calls:
+                for ref in json.loads(call["prior_answers"] or "[]"):
+                    if "answer_excerpt" not in ref:
+                        continue
+                    message_id = ref["answer_message_id"]
+                    if message_id not in checked_answers:
+                        checked_answers[message_id] = session_answer_current(connection, run, message_id)
+                    answer = checked_answers[message_id]
+                    if (
+                        answer is None or answer["body_digest"] != ref["answer_digest"]
+                        or history_excerpt(answer["body"], 220) != ref["answer_excerpt"]
+                    ):
+                        return False, "ASSISTANT_SESSION_ANSWER_SOURCE_INVALID"
         calls=connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' AND status='OK'",(run_id,)).fetchall()
         for row in calls:
             try:

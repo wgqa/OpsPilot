@@ -26,6 +26,7 @@ from opspilot.domain.d2 import canonical_json, digest_json, reserve_attempt, fin
 from opspilot.domain.chat import (
     prepare_chat_attempt, complete_chat_attempt, fail_chat_attempt,
     _prepare_context, record_chat_limit_in_transaction, MAX_COMPRESSION_OUTPUT_TOKENS,
+    session_answer_current,
 )
 from opspilot.domain.context_engineering import investigator_context_budget, estimate_text_tokens
 from opspilot.domain.task_control import TaskControlError
@@ -308,7 +309,9 @@ SYSTEM='''你是专业技术支持助手。保留用户的工作目标、日志�
 
 
 def _assistant_failure_notice(error: BaseException) -> str | None:
-    """Return user-safe program text for known connection failures only."""
+    """Return user-safe program text for known failures."""
+    if isinstance(error, TaskControlError) and error.code == "ASSISTANT_CHAT_HISTORY_CHANGED":
+        return "本次调查保存的聊天上下文已失效。请在当前任务中重新发送问题。"
     connection_errors = {
         "OpenAIConnectionError", "APIConnectionError", "ConnectError", "ConnectTimeout",
         "ReadTimeout", "WriteTimeout", "RemoteProtocolError",
@@ -451,6 +454,31 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
         raise
 
 
+def _assistant_chat_seed(prepared):
+    messages = []
+    for item in prepared["messages"]:
+        content = str(item.get("content", ""))
+        if item["role"] == "system" and content.startswith("HISTORICAL SESSION SUMMARY"):
+            messages.append(SystemMessage(content=content))
+        elif item["role"] == "user":
+            messages.append(HumanMessage(content=content))
+        elif item["role"] == "assistant":
+            messages.append(AIMessage(content="历史答复（不是本 Run 新观察）：" + content))
+    return messages
+
+
+def _assert_chat_seed(messages, seed):
+    # Only subsequent model/tool turns may follow the verified chat history.
+    def identity(message):
+        return message.type, message.content
+
+    if (
+        not seed or [identity(item) for item in messages[:len(seed)]] != [identity(item) for item in seed]
+        or any(not isinstance(item, (AIMessage, ToolMessage)) for item in messages[len(seed):])
+    ):
+        raise TaskControlError("ASSISTANT_CHAT_HISTORY_CHANGED")
+
+
 def assistant_tool_hidden_for_experiment(tool_name, experiment_id):
     """Apply the isolated Skill OFF condition only to the material campaign."""
     from opspilot.domain.assistant_experiment import (
@@ -563,23 +591,37 @@ class Loop(AgentMiddleware):
             if not own_valid: raise TaskControlError(reason)
             previous=[]
             selected_ids=set(prepared.get('selected_message_ids',[]))
-            for row in c.execute("SELECT m.message_id,m.body,m.body_digest,m.created_at,m.sequence,a.run_id,r.source_message_id,r.task_id AS answer_task_id FROM chat_run_answers a JOIN messages m ON m.message_id=a.message_id JOIN task_runs r ON r.run_id=a.run_id WHERE m.session_id=? AND m.tenant_id=? AND m.sequence<? AND (r.task_id IS NULL OR r.task_id IS ?) ORDER BY m.sequence DESC LIMIT 6",(run['session_id'],run['tenant_id'],run['consumed_message_seq'],run['task_id'])):
+            previous_rows = c.execute(
+                """SELECT m.*, a.run_id, r.source_message_id
+                   FROM chat_run_answers a JOIN messages m ON m.message_id = a.message_id
+                   JOIN task_runs r ON r.run_id = a.run_id AND r.tenant_id = m.tenant_id
+                     AND r.session_id = m.session_id AND r.task_id IS m.task_id
+                   WHERE m.session_id = ? AND m.tenant_id = ? AND m.sequence < ?
+                     AND (r.task_id IS NULL OR r.task_id IS ?)
+                   ORDER BY m.sequence DESC LIMIT 6""",
+                (run["session_id"], run["tenant_id"], run["consumed_message_seq"], run["task_id"]),
+            ).fetchall()
+            for row in previous_rows:
                 selected=row['message_id'] in selected_ids
-                pre_binding_history=run['task_id'] is not None and row['answer_task_id'] is None
+                pre_binding_history=run['task_id'] is not None and row['task_id'] is None
                 if not selected and not pre_binding_history:
                     continue
-                if domain.selected(c,row['run_id']) and domain.sources_current(c,row['run_id'])[0]:
-                    item={
-                        'run_id':row['run_id'],'answer_message_id':row['message_id'],
-                        'source_message_id':row['source_message_id'],'sequence':row['sequence'],
-                        'created_at':row['created_at'],
-                        'answer_digest':row['body_digest'],
-                        'authority':'HISTORY_NOT_NEW_OBSERVATION',
-                        'content_location':'SELECTED_SESSION_MESSAGES' if selected else 'BOUNDED_PRE_BINDING_HISTORY_EXCERPT',
-                    }
-                    if not selected:
-                        item['answer_excerpt']=domain.history_excerpt(row['body'],220)
-                    previous.append(item)
+                if not domain.selected(c, row["run_id"]):
+                    continue
+                item = {
+                    "run_id": row["run_id"], "answer_message_id": row["message_id"],
+                    "source_message_id": row["source_message_id"], "sequence": row["sequence"],
+                    "created_at": row["created_at"], "answer_digest": row["body_digest"],
+                    "authority": "HISTORY_NOT_NEW_OBSERVATION",
+                    "content_location": "SELECTED_SESSION_MESSAGES" if selected else "BOUNDED_PRE_BINDING_HISTORY_EXCERPT",
+                }
+                if not selected:
+                    verified = session_answer_current(c, run, row["message_id"])
+                    if verified is None:
+                        continue
+                    item["answer_digest"] = verified["body_digest"]
+                    item["answer_excerpt"] = domain.history_excerpt(verified["body"], 220)
+                previous.append(item)
         memory_guidance_messages = [
             str(item.get('content', '')) for item in prepared.get('messages', [])
             if item.get('role') == 'system'
@@ -1283,13 +1325,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             with connect(path) as c:c.execute('UPDATE assistant_runs SET delivery_attempt_id=? WHERE run_id=?',(delivery,run_id))
         loop=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=reserved_tokens)
         prepared,_=loop.context()
-        initial=[]
-        for item in prepared['messages']:
-            content=str(item.get('content',''))
-            if item['role']=='system' and content.startswith('HISTORICAL SESSION SUMMARY'):
-                initial.append(SystemMessage(content=content))
-            elif item['role']=='user':initial.append(HumanMessage(content=content))
-            elif item['role']=='assistant':initial.append(AIMessage(content='历史答复（不是本 Run 新观察）：'+content))
+        initial = _assistant_chat_seed(prepared)
         cp=Path(checkpoint_path);cp.parent.mkdir(parents=True,exist_ok=True)
         config={'configurable':{'thread_id':'assistant-v1:'+run_id},'recursion_limit':36,'max_concurrency':1}
         try:
@@ -1300,6 +1336,8 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
                 # Memory was active. Do not continue that context after its
                 # manifest source has been revoked, expired, or changed.
                 loop.assert_manifest_memories_current()
+                if saved.values:
+                    _assert_chat_seed(saved.values.get("messages", []), initial)
                 answer=await asyncio.wait_for(graph.ainvoke(None if saved.values else {'messages':initial},config),60)
                 final=answer['messages'][-1]
                 text=final.content if isinstance(final.content,str) else canonical_json(final.content)
