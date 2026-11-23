@@ -7,11 +7,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from opspilot.domain.database import connect, initialize
 from opspilot.domain.events import write_outbox_event
 
+if TYPE_CHECKING:
+    from opspilot.domain.task_conditions import ConditionChange
 
 MessageKind = Literal["CHAT_READONLY", "CORRECT_TASK_INPUT"]
 RunStatus = Literal[
@@ -1102,6 +1104,7 @@ def admit_task_message(
     update_proposal_id: str | None = None,
     defer_task_chat_until_classified: bool = False,
     assistant_core: bool = False,
+    condition_changes: list[ConditionChange] | None = None,
 ) -> dict[str, object]:
     if input_kind not in {"CHAT_READONLY", "CORRECT_TASK_INPUT"}:
         raise ValueError("Unsupported task message kind.")
@@ -1137,6 +1140,19 @@ def admit_task_message(
     if update_proposal_id is not None:
         request["expected_control_revision"] = expected_control_revision
         request["update_proposal_id"] = update_proposal_id
+    if condition_changes is not None:
+        from opspilot.domain.task_conditions import CHANGES, MAX_ITEMS, validate_confirmation
+
+        if (
+            input_kind != "CORRECT_TASK_INPUT" or expected_control_revision is None
+            or not 1 <= len(condition_changes) <= MAX_ITEMS or assistant_core
+        ):
+            raise TaskControlError("TASK_CONDITION_CONFIRMATION_REQUIRED")
+        event = {
+            "operation_id": idempotency_key, "expected_control_revision": expected_control_revision,
+            "changes": [change.model_dump() for change in condition_changes],
+        }
+        request[CHANGES] = event
     if defer_task_chat_until_classified:
         request["defer_task_chat_until_classified"] = True
     request_digest = _digest(request)
@@ -1215,6 +1231,15 @@ def admit_task_message(
         body_digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
         if input_kind == "CORRECT_TASK_INPUT":
             assert control is not None and task_id is not None
+            if condition_changes is not None:
+                assert binding is not None
+                if str(binding["service_id"]) == "orders-async-demo":
+                    from opspilot.domain.s3 import get_s3_binding
+
+                    get_s3_binding(connection, task_id)
+                validate_confirmation(
+                    connection, control, event["changes"], task_id, identity.tenant_id, session_id, seq,
+                )
             new_revision = int(control["control_revision"]) + 1
             connection.execute(
                 """UPDATE task_controls SET control_revision = ?, pending_critical_message_seq = ?,
@@ -1337,7 +1362,8 @@ def admit_task_message(
             connection, identity.tenant_id, task_id, session_id, "COMMAND", command_id,
             "MESSAGE_ACCEPTED",
             {"command_id": command_id, "message_id": message_id, "run_id": run_id,
-             "sequence": seq, "input_kind": input_kind, "application_state": result["application_state"]},
+             "sequence": seq, "input_kind": input_kind, "application_state": result["application_state"],
+             **({CHANGES: event} if condition_changes is not None else {})},
         )
         connection.execute("UPDATE sessions SET updated_at = ? WHERE session_id = ?", (now, session_id))
     return result
@@ -1822,6 +1848,12 @@ def apply_pending_critical_inputs(
         # The latest accepted correction's Run must consume the entire pending high-water.
         if str(run["source_message_id"]) != str(rows[-1]["message_id"]):
             raise TaskControlError("TASK_CONTROL_STALE")
+        from opspilot.domain.task_conditions import apply_confirmed_changes
+
+        next_revision = int(control["control_revision"]) + 1
+        condition_payload = apply_confirmed_changes(
+            connection, control, rows, task_id, identity.tenant_id, str(run["session_id"]), next_revision,
+        )
         now = _utc_now()
         inputs: list[dict[str, object]] = []
         for row in rows:
@@ -1845,7 +1877,6 @@ def apply_pending_critical_inputs(
                 "provenance": "USER_INPUT_UNTRUSTED",
                 "body_digest": digest,
             })
-        next_revision = int(control["control_revision"]) + 1
         connection.execute(
             """UPDATE task_controls SET control_revision = ?, pending_critical_message_seq = NULL,
                       applied_critical_message_seq = ?, changed_at = ?, changed_by = ?,
@@ -1865,7 +1896,7 @@ def apply_pending_critical_inputs(
             "CRITICAL_INPUTS_APPLIED",
             {"run_id": run_id, "message_ids": [item["message_id"] for item in inputs],
              "applied_critical_message_seq": pending_seq, "control_revision": next_revision,
-             "provenance": "USER_INPUT_UNTRUSTED"},
+             "provenance": "USER_INPUT_UNTRUSTED", **condition_payload},
         )
         return {
             "run_id": run_id,

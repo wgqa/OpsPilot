@@ -38,7 +38,7 @@ from opspilot.web.schemas import (
     MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
     S3HandoffSubmitRequest,
     SemanticMemoryCandidateRequest, InvestigationUpdateProposalRequest,
-    InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest,
+    InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest, SessionMessageRequest,
 )
 
 
@@ -92,6 +92,9 @@ _STATUS_BY_CODE = {
     "TASK_ABORTED": 409,
     "TASK_ALREADY_TERMINAL": 409,
     "TASK_CONTROL_STALE": 409,
+    "TASK_CONDITION_VERSION_CONFLICT": 409,
+    "TASK_CONDITION_CAPACITY_EXCEEDED": 409,
+    "TASK_CONDITION_SOURCE_INVALID": 404,
     "ASSESSMENT_IN_PROGRESS": 409,
     "UPDATE_ASSESSMENT_NOT_ACTIVE": 409,
     "UPDATE_ASSESSMENT_RETRY_LIMIT": 409,
@@ -639,7 +642,7 @@ def create_app(
     @app.post("/api/sessions/{session_id}/messages", status_code=202)
     async def post_message(
         session_id: str,
-        body: MessageRequest,
+        body: SessionMessageRequest,
         idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
         context: AuthContext = Depends(write_user),
     ) -> dict[str, Any]:
@@ -647,6 +650,8 @@ def create_app(
             resolved_db, context.identity, session_id=session_id, task_id=body.task_id,
             input_kind=body.input_kind, body=body.body,
             idempotency_key=require_idempotency_key(idempotency_key),
+            expected_control_revision=body.expected_control_revision,
+            condition_changes=body.condition_changes,
             defer_task_chat_until_classified=(
                 body.task_id is not None and body.input_kind == "CHAT_READONLY"
             ),

@@ -310,6 +310,8 @@ SYSTEM='''你是专业技术支持助手。保留用户的工作目标、日志�
 
 def _assistant_failure_notice(error: BaseException) -> str | None:
     """Return user-safe program text for known failures."""
+    if str(error).startswith("TASK_CONDITIONS_EXCEED_CONTEXT_BUDGET"):
+        return "本轮无法在模型预算内同时保留所有已确认条件。请选择较小的调查范围，本轮未完成。"
     if isinstance(error, TaskControlError) and error.code == "ASSISTANT_CHAT_HISTORY_CHANGED":
         return "本次调查保存的聊天上下文已失效。请在当前任务中重新发送问题。"
     connection_errors = {
@@ -455,10 +457,12 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
 
 
 def _assistant_chat_seed(prepared):
+    from opspilot.domain.task_conditions import CONDITION_PREFIX
+
     messages = []
     for item in prepared["messages"]:
         content = str(item.get("content", ""))
-        if item["role"] == "system" and content.startswith("HISTORICAL SESSION SUMMARY"):
+        if item["role"] == "system" and content.startswith(("HISTORICAL SESSION SUMMARY", CONDITION_PREFIX)):
             messages.append(SystemMessage(content=content))
         elif item["role"] == "user":
             messages.append(HumanMessage(content=content))
@@ -670,11 +674,34 @@ class Loop(AgentMiddleware):
             raise TaskControlError('ASSISTANT_MEMORY_MANIFEST_INVALID')
         self._assert_memories_current(selected_memories)
 
+    def _assert_conditions_current(self, expected_conditions):
+        if expected_conditions is None:
+            return
+        from opspilot.domain.s3 import get_s3_binding
+        from opspilot.domain.task_conditions import current_conditions
+
+        with connect(self.path) as connection:
+            connection.execute("BEGIN")
+            run, _ = domain.state(connection, self.run_id, worker_id=self.worker_id)
+            get_s3_binding(connection, run["task_id"])
+            if current_conditions(connection, run) != expected_conditions:
+                raise TaskControlError("TASK_CONDITIONS_STALE")
+
     async def awrap_model_call(self,request,handler):
+        from opspilot.domain.task_conditions import CONDITION_PREFIX, condition_context
+
         prepared,payload=self.context()
         # The native tool messages are retained; refresh trusted context before
         # every dispatch, and stop rather than send invalidated source content.
         messages=list(request.messages)
+        conditions = prepared["task_conditions"]
+        expected = [] if conditions is None else [condition_context(conditions)]
+        recorded = [
+            item.content for item in messages
+            if isinstance(item, SystemMessage) and str(item.content).startswith(CONDITION_PREFIX)
+        ]
+        if recorded != expected:
+            raise TaskControlError("TASK_CONDITIONS_STALE")
         memory_guidance = list(prepared.get('memory_guidance_messages', []))
         system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(payload)
         if memory_guidance:
@@ -715,6 +742,7 @@ class Loop(AgentMiddleware):
         call,fresh=domain.reserve(self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',wire,self.worker_id,experiment_id=self.experiment_id)
         self.trace('model_request',call_id=call['call_id'],replay=not fresh,**wire)
         if not fresh:
+            self._assert_conditions_current(conditions)
             self._assert_memories_current(memory_refs)
             self._settle_cached_campaign_dispatch(
                 'MODEL', call['logical_key'], self._campaign_usage_for_cached_call(call)
@@ -739,6 +767,7 @@ class Loop(AgentMiddleware):
             # This reuses the Memory Domain validator after durable reservations
             # and immediately before entering the Provider handler.
             self._assert_memories_current(memory_refs)
+            self._assert_conditions_current(conditions)
             send_started = True
             # The factory pins the output cap using the configured provider's
             # wire parameter. Re-injecting `max_tokens` here would make the
@@ -1104,10 +1133,10 @@ async def _prepare_assistant_context_impl(
     )
     from opspilot.domain.context_engineering import ContextBudgetExceeded
 
-    def stop(code: str) -> dict[str, object]:
+    def stop(code: str, *, notice: str | None = None) -> dict[str, object]:
         with connect(path) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            record_chat_limit_in_transaction(connection, run_id, code)
+            record_chat_limit_in_transaction(connection, run_id, code, user_message=notice)
         return {"error": code, "run_id": run_id}
 
     while True:
@@ -1116,7 +1145,7 @@ async def _prepare_assistant_context_impl(
                 path, run_id, worker_id, model_id, reserved_tokens=reserved_tokens,
             )
         except ContextBudgetExceeded as error:
-            return stop(error.code)
+            return stop(error.code, notice=_assistant_failure_notice(error))
         if compression is None:
             return await asyncio.to_thread(
                 prepare_chat_attempt, path, run_id, worker_id, model_id,
@@ -1304,31 +1333,29 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
                     return canonical_json(value),value
                 return call
             tools.append(StructuredTool.from_function(coroutine=adapter(t.name),name=t.name,description=t.description or '',args_schema=schema,response_format='content_and_artifact'))
-        # Tool schemas, the fixed system prompt and the WORK_CONTEXT payload all
-        # travel in the same model input as the conversation. Reserve their
-        # footprint while selecting history, so the wire check cannot reject a
-        # context the assistant could still answer from.
-        tools_tokens=estimate_text_tokens(canonical_json(specs))+8 if specs else 0
-        base_reserved=tools_tokens+estimate_text_tokens(SYSTEM)+4
-        probe=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=base_reserved)
-        _,probe_payload=probe.context()
-        reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(probe_payload))+4
-        if specs:
-            reserved_tokens+=ASSISTANT_TOOL_RESULT_RESERVE
-        if delivery is None:
-            prepared=await _prepare_assistant_context(
-                path,run_id,worker_id,model_id,model,reserved_tokens=reserved_tokens,
-                experiment_id=experiment_id,
-            )
-            if prepared.get('error'): return prepared
-            delivery=prepared['attempt_id']
-            with connect(path) as c:c.execute('UPDATE assistant_runs SET delivery_attempt_id=? WHERE run_id=?',(delivery,run_id))
-        loop=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=reserved_tokens)
-        prepared,_=loop.context()
-        initial = _assistant_chat_seed(prepared)
-        cp=Path(checkpoint_path);cp.parent.mkdir(parents=True,exist_ok=True)
-        config={'configurable':{'thread_id':'assistant-v1:'+run_id},'recursion_limit':36,'max_concurrency':1}
         try:
+            # Tool schemas, the system prompt and WORK_CONTEXT share the
+            # input budget with the required conditions and conversation.
+            tools_tokens=estimate_text_tokens(canonical_json(specs))+8 if specs else 0
+            base_reserved=tools_tokens+estimate_text_tokens(SYSTEM)+4
+            probe=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=base_reserved)
+            _,probe_payload=probe.context()
+            reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(probe_payload))+4
+            if specs:
+                reserved_tokens+=ASSISTANT_TOOL_RESULT_RESERVE
+            if delivery is None:
+                prepared=await _prepare_assistant_context(
+                    path,run_id,worker_id,model_id,model,reserved_tokens=reserved_tokens,
+                    experiment_id=experiment_id,
+                )
+                if prepared.get('error'): return prepared
+                delivery=prepared['attempt_id']
+                with connect(path) as c:c.execute('UPDATE assistant_runs SET delivery_attempt_id=? WHERE run_id=?',(delivery,run_id))
+            loop=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=reserved_tokens)
+            prepared,_=loop.context()
+            initial = _assistant_chat_seed(prepared)
+            cp=Path(checkpoint_path);cp.parent.mkdir(parents=True,exist_ok=True)
+            config={'configurable':{'thread_id':'assistant-v1:'+run_id},'recursion_limit':36,'max_concurrency':1}
             async with AsyncSqliteSaver.from_conn_string(str(cp)) as saver:
                 graph=create_agent(model=model,tools=tools,system_prompt=SYSTEM,middleware=[loop],checkpointer=saver)
                 saved=await graph.aget_state(config)
@@ -1348,7 +1375,8 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
                 trace('answer_committed',**result,answer=text)
                 return result
         except Exception as error:
-            reason='ASSISTANT_STOP:'+type(error).__name__+':'+str(error)[:180]
+            code = getattr(error, "code", "")
+            reason = code if code.startswith("TASK_CONDITION") else 'ASSISTANT_STOP:'+type(error).__name__+':'+str(error)[:180]
             failure=_close_terminal_assistant_failure(path,worker_id,run_id,error,reason)
             trace('stopped',reason=reason,status=failure.get('status'),error_class=type(error).__name__)
             return {'status':'NOT_COMPLETED','reason':str(error)}

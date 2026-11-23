@@ -1118,6 +1118,8 @@ def _prepare_context(
     connection: sqlite3.Connection, run: sqlite3.Row, model_id: str, db_path: str | Path,
     *, reserved_tokens: int = 0,
 ) -> dict[str, Any]:
+    from opspilot.domain.task_conditions import condition_context, current_conditions
+
     tenant_id, session_id = str(run["tenant_id"]), str(run["session_id"])
     task_id = str(run["task_id"]) if run["task_id"] is not None else None
     source_message = _run_source_message(connection, run)
@@ -1139,6 +1141,11 @@ def _prepare_context(
         if linked is None:
             raise TaskControlError("SESSION_TASK_LINK_REQUIRED")
     state, state_digest = _trusted_state(connection, task_id)
+    conditions = current_conditions(connection, run)
+    condition_message = (
+        {"role": "system", "content": condition_context(conditions)}
+        if conditions is not None else None
+    )
     if task_id and state is not None:
         from opspilot.domain.s2_diagnosis import get_s2_task_outcome
 
@@ -1299,10 +1306,15 @@ def _prepare_context(
             "covered_to_seq": int(summary["covered_to_seq"]),
             "source_attempt_id": str(summary["source_attempt_id"]),
         }
+        summary_json = str(summary["summary_json"])
+        if condition_message is not None:
+            historical = json.loads(summary_json)
+            historical["historical_constraints"] = historical.pop("constraints", [])
+            summary_json = _canonical(historical)
         summary_message = {
             "role": "system",
             "content": "HISTORICAL SESSION SUMMARY (untrusted, non-authoritative; source IDs are attached): "
-                       + str(summary["summary_json"]),
+                       + summary_json,
         }
     visible_history = [
         item for item in history
@@ -1421,6 +1433,19 @@ def _prepare_context(
     visible_history.extend(task_input_anchors.values())
     visible_history.sort(key=lambda item: int(item["sequence"]))
     full_messages = list(messages)
+    if condition_message is not None:
+        full_messages.append(condition_message)
+        required = [
+            *full_messages, {"role": "user", "content": source_message["body"]},
+            *({"role": "user", "content": f"{anchor['anchor_kind']} (UNTRUSTED USER INPUT): {anchor['body']}"}
+              for anchor in task_input_anchors.values()),
+        ]
+        required_tokens = estimate_messages_tokens(required)
+        if required_tokens > effective_budget["input_budget_tokens"]:
+            raise ContextBudgetExceeded(
+                "TASK_CONDITIONS_EXCEED_CONTEXT_BUDGET", required_tokens=required_tokens,
+                input_budget_tokens=effective_budget["input_budget_tokens"],
+            )
     if summary_message is not None and strategy != "RECENT_WINDOW":
         full_messages.append(summary_message)
     full_messages.extend(item["messages"][0] for item in memory_block_by_id.values())
@@ -1584,6 +1609,7 @@ def _prepare_context(
             "evidence_refs": evidence, "memory_refs": memories, "summary_refs": [],
             "model_call_refs": [], "excluded_sources": excluded,
             "context_blocks": [], "trusted_state_digest": state_digest, "task_state": state,
+            "task_conditions": conditions,
         }
 
     blocks: list[dict[str, Any]] = [
@@ -1612,6 +1638,13 @@ def _prepare_context(
             "authority": "UNTRUSTED_DERIVED_CONTEXT", "required": False, "priority": 2000,
             "order": 1, "messages": [summary_message], "source_refs": [str(summary["summary_id"])],
             "summary_ref": summary_ref,
+        })
+    if condition_message is not None:
+        blocks.append({
+            "block_id": f"task-conditions:{_digest(condition_message['content'])}",
+            "category": "CURRENT_TASK_CONDITIONS", "authority": "USER_CONFIRMED_REQUIREMENTS",
+            "required": True, "priority": 100, "order": 3, "messages": [condition_message],
+            "source_refs": [item["source_message_id"] for item in conditions],
         })
     blocks.extend(memory_block_by_id.values())
     blocks.extend(prior_followup_blocks)
@@ -1698,6 +1731,7 @@ def _prepare_context(
                         "max_context_chars": MAX_CHAT_CONTEXT_CHARS,
                         "prior_readonly_followup_refs": selected_prior_followup_refs},
         "context_budget": context_budget, "context_blocks": context_blocks,
+        "task_conditions": conditions,
         "trusted_state_digest": state_digest, "task_state": state,
         "compression_required": False,
     }
@@ -2258,6 +2292,19 @@ def complete_chat_attempt(
         ).fetchone()
         if manifest is None:
             raise TaskControlError("CHAT_CONTEXT_MANIFEST_MISSING")
+        from opspilot.domain.task_conditions import condition_context, current_conditions
+
+        truncation = json.loads(str(manifest["truncation_json"]))
+        conditions = current_conditions(connection, run)
+        condition_block_ids = [
+            item["block_id"] for item in truncation.get("context_blocks", [])
+            if item.get("category") == "CURRENT_TASK_CONDITIONS"
+        ]
+        expected_condition_blocks = (
+            [] if conditions is None else [f"task-conditions:{_digest(condition_context(conditions))}"]
+        )
+        if condition_block_ids != expected_condition_blocks:
+            raise TaskControlError("TASK_CONDITIONS_STALE")
         if is_assistant_run:
             manifest_memories = json.loads(str(manifest["memory_refs_json"]))
             if not isinstance(manifest_memories, list):
@@ -2358,6 +2405,10 @@ def complete_chat_attempt(
             (str(run["run_id"]), assistant_id, attempt_id, str(manifest["manifest_id"]), body_digest, now),
         )
         selected_message_ids = json.loads(str(manifest["selected_message_ids_json"]))
+        if conditions is not None:
+            selected_message_ids = list(dict.fromkeys([
+                *selected_message_ids, *(item["source_message_id"] for item in conditions),
+            ]))
         for message_id in selected_message_ids:
             source_message = connection.execute(
                 "SELECT role, body_digest FROM messages WHERE message_id = ? AND session_id = ? AND tenant_id = ?",
@@ -2392,7 +2443,6 @@ def complete_chat_attempt(
                    VALUES (?, 'MEMORY', ?, ?, ?)""",
                 (assistant_id, str(item["memory_id"]), str(item["version"]), str(item["digest"])),
             )
-        truncation = json.loads(str(manifest["truncation_json"]))
         for item in truncation.get("summary_refs", []):
             if not isinstance(item, dict):
                 continue

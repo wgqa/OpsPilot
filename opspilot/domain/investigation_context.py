@@ -10,6 +10,7 @@ from typing import Any
 
 from opspilot.domain.database import connect
 from opspilot.domain.task_control import TaskControlError, assert_task_control_in_transaction
+from opspilot.domain.task_conditions import current_conditions
 
 
 class InvestigationContextInvalid(TaskControlError):
@@ -401,6 +402,9 @@ def _read_context(connection: sqlite3.Connection, task_id: str, run_id: str) -> 
         "pending_critical_message_seq": None,
         "input_refs": refs,
     }
+    conditions = current_conditions(connection, row)
+    if conditions is not None:
+        control["conditions"] = conditions
     return {
         "inputs": selected,
         "task_run_control": control,
@@ -503,7 +507,7 @@ def validate_task_run_context_in_transaction(
     if not run_id or type(expected_revision) is not int:
         raise InvestigationContextInvalid("TASK_RUN_CONTEXT_REQUIRED")
     run = connection.execute(
-        "SELECT tenant_id, session_id, source_message_id, expected_control_revision, consumed_message_seq, applied_critical_message_seq, status FROM task_runs WHERE run_id = ? AND task_id = ?",
+        "SELECT task_id, tenant_id, session_id, source_message_id, expected_control_revision, consumed_message_seq, applied_critical_message_seq, status FROM task_runs WHERE run_id = ? AND task_id = ?",
         (run_id, task_id),
     ).fetchone()
     if run is None:
@@ -515,6 +519,8 @@ def validate_task_run_context_in_transaction(
         expected_revision,
         run_id=run_id,
     )
+    if current_conditions(connection, run) != context.get("conditions"):
+        raise InvestigationContextInvalid("TASK_CONDITIONS_STALE")
     for key in ("consumed_message_seq", "applied_critical_message_seq"):
         if int(run[key]) != int(context.get(key, -1)):
             raise InvestigationContextInvalid("TASK_INPUT_HIGHWATER_STALE")

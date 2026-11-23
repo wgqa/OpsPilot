@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from opspilot.domain.task_conditions import MAX_ITEMS, ConditionChange
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -28,6 +29,17 @@ class MessageRequest(StrictModel):
     body: str = Field(min_length=1, max_length=20_000)
     input_kind: Literal["CHAT_READONLY", "CORRECT_TASK_INPUT"] = "CHAT_READONLY"
     task_id: str | None = Field(default=None, max_length=100)
+
+
+class SessionMessageRequest(MessageRequest):
+    expected_control_revision: int | None = Field(default=None, ge=0, strict=True)
+    condition_changes: list[ConditionChange] | None = Field(default=None, min_length=1, max_length=MAX_ITEMS)
+
+    @model_validator(mode="after")
+    def require_confirmation_revision(self):
+        if (self.expected_control_revision is None) != (self.condition_changes is None):
+            raise ValueError("Condition changes and expected_control_revision must be provided together.")
+        return self
 
 
 class AssistantScopeRequest(StrictModel):

@@ -339,6 +339,7 @@ def sources_current(connection, run_id):
         scoped_protocol_excerpt_is_current,
     )
     from opspilot.domain.s3 import current_s3_evidence, get_s3_binding
+    from opspilot.domain.task_conditions import current_conditions
     try:
         run,identity=state(connection,run_id,active=False)
         if _run_source_message(connection, run) is None:
@@ -348,6 +349,7 @@ def sources_current(connection, run_id):
             control=connection.execute('SELECT control_revision,terminal_state FROM task_controls WHERE task_id=?',(run['task_id'],)).fetchone()
             if control['terminal_state']!='ACTIVE' or control['control_revision']!=run['expected_control_revision']:
                 return False,'TASK_CONTROL_CHANGED'
+            current_conditions(connection, run)
             # Shared answer excerpts live in WORK_CONTEXT, outside the normal
             # chat history manifest. Check their original lineage on reuse.
             checked_answers = {}
