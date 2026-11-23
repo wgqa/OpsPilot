@@ -1,0 +1,83 @@
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\docs\reviews\p0-02-a-green-01\run_pair.py", line 265, in <module>
+  |     asyncio.run(run(Path(temp), args.output, args.baseline))
+  |     ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 204, in run
+  |     return runner.run(main)
+  |            ~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\runners.py", line 127, in run
+  |     return self._loop.run_until_complete(task)
+  |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  |   File "D:\python\Lib\asyncio\base_events.py", line 719, in run_until_complete
+  |     return future.result()
+  |            ~~~~~~~~~~~~~^^
+  |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\docs\reviews\p0-02-a-green-01\run_pair.py", line 219, in run
+  |     control_answer = await dispatch(label, next_query, path=branch, worker_epoch=branch_epoch,
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |                                     cp=root / f"{label}-checkpoint.sqlite")
+  |                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\docs\reviews\p0-02-a-green-01\run_pair.py", line 72, in dispatch
+  |     await _dispatch_run(path, cp, frozen.WORKER, "executor-a", frozen.persisted_run(path, run_id),
+  |                         worker_epoch, assistant_model_factory=wire.factory)
+  |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\opspilot\web\worker.py", line 524, in _dispatch_run
+  |     await run_assistant(
+  |     ...<2 lines>...
+  |     )
+  |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\opspilot\assistant.py", line 952, in run_assistant
+  |     return await asyncio.wait_for(_run_assistant(path,checkpoint_path,worker_id,run_id,model=model,trace=trace,experiment_id=experiment_id),min(60,remaining/1000))
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\asyncio\tasks.py", line 488, in wait_for
+  |     return await fut
+  |            ^^^^^^^^^
+  |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\opspilot\assistant.py", line 1315, in _run_assistant
+  |     async with Client(params) as client:
+  |                ~~~~~~^^^^^^^^
+  |   File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\client.py", line 480, in __aexit__
+  |     await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+  |   File "D:\python\Lib\contextlib.py", line 768, in __aexit__
+  |     raise exc
+  |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+  |     cb_suppress = await cb(*exc_details)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^
+  |   File "D:\python\Lib\contextlib.py", line 235, in __aexit__
+  |     await self.gen.athrow(value)
+  |   File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 201, in stdio_client
+  |     async with anyio.create_task_group() as tg:
+  |                ~~~~~~~~~~~~~~~~~~~~~~~^^
+  |   File "D:\学习\agent新项目\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+  |     raise BaseExceptionGroup(
+  |         "unhandled errors in a TaskGroup", self._exceptions
+  |     ) from None
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Exception Group Traceback (most recent call last):
+    |   File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 205, in stdio_client
+    |     yield read_stream, write_stream
+    |   File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+    |     cb_suppress = await cb(*exc_details)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\session.py", line 514, in __aexit__
+    |     result = await self._task_group.__aexit__(exc_type, exc_val, exc_tb)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\学习\agent新项目\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 847, in __aexit__
+    |     raise BaseExceptionGroup(
+    |         "unhandled errors in a TaskGroup", self._exceptions
+    |     ) from None
+    | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+    +-+---------------- 1 ----------------
+      | Traceback (most recent call last):
+      |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\opspilot\assistant.py", line 1344, in _run_assistant
+      |     _,probe_payload=probe.context()
+      |                     ~~~~~~~~~~~~~^^
+      |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\opspilot\assistant.py", line 592, in context
+      |     prepared=_prepare_context(c,c.execute('SELECT * FROM task_runs WHERE run_id=?',(self.run_id,)).fetchone(),self.model_id,self.path,reserved_tokens=self.reserved_tokens)
+      |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\opspilot\domain\chat.py", line 1144, in _prepare_context
+      |     conditions = current_conditions(connection, run)
+      |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\opspilot\domain\task_conditions.py", line 175, in current_conditions
+      |     source = _condition_source(
+      |         connection, item, task_id, run["tenant_id"], run["session_id"], item["confirmation_sequence"],
+      |     )
+      |   File "D:\学习\agent新项目\.worktrees\p0-02-a-green-01\opspilot\domain\task_conditions.py", line 66, in _condition_source
+      |     raise TaskControlError("TASK_CONDITION_SOURCE_INVALID")
+      | opspilot.domain.task_control.TaskControlError: TASK_CONDITION_SOURCE_INVALID
+      +------------------------------------
