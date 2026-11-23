@@ -1,0 +1,153 @@
+Traceback (most recent call last):
+  File "D:\学习\agent新项目\.worktrees\p0-01-task-context-green\opspilot\assistant.py", line 918, in run_assistant
+    return await asyncio.wait_for(_run_assistant(path,checkpoint_path,worker_id,run_id,model=model,trace=trace,experiment_id=experiment_id),min(60,remaining/1000))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python\Lib\asyncio\tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "D:\学习\agent新项目\.worktrees\p0-01-task-context-green\opspilot\assistant.py", line 1274, in _run_assistant
+    async with Client(params) as client:
+               ~~~~~~^^^^^^^^
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\client.py", line 480, in __aexit__
+    await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
+  File "D:\python\Lib\contextlib.py", line 768, in __aexit__
+    raise exc
+  File "D:\python\Lib\contextlib.py", line 751, in __aexit__
+    cb_suppress = await cb(*exc_details)
+                  ^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python\Lib\contextlib.py", line 221, in __aexit__
+    await anext(self.gen)
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 201, in stdio_client
+    async with anyio.create_task_group() as tg:
+               ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 851, in __aexit__
+    raise exc_val
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 212, in stdio_client
+    await shutdown()
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 196, in shutdown
+    await _stop_server_process(process)
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 258, in _stop_server_process
+    if not await _wait_for_process_exit(process, PROCESS_TERMINATION_TIMEOUT):
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\mcp\client\stdio.py", line 287, in _wait_for_process_exit
+    await anyio.sleep(_EXIT_POLL_INTERVAL)
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\anyio\_core\_eventloop.py", line 95, in sleep
+    return await get_async_backend().sleep(delay)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\学习\agent新项目\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2592, in sleep
+    await sleep(delay)
+  File "D:\python\Lib\asyncio\tasks.py", line 702, in sleep
+    return await future
+           ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\学习\agent新项目\.worktrees\p0-01-task-context-green\opspilot\web\worker.py", line 570, in run_worker
+    await _dispatch_run(
+    ...<2 lines>...
+    )
+  File "D:\学习\agent新项目\.worktrees\p0-01-task-context-green\opspilot\web\worker.py", line 524, in _dispatch_run
+    await run_assistant(
+    ...<2 lines>...
+    )
+  File "D:\学习\agent新项目\.worktrees\p0-01-task-context-green\opspilot\assistant.py", line 926, in run_assistant
+    try:await heartbeat
+        ^^^^^^^^^^^^^^^
+  File "D:\学习\agent新项目\.worktrees\p0-01-task-context-green\opspilot\web\worker.py", line 132, in _heartbeat_budget
+    await asyncio.to_thread(heartbeat_execution_interval, db_path, task_id)
+  File "D:\python\Lib\asyncio\threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python\Lib\concurrent\futures\thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "D:\python\Lib\concurrent\futures\thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "D:\学习\agent新项目\.worktrees\p0-01-task-context-green\opspilot\domain\execution_budget.py", line 199, in heartbeat_execution_interval
+    with connect(path) as connection:
+         ~~~~~~~^^^^^^
+  File "D:\python\Lib\contextlib.py", line 148, in __exit__
+    next(self.gen)
+    ~~~~^^^^^^^^^^
+  File "D:\学习\agent新项目\.worktrees\p0-01-task-context-green\opspilot\domain\database.py", line 1066, in connect
+    connection.commit()
+    ~~~~~~~~~~~~~~~~~^^
+sqlite3.OperationalError: database is locked
+Timeout (0:01:10)!
+Thread 0x000052f8 (most recent call first):
+  File "D:\python\Lib\concurrent\futures\thread.py", line 116 in _worker
+  File "D:\python\Lib\threading.py", line 1023 in run
+  File "D:\python\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "D:\python\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x00002f70 (most recent call first):
+  File "D:\python\Lib\threading.py", line 369 in wait
+  File "D:\python\Lib\queue.py", line 202 in get
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 1089 in run
+  File "D:\python\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "D:\python\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x000032b4 (most recent call first):
+  File "D:\python\Lib\concurrent\futures\thread.py", line 116 in _worker
+  File "D:\python\Lib\threading.py", line 1023 in run
+  File "D:\python\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "D:\python\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x00000e24 (most recent call first):
+  File "D:\python\Lib\asyncio\windows_events.py", line 775 in _poll
+  File "D:\python\Lib\asyncio\windows_events.py", line 446 in select
+  File "D:\python\Lib\asyncio\base_events.py", line 2008 in _run_once
+  File "D:\python\Lib\asyncio\base_events.py", line 677 in run_forever
+  File "D:\python\Lib\asyncio\base_events.py", line 706 in run_until_complete
+  File "D:\python\Lib\asyncio\runners.py", line 127 in run
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2548 in run
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\anyio\_core\_eventloop.py", line 83 in run
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\anyio\from_thread.py", line 538 in run_blocking_portal
+  File "D:\python\Lib\threading.py", line 1023 in run
+  File "D:\python\Lib\threading.py", line 1081 in _bootstrap_inner
+  File "D:\python\Lib\threading.py", line 1043 in _bootstrap
+
+Thread 0x00004aec (most recent call first):
+  File "D:\python\Lib\threading.py", line 369 in wait
+  File "D:\python\Lib\concurrent\futures\_base.py", line 445 in result
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\anyio\from_thread.py", line 340 in call
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\starlette\testclient.py", line 515 in wait_shutdown
+  File "D:\python\Lib\contextlib.py", line 482 in _exit_wrapper
+  File "D:\python\Lib\contextlib.py", line 604 in __exit__
+  File "D:\python\Lib\contextlib.py", line 627 in close
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\starlette\testclient.py", line 522 in __exit__
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.worktrees\p0-01-task-context-green\tests\test_ar04a_context_journey_01.py", line 214 in _run_journey
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.worktrees\p0-01-task-context-green\tests\test_ar04a_context_journey_01.py", line 334 in test_ar04a_long_session_keeps_goal_material_and_current_facts
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\python.py", line 167 in pytest_pyfunc_call
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\python.py", line 1707 in runtest
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\runner.py", line 184 in pytest_runtest_call
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\runner.py", line 250 in <lambda>
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\runner.py", line 361 in from_call
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\runner.py", line 249 in call_and_report
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\runner.py", line 139 in runtestprotocol
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\runner.py", line 118 in pytest_runtest_protocol
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\main.py", line 408 in pytest_runtestloop
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\main.py", line 384 in _main
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\main.py", line 330 in wrap_session
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\main.py", line 377 in pytest_cmdline_main
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_execution.py", line 147 in _multicall
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_manager.py", line 183 in _hookexec
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pluggy\_caller.py", line 197 in __call__
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\config\__init__.py", line 229 in _main
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\_pytest\config\__init__.py", line 253 in _console_main
+  File "D:\\u5b66\u4e60\agent\u65b0\u9879\u76ee\.venv\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
