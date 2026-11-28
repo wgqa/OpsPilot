@@ -1,0 +1,31 @@
+R2-AR04 second bound Live recheck
+Execution branch: codex/r2-ar04-live-admission-hf01
+Execution HEAD: a0c1f62eeded49e6f0f6d8139b5786cc653708e0
+Frozen Base: fa4cd8a7ea6dd36babccbbfc5fcdb7a179729fd3
+
+Final check
+  git rev-parse HEAD / git ls-remote origin refs/heads/codex/r2-ar04-live-admission-hf01
+    Both returned the execution HEAD. Tracked files clean before invocation.
+  _task_assert_frozen() -> complete task freeze passed.
+  _assert_source_manifest(freeze) and _mock_passed(pinned_mock) -> passed.
+  Source and production/Adapter Blobs are recorded in SEND_GATE.json.
+  Fresh official price/version observation -> PRICE_SNAPSHOT.json.
+  python -B docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --mock-results docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_09/MOCK_RESULTS.json --output <new isolated PRESEND_PREFLIGHT.json>
+    Exit 0. READY_FOR_NEW_LIVE_AUTHORIZATION. Provider requests 0.
+  validate_authorization_manifest() and load_authorization() -> validated the same digest.
+    A unique temporary authorization was created and validated against the fixed Mock.
+
+One Live invocation
+  python -B docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py live --authorization <new isolated manifest> --mock-results docs/evidence/r2-ar04-remaining-live-gate-01/mock_run_09/MOCK_RESULTS.json --output docs/evidence/r2-ar04-remaining-live-gate-01/live_run_02
+    Started 2026-11-16T16:31:37Z. Finished 2026-11-16T16:31:52Z.
+    Exit 1. STOPPED. CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED.
+    Requests 1/6 (summary 1/4, answer 0/2). Ledger peak estimate USD 0.001786. No retry.
+    Runner stderr size 0 bytes.
+    Trace has one SEND_STARTED and one RESPONSE_RECEIVED. Original output remains in the new run directory.
+
+Evidence verification
+  Local checks reconciled the Trace, Ledger, results, frozen Mock and authorization digest.
+  The raw summary contains the sourced seq3 endpoint. The persistence attempt failed and no Answer Manifest exists.
+  The historical Q06-B early seq3 PARTIAL entry is unchanged and the current Q06-B Case is NOT_STARTED.
+  A local scan of all 12 files, including decompressed Trace records, found no exact Provider key or raw one-time authorization ID.
+  No new Mock runs or pytest suites were executed for this Live task.

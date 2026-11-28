@@ -1,0 +1,44 @@
+Repair-before RED test, corrected API DTO field
+Command: python -m pytest -q tests/test_r2_ar04_compaction_c06_hf_01.py -k t01_t02_t03 --basetemp .pytest-tmp/r2-ar04-c06-hf01-red2
+Expected outcome: behavioral assertion reports WORKER_RUN_FAILED instead of SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET.
+F                                                                        [100%]
+================================== FAILURES ===================================
+___ test_t01_t02_t03_c06_user_oversize_is_classified_visible_and_idempotent ___
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000020C52468C30>
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04a-context-journey-01/.pytest-tmp/r2-ar04-c06-hf01-red2/test_t01_t02_t03_c06_user_over0')
+
+    def test_t01_t02_t03_c06_user_oversize_is_classified_visible_and_idempotent(
+        monkeypatch, tmp_path,
+    ):
+        from opspilot.domain.context_engineering import estimate_text_tokens
+
+        audit = _audit_harness()
+        original = json.loads((Path(audit.RESULT_DIR) / "case_traces/C06_USER_OVERSIZE.json").read_text(encoding="utf-8"))
+        original_user = next(
+            message for message in original["persisted_messages"]
+            if message["sequence"] == 1 and message["role"] == "USER"
+        )
+        same_first_body = audit.padded("[GT:GOAL] oversized untrusted user source ", 5900)
+        assert estimate_text_tokens(same_first_body) >= 5900
+
+        case = _exercise_case(
+            monkeypatch=monkeypatch, tmp_path=tmp_path, case_id="C06_USER_OVERSIZE",
+            strategy="ROLLING_SUMMARY", turns=14, seed_size=40,
+            first_body=same_first_body, final_body="�����û��������ϱ߽硣",
+            final_budget=12000, repeat_closeout=True,
+        )
+        run_id = case["run_id"]
+        assert case["run_view"]["status"] == "FAILED"
+        assert case["run_view"]["waiting_reason"] == "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET"
+        assert case["task_run"]["blocked_reason"] == "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET"
+>       assert case["instrumentation"]["prep_calls"][0]["error"] == "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET"
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       IndexError: list index out of range
+
+tests\test_r2_ar04_compaction_c06_hf_01.py:198: IndexError
+=========================== short test summary info ===========================
+FAILED tests/test_r2_ar04_compaction_c06_hf_01.py::test_t01_t02_t03_c06_user_oversize_is_classified_visible_and_idempotent
+1 failed, 4 deselected in 20.59s
+Exit code: 1
+Attempt note: this test version invoked the repeat-closeout helper before checking the first public status; the repeat helper can update reason_code. The test order was corrected so first-failure status is asserted before idempotency closeout. This attempt is not used as final RED evidence.

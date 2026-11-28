@@ -1,0 +1,61 @@
+R2-AR04-LIVE-ADMISSION-HF-01 test log
+Worktree: D:\学习\agent新项目\.worktrees\ar04a-context-journey-01
+Review base: bf9e5d84f4aa2e57d1f195dbe7933d74c5586a3b
+Candidate branch: codex/r2-ar04-live-admission-hf01
+
+Final successful checks (all offline or HTTPX MockTransport; Provider requests 0; cost USD 0.00):
+
+1) Provider route, redirect, malformed response, authorization identity, source pin, and full Assistant tool-call boundary:
+Command:
+python -m pytest -q docs/evidence/r2-ar04-live-admission-hf01/test_live_admission_hf01.py -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-admission-hf01-final-tests-03
+Exit: 0
+Result: 31 passed in 12.25s.
+Coverage: SDK root and /v1 path construction; exact endpoint/base-path matching; Host, scheme, port, method, query, fragment, raw encoded path and wrong-host rejection; redirect suppression with follow_redirects enabled; invalid JSON/choice and length rejection; full Assistant → Domain failure injection for tool_calls and stop-with-tool_calls; exact authorization Task ID and adapter Blob pins.
+Raw failure evidence: failure_injections/*/{TRACE.jsonl.gz,LEDGER.json}; summary: FAILURE_RESULTS.json.
+
+2) Existing remaining-gate and ABC Runner tests:
+Command:
+python -m pytest -q docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py docs/evidence/abc-live-env-unblock-01/test_abc_runner.py -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-admission-hf01-existing-03
+Exit: 0
+Result: 19 passed in 36.13s.
+Coverage includes successful Q02-B/Q06-B full Mock chains, 1024/512 caps, frozen source, 29-row history, shared reserve, source invalidation, UNKNOWN no-retry/no-next-case, missing and historical authorization rejection, and non-secret environment loading.
+
+3) Existing AR-04 compression budget suite:
+Environment: OPSPILOT_AR04_HEADROOM_TRACE_PATH was set to an empty string so no historical trace path could be modified.
+Command:
+python -m pytest -q tests/test_ar04a_compression_budget_hf_01.py -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-admission-hf01-budget-02
+Exit: 0
+Result: 10 passed in 97.21s.
+
+4) Frozen Q02-B truncation replay, writing only to this task's new evidence directory:
+Environment: OPSPILOT_AR04_HEADROOM_TRACE_PATH=docs/evidence/r2-ar04-live-admission-hf01/TRUNCATION_REPLAY_TRACE_02.jsonl.gz
+Command:
+python -m pytest -q tests/test_ar04a_compression_budget_hf_01.py::test_original_q02_b_512_token_truncation_still_stops_without_persistence -p no:cacheprovider --basetemp=C:\pytest-opspilot-ar04-admission-hf01-truncation-02
+Exit: 0
+Result: 1 passed in 10.13s. The original frozen trace was not written or changed.
+
+5) Fresh successful two-case Mock runner:
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py mock --output docs/evidence/r2-ar04-live-admission-hf01/mock_run_04
+Exit: 0 (runner stdout suppressed; durable outputs are in mock_run_04/).
+Result: 2/2 Cases; 4 Mock summaries; 2 Mock answers; 6 total Mock requests; 0 real Provider requests; 0 MCP.
+
+6) Fresh zero-cost preflight bound to mock_run_04:
+Command:
+python docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py preflight --mock-results docs/evidence/r2-ar04-live-admission-hf01/mock_run_04/MOCK_RESULTS.json --output docs/evidence/r2-ar04-live-admission-hf01/LIVE_PREFLIGHT_04_FINAL.json
+Exit: 0 (runner stdout suppressed; durable output is LIVE_PREFLIGHT_04_FINAL.json).
+Result: READY_FOR_NEW_LIVE_AUTHORIZATION; no authorization created; 0 Provider sends; price recheck remains required before future live use.
+
+7) Non-secret configured endpoint shape:
+Command: python docs/evidence/r2-ar04-live-admission-hf01/capture_config_shape.py
+Exit: 0. Observed scheme=https, host=api.deepseek.com, port=null, path=/v1. No secret value was printed.
+
+Preserved development-time failures and corrections:
+- Initial new test iterations exposed incorrect expected Assistant status / a Git safecrlf warning / redirect error classification. The test and local Git invocation were corrected; final suite is 31/31. All injected Provider responses remain under failure_injections/.
+- The first zero-cost preflight raised NameError after the adapter import changed from urlparse to urlsplit; the environment helper still referenced urlparse. It now uses urlsplit. The initial blocked report remains LIVE_PREFLIGHT.json; final status is in LIVE_PREFLIGHT_04_FINAL.json.
+- An intermediate preflight correctly rejected a Mock artifact whose digest was stale after Runner edits. Fresh Mock and Preflight were regenerated as mock_run_04 and LIVE_PREFLIGHT_04_FINAL.json. Intermediate outputs are retained and are not used as final evidence.
+- An earlier 19-test run found that V2 wrote no separate reply provenance file because the review-task metadata check ran before the wrapper added metadata. The check now applies at the finalized task-boundary result; the final 19/19 rerun passed and mock_run_04 contains MOCK_REPLY_PROVENANCE.jsonl.gz.
+
+Not passed / not claimed:
+- A broad `pytest -k ar04` scan was interrupted after a long-running case showed no progress. Exit code 1; it is not a pass and is not used as the acceptance result.
+- No real Provider request, price lookup, model semantic judgment, or live authorization was performed.

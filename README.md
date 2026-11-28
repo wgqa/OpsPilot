@@ -1,10 +1,24 @@
 # OpsPilot
 
+## 当前方向与能力边界（2026-11-07）
+
+OpsPilot 是面向企业 API 接入与技术支持的持续协作 Agent，也是 Agent Engineering 学习项目。开发优先让用户完成真实工作，让模型在合法范围内自主选择查询、补查、澄清、继续或停止，再根据实际风险补足工程能力。完整方向见 [PROJECT_NORTH_STAR.md](PROJECT_NORTH_STAR.md)，实施入口见 [AGENTS.md](AGENTS.md)，当前计划见 [TASKS.md](TASKS.md)。
+
+校招交付与长期产品成长并行推进。**R1** 是简历可投递版本，达成后冻结版本、更新简历并开始投递，不必等待 **R2** 完整展示成品或 **R3** 长期企业 API 能力扩展。R1-ENGINE 与 R1-INTERACTIVE 仍按原定义分别验收；浏览器 STOP 下不得宣称互动体验已验收。详见 [当前路线与里程碑](TASKS.md) 和 [North Star](PROJECT_NORTH_STAR.md)。
+
+PRODUCT-01 Slice 02 的真实 DeepSeek 四轮结果为 `PARTIAL`，其中配置推断曾超出证据。Final Bridge 与 Bridge Closeout 已获 `ACCEPT_WITH_LIMITS`：确定性离线 S1/S2 同 Session 路径成立，但新 Bridge 的真实模型行为和浏览器体验仍未验证。当前 R1 集成候选尚待独立审查；截至本次集成前，R1-ENGINE 冻结结论为 `HOLD`，R1-INTERACTIVE 也为 `HOLD`。全量 pytest 的已知历史结果为 741/757、16 项失败（12 项实验身份/旧 claim 绑定，3 项 AR-03 Runner MockTransport 与新增 Assistant 工具 Schema 不兼容，1 项退役 C1 合同）；本轮已定位这 3 项的旧 Runner allowlist 根因，但未修改历史实验合同。本次不把旧结果冒充为新 SHA 回归。新 Bridge 真实 Provider 为 `NOT_RUN`；浏览器为 `NOT_RUN / BROWSER_STOP_ACTIVE`。[Slice 02 报告](docs/evidence/vnext/product-01-slice-02-live/REPORT.md) · [Bridge Closeout 报告](docs/evidence/vnext/product-01-bridge-closeout-01/REPORT.md) · [集成评审输入](docs/evidence/vnext/r1-final-integration-01/RELEASE_DECISION_INPUT.md)。这些结果不能合并表述为整体 PASS。
+
+已有 S1/S2 离线业务链、TaskControl、审批与交接能力继续受原合同约束。普通聊天不自动取得业务权限；历史对话和 Memory 不替代当前可信事实。冻结的 REPAIR/Handoff 安全边界不因产品优先而放松。AR-04C 的真实模型结果仍保留其历史 PARTIAL/G7 ON FAIL 结论；AR-05 全量回归、浏览器及真实模型状态按各自最新正式报告核对。本文不把确定性替身测试写成真实模型成果，也不自动授权代码、Provider、浏览器、外部业务写入或 main 合并。
+
+## 历史阶段进度与运行说明（保留旧快照；未在当前基线重新验证）
+
+> 下文保留旧阶段状态和命令供溯源，不保证对应当前工作树或当前远端 main 的能力；执行前请以当前代码、任务卡及验收报告核对。旧 M1-03 工作台说明不代表当前 Web 体验已验收。
+
 M4-02 新增订单异步回调只读调查切片（验收候选）：可从 Web 选择场景，区分订单处理中、投递失败和接收方排队；模型自主选择只读调查行动，Knowledge/Skill 按需检索，复用既有经审核 Episodic Memory。[运行与证据](docs/evidence/vnext/m4-02/REPORT.md)。不重发回调，不表示业务恢复；等待主 Agent 独立验收。
 
 面向企业 API 接入问题调查与协作处置的对话式 Agent，使用 Python、LangChain 和 LangGraph，同时承载大厂校招 Agent Engineering / AI 应用研发的知识实践。
 
-> **当前指导入口（2026-10-22 更新）：** 开始规划、开发或评审前，先读 [项目北极星](PROJECT_NORTH_STAR.md) 和 [AGENTS.md](AGENTS.md)。项目同时要求用户可感知的智能任务推进，以及 Context Engineering、分层 Memory、Knowledge、Skills、MCP 等知识的实践与验证；以白皮书原理、源码、实验和面试表达形成学习闭环。当前需重点补齐业务智能与连续任务体验相对治理能力的差距。方向更新不代表新阶段已获准启动。
+> **历史指导记录（2026-10-22）：** 当时的规划、开发和评审入口是 [项目北极星](PROJECT_NORTH_STAR.md) 与 [AGENTS.md](AGENTS.md)。当时提出同时实践用户可感知的智能任务推进与 Context Engineering、分层 Memory、Knowledge、Skills、MCP，并以白皮书原理、源码、实验和面试表达形成学习闭环。当前方向以 North Star 的 2026-11-07 修订为准；方向记录本身不代表新阶段已获准启动。
 >
 > **进度说明：** 下方 D1–D7 / M1 状态及运行 SHA 为历史记录，不是当前完整进度；S1/S2 是回归基线，不是长期业务范围上限。请结合当前 Git SHA、阶段任务卡与正式验收核实状态。近期证据入口：[M3 收口报告](docs/evidence/vnext/m3-closeout-01/REPORT.md)、[M3 HF-02 报告](docs/evidence/vnext/m3-hf-02/REPORT.md)；不据此推定 M3 总体验收通过。
 
@@ -32,7 +46,7 @@ M4-02 新增订单异步回调只读调查切片（验收候选）：可从 Web 
 **D3 真实运行轨迹与报告：** [D3 报告](docs/evidence/d3/REPORT.md) · [脱敏轨迹](docs/evidence/d3/TRACE.json) · [进程与测试日志](docs/evidence/d3/)
 **工程边界：** [AGENTS.md](AGENTS.md)
 
-## vNext 本地 Vue 工作台（M1-03）
+### vNext 本地 Vue 工作台（M1-03 历史说明）
 
 在本地 `.env` 配置模型端点、演示账户口令，并确保模型密钥不进入 Git。终端 A 启动单实例 FastAPI：
 
@@ -239,6 +253,10 @@ D6 仅有 5 次真实模型 smoke 尝试，不是十个独立 benchmark 样本�
 - Function Calling 和 D2 Investigator 目前只验证了已配置的 `deepseek-flash` OpenAI-compatible Chat Completions 端点；其他提供商和模型尚未验证。模型偶尔会返回并行调用；Dispatcher 只发出第一个，其他调用留痕为未发送，再让模型依据结果选择下一步。
 - 本地可信操作者注册表、业务 API、fixture 与 SQLite 仅用于演示，不代表生产 IAM 或客户系统。D3 通过本地事务与跨进程 CLI 演示首次正确闭环。
 - D4 已用真实 OS 子进程验证 ActionIntent、REPAIR、冻结报告和 DELIVER 在提交/检查点边界进程退出后的幂等恢复，并覆盖计划取消/替换竞争、并发重复提交和未知终态阻断；D5 在同一本地 SQLite Demo Domain 中加入一类人工管理的 Episodic Memory、单一版本化 Skill 和模型调用来源台账。这些证据不代表生产 IAM 或分布式存储保证。向量记忆、Memory 自动总结、其他 Skill、多 Agent、Redis、S2/S3 与前端仍不在当前实现范围。
+
+## R1 所有者本地试用
+
+Windows 本地试用代码、隔离数据路径、初始化/启动/停止脚本和 Provider 限制见 [R1 用户试用指南](docs/user-demo/USER_GUIDE.md) 与 [环境变量和数据地图](docs/user-demo/ENVIRONMENT_MAP.md)。本试用工作树和运行数据与历史 Campaign 隔离。
 
 ## 文档与评审历史
 

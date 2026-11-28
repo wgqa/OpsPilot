@@ -1,0 +1,23 @@
+.....F......................................................             [100%]
+================================== FAILURES ===================================
+________ test_zero_tool_followup_can_explain_valid_historical_snapshot ________
+
+demo_db = WindowsPath('D:/学习/agent新项目/.worktrees/r1-live-journey-01/.pytest-tmp-r1-j2-headroom-hf01/test_zero_tool_followup_can_ex0/domain.sqlite3')
+tmp_path = WindowsPath('D:/学习/agent新项目/.worktrees/r1-live-journey-01/.pytest-tmp-r1-j2-headroom-hf01/test_zero_tool_followup_can_ex0')
+
+    def test_zero_tool_followup_can_explain_valid_historical_snapshot(demo_db, tmp_path):
+        initial, _ = _initial(demo_db, tmp_path)
+        next_run = _followup(demo_db, initial, FROZEN_CASES['user_inputs']['J4'], 'f01-explain')
+        model = ExplainHistoryFixture(mode='explain-history')
+        result, _ = execute(demo_db, next_run, model, tmp_path / 'checkpoint.sqlite3')
+        assert result['status'] == 'SUCCEEDED', result
+        context = _context(model.seen[0])
+        assert context['current_run']['run_id'] == next_run['run_id']
+>       assert context['current_run']['completed_tools'] == []
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'completed_tools'
+
+tests\test_ar04c_f01_context_currentness.py:87: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_f01_context_currentness.py::test_zero_tool_followup_can_explain_valid_historical_snapshot
+1 failed, 59 passed in 77.46s (0:01:17)

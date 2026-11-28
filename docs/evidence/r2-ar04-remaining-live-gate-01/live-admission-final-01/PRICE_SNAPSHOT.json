@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-REMAINING-LIVE-01",
+  "evidence_level": "OFFICIAL_PROVIDER_DOCUMENTATION_READ_ONLY",
+  "checked_at_utc": "2026-11-15T15:40:04Z",
+  "provider": "DeepSeek",
+  "sources": [
+    {
+      "title": "Models & Pricing",
+      "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "observed_facts": [
+        "deepseek-flash is served by DeepSeek-V4.1-Flash-1017.",
+        "The OpenAI-compatible base URL is https://api.deepseek.com.",
+        "Peak cache-hit input is USD 0.006 per 1M tokens; peak cache-miss input is USD 0.30 per 1M tokens; peak output is USD 1.20 per 1M tokens.",
+        "Off-peak rates are half the peak rates; model usage is billed by input and output token counts.",
+        "Search and Fetch are separately billed, and product prices may change."
+      ]
+    },
+    {
+      "title": "Chat Completions API",
+      "url": "https://api-docs.deepseek.com/api/create-chat-completion/",
+      "observed_facts": [
+        "tool_choice=none means no tool should be called even if tools are provided.",
+        "thinking.type=disabled selects non-thinking mode; thinking is enabled by default when omitted.",
+        "The documented response has finish_reason values including stop, length, and tool_calls."
+      ]
+    },
+    {
+      "title": "Agent Integrations",
+      "url": "https://api-docs.deepseek.com/quick_start/agent_integrations/",
+      "observed_facts": [
+        "An official OpenAI-compatible integration uses https://api.deepseek.com/v1/chat/completions."
+      ]
+    }
+  ],
+  "model": {
+    "configured_alias": "deepseek-flash",
+    "documented_version": "DeepSeek-V4.1-Flash-1017",
+    "official_model_id_list_name": "DeepSeek-V4.1-Flash",
+    "resolution_evidence": "Documentation only; no authenticated models endpoint or Provider request was made.",
+    "alias_is_immutable": false
+  },
+  "pricing_usd_per_million_tokens": {
+    "input_cache_hit_off_peak": "0.003",
+    "input_cache_hit_peak": "0.006",
+    "input_cache_miss_off_peak": "0.15",
+    "input_cache_miss_peak": "0.30",
+    "output_off_peak": "0.60",
+    "output_peak": "1.20",
+    "peak_window_utc": "01:00-04:00 and 06:00-10:00 Monday-Friday, excluding Chinese public holidays",
+    "off_peak_window": "All other times including weekends and Chinese public holidays"
+  },
+  "billing": {
+    "basis": "Input and output tokens at applicable rates",
+    "search_fetch_enabled": false,
+    "search_fetch_separately_billed": true,
+    "must_recheck_before_any_live_send": true
+  },
+  "runtime_configuration_presence_only": {
+    "main_repo_env_loaded": true,
+    "api_key_present": true,
+    "api_key_value_recorded": false,
+    "configured_model_alias": "deepseek-flash",
+    "base_url_scheme": "https",
+    "base_url_host": "api.deepseek.com",
+    "base_url_path": "/v1",
+    "runtime_model_config_version_present_in_env": false,
+    "runtime_price_version_present_in_env": false,
+    "runtime_service_identity_present_in_env": false,
+    "isolated_runner_supplies_task_scoped_non_secret_defaults": true,
+    "credential_validity_checked": false
+  },
+  "frozen_budget": {
+    "cases": [
+      "Q02-B",
+      "Q06-B"
+    ],
+    "summary_requests": 4,
+    "answer_requests": 2,
+    "total_requests": 6,
+    "max_input_tokens": 12000,
+    "summary_generation_max_tokens": 1024,
+    "answer_max_tokens": 512,
+    "persisted_summary_max_tokens": 512,
+    "automatic_retries": 0,
+    "external_mcp": false,
+    "tool_choice": "none",
+    "hard_cap_usd": "0.060000"
+  },
+  "worst_case_cost": {
+    "basis": "Peak rates, all input treated as cache miss, per-request reservations rounded up to next USD micro-unit",
+    "summary_request": {
+      "input_usd": "0.0036000",
+      "output_usd": "0.0012288",
+      "exact_usd": "0.0048288",
+      "reserved_usd": "0.004829"
+    },
+    "answer_request": {
+      "input_usd": "0.0036000",
+      "output_usd": "0.0006144",
+      "exact_usd": "0.0042144",
+      "reserved_usd": "0.004215"
+    },
+    "purpose_specific_total_usd": "0.027746",
+    "per_case_grant_reserve_usd": "0.014487",
+    "shared_grant_reserve_usd": "0.028974",
+    "hard_cap_usd": "0.060000",
+    "headroom_usd": "0.031026",
+    "within_hard_cap": true
+  },
+  "actual_provider_requests": 0,
+  "actual_provider_cost_usd": "0.00"
+}

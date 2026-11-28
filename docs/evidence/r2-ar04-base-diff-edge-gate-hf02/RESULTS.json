@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-BASE-DIFF-EDGE-GATE-HF-02",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "main_agent_acceptance": "PENDING",
+  "branch": "codex/r2-ar04-base-diff-edge-gate-hf02",
+  "base": "ecbd7d3ebfebc3cb4ea1f75cbf4cfae6e7786011",
+  "comparison_baseline": "1cba32753f22e0a610aa7654ab5dc6cddd94ccf2",
+  "provider_request_count": 0,
+  "provider_cost_usd": 0,
+  "external_mcp_call_count": 0,
+  "python": "3.14.0",
+  "sqlite": "3.50.4",
+  "pytest": "9.1.1",
+  "lock_packages_verified": 71,
+  "f01": {
+    "status": "PREEXISTING_PROMPT_ASSERTION_MISMATCH",
+    "evidence": "DIRECT_PYTEST_ABBA_AND_PERSISTED_SQLITE_REQUESTS_AND_GIT_SOURCE",
+    "node": "tests/test_ar04c_f01_context_currentness.py::test_zero_tool_followup_can_explain_valid_historical_snapshot",
+    "run_order": ["base", "head", "head", "base"],
+    "pytest_exit_codes": [1, 1, 1, 1],
+    "error": "KeyError: 'completed_tools'",
+    "line": 87,
+    "field_projection_change": "922d815647dd096ddace5e8c54720dffa09dc664",
+    "predates_summary_patch": true,
+    "order_dependent_fixture_pollution_observed": false,
+    "fixture_followup_statuses": ["SUCCEEDED", "SUCCEEDED", "SUCCEEDED", "SUCCEEDED"],
+    "fixture_followup_mcp_counts": [0, 0, 0, 0],
+    "audit_completed_tools": [],
+    "prompt_current_run_keys": ["business_observations", "description", "run_id"],
+    "earlier_snapshot_visible": true,
+    "log": "F01_RUN.txt",
+    "followup": "Review the test's projection expectation separately from the compression patch. This does not resolve historical F01 live model behavior."
+  },
+  "edge_checks": {
+    "evidence": "L2_DETERMINISTIC_SYNTHETIC_SUMMARY_TEXT_AND_ACTUAL_TOKEN_ESTIMATOR",
+    "tail_group": {
+      "base": { "passed": 3, "failed": 0, "exit": 0 },
+      "head_before_hf02": { "passed": 0, "failed": 3, "exit": 1 },
+      "hf02": { "passed": 3, "failed": 0 },
+      "classification": "NEW_HEAD_REGRESSION_FIXED",
+      "source_sequence": 3,
+      "complete_candidate_persisted_tokens": {
+        "version": 138,
+        "request_id": 136,
+        "negated_constraint": 130
+      },
+      "before_log": "EDGE_BEFORE_RUN.txt"
+    },
+    "four_same_category": {
+      "test_status": "PASS",
+      "retained_sequences": [3, 5, 8],
+      "omitted_sequences": [4],
+      "full_document_tokens": 400,
+      "persisted_tokens": 355,
+      "next_projection_tokens": 197,
+      "formal_correction_sequence": 9,
+      "protocol_history_sequence": 11,
+      "unknown_deployment_sequence": 12
+    },
+    "actual_budget_pressure": {
+      "test_status": "PASS",
+      "fact_status": "PARTIAL",
+      "source_sequences": [2, 3, 4],
+      "storage_limit": 512,
+      "full_document_tokens": 520,
+      "persisted_tokens": 509,
+      "persisted_tokens_if_only_constraint_restored": 516,
+      "next_projection_tokens": 210,
+      "missing_tail": "only when the receiver is not disabled."
+    }
+  },
+  "production_patch": {
+    "file": "opspilot/domain/chat.py",
+    "added_lines": 13,
+    "removed_lines": 0,
+    "reason": "ecbd7d3 clips source-linked version, correction and negation tails even when the complete entries fit the existing budget and old Base retains them.",
+    "behavior": "After selection, restore a complete already-selected anchor of up to 100 characters when the full token estimate still fits.",
+    "cap_tokens": 512
+  },
+  "final_runs": {
+    "edge": { "passed": 5, "failed": 0, "exit": 0 },
+    "hf01_retention": { "passed": 12, "failed": 0, "exit": 0 },
+    "context_source_currentness_grant_assistant": { "passed": 64, "failed": 1, "exit": 1, "failure": "F01" },
+    "c06_and_memory_revocation": { "passed": 6, "failed": 0, "exit": 0 },
+    "total": { "passed": 87, "failed": 1 },
+    "log": "REGRESSION_WORKTREE_RUN.txt"
+  },
+  "initial_checkout_run": {
+    "log": "REGRESSION_RUN.txt",
+    "edge": { "passed": 5, "failed": 0, "exit": 0 },
+    "hf01_retention": { "passed": 11, "failed": 1, "exit": 1 },
+    "related": { "passed": 64, "failed": 1, "exit": 1, "failure": "F01" },
+    "gates": { "passed": 6, "failed": 0, "exit": 0 },
+    "additional_failure": "Fresh Windows checkout converted LF to CRLF in historical LIVE_RESULTS.json. The byte hash differed, but full content matched when normalizing line endings. The original worktree byte hashes passed on rerun."
+  },
+  "frozen_trace_replay": {
+    "evidence": "FROZEN_FIRST_PROVIDER_OUTPUTS_REPLAYED_IN_CANDIDATE_L2",
+    "cases_with_all_target_facts_after_two_projections": 6,
+    "cases": 6,
+    "persisted_and_next_projection_token_estimates": {
+      "Q02-A": [507, 293],
+      "Q02-B": [507, 284],
+      "Q03-A": [506, 289],
+      "Q03-B": [499, 286],
+      "Q06-A": [503, 274],
+      "Q06-B": [509, 291]
+    },
+    "provider_requests": 0
+  },
+  "history": {
+    "prior_evidence_modified": false,
+    "c06_red_trace_sha256": "a820169936e3b4df2a2ca3120a606cdcd2df09d7dff92d0c590da3ea9b8ae13f",
+    "c06_prior_results_sha256": "c283bd91404f84b5908f528e8625bbe11e1f7c41dba13f71970ebacae88cc1e7"
+  },
+  "not_run": ["FULL_REPOSITORY_PYTEST", "LIVE_L3_RETEST", "EXTERNAL_MCP", "BROWSER"],
+  "l3": {
+    "recommendation": "ELIGIBLE_FOR_BOUNDED_RETEST_AFTER_INDEPENDENT_ACCEPTANCE_AND_NEW_AUTHORIZATION",
+    "cases": ["Q02-A", "Q02-B", "Q06-B"],
+    "track": "HISTORICAL_RECALL_TOOL_CHOICE_NONE",
+    "remaining_limits": ["F01 projection assertion separately open", "Three entries per category", "Valid references can accompany partial or omitted facts", "Live semantics untested"],
+    "further_compaction_work": "Stop offline tuning at this candidate. Use the actual future input trace to determine the cause of any remaining L3 error."
+  }
+}

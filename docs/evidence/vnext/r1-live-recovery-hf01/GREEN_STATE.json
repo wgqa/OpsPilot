@@ -1,0 +1,113 @@
+{
+  "evidence_kind": "offline_fixture_green_reproduction",
+  "provider_http": 0,
+  "external_business_writes": 0,
+  "task_id": "task-fb49f516-7be9-4420-9fe6-fdead5cf2d14",
+  "runs": [
+    {
+      "run_id": "run-26e98045-a25f-4738-9e91-6c7e9b876aba",
+      "kind": "INVESTIGATE",
+      "status": "BLOCKED",
+      "blocked_reason": "LEGACY_PROVIDER_AUTHORIZATION_REQUIRED",
+      "source_message_id": "message-30a45c20-9072-437e-9e95-a796ff6ff5e8",
+      "consumed_message_seq": 1,
+      "expected_control_revision": 0
+    },
+    {
+      "run_id": "run-49c64fd8-929f-4828-b486-34db91324782",
+      "kind": "INVESTIGATE",
+      "status": "BLOCKED",
+      "blocked_reason": "LEGACY_PROVIDER_AUTHORIZATION_REQUIRED",
+      "source_message_id": "message-30e83ee0-dca8-4556-b8fe-469d96e86f97",
+      "consumed_message_seq": 2,
+      "expected_control_revision": 1
+    },
+    {
+      "run_id": "run-932e326e-edc1-43f3-b1df-e6ef06cb8c01",
+      "kind": "CHAT_READONLY",
+      "status": "SUCCEEDED",
+      "blocked_reason": null,
+      "source_message_id": "message-a2fd45d0-2877-4c8e-bbe3-8dfef5b16234",
+      "consumed_message_seq": 3,
+      "expected_control_revision": 1
+    }
+  ],
+  "task_control": {
+    "control_revision": 1,
+    "pending_critical_message_seq": 2,
+    "applied_critical_message_seq": 0
+  },
+  "correction_message": {
+    "message_id": "message-30e83ee0-dca8-4556-b8fe-469d96e86f97",
+    "task_id": "task-fb49f516-7be9-4420-9fe6-fdead5cf2d14",
+    "sequence": 2,
+    "input_kind": "CORRECT_TASK_INPUT",
+    "application_state": "RECEIVED_NOT_APPLIED",
+    "applied_run_id": null
+  },
+  "correction_idempotency_replay": "same correction message_id and run_id; one CORRECT_TASK_INPUT row",
+  "readonly_answer": "当前同一 Event event-a996f4ed-5c63-418a-af74-841e2440134d 的 Delivery HTTP 503 / FAILED；Receiver 为 NOT_RECEIVED。协议比较来自本 Session 的先前授权资料；线上部署版本仍未知。",
+  "observations": [
+    {
+      "tool": "get_callback_delivery",
+      "call_id": "assistant-call-1f4c31a4-89b3-4e34-8ee7-a1ed3d558420",
+      "evidence_id": "evidence-7feb57b9-abb3-4a36-ab99-0d9ca25c6bf6",
+      "observation_id": "observation-cb9d52b6-5b1f-4f3a-a2d2-84b8317a186a",
+      "observation_run_id": "run-932e326e-edc1-43f3-b1df-e6ef06cb8c01",
+      "facts": {
+        "attempt_count": 1,
+        "event_id": "event-a996f4ed-5c63-418a-af74-841e2440134d",
+        "failure_code": "TEMPORARY_UNAVAILABLE",
+        "max_attempts": 3,
+        "order_id": "async-order-2",
+        "order_version": 2,
+        "receiver_http_status": 503,
+        "response_digest": "6f66512b45c37e9c28b8c2d226da8b1d4460d188a1032e67c4a5f5515c006362",
+        "retry_at": "2026-11-09T09:01:48.446476Z",
+        "retry_state": "SCHEDULED",
+        "service_id": "orders-async-demo",
+        "status": "FAILED",
+        "tenant_id": "tenant-a",
+        "transport_request_id": "transport-04c69676-23c5-4e1a-8a9c-9ef45d0ff7e1",
+        "transport_response_json": "{\"accepted_at\":null,\"attempt_count\":1,\"event_id\":\"event-a996f4ed-5c63-418a-af74-841e2440134d\",\"failure_code\":\"TEMPORARY_UNAVAILABLE\",\"max_attempts\":3,\"order_id\":\"async-order-2\",\"processing_sla_seconds\":null,\"receiver_state\":\"UNAVAILABLE\",\"request_id\":\"transport-04c69676-23c5-4e1a-8a9c-9ef45d0ff7e1\",\"retry_at\":\"2026-11-09T09:01:48.446476Z\",\"retry_state\":\"SCHEDULED\"}",
+        "version": 2
+      },
+      "observed_at": "2026-11-09T09:00:52.956+00:00"
+    },
+    {
+      "tool": "get_receiver_processing",
+      "call_id": "assistant-call-6c450881-f340-46dd-accd-544d26a2f60f",
+      "evidence_id": "evidence-f8d8200e-62bf-427e-8001-274a37cbd39f",
+      "observation_id": "observation-487826dd-b949-4b2c-8d85-99061f743cb3",
+      "observation_run_id": "run-932e326e-edc1-43f3-b1df-e6ef06cb8c01",
+      "facts": {
+        "accepted_at": null,
+        "delivery_version": 2,
+        "event_id": "event-a996f4ed-5c63-418a-af74-841e2440134d",
+        "order_id": "async-order-2",
+        "processing_sla_seconds": null,
+        "service_id": "orders-async-demo",
+        "status": "NOT_RECEIVED",
+        "tenant_id": "tenant-a",
+        "version": 2
+      },
+      "observed_at": "2026-11-09T09:00:53.150+00:00"
+    }
+  ],
+  "model_call_count": 3,
+  "mcp_call_count": 2,
+  "negative_paths": {
+    "cross_session_task": "SESSION_TASK_LINK_REQUIRED; no message or run created",
+    "other_tenant_owner": "TASK_SCOPE_DENIED; no additional MCP attempt"
+  },
+  "formal_side_effect_counts": {
+    "s3_diagnoses": 0,
+    "d3_plans": 0,
+    "d3_approvals": 0,
+    "d3_action_intents": 0,
+    "d3_action_ledgers": 0,
+    "d3_delivery_records": 0,
+    "s3_handoff_queue_entries": 0,
+    "s3_handoff_receipts": 0
+  }
+}

@@ -1,0 +1,35 @@
+R1-LIVE-JOURNEY-01 CONTINUE — targeted validation
+Date: 2026-11-08
+Code HEAD at paid execution: 0f39d1e667d1ec31b0289c897e87f0a975741876
+
+1) Offline SDK parse of captured real Provider response (explicit MockTransport; no network):
+   Result: PASS. ChatOpenAI parsed the recorded completion ID, list_scoped_protocol_documents tool call, and Usage.
+
+2) Regression RED before runtime_provider.py correction:
+   python -m pytest -vv -s tests/test_product_01_runtime_grant_01.py::test_runtime_transport_replays_decoded_gzip_response_with_valid_http_headers --basetemp='D:\OpsPilot-pytest\r1-live-transport-red'
+   Result: 1 failed as expected. HTTPX DecodingError: Error -3 while decompressing data: incorrect header check. The Runtime transport returned decoded bytes with the original gzip/length headers.
+
+3) First related regression invocation had a missing external pytest temp parent:
+   python -m pytest -vv tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py tests/test_r1_live_campaign_budget.py tests/test_r1_journey_readiness_01.py --basetemp='D:\OpsPilot-pytest\r1-live-related-final'
+   Result: 42 fixture setup errors because D:\OpsPilot-pytest did not exist; 2 independent tests passed. No product assertion failed. Parent was created, no repository files were used for temp DBs.
+
+4) GREEN and relevant regression after correction:
+   python -m pytest -q tests/test_product_01_runtime_grant_01.py tests/test_product_01_runtime_grant_01_hf01.py tests/test_r1_live_campaign_budget.py tests/test_r1_journey_readiness_01.py --basetemp='D:\OpsPilot-pytest\r1-live-related-final'
+   Result: 44 passed in 31.56s; exit code 0.
+
+5) Actual one-shot Campaign execution (one execution; no retry):
+   python D:\学习\agent新项目\.private\r1-live-journey-01-continue-01-20261108\execute_live.py
+   Result: exit code 2, campaign PARTIAL, 4 Provider sends, 4 HTTP 200, 4 valid Usage/Completion IDs, 4 failed Assistant Runs, 0 MCP calls. Campaign STOPPED. No subsequent provider request was made.
+
+6) Manual artifact/accounting inspection (read-only):
+   Private Domain DB: 4 task_runs FAILED; 4 chat_attempts OpenAIConnectionError; 4 assistant_calls UNKNOWN; 4 runtime spends RESPONSE_STORED; campaign sends=4, status=STOPPED; D3/S2 business side-effect counts=0; S1/S2 readback counts=0.
+   Runtime spend_summary: committed_or_reserved=2,914 USD micro; remaining=10,997,086 USD micro; campaign STOPPED so unused cap was not reused.
+
+Private evidence hashes (SHA-256):
+   execution.jsonl: 3d72adf25b179e2d6afc0d3483e789d81f2c3997300d6e027bcab4c0f922e8a2
+   provider_http.jsonl: 80d910bf7b191de6dcc6d5206794295bb535a9122fc7983a2934d46246b4aac6
+   domain.sqlite3: ef5bdc6907ae156c431ff4478e7cfd850e7761b736c719fd3ff3f2777b692197
+   checkpoint.sqlite3: 883e1e31848e77ac426e100872e398dedd0d919d292b82b2cc275a3c6ae37015
+   runner_console.log: 1a59fe7590f0ac6ad77db295903f13a6081a45e448d87466171e433ab2a0a789
+   targeted_regression.log: 400dc0e7140712370cbd83c2ea933791659f11ea87af705bc31d56cb380d518d
+   Public artifacts were derived from these private immutable execution records; no credential value was present in the public artifacts.

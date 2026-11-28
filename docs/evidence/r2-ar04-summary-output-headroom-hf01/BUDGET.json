@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-SUMMARY-OUTPUT-HEADROOM-HF-01",
+  "base_sha": "d4ca2c914b6b99f26d1941d780f838d61a6a75d0",
+  "evidence_level": "OFFLINE_FIXTURE_MOCK_AND_FROZEN_PRICE_ARITHMETIC",
+  "provider_requests": 0,
+  "provider_cost_usd": "0.00",
+  "token_caps": {
+    "summary_generation": 1024,
+    "domain_persisted_summary": 512,
+    "frozen_live_answer_request": 512,
+    "runtime_grant_product_maximum": 2048,
+    "input_per_request": 12000
+  },
+  "grant_rule": "summary request cap = min(1024, Runtime Grant max_output_tokens); lower grants remain restrictive",
+  "price_reference": {
+    "provider": "DeepSeek",
+    "model_alias": "deepseek-flash",
+    "published_model_version": "DeepSeek-V4.1-Flash-1017",
+    "price_version": "deepseek-v4.1-flash-1017-peak-2026-11-15",
+    "snapshot_source": "docs/evidence/r2-ar04-live-recheck-v2-final-01/PREFLIGHT.json",
+    "snapshot_checked_on": "2026-11-15",
+    "input_uncached_usd_per_million": "0.30",
+    "output_usd_per_million": "1.20",
+    "rechecked_in_this_offline_task": false,
+    "future_live_send_requires_recheck": true
+  },
+  "request_reserve_formula": "ceil((input_tokens * input_rate_micro_per_million + output_tokens * output_rate_micro_per_million) / 1000000)",
+  "request_reserves_usd_micro": {
+    "summary_12000_input_1024_output": 4829,
+    "answer_12000_input_512_output": 4215,
+    "runtime_grant_12000_input_1024_output": 4829,
+    "runtime_grant_12000_input_2048_output": 6058
+  },
+  "frozen_matrix": {
+    "summary_calls": 6,
+    "answer_calls": 3,
+    "provider_call_limit": 9,
+    "hard_cap_usd_micro": 60000,
+    "request_cap_based_total_usd_micro": 41619,
+    "request_cap_based_total_usd": "0.041619",
+    "runtime_grant_1024_each_call_total_usd_micro": 43461,
+    "runtime_grant_1024_each_call_total_usd": "0.043461",
+    "runtime_grant_2048_each_call_total_usd_micro": 54522,
+    "runtime_grant_2048_each_call_total_usd": "0.054522",
+    "all_totals_within_hard_cap": true
+  },
+  "grant_test": {
+    "isolated_grant_output_limit": 1024,
+    "summary_wire_limit": 1024,
+    "answer_wire_limit": 512,
+    "pre_send_reserved_usd_micro": 4829,
+    "over_grant_1025_request_rejected": true,
+    "evidence_level": "ISOLATED_RUNTIME_GRANT_TEST"
+  },
+  "mock_trace_sha256": "651400d3f67415efa2c85edc727ce7a64760c68e8af0010ebc42b784b6991641",
+  "caution": "Arithmetic uses the previous frozen official price snapshot and is not a current-price check or live authorization."
+}

@@ -113,7 +113,7 @@ def save_trace(name, payload):
         (Path(output) / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def test_history_filters_unproven_and_foreign_rows_before_limit(demo_db, monkeypatch):
+def test_history_filters_unproven_and_foreign_rows_before_budgeting(demo_db, monkeypatch):
     session = Session(demo_db)
     task_a = session.task(FOREIGN)["task_id"]
     task_b = session.task(ORIGINAL)["task_id"]
@@ -126,7 +126,7 @@ def test_history_filters_unproven_and_foreign_rows_before_limit(demo_db, monkeyp
     with connect(demo_db) as db:
         # A NULL-labelled row without an accepting Run cannot count as public.
         db.execute("DELETE FROM task_runs WHERE run_id=?", (unproven["run_id"],))
-    monkeypatch.setattr(chat, "MAX_CHAT_HISTORY_MESSAGES", 3)
+    monkeypatch.setenv("OPSPILOT_CONTEXT_STRATEGY", "RECENT_WINDOW")
     session.claim(target)
     messages = chat.prepare_chat_attempt(demo_db, target["run_id"], WORKER, "fixture")["messages"]
     assert "ALPHA" not in text_of(messages)
@@ -272,7 +272,11 @@ def test_recovery_checks_saved_chat_messages_before_sdk_dispatch(demo_db, tmp_pa
         await _dispatch_run(demo_db, checkpoint, WORKER, "executor-a",
                             session.run(target), session.worker_epoch, assistant_model_factory=factory)
 
-    base_seed = assistant._assistant_chat_seed
+    base_seed = assistant.Loop._fresh_context_prefix
+
+    def polluted_seed(loop, prepared):
+        prefix, marker, body = base_seed(loop, prepared)
+        return [HumanMessage(content=FOREIGN), *prefix], marker, body
 
     async def interrupt_worker():
         reached_model = asyncio.Event()
@@ -284,9 +288,7 @@ def test_recovery_checks_saved_chat_messages_before_sdk_dispatch(demo_db, tmp_pa
         with monkeypatch.context() as interrupted:
             interrupted.setattr(assistant.Loop, "awrap_model_call", stop_before_provider)
             if polluted:
-                interrupted.setattr(assistant, "_assistant_chat_seed", lambda prepared: [
-                    HumanMessage(content=FOREIGN), *base_seed(prepared),
-                ])
+                interrupted.setattr(assistant.Loop, "_fresh_context_prefix", polluted_seed)
             worker = asyncio.create_task(dispatch())
             try:
                 await asyncio.wait_for(reached_model.wait(), 20)

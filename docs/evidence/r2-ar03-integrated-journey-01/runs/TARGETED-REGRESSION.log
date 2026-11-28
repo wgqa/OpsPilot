@@ -1,0 +1,79 @@
+.........................................................F.............. [ 74%]
+...............F.........                                                [100%]
+================================== FAILURES ===================================
+_____ test_product_01_same_event_queued_to_processed_uses_new_observation _____
+
+demo_db = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/r2-ar03-regression/test_product_01_same_event_que0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/r2-ar03-regression/test_product_01_same_event_que0')
+
+    def test_product_01_same_event_queued_to_processed_uses_new_observation(demo_db, tmp_path):
+        """A changed fixture invalidates old evidence; the same Event is freshly observed."""
+        from fastapi.testclient import TestClient
+        from opspilot.domain.database import connect
+        from opspilot.domain.s3 import prepare_s3_fixture
+        from opspilot.web.app import create_app
+        from test_ar02_assistant import ORIGIN, PASSWORDS
+
+        fixture = prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="product-01-changing-order", contract_version=2)
+        event_id = fixture["transport_trace"][0]["request"]["event_id"]
+        run_models = [
+            IntegrationFixtureModel(mode="current-event-only"),
+            IntegrationFixtureModel(mode="current-event-only"),
+        ]
+        queued_models = list(run_models)
+        app = create_app(
+            db_path=demo_db, checkpoint_db_path=tmp_path / "product-01-state-change-cp.sqlite3", start_worker=True,
+            credentials=PASSWORDS, expected_origin=ORIGIN, assistant_model_factory=lambda: queued_models.pop(0),
+        )
+        with TestClient(app) as client:
+            headers = _login(client)
+            session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
+            response = client.post(
+                f"/api/sessions/{session_id}/assistant/order", headers={**headers, "Idempotency-Key": "product-01-queued"},
+                json={"order_id": "product-01-changing-order", "initial_message": "请核实当前 Event。"},
+            )
+            assert response.status_code == 202, response.text
+            first = response.json()
+            assert _wait_run(client, first["run_id"])["status"] == "SUCCEEDED"
+            with connect(demo_db) as connection:
+                connection.execute("UPDATE s3_receivers SET status='PROCESSED',version=version+1 WHERE order_id=?",
+                                   ("product-01-changing-order",))
+            response = client.post(
+                f"/api/sessions/{session_id}/assistant/messages", headers={**headers, "Idempotency-Key": "product-01-recheck"},
+                json={"body": "请重新核实同一 Event 的 Receiver 状态。", "task_id": first["task_id"]},
+            )
+            assert response.status_code == 202, response.text
+            second = response.json()
+            assert _wait_run(client, second["run_id"])["status"] == "SUCCEEDED"
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            old_answer = next(row["body"] for row in messages if row.get("answer_source_message_id") == first["message_id"])
+            new_answer = next(row["body"] for row in messages if row.get("answer_source_message_id") == second["message_id"])
+>           assert old_answer == "这条历史答复的来源已失效，不能作为当前依据。请重新查询。"
+E           AssertionError: assert '当前同一 Event e...资料；线上部署版本仍未知。' == '这条历史答复的来源已失效，不能作为当前依据。请重新查询。'
+E
+E             - 这条历史答复的来源已失效，不能作为当前依据。请重新查询。
+E             + 当前同一 Event event-f89f0ff2-c774-4b15-81f3-ef11cb2aa1ed 的 Delivery HTTP 202 / ACKNOWLEDGED；Receiver 为 QUEUED。协议比较来自本 Session 的先前授权资料；线上部署版本仍未知。
+
+tests\test_ar02_ar03_integration_01.py:1308: AssertionError
+________ test_zero_tool_followup_can_explain_valid_historical_snapshot ________
+
+demo_db = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/r2-ar03-regression/test_zero_tool_followup_can_ex0/domain.sqlite3')
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/r2-ar03-regression/test_zero_tool_followup_can_ex0')
+
+    def test_zero_tool_followup_can_explain_valid_historical_snapshot(demo_db, tmp_path):
+        initial, _ = _initial(demo_db, tmp_path)
+        next_run = _followup(demo_db, initial, FROZEN_CASES['user_inputs']['J4'], 'f01-explain')
+        model = ExplainHistoryFixture(mode='explain-history')
+        result, _ = execute(demo_db, next_run, model, tmp_path / 'checkpoint.sqlite3')
+        assert result['status'] == 'SUCCEEDED', result
+        context = _context(model.seen[0])
+        assert context['current_run']['run_id'] == next_run['run_id']
+>       assert context['current_run']['completed_tools'] == []
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       KeyError: 'completed_tools'
+
+tests\test_ar04c_f01_context_currentness.py:87: KeyError
+=========================== short test summary info ===========================
+FAILED tests/test_ar02_ar03_integration_01.py::test_product_01_same_event_queued_to_processed_uses_new_observation
+FAILED tests/test_ar04c_f01_context_currentness.py::test_zero_tool_followup_can_explain_valid_historical_snapshot
+2 failed, 95 passed in 295.52s (0:04:55)

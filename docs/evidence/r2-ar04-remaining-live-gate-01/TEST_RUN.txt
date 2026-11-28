@@ -1,0 +1,47 @@
+R2-AR04-REMAINING-LIVE-GATE-01 final validation log
+Working directory: D:\学习\agent新项目\.worktrees\ar04a-context-journey-01
+Production source base during validation: fa4cd8a7ea6dd36babccbbfc5fcdb7a179729fd3
+Production changes: none
+Provider requests: 0
+External MCP calls: 0
+
+1) Compile the task runner and its tests
+Command:
+  python -m py_compile docs/evidence/r2-ar04-remaining-live-gate-01/run_remaining_live_gate.py docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py
+Exit: 0
+
+2) Task runner and safety gates
+Command:
+  python -m pytest -q docs/evidence/r2-ar04-remaining-live-gate-01/test_remaining_live_gate.py --basetemp=D:\pytest-opspilot-ar04-rem-gate-final-task-20261115-a
+Result: 11 passed in 41.67s
+Exit: 0
+
+3) Historical Q02-B 512-token truncated response replay
+Command:
+  $env:OPSPILOT_AR04_HEADROOM_TRACE_PATH = 'D:\学习\agent新项目\.worktrees\ar04a-context-journey-01\docs\evidence\r2-ar04-remaining-live-gate-01\TRUNCATION_REVERSE_TRACE.jsonl.gz'; python -m pytest -q tests/test_ar04a_compression_budget_hf_01.py::test_original_q02_b_512_token_truncation_still_stops_without_persistence --basetemp=D:\pytest-opspilot-ar04-rem-gate-final-trunc-20261115-a
+Result: 1 passed in 12.34s
+Exit: 0
+
+4) 1024 generation / 512 persistence / Grant ceiling regressions
+Command:
+  python -m pytest -q tests/test_ar04a_compression_budget_hf_01.py::test_valid_summary_over_512_generation_tokens_is_domain_compacted_to_512 tests/test_ar04a_compression_budget_hf_01.py::test_summary_usage_above_1024_stops_before_domain_persistence tests/test_ar04a_compression_budget_hf_01.py::test_compression_generation_cap_respects_runtime_grant_ceiling --basetemp=D:\pytest-opspilot-ar04-rem-gate-final-headroom-20261115-a
+Result: 3 passed in 22.17s
+Exit: 0
+
+5) C06 boundaries (standalone rerun)
+Command:
+  python -m pytest -vv tests/test_r2_ar04_compaction_c06_hf_01.py --basetemp=D:\pytest-opspilot-ar04-rem-gate-final-c06-20261115-b
+Result: 5 passed in 60.51s
+Exit: 0
+
+6) Runtime Grant regressions
+Command:
+  python -m pytest -q tests/test_product_01_runtime_grant_01.py --basetemp=D:\pytest-opspilot-ar04-rem-gate-final-grant-20261115-a
+Result: 22 passed in 15.76s
+Exit: 0
+
+Interrupted supplementary run:
+  python -m pytest -q tests/test_r2_ar04_compaction_c06_hf_01.py --basetemp=D:\pytest-opspilot-ar04-rem-gate-final-c06-20261115-a
+The quiet run produced no output while T06's test subprocess remained alive for several minutes. It was interrupted (exit 1); the subprocess exited. The standalone verbose run above then completed all five tests successfully.
+
+The tests use fixtures, temporary databases, and MockTransport. No Provider request was made and no production database was opened or written.

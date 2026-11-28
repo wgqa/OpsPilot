@@ -1,0 +1,27 @@
+PRODUCT-01-RUNTIME-ENTRY-01 - offline verification log
+Base: fa30383c1a58755e75bef7b7f393ff9ba602200c
+Branch: codex/product-01-runtime-entry-01
+Provider / browser / external business writes: 0 / 0 / 0
+HTTPX MockTransport synthetic responses: 2; no external Provider connection.
+MCP calls observed in 19 isolated pytest SQLite/Checkpoint files: 23 attempts (22 OK, 1 FAILED scope rejection).
+Assistant calls in those local databases: 33 MODEL OK fixture/model-loop records; these are not Provider requests.
+Read-only aggregate of 11 isolated Domain DBs: d3_approvals=0, approval_resume_links=0, d3_action_permissions=0, d3_action_intents=0, d3_action_ledgers=0, s2_handoff_receipts=0, s3_handoff_receipts=0.
+
+COMMAND 1
+python -m pytest -q --tb=short --basetemp D:\Temp\OpsPilot-runtime-entry-01 tests/test_ar02_runtime.py::test_worker_default_does_not_construct_paid_provider tests/test_ar02_runtime.py::test_knowledge_then_bound_investigation_same_session tests/test_ar02_runtime.py::test_mixed_scope_denial_retains_legal_query tests/test_ar02_runtime.py::test_real_api_worker_session_journey_and_refresh_no_extra_dispatch tests/test_ar02_runtime.py::test_old_core_sources_revoke_and_ordinary_chat_cannot_borrow_observation tests/test_ar02_runtime.py::test_revocation_between_tool_and_model_stops_and_source_api_denies tests/test_ar02_assistant.py::test_no_task_document_scope_is_server_owned_and_session_isolated tests/test_ar02_assistant.py::test_no_task_has_no_business_tool_or_privileged_authority tests/test_product_01_live_scope.py::test_product_01_live_scope_requires_one_claim_and_one_reservation tests/test_ar02_ar03_integration_01.py::test_terminal_model_cap_discloses_only_revalidated_failed_run_sources
+RESULT
+...........                                                              [100%]
+11 passed in 29.93s
+EXIT_CODE=0
+
+COMMAND 2
+python -m pytest -q --tb=short --basetemp D:\Temp\OpsPilot-runtime-entry-01-provider tests/test_ar02_smoke_provider_factory.py
+RESULT
+.......                                                                  [100%]
+7 passed in 2.03s
+EXIT_CODE=0
+
+Interpretation:
+- Tests use FixtureModel or explicit HTTPX MockTransport; no network fallback was used.
+- The Product Slice02 one-shot test creates its authorization and claim only under pytest tmp_path, sends one synthetic MockTransport response, rejects a repeated claim/send, and confirms a second DB cannot be rebound. It did not read or mutate a historical live claim.
+- No full pytest suite was run.

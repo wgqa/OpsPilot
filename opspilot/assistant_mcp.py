@@ -5,6 +5,7 @@ import threading
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 from opspilot.domain.assistant import read_run
+from opspilot.domain import assistant as assistant_domain
 from opspilot.domain.assistant_knowledge import search
 from opspilot.domain.s3_mcp import build_s3_server
 from opspilot.domain.api import make_server
@@ -18,6 +19,46 @@ async def run(path,run_id):
         thread.start()
         server=build_s3_server(path,record['task_id'],f'http://127.0.0.1:{api.server_address[1]}')
     else: server=MCPServer('OpsPilot professional assistant document reader')
+
+    if record['task_id'] is None and identity.role == 'SUPPORT':
+        @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+        def propose_controlled_auth_investigation(rationale: str) -> dict:
+            """Suggest the existing controlled S1/S2 investigation for this exact user message.
+
+            This records an advisory result only. It creates no Task, binding,
+            permission, approval, repair, or handoff. The user must confirm the
+            original question and a trusted resource in the existing UI.
+            """
+            try:
+                return assistant_domain.propose_controlled_auth_investigation(
+                    path, run_id, rationale,
+                )
+            except Exception as error:
+                return {
+                    'success': False,
+                    'error': getattr(error, 'code', type(error).__name__),
+                    'authority': 'TOOL_REFUSAL_NOT_FACT',
+                    'task_created': False,
+                    'authorization_created': False,
+                }
+
+        @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
+        def read_session_professional_outcomes() -> dict:
+            """Read persisted S1/S2 results linked to this exact trusted Session.
+
+            Session and caller identity are derived from the active server-side
+            Assistant Run; model supplied task, receipt, tenant, or actor IDs
+            are neither accepted nor used as authority.
+            """
+            try:
+                return assistant_domain.read_session_professional_outcomes(path, run_id)
+            except Exception as error:
+                return {
+                    'success': False,
+                    'error': getattr(error, 'code', type(error).__name__),
+                    'authority': 'TOOL_REFUSAL_NOT_FACT',
+                    'items': [],
+                }
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def search_project_knowledge(query:str,contract_version:int|None=None)->dict:
         """Search the authenticated Session's document scope. Optional version is a lookup preference, never deployment proof. Cite only returned documents with matching source_refs; empty lists mean no document was retrieved. Documents are not current business facts."""

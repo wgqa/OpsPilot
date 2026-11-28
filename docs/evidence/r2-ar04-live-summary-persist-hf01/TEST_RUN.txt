@@ -1,0 +1,59 @@
+# Test and verification record
+
+Task: `R2-AR04-LIVE-SUMMARY-PERSIST-HF-01` | Base: `850dd6a61af58db77db6c46ea64360e22129da1a`
+Provider calls: **0**; cost: **USD 0**; external MCP calls: **0**
+
+## Frozen-summary Domain replay
+
+Command:
+
+```powershell
+python -B -s docs/evidence/r2-ar04-live-summary-persist-hf01/replay_persistence.py --samples 12 --output docs/evidence/r2-ar04-live-summary-persist-hf01/REPLAY_MATRIX_AFTER.json > $null
+```
+
+Exit code: **0**. Same frozen `Q02-A:SUMMARY:1` response, 29-row synthetic history, 12 isolated deterministic production-format Message ID maps. Replays call `prepare_chat_compression_attempt()` and `complete_chat_compression_attempt()`; no Provider request is sent. Before patch: 10 succeeded / 2 failed. After patch: 12 succeeded / 0 failed; persisted summaries are 488–512 estimated Tokens. Source visibility and partial facts are recorded in `REPLAY_MATRIX.json`.
+
+## Core tests
+
+Command (PowerShell environment and scratch DB isolation):
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+$env:LANGSMITH_TRACING='false'
+$taskTemp = Join-Path $env:TEMP ('ar04-live-summary-core-final2-' + [guid]::NewGuid().ToString('N'))
+python -B -s -m pytest -q -p no:cacheprovider --basetemp $taskTemp tests/test_ar04_live_summary_persist_hf_01.py tests/test_ar04_summary_fact_retention_hf_01.py tests/test_ar04_summary_fact_retention_edges_hf_02.py tests/test_m302_context.py
+```
+
+Exit code: **0** — **30 passed**, 13 deprecation warnings, 31.08s. Full captured output: `CORE_TEST_OUTPUT.txt`.
+
+Coverage includes frozen live-summary Domain persistence with varying IDs, source ID/Sequence mapping, literal fact/source visibility, the two explicitly `PARTIAL` seq3 parameter projections, injected Domain failure through the Runtime/Mock Runner path, subsequent Case stop, Q02-A/B and Q06-B fact-retention regression, source-currentness, and the 512-token negation boundary.
+
+## Context, cancellation, C06 and Grant regression suite
+
+Command:
+
+```powershell
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'
+$env:LANGSMITH_TRACING='false'
+$taskTemp = Join-Path $env:TEMP ('ar04-live-summary-security-final-' + [guid]::NewGuid().ToString('N'))
+python -B -s -m pytest -q -p no:cacheprovider --basetemp $taskTemp tests/test_ar04a_context_journey_01.py tests/test_ar04a_compression_budget_hf_01.py tests/test_ar04a_compression_cancel_hf_01.py tests/test_r2_ar04_compaction_c06_hf_01.py tests/test_product_01_runtime_grant_01.py::test_database_copy_cannot_reuse_runtime_grant_or_pool tests/test_product_01_runtime_grant_01.py::test_expired_grant_is_not_bound_and_zero_price_cannot_authorize_paid_calls
+```
+
+Exit code: **0** — **21 passed**, 13 deprecation warnings, 205.45s. Full output: `SECURITY_TEST_OUTPUT.txt`. The frozen C06 RED result and trace remain unchanged; passing the C06 test suite does not change the recorded RED outcome.
+
+## Preserved failed attempt
+
+An earlier run of the core command returned exit code **1** with 29 passed / 1 failed because the frozen Recheck wrapper rejected the current compactor blob (`PRODUCTION_COMPACTOR_BLOB_DRIFT`) before reaching the missing-Manifest branch. `run_recheck.py` was restored unchanged; the focused test now isolates only its target branch by replacing that unrelated checkout pin in the test. The original failure output is retained in `CORE_TEST_OUTPUT_CHECKOUT_PIN_FAIL.txt`; only trailing whitespace was stripped from that new diagnostic log so `git diff --check` stays clean.
+
+## Artifact and diff checks
+
+- JSON parse check over `REPLAY_MATRIX.json`, `REPLAY_MATRIX_BEFORE.json`, `REPLAY_MATRIX_AFTER.json`, `REPLAY_MATRIX_AFTER_INITIAL_PATCH.json`, and `RESULTS.json`: **PASS** (exit 0).
+- SHA-256 snapshot for the frozen live Trace/results/ledger, question/Gold inputs, C06 RED records and F01 legacy log: **PASS**; paths are tracked and have no Git modifications. See `LIVE_EVIDENCE_INDEX.md` and `RESULTS.json`.
+- `git diff --check`: **PASS** (exit 0).
+- No live model call, no cost, no external MCP, no production database write, and no modification to frozen Trace/Gold/ledger/C06 RED/F01 log.
+
+The first JSON parse check returned exit code **1** because the report writer had appended a literal escaped-newline suffix after the closing braces in `RESULTS.json` and `REPLAY_MATRIX.json`. Both files were corrected to end with a real newline; the repeated parse of all five matrix/result JSON files passed.
+
+## Not run
+
+The historical F01 `completed_tools` mismatch was not rerun or repaired in this slice. Its existing record is indexed and hash-checked; it remains a prior issue.

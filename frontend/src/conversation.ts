@@ -1,5 +1,5 @@
 import type {
-  ChatChunk, MessageItem, RunItem,
+  ChatChunk, MessageItem, RunActivity, RunItem,
 } from './api';
 
 export interface ConversationAnswer {
@@ -65,6 +65,7 @@ export interface ConversationItem {
   createdAt: string;
   runId?: string;
   message?: MessageItem;
+  messages?: MessageItem[];
   answer?: ConversationAnswer;
   followup?: ConversationFollowup;
   assessment?: ConversationAssessment;
@@ -72,6 +73,7 @@ export interface ConversationItem {
   supersededChatRuns?: ConversationRun[];
   run?: ConversationRun;
   chunks?: ChatChunk[];
+  activities?: RunActivity[];
   diagnosis?: Record<string, unknown>;
 }
 
@@ -93,6 +95,7 @@ export interface ProjectConversationInput {
   assessments?: ConversationAssessment[];
   activeChatRun?: ConversationRun | null;
   chunks?: ChatChunk[];
+  activities?: RunActivity[];
   s3Outcome?: Record<string, unknown> | null;
 }
 
@@ -167,6 +170,24 @@ export function filterDeniedS3AssistantMessages(
 ): MessageItem[] {
   return messages.filter((message) => message.role !== 'ASSISTANT'
     || !message.task_id || !isTaskDenied(message.task_id));
+}
+
+export function maskS3AnswersForRevalidation(messages: MessageItem[]): MessageItem[] {
+  return messages.map((message) => {
+    if (message.role !== 'ASSISTANT' || !message.answer_visibility || message.answer_visibility === 'HIDDEN') return message;
+    return {
+      ...message, body: '这条历史答复的读取资格待重新核验。',
+      answer_visibility: 'HIDDEN', source_status: 'S3_HISTORY_REVALIDATION_PENDING',
+    };
+  });
+}
+
+export function mergeChatChunks(current: ChatChunk[], incoming: ChatChunk[]): ChatChunk[] {
+  const bySequence = new Map(current.map((chunk) => [chunk.chunk_seq, chunk]));
+  for (const chunk of incoming) {
+    if (!bySequence.has(chunk.chunk_seq)) bySequence.set(chunk.chunk_seq, chunk);
+  }
+  return [...bySequence.values()].sort((left, right) => left.chunk_seq - right.chunk_seq);
 }
 
 export function projectSessionEvent(event: SessionEventDisplay & { payload?: unknown }): SessionEventDisplay {
@@ -317,6 +338,12 @@ function confirmedCorrectionSources(
 
 export function projectConversation(input: ProjectConversationInput): ConversationProjection {
   const assessments = input.assessments ?? [];
+  const active = input.activeChatRun;
+  const activeActivities = active ? [...new Map((input.activities ?? [])
+    .filter((item) => item.payload.run_id === active.run_id)
+    .map((item) => [item.event_seq, item])).values()].sort((left, right) => left.event_seq - right.event_seq) : [];
+  const liveAssistantReply = active?.execution_core === 'ASSISTANT_V1' && ['QUEUED', 'RUNNING'].includes(active.status);
+  const hasDraft = (input.chunks?.length ?? 0) > 0;
   const uniqueMessages = [...new Map(input.messages.map((message) => [message.message_id, message])).values()];
   const messagesById = new Map(uniqueMessages.map((message) => [message.message_id, message]));
   const allRuns = new Map<string, ConversationRun>();
@@ -376,7 +403,9 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     for (const run of sidecars) correctionTakeoverSidecarIds.add(run.run_id);
   }
 
-  for (const message of uniqueMessages) {
+  const orderedMessages = [...uniqueMessages].sort((left, right) =>
+    left.sequence - right.sequence || left.message_id.localeCompare(right.message_id));
+  for (const message of orderedMessages) {
     if (message.role === 'USER') continue;
     const sourceId = message.answer_source_message_id ?? null;
     const source = sourceId ? messagesById.get(sourceId) : undefined;
@@ -384,10 +413,34 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     const displaySource = correctedSource?.correctionMessageId === sourceId ? correctedSource.sourceMessageId : sourceId;
     const valid = message.role === 'ASSISTANT' && !!source && source.role === 'USER'
       && taskMatches(message, source.task_id) && !!message.answer_run_id
-      && !!message.answer_kind && attach(displaySource, message.task_id, {
-        id: `message:${message.message_id}`, kind: 'CHAT_MESSAGE', createdAt: message.created_at,
-        runId: message.answer_run_id, message,
-      });
+      && !!message.answer_kind && !!displaySource && threadByMessageId.has(displaySource)
+      && taskMatches(threadByMessageId.get(displaySource)!.anchor, message.task_id);
+    if (valid && displaySource && message.answer_run_id) {
+      const showActivity = message.answer_run_id === active?.run_id && message.answer_kind === 'CHAT_MODEL'
+        && (!message.answer_visibility || message.answer_visibility === 'CURRENT') && activeActivities.length > 0;
+      const itemId = `turn:${message.answer_run_id}:${displaySource}`;
+      const ids = idsByThread.get(displaySource)!;
+      const existing = ids.get(itemId);
+      if (existing?.kind === 'CHAT_MESSAGE') {
+        const turnMessages = existing.messages ?? (existing.message ? [existing.message] : []);
+        if (!turnMessages.some((candidate) => candidate.message_id === message.message_id)) {
+          turnMessages.push(message);
+          turnMessages.sort((left, right) =>
+            left.sequence - right.sequence || left.message_id.localeCompare(right.message_id));
+          existing.messages = turnMessages;
+          existing.message = turnMessages[turnMessages.length - 1];
+          existing.createdAt = turnMessages[0].created_at;
+        }
+        if (showActivity) existing.activities = activeActivities;
+      } else {
+        attach(displaySource, message.task_id, {
+          id: itemId, kind: 'CHAT_MESSAGE', createdAt: message.created_at,
+          runId: message.answer_run_id, message, messages: [message],
+          ...(showActivity ? { activities: activeActivities } : {}),
+        });
+      }
+      continue;
+    }
     if (!valid) {
       const item: ConversationItem = {
         id: `message:${message.message_id}`, kind: 'CHAT_MESSAGE', createdAt: message.created_at, message,
@@ -436,10 +489,16 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     if (!attach(assessment.source_message_id, taskId, item)) orphan(item);
   }
 
-  const active = input.activeChatRun;
   const answeredRuns = new Set<string>();
+  const answerRunsBeyondProgramNotice = new Set<string>();
   for (const thread of threads) {
-    for (const item of thread.items) if (item.runId) answeredRuns.add(item.runId);
+    for (const item of thread.items) {
+      if (!item.runId) continue;
+      answeredRuns.add(item.runId);
+      if (item.kind !== 'CHAT_MESSAGE' || !item.messages?.every((message) => message.answer_kind === 'PROGRAM_LIMIT')) {
+        answerRunsBeyondProgramNotice.add(item.runId);
+      }
+    }
   }
 
   for (const run of allRuns.values()) {
@@ -448,7 +507,7 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     const reason = run.blocked_reason ?? run.waiting_reason ?? '';
     if (reason === 'FOLLOWUP_ROUTED_TO_INVESTIGATOR'
       || reason === 'UPDATE_CLASSIFICATION_PENDING' || reason === 'UPDATE_CONFIRMATION_PENDING') continue;
-    if (active?.run_id === run.run_id && run.status === 'RUNNING' && (input.chunks?.length ?? 0) > 0) continue;
+    if (active?.run_id === run.run_id && (liveAssistantReply || (run.status === 'RUNNING' && hasDraft))) continue;
     if (answeredRuns.has(run.run_id)) continue;
     const item: ConversationItem = {
       id: `run:${run.run_id}`, kind: 'RUN_STATUS', createdAt: run.started_at ?? run.created_at,
@@ -458,12 +517,12 @@ export function projectConversation(input: ProjectConversationInput): Conversati
     if (!attach(effectiveSource, run.task_id, item)) orphan(item);
   }
 
-  if (active?.status === 'RUNNING' && active.source_message_id && (input.chunks?.length ?? 0) > 0) {
-    const chunks = [...new Map((input.chunks ?? []).map((chunk) => [chunk.chunk_id, chunk])).values()]
-      .sort((left, right) => left.chunk_seq - right.chunk_seq);
+  if (active?.source_message_id && !answerRunsBeyondProgramNotice.has(active.run_id)
+    && (liveAssistantReply || (hasDraft
+      && ['RUNNING', 'FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE'].includes(active.status)))) {
     const item: ConversationItem = {
       id: `stream:${active.run_id}`, kind: 'STREAM', createdAt: active.started_at ?? active.created_at,
-      runId: active.run_id, run: active, chunks,
+      runId: active.run_id, run: active, chunks: mergeChatChunks([], input.chunks ?? []), activities: activeActivities,
     };
     const source = resolveRunSource(allRuns.get(active.run_id), active.source_message_id);
     if (!source || !attach(source, active.task_id, item)) orphan(item);

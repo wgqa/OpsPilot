@@ -7,6 +7,8 @@ export interface SessionItem {
 
 export interface SessionDetail {
   session_id: string;
+  created_at: string;
+  updated_at: string;
   tasks: Array<{ task_id: string; linked_at: string; is_primary: number }>;
   s1_demo_resource: { service_id: string; integration_id: string; principal_id: string } | null;
 }
@@ -68,6 +70,8 @@ export interface MessageItem {
   answer_run_id?: string | null;
   answer_source_message_id?: string | null;
   answer_kind?: 'CHAT_MODEL' | 'PROGRAM_LIMIT' | null;
+  answer_visibility?: 'CURRENT' | 'HISTORICAL_SNAPSHOT' | 'HIDDEN';
+  source_status?: string | null;
   investigation_origin_message_id?: string | null;
 }
 
@@ -153,6 +157,76 @@ export interface ChatChunk {
   body_digest: string;
   created_at: string;
   attempt_id: string;
+}
+
+export interface RunActivity {
+  event_seq: number;
+  event_kind: 'ASSISTANT_ACTIVITY';
+  happened_at: string;
+  payload: {
+    run_id: string;
+    stage: string;
+    activity_status: 'STARTED' | 'SUCCEEDED' | 'FAILED';
+    tool_name?: string;
+    duration_ms?: number;
+    memory_count?: number;
+  };
+}
+
+export interface PersonalMemoryRecord extends Record<string, unknown> {
+  memory_id: string;
+  tenant_id: string;
+  owner_actor_id: string;
+  memory_kind: 'PREFERENCE' | 'WORK_HABIT' | 'PROJECT_BACKGROUND';
+  memory_mode: 'PINNED' | 'RELEVANT';
+  memory_key: string;
+  content: string;
+  content_digest: string;
+  source_message_id: string;
+  source_refs: Array<Record<string, unknown>>;
+  source_current: boolean;
+  state: 'CANDIDATE' | 'ACTIVE' | 'REVISED' | 'REVOKED' | 'EXPIRED';
+  creation_source: 'USER_EXPLICIT' | 'USER_CONFIRMED' | 'AUTO_LEARNED' | null;
+  version: number;
+  expires_at: string;
+}
+
+export interface PersonalMemorySettings {
+  tenant_id: string;
+  owner_actor_id: string;
+  recall_enabled: boolean;
+  auto_learn_enabled: boolean;
+  auto_learn_available: boolean;
+  consolidation_status: Record<string, number>;
+  consolidation_latest_job: {
+    job_id: string;
+    status: string;
+    proposal_count: number;
+    written_count: number;
+    duplicate_count: number;
+    skipped_count: number;
+    rejected_count: number;
+    failure_code: string | null;
+    updated_at: string;
+  } | null;
+  is_default: boolean;
+  updated_at: string | null;
+}
+
+export interface ChatRunContext {
+  run_id: string;
+  attempts: Array<{
+    attempt_id: string;
+    status: string;
+    manifest: {
+      memory_refs: Array<Record<string, unknown>>;
+      excluded_sources: Array<Record<string, unknown>>;
+      summary_refs: Array<Record<string, unknown>>;
+      context_budget: Record<string, unknown>;
+    };
+  }>;
+  compression_attempts: Array<Record<string, unknown>>;
+  excluded_sources: Array<Record<string, unknown>>;
 }
 
 export interface InspectorRun {
@@ -370,7 +444,17 @@ export const api = {
   createSession(csrf: string) {
     return request<SessionItem>('/api/sessions', { method: 'POST', headers: writeHeaders(csrf) });
   },
-  messages(sessionId: string) { return request<{ items: MessageItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=500`); },
+  messages(sessionId: string, page: { afterSeq?: number; beforeSeq?: number; limit?: number } = {}) {
+    const query = new URLSearchParams({ limit: String(page.limit ?? 500) });
+    if (page.beforeSeq !== undefined) query.set('before_seq', String(page.beforeSeq));
+    else if (page.afterSeq !== undefined) query.set('after_seq', String(page.afterSeq));
+    else query.set('latest', 'true');
+    return request<{
+      items: MessageItem[];
+      has_more_before: boolean;
+      has_more_after: boolean;
+    }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${query.toString()}`, { cache: 'no-store' });
+  },
   sessionRuns(sessionId: string) { return request<{ items: RunItem[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`); },
   send(sessionId: string, body: string, taskId: string | null, csrf: string, inputKind: 'CHAT_READONLY' | 'CORRECT_TASK_INPUT' = 'CHAT_READONLY') {
     return request<AcceptedMessage>(
@@ -479,8 +563,12 @@ export const api = {
   },
   runs(taskId: string) { return request<{ items: RunItem[] }>(`/api/tasks/${encodeURIComponent(taskId)}/runs`); },
   run(runId: string) { return request<RunItem>(`/api/runs/${encodeURIComponent(runId)}`); },
+  runContext(runId: string) { return request<ChatRunContext>(`/api/runs/${encodeURIComponent(runId)}/context`); },
   chunks(runId: string, afterSeq: number) {
     return request<{ items: ChatChunk[] }>(`/api/runs/${encodeURIComponent(runId)}/chunks?after_seq=${afterSeq}`);
+  },
+  runActivity(runId: string) {
+    return request<{ items: RunActivity[] }>(`/api/runs/${encodeURIComponent(runId)}/activity`);
   },
   inspector(taskId: string) { return request<Inspector>(`/api/tasks/${encodeURIComponent(taskId)}/inspector`); },
   pendingApprovals() { return request<{ items: PendingApproval[] }>('/api/approvals/pending'); },
@@ -525,6 +613,49 @@ export const api = {
   },
   revokeMemory(memoryId: string, csrf: string, idempotencyKey: string) {
     return request<MemoryRecord>(`/api/memories/${encodeURIComponent(memoryId)}/revoke`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
+  personalMemories(state?: string) {
+    const query = state ? `?state=${encodeURIComponent(state)}` : '';
+    return request<{ items: PersonalMemoryRecord[] }>(`/api/personal-memories${query}`);
+  },
+  personalMemory(memoryId: string) {
+    return request<PersonalMemoryRecord>(`/api/personal-memories/${encodeURIComponent(memoryId)}`);
+  },
+  personalMemorySettings() {
+    return request<PersonalMemorySettings>('/api/personal-memory-settings');
+  },
+  updatePersonalMemorySettings(recallEnabled: boolean, autoLearnEnabled: boolean, csrf: string) {
+    return request<PersonalMemorySettings>('/api/personal-memory-settings', {
+      method: 'PUT', headers: writeHeaders(csrf),
+      body: JSON.stringify({ recall_enabled: recallEnabled, auto_learn_enabled: autoLearnEnabled }),
+    });
+  },
+  createPersonalMemoryCandidate(
+    payload: {
+      memory_kind: PersonalMemoryRecord['memory_kind'];
+      memory_mode?: PersonalMemoryRecord['memory_mode'];
+      memory_key: string;
+      content: string;
+      source_message_id: string;
+      ttl_days?: number;
+      supersedes_memory_id?: string;
+      expected_version?: number;
+    }, csrf: string, idempotencyKey: string,
+  ) {
+    return request<PersonalMemoryRecord>('/api/personal-memories/candidates', {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(payload),
+    });
+  },
+  confirmPersonalMemory(memoryId: string, csrf: string, idempotencyKey: string) {
+    return request<PersonalMemoryRecord>(`/api/personal-memories/${encodeURIComponent(memoryId)}/confirm`, {
+      method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
+    });
+  },
+  revokePersonalMemory(memoryId: string, csrf: string, idempotencyKey: string) {
+    return request<PersonalMemoryRecord>(`/api/personal-memories/${encodeURIComponent(memoryId)}/revoke`, {
       method: 'POST', headers: { ...writeHeaders(csrf), 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({}),
     });
   },

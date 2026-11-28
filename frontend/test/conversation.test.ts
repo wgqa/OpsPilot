@@ -151,7 +151,7 @@ test('groups interleaved results under exact source messages and keeps late answ
   assert.deepEqual(projection.threads.map((thread) => thread.anchor.message_id), ['q1', 'q2', 'q3']);
   assert.deepEqual(projection.threads[0]?.items.map((item) => item.id), ['investigation:investigate-r1']);
   assert.equal(projection.threads[0]?.items.at(-1)?.createdAt, '2026-01-01T00:04:00Z');
-  assert.deepEqual(projection.threads[1]?.items.map((item) => item.id), ['message:a2']);
+  assert.deepEqual(projection.threads[1]?.items.map((item) => item.id), ['turn:chat-r2:q2']);
   assert.equal(projection.threads[1]?.items[0]?.message?.body, 'second answer');
 });
 
@@ -213,6 +213,25 @@ test('deduplicates replayed stable ids and renders only the active source run ch
   assert.deepEqual(projection.threads[0]?.items[0]?.chunks?.map((chunk) => chunk.body), ['hello', ' world']);
 });
 
+test('keeps persisted partial Provider text visibly incomplete after a terminal failure', () => {
+  const projection = projectConversation({
+    messages: [
+      user('q-failed-stream', 1, '2026-01-01T00:00:00Z'),
+      { ...user('failure-notice', 2, '2026-01-01T00:00:03Z'), role: 'ASSISTANT',
+        answer_run_id: 'chat-r-failed', answer_source_message_id: 'q-failed-stream', answer_kind: 'PROGRAM_LIMIT' },
+    ],
+    activeChatRun: { run_id: 'chat-r-failed', task_id: 'task-a', source_message_id: 'q-failed-stream',
+      kind: 'CHAT_READONLY', status: 'FAILED', created_at: '2026-01-01T00:00:01Z' },
+    chunks: [{ chunk_id: 'chunk-partial', chunk_seq: 1, body: 'partial Provider draft', body_digest: 'd1',
+      created_at: '2026-01-01T00:00:02Z', attempt_id: 'attempt-1' }],
+  });
+
+  const draft = projection.threads[0]?.items.find((item) => item.kind === 'STREAM');
+  assert.ok(draft);
+  assert.deepEqual(draft.chunks?.map((chunk) => chunk.body), ['partial Provider draft']);
+  assert.equal(draft.run?.status, 'FAILED');
+});
+
 test('keeps waiting and failed outcomes visible without duplicating an ordinary Follow-up card', () => {
   const projection = projectConversation({
     messages: [
@@ -265,7 +284,7 @@ test('keeps waiting and failed outcomes visible without duplicating an ordinary 
   assert.deepEqual(itemIds('confirm-question'), ['assessment:confirmation-wait']);
   assert.deepEqual(itemIds('followup-question'), ['followup:followup-run']);
   assert.deepEqual(itemIds('partial-question'), ['investigation:partial-run']);
-  assert.deepEqual(itemIds('limit-question'), ['message:limit-answer']);
+  assert.deepEqual(itemIds('limit-question'), ['turn:limit-run:limit-question']);
   assert.deepEqual(itemIds('failed-question'), ['run:failed-run']);
   assert.equal(projection.threads.find((thread) => thread.anchor.message_id === 'limit-question')
     ?.items[0]?.message?.answer_kind, 'PROGRAM_LIMIT');

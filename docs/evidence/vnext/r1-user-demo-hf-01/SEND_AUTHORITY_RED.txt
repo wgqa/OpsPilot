@@ -1,0 +1,101 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+___ test_reserved_assistant_run_aborted_before_send_cannot_get_send_permit ____
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-user-demo-01/.runtime/user-demo-hf01-runtime-red2/test_reserved_assistant_run_ab0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023382A51CD0>
+
+    def test_reserved_assistant_run_aborted_before_send_cannot_get_send_permit(demo_db, monkeypatch):
+        """A durable reservation is not enough once TaskControl has aborted the Run."""
+        import os
+    
+        import pytest
+    
+        from opspilot.domain.assistant_runtime_grant import (
+            RuntimeGrantError, bind_run, claim_send, runtime_config_from_env,
+        )
+        from opspilot.domain.database import connect
+        from opspilot.domain.task_control import (
+            abort_task, claim_task_run, create_session, create_task_with_initial_run,
+            trusted_identity,
+        )
+    
+        from test_product_01_runtime_grant_01 import _configure, _provision, _worker
+        from opspilot.domain.s3 import prepare_s3_fixture
+    
+        _configure(monkeypatch)
+        _provision(demo_db, total=30_000)
+        prepare_s3_fixture(demo_db, "PROCESSING", order_id="ar02-order", contract_version=2)
+        worker = _worker(demo_db)
+        try:
+            identity = trusted_identity(demo_db, "support-a")
+            session_id = create_session(demo_db, identity)["session_id"]
+            created = create_task_with_initial_run(
+                demo_db, identity, session_id=session_id, service_id="orders-async-demo",
+                integration_id="async-integration-a", s3_order_id="ar02-order",
+                ticket_id="HF01-ABORT-BEFORE-SEND", initial_message="Read-only callback check.",
+                idempotency_key="hf01-abort-before-send", assistant_core=True,
+            )
+            claim_task_run(demo_db, identity, created["run_id"])
+            run = {"run_id": created["run_id"], "session_id": session_id}
+            binding = bind_run(demo_db, run["run_id"], runtime_config_from_env())
+            call, dispatch, _, body_digest, output_cap, request_digest = _prepared_send(
+                demo_db, worker, binding, run,
+            )
+            aborted = abort_task(
+                demo_db, identity, task_id=created["task_id"], reason="user cancelled before send",
+                idempotency_key="hf01-abort-before-send-command",
+            )
+            assert aborted["terminal_state"] == "ABORTED"
+    
+>           with pytest.raises(RuntimeGrantError, match="TASK_ABORTED"):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           Failed: DID NOT RAISE RuntimeGrantError
+
+tests\test_r1_user_demo_hf_01.py:140: Failed
+___________ test_stale_worker_epoch_cannot_get_provider_send_permit ___________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/r1-user-demo-01/.runtime/user-demo-hf01-runtime-red2/test_stale_worker_epoch_cannot0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023382B1C3E0>
+
+    def test_stale_worker_epoch_cannot_get_provider_send_permit(demo_db, monkeypatch):
+        """A worker superseded after reservation cannot make a new external send."""
+        import os
+    
+        import pytest
+    
+        from opspilot.domain.assistant_runtime_grant import (
+            RuntimeGrantError, bind_run, claim_send, runtime_config_from_env,
+        )
+        from opspilot.domain.task_control import register_worker_owner
+    
+        from test_product_01_runtime_grant_01 import _configure, _provision, _run, _worker
+    
+        _configure(monkeypatch)
+        _provision(demo_db, total=30_000)
+        worker = _worker(demo_db)
+        try:
+            run = _run(demo_db, "stale-worker-epoch", worker_id=worker.owner_id)
+            binding = bind_run(demo_db, run["run_id"], runtime_config_from_env())
+            call, dispatch, _, body_digest, output_cap, request_digest = _prepared_send(
+                demo_db, worker, binding, run,
+            )
+            register_worker_owner(demo_db, worker.owner_id, os.getpid())
+    
+            # The old code only compared the caller-supplied owner string and granted
+            # a send even though the database had already advanced this owner's epoch.
+            permit = claim_send(
+                demo_db, binding, call_id=call["call_id"], request_key=dispatch["request_key"],
+                request_digest=request_digest, body_digest=body_digest,
+                request_url="https://api.deepseek.com/chat/completions", method="POST",
+                requested_max_output_tokens=output_cap, worker_id=worker.owner_id,
+            )
+>           assert permit["action"] != "SEND", "stale worker epoch received an external send permit"
+E           AssertionError: stale worker epoch received an external send permit
+E           assert 'SEND' != 'SEND'
+
+tests\test_r1_user_demo_hf_01.py:189: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_r1_user_demo_hf_01.py::test_reserved_assistant_run_aborted_before_send_cannot_get_send_permit
+FAILED tests/test_r1_user_demo_hf_01.py::test_stale_worker_epoch_cannot_get_provider_send_permit
+2 failed in 0.87s

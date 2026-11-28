@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-LIVE-ADMISSION-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "review_base_sha": "bf9e5d84f4aa2e57d1f195dbe7933d74c5586a3b",
+  "original_gate_base_sha": "fa4cd8a7ea6dd36babccbbfc5fcdb7a179729fd3",
+  "branch": "codex/r2-ar04-live-admission-hf01",
+  "final_mock_run": {
+    "path": "mock_run_05/MOCK_RESULTS.json",
+    "status": "COMPLETED",
+    "case_matrix_passed": true,
+    "cases": ["Q02-B", "Q06-B"],
+    "mock_summary_requests": 4,
+    "mock_answer_requests": 2,
+    "mock_total_requests": 6,
+    "provider_requests": 0,
+    "provider_cost_usd": "0.00",
+    "external_mcp_calls": 0,
+    "summary_generation_limit_tokens": 1024,
+    "persisted_summary_limit_tokens": 512,
+    "answer_limit_tokens": 512,
+    "shared_grant_reserve_usd_micro": 28974,
+    "hard_cap_usd_micro": 60000,
+    "runner_sha256": "f60fa228a2fe8530963c66b18bd5674ecdf8465dd96d1886d05a3d3937da5647",
+    "target_facts_visible_with_source": true
+  },
+  "admission_blockers": {
+    "provider_path_guard": {
+      "status": "FIXED_AND_TESTED",
+      "accepted_forms": ["/chat/completions", "/v1/chat/completions"],
+      "structured_origin_checks": ["https", "api.deepseek.com", "port 443", "no userinfo", "no query", "no fragment", "exact base-path route", "raw encoded path", "Host header"],
+      "redirect_status": "BLOCKED_BEFORE_FOLLOW_UP_REQUEST"
+    },
+    "unexpected_tool_calls": {
+      "status": "FIXED_AND_TESTED_FULL_ASSISTANT_PATH",
+      "injections": ["finish_reason=tool_calls", "finish_reason=stop with non-empty tool_calls"],
+      "domain_final_answer": "NONE; latest Assistant attempt FAILED",
+      "tool_observations": 0,
+      "external_mcp_calls": 0,
+      "business_write_rows": 0,
+      "request_usage_and_trace_preserved": true,
+      "later_case_started": false
+    },
+    "authorization_task_identity": {
+      "status": "ALIGNED_AND_TESTED",
+      "authorization_task_id": "R2-AR04-REMAINING-LIVE-GATE-01",
+      "review_task_id_metadata": "R2-AR04-LIVE-ADMISSION-HF-01",
+      "matching_is_exact": true,
+      "old_authorization_ids_rejected": true,
+      "valid_authorization_created": false
+    }
+  },
+  "additional_negative_cases": [
+    {"case": "invalid JSON response", "stop": "PROVIDER_RESPONSE_INVALID", "provider_requests": 0},
+    {"case": "invalid choice shape", "stop": "PROVIDER_RESPONSE_INVALID", "provider_requests": 0},
+    {"case": "finish_reason=length", "stop": "PROVIDER_OUTPUT_NOT_COMPLETE", "provider_requests": 0},
+    {"case": "3xx redirect", "stop": "PROVIDER_REDIRECT_BLOCKED", "follow_up_requests": 0, "provider_requests": 0},
+    {"case": "historical Q02-B 512-token truncation replay", "result": "REJECTED_WITHOUT_SUMMARY_PERSISTENCE", "provider_requests": 0}
+  ],
+  "preflight": {
+    "path": "LIVE_PREFLIGHT_05_FINAL.json",
+    "status": "READY_FOR_NEW_LIVE_AUTHORIZATION",
+    "runtime_config_valid": true,
+    "isolated_runtime_grant_bindable": true,
+    "historical_authorization_reuse_blocked": true,
+    "review_task_id_rejected_as_authorization_task": true,
+    "new_authorization_created": false,
+    "live_dispatch_performed": false,
+    "provider_requests": 0,
+    "provider_cost_usd": "0.00",
+    "official_price_rechecked_this_task": false
+  },
+  "freeze_gate_compatibility_recheck": {
+    "status": "FIXED_AND_RECHECKED",
+    "pre_fix_failure": "PRODUCTION_OR_HISTORICAL_EVIDENCE_DIFF_FROM_BASE",
+    "scope_exception": "Only docs/evidence/abc-live-env-unblock-01/run_abc_eval.py is allowed by the outer task gate; all other directory changes remain rejected.",
+    "targeted_tests_passed": 31,
+    "targeted_tests_total": 31,
+    "existing_gate_and_adapter_tests_passed": 19,
+    "existing_gate_and_adapter_tests_total": 19,
+    "fresh_mock_run": "mock_run_05/MOCK_RESULTS.json",
+    "fresh_preflight": "LIVE_PREFLIGHT_05_FINAL.json"
+  },
+  "tests": {
+    "new_path_tool_authorization_tests": {"passed": 31, "total": 31, "exit_code": 0},
+    "existing_live_gate_and_abc_runner_tests": {"passed": 19, "total": 19, "exit_code": 0},
+    "compression_budget_tests": {"passed": 10, "total": 10, "exit_code": 0},
+    "q02b_truncation_replay": {"passed": 1, "total": 1, "exit_code": 0},
+    "broad_ar04_filter_scan": {"status": "ABORTED_NOT_PASS", "exit_code": 1}
+  },
+  "protection": {
+    "production_files_changed": false,
+    "gold_or_historical_trace_changed": false,
+    "frozen_protected_hashes_match_base": true,
+    "production_database_writes": 0,
+    "external_mcp_calls": 0,
+    "live_authorization_file_created": false,
+    "main_merged": false
+  },
+  "actual_provider_requests": 0,
+  "actual_provider_cost_usd": "0.00",
+  "live_authorization_required_before_any_future_send": true
+}

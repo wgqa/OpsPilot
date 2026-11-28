@@ -1,0 +1,23 @@
+Final focused command:
+python -m pytest tests/test_r1_j2_closeout_fix_02.py tests/test_r1_journey_readiness_01.py::test_r1_j1_j2_formal_runtime_grant_continuity_and_event_correction tests/test_ar03_material_01.py::test_trusted_order_material_investigation_uses_current_same_event_and_keeps_draft_unsubmitted -q --tb=short --basetemp=D:\temp\pytest-r1-j2-closeout-fix-02-final-targeted
+Result: 5 passed in 16.49s; exit code 0.
+Captured output: FINAL_TARGETED_TESTS.txt
+
+Related regression command (run after production changes, before the final test-only assertions):
+python -m pytest tests/test_ar02_context_continuity_01.py tests/test_ar02_assistant.py tests/test_ar02_runtime.py tests/test_m302_context.py tests/test_product_01_runtime_grant_01.py -q --tb=short --basetemp=D:\temp\pytest-r1-j2-closeout-fix-02-related
+Result: 50 passed in 68.23s; exit code 0.
+Captured output: RELATED_REGRESSION.txt
+
+Relevant saved RED/GREEN artifacts:
+- RED_F1_RUN2.txt: formal offline journey reproduced current-anchor presentation failure.
+- RED_F2.txt: duplicate current-run metadata remained in model projection.
+- RED_F2_TOOLCALL_LINK.txt: removing explicit Tool Call to Observation mapping lost the provider tool_call_id association.
+- GREEN_FORMAL_JOURNEY_FINAL_R2.txt: formal API/Worker/MockTransport/MCP/Domain offline journey passed.
+- GREEN_BINDING.txt: legal bound query and trusted new binding path passed; chat text did not mutate the original binding.
+- F2_TOKEN_REPLAY.json: exact saved-request and three-real-MCP-result token comparison.
+
+Initial setup issue: first F1 test attempt could not create the default AppData pytest temporary directory. The test was rerun with an isolated D:\temp basetemp; no project code was changed for this environment issue.
+
+No real Provider HTTP, browser automation, or external business write was performed.
+
+Note: trailing terminal-column padding was trimmed from captured text logs; command output, errors, assertions, counts, and exit codes were retained.

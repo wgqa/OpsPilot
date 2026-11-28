@@ -1,6 +1,58 @@
 # TASKS.md — OpsPilot 相对 D1 的实施追踪
 
-> **当前规划约束（2026-10-22 更新）：** 先读 [PROJECT_NORTH_STAR.md](PROJECT_NORTH_STAR.md) 和 [AGENTS.md](AGENTS.md)。后续任务须同时写明用户旅程/智能决策与学习目标，并沿“白皮书原理 → 实现取舍 → 实验与失败 → 面试表达”留下证据。Context/Memory 等核心知识不能因当前业务狭窄而被长期排除；能力实验、业务接入、效果验证分别记录。业务切片优先补齐连续对话到实际调查和业务推进的差距，安全不变量始终有效。
+## 当前交付路线与产品主线（v1.2，2026-11-07）
+
+> **状态快照，不替代开工时核对 Git。** 本路线文档最初来自 `codex/product-roadmap-v1-2@339c2385ce0346dc97feaa63c9ca034545adbe77`；本次集成以 `codex/product-01-bridge-closeout-01@6b5bfb16c461afcf1cdafaad9ebe08dd6a004b27` 为代码基线，远端 `main@60eee87bfe3cca522011316cb4cd2c0064ad291b`。文档与代码/证据在独立分支集成，不合并 main；本快照不是主 Agent 对 R1 或当前候选的验收。
+>
+> PRODUCT-01 Slice 01 有确定性离线业务链证据；Slice 02 的真实 DeepSeek 四轮旅程为 `PARTIAL`，其中部分配置推断超出证据。Final Bridge 与 Bridge Closeout 均获主 Agent `ACCEPT_WITH_LIMITS`，其离线 S1/S2 同 Session 接线成立，但新 Bridge 真实模型与浏览器旅程尚未验证。前次完整 pytest 为 741/757、16 项失败；其中 12 项绑定历史实验身份/Claim，3 项 AR-03 Runner MockTransport 失败本轮已定位为冻结 allowlist 不包含 Product Bridge 新增 Assistant 工具 Schema，1 项要求退役 C1 合同。该完整结果不是本次集成 SHA 的新运行。详见 [Slice 02 报告](docs/evidence/vnext/product-01-slice-02-live/REPORT.md)、[Bridge Closeout 报告](docs/evidence/vnext/product-01-bridge-closeout-01/REPORT.md) 与 [本轮归因](docs/evidence/vnext/r1-final-integration-01/FAILURES.md)。不得把不同证据等级合并成整体 PASS。
+
+**研发排序：用户可见工作成果 → 模型在合法范围内自主决策 → 最小可运行实现 → 实际使用与有界验证 → 按明确风险和已观察缺陷补强工程。** 安全、授权及副作用合同始终是底线。校招交付与长期产品成长互不阻断；发布 HOLD 不自动禁止无关的隔离只读开发。
+
+### R1 — 简历可投递版本
+
+沿用原计划中 `R1-ENGINE` 与 `R1-INTERACTIVE` 的独立验收定义。当前交付重点是统一 Assistant 与现有 S1/S2 的最小业务衔接、至少一条可信业务闭环、准确的后续追问及适用的正常用户入口；保留已获得的 Provider、MCP、Context、协议分析和跨轮纠错证据。达成 R1 后冻结对应 SHA、依赖、测试、Trace、业务结果、失败与限制，更新简历并开始投递和面试准备，不等待 R2/R3。
+
+#### 主要产品工作候选：PRODUCT-01 — Assistant 连续技术支持工作
+
+在同一 Session 中推进协议版本对比、用户配置/日志等材料分析、按需可信只读核查、用户纠错或追问，并交付有来源且区分历史与当前事实的处理说明。材料充分时允许直接回答；材料不足时由 Agent 在授权范围内决定补查、澄清、继续或停止，不规定固定工具顺序。优先复用现有 Assistant、Knowledge、Skill、Memory、Context、Session、MCP 与 S3 只读工具。
+
+现有证据须按等级陈述：Slice 02 的真实模型旅程为 `PARTIAL`；Final Bridge 与 Bridge Closeout 的离线同 Session S1/S2 接线已获 `ACCEPT_WITH_LIMITS`，不等于新 Bridge 的真实模型或浏览器验收。此段记录产品工作方向，不自动授权后续代码、付费请求、浏览器或写入。
+
+`R1-ENGINE` 若有足够已验证工程证据，可独立支持准确的简历表述；若浏览器 STOP 仍有效，`R1-INTERACTIVE` 必须保持未完成/未验证，不能由 API 或离线 UI 测试代替。
+
+### R2 — 完整校招展示成品
+
+维持原 v1.1 范围和验收要求：六类工作、Context/Memory/Skill 实践、S1/S2 处置、12 个代表性案例及校招源码/面试材料。R2 是完整展示质量的停止线；R3 不取消、不缩减 R2。
+
+### R3 — 长期企业 API 工作能力扩展
+
+R1 冻结后，可与 R2 交错推进独立授权的 API 接入、联调、运行支持、变更分析和协作处置切片，优先复用现有统一 Assistant、Session、MCP、Knowledge、Memory、Skill 与可信 Domain：
+
+1. API 联调、响应契约校验与修正后复测。
+2. 日志、Trace、发布配置与授权资源发现。
+3. 故障影响范围及变更影响分析。
+4. 受控动作、真实跟进和恢复验证。
+5. 用户资料、项目记忆、跨会话工作上下文与适用 Skill。
+
+每项新工作仍须有独立用户目标、合法决策空间、可信观察、实际交付和停止条件；不因路线列出方向而自动获准开发。
+
+### 有界发布收口：AR-05-RELEASE-REGRESSION-BOUNDARY-01
+
+仅处理 AR-04C 12 项历史实验测试和 C1 `READONLY_FOLLOWUP` 旧 RED 的适用性、隔离和当前合同证明。原始 Claim、Gold、RED 与日志保留；不把有意排除算作通过。该收口影响对应候选的正式发布/合并判断，不自动阻断无关的隔离只读产品开发。
+
+**授权边界：** 本路线修订不授权新代码实施、真实 Provider、浏览器自动化、受控/外部业务写入或 main 合并；相关事项继续遵守原有单独授权和 STOP 条件。
+
+### 当前 R1 集成状态（2026-11-07）
+
+- Final Bridge 与 Bridge Closeout：`ACCEPT_WITH_LIMITS`，限于已有离线 S1/S2 同 Session 业务链与回归证据。
+- 本次 R1-ENGINE 集成候选：等待主 Agent 独立评审；实施方不得自签放行。
+- R1-INTERACTIVE：`HOLD`；浏览器 `NOT_RUN / BROWSER_STOP_ACTIVE`。
+- PRODUCT-01 新 Bridge 真实 Provider：`NOT_RUN`；本任务不含收费授权。
+- 前次全量 pytest：741/757，16 项失败；本次相关定向范围另行记录，不将历史数字算作本候选测试结果。
+
+## 历史执行跟踪（D1–D7 / M1 / R1 原记录保留）
+
+> **历史规划约束快照（2026-10-22）：** 先读 [PROJECT_NORTH_STAR.md](PROJECT_NORTH_STAR.md) 和 [AGENTS.md](AGENTS.md)。后续任务须同时写明用户旅程/智能决策与学习目标，并沿“白皮书原理 → 实现取舍 → 实验与失败 → 面试表达”留下证据。当前优先级以 North Star 最新变更记录与本轮授权为准。
 >
 > **历史追踪说明：** 下方 D1–D7 / M1 勾选和待审说明保留其原阶段语境，不表示当前开发停留在这些阶段。当前范围须结合 Git SHA、已授权任务卡和主 Agent 正式验收核对；近期证据见 [M3 收口](docs/evidence/vnext/m3-closeout-01/REPORT.md) 与 [M3 HF-02](docs/evidence/vnext/m3-hf-02/REPORT.md)。本次仅同步指导，不新增开发任务、不改变历史验收结论。
 
@@ -156,9 +208,11 @@
 - [x] 源码、原始日志、机器结果、全部补充尝试、截图及学习材料见 [M4-02 REPORT](docs/evidence/vnext/m4-02/REPORT.md)。
 - [ ] 主 Agent 独立验收。未授权进入下一阶段；不自签 M4 总体 PASS，不重发回调，不新增业务写能力。
 
-## R1 主线集成门禁与当前成品路线（2026-11-04）
+## 历史快照：R1 主线集成门禁与当时路线（截至 2026-11-04）
 
-- AR-02/AR-03：本候选集成既有代码与历史证据；本门禁未调用 Provider、未做业务写入，也不提升历史 PARTIAL/UNKNOWN/HOLD 结果。
+> 以下 main SHA、门禁状态和路线只描述 2026-11-04 的记录，不代表本次开工时远端状态；请在每轮重新核对 Git 和适用裁决。
+
+- AR-02/AR-03：当时的候选集成既有代码与历史证据；该门禁未调用 Provider、未做业务写入，也不提升历史 PARTIAL/UNKNOWN/HOLD 结果。
 - R1-ENGINE：候选 `91a067aa083c2d4446d88a09d84164ea4c3bb956` 已完成代码/离线回归审查；主线放行仍 HOLD，原因与测试证据见 [`R1 主线集成门禁报告`](docs/evidence/r1-main-integration-gate-01/REPORT.md)。
 - R1-INTERACTIVE：`HOLD / NOT_RUN / BROWSER_STOP_ACTIVE`；前端类型、构建和投影测试不能替代真实浏览器验收。
 - `main` 仍为 `ec8c3582f6d145eec9979c43607302731411ead8`，尚未合并；门禁评审分支不代表主线正式版本。

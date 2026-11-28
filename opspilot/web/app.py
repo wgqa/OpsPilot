@@ -4,6 +4,8 @@ import asyncio
 import hashlib
 import json
 import os
+import re
+import threading
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -38,13 +40,19 @@ from opspilot.web.schemas import (
     AbortTaskRequest, CreateTaskRequest, LoginRequest, MessageRequest, AssistantScopeRequest, AssistantOrderRequest,
     MemoryCommandRequest, PlanApprovalRequest, S2HandoffSubmitRequest,
     S3HandoffSubmitRequest,
-    SemanticMemoryCandidateRequest, InvestigationUpdateProposalRequest,
-    InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest, SessionMessageRequest,
-    ConditionReviewConfirmRequest,
+    SemanticMemoryCandidateRequest, PersonalMemoryCandidateRequest, PersonalMemorySettingsRequest,
+    InvestigationUpdateProposalRequest,
+    InvestigationUpdateConfirmRequest, InvestigationUpdateCancelRequest,
+    SessionMessageRequest, ConditionReviewConfirmRequest,
 )
 
 
 _M1_05_TEST_FAILPOINT: Callable[[str], None] | None = None
+_SENSITIVE_ANSWER_VALUE = re.compile(
+    r"(?i)(?:\b(?:authorization|(?:set-)?cookie|api[_ -]?key|password|passwd|"
+    r"secret(?:[_ -]?value)?|access[_ -]?token|refresh[_ -]?token)\b|(?:密码|口令|密钥))[\"']?\s*[:=]\s*\S"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+)
 
 
 def _run_m1_05_test_failpoint(name: str) -> None:
@@ -82,6 +90,8 @@ _STATUS_BY_CODE = {
     "UPDATE_PROPOSAL_NOT_FOUND": 404,
     "MEMORY_SCOPE_DENIED": 403,
     "MEMORY_SOURCE_REJECTED": 409,
+    "PERSONAL_MEMORY_SOURCE_REJECTED": 409,
+    "PERSONAL_MEMORY_CONFLICT": 409,
     "MEMORY_IDEMPOTENCY_CONFLICT": 409,
     "IDEMPOTENCY_CONFLICT": 409,
     "IDEMPOTENCY_KEY_MISMATCH": 422,
@@ -160,6 +170,8 @@ def create_app(
     assistant_model_factory=None,
     assistant_experiment_id: str | None = None,
     condition_model_factory=None,
+    assistant_runtime_enabled: bool | None = None,
+    assistant_streaming_enabled: bool = False,
 ) -> FastAPI:
     from opspilot.config import DEFAULT_CHECKPOINT_DB_PATH, database_path, load_local_environment
 
@@ -177,6 +189,17 @@ def create_app(
     resolved_experiment = assistant_experiment_id or configured_experiment
     if resolved_experiment is not None and resolved_experiment not in SUPPORTED_EXPERIMENT_IDS:
         raise ValueError("AR02_LIVE_EXPERIMENT_SCOPE_INVALID")
+    runtime_flag = os.environ.get("OPSPILOT_ASSISTANT_RUNTIME_ENABLED", "").strip()
+    if assistant_runtime_enabled is None:
+        if runtime_flag not in {"", "0", "1"}:
+            raise ValueError("ASSISTANT_RUNTIME_ENABLE_FLAG_INVALID")
+        resolved_runtime_enabled = runtime_flag == "1"
+    else:
+        if type(assistant_runtime_enabled) is not bool:
+            raise TypeError("assistant_runtime_enabled must be a bool")
+        resolved_runtime_enabled = assistant_runtime_enabled
+    if resolved_runtime_enabled and resolved_experiment is not None:
+        raise ValueError("ASSISTANT_RUNTIME_AND_EXPERIMENT_SCOPES_CONFLICT")
     resolved_db = database_path(str(db_path) if db_path is not None else None)
     checkpoint_path = Path(checkpoint_db_path or os.environ.get("OPSPILOT_CHECKPOINT_DB_PATH") or DEFAULT_CHECKPOINT_DB_PATH)
     if not checkpoint_path.is_absolute():
@@ -195,6 +218,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.shutdown_requested.clear()
         initialize(resolved_db)
         if resolved_experiment is not None:
             from opspilot.domain.assistant_experiment import initialize_experiment
@@ -224,6 +248,8 @@ def create_app(
                     worker_epoch=worker.epoch,
                     assistant_model_factory=assistant_model_factory,
                     assistant_experiment_id=resolved_experiment,
+                    assistant_runtime_enabled=resolved_runtime_enabled,
+                    assistant_streaming_enabled=assistant_streaming_enabled,
                 ),
                 name="opspilot-domain-run-worker",
             )
@@ -233,6 +259,10 @@ def create_app(
         try:
             yield
         finally:
+            # Also close streams for ASGI lifespan-only shutdown paths. The
+            # Windows launcher signals this before Uvicorn starts draining
+            # connections so long-lived streams do not hold graceful shutdown.
+            app.state.shutdown_requested.set()
             if worker_task is not None:
                 worker_task.cancel()
                 try:
@@ -249,10 +279,14 @@ def create_app(
     app.state.cookie_secure = origin.lower().startswith("https://")
     app.state.worker_configured = bool(start_worker)
     app.state.assistant_experiment_id = resolved_experiment
+    app.state.assistant_runtime_enabled = resolved_runtime_enabled
+    app.state.assistant_streaming_enabled = assistant_streaming_enabled
+    app.state.assistant_model_factory = assistant_model_factory
     app.state.worker_task = None
     app.state.worker_id = None
     app.state.worker_epoch = None
     app.state.worker_loop = None
+    app.state.shutdown_requested = threading.Event()
 
     async def current_user(request: Request) -> AuthContext:
         return authenticate_session(resolved_db, request.cookies.get(COOKIE_NAME))
@@ -262,6 +296,15 @@ def create_app(
         check_origin(request.headers.get("origin"), origin)
         verify_csrf(context, request.headers.get("x-csrf-token"))
         return context
+
+    def personal_memory_auto_learn_available() -> bool:
+        return bool(
+            app.state.worker_configured
+            and app.state.assistant_runtime_enabled
+            and app.state.assistant_experiment_id is None
+            and callable(app.state.assistant_model_factory)
+            and os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "").strip() == "1"
+        )
 
     @app.exception_handler(TaskControlError)
     async def task_control_error(_request: Request, error: TaskControlError) -> JSONResponse:
@@ -644,14 +687,22 @@ def create_app(
     @app.get("/api/runs/{run_id}/chunks")
     async def get_run_chunks(
         run_id: str,
+        response: Response,
         after_seq: int = Query(default=0, ge=0),
         limit: int = Query(default=500, ge=1, le=1000),
         context: AuthContext = Depends(current_user),
     ) -> dict[str, Any]:
         from opspilot.domain.chat import get_chat_chunks
 
+        response.headers["Cache-Control"] = "no-store"
         return {"items": get_chat_chunks(resolved_db, context.identity, run_id, after_seq=after_seq, limit=limit),
                 "after_seq": after_seq}
+
+    @app.get("/api/runs/{run_id}/activity")
+    async def get_run_activity(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+        from opspilot.domain.chat import list_run_activity
+
+        return {"items": list_run_activity(resolved_db, context.identity, run_id)}
 
     @app.get("/api/runs/{run_id}/context")
     async def get_run_context(run_id: str, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
@@ -720,8 +771,9 @@ def create_app(
             s3_order_id=body.order_id,assistant_core=True)
 
     @app.get("/api/runs/{run_id}/assistant-sources")
-    async def assistant_sources(run_id: str,context: AuthContext = Depends(current_user)) -> dict[str, Any]:
+    async def assistant_sources(run_id: str, response: Response, context: AuthContext = Depends(current_user)) -> dict[str, Any]:
         from opspilot.domain.assistant import sources_current as current_sources
+        response.headers["Cache-Control"] = "no-store"
         with connect(resolved_db) as connection:
             row=connection.execute('SELECT r.* FROM task_runs r JOIN sessions s ON s.session_id=r.session_id JOIN assistant_runs a ON a.run_id=r.run_id WHERE r.run_id=? AND r.tenant_id=? AND s.owner_id=?',(run_id,context.identity.tenant_id,context.identity.actor_id)).fetchone()
             if row is None:raise HTTPException(status_code=404,detail='ASSISTANT_RUN_NOT_FOUND')
@@ -729,7 +781,14 @@ def create_app(
                 from opspilot.domain.s3 import get_s3_binding
                 try:get_s3_binding(connection,row['task_id'])
                 except Exception as error:raise HTTPException(status_code=403,detail='S3_SCOPE_DENIED') from error
-            valid,reason=current_sources(connection,run_id)
+            # A failed read-only chat may still have completed MCP observations.
+            # Re-expose them only through this read-only source view, where the
+            # Domain revalidates the exact Run, TaskBinding, versions and TTL.
+            # Failed-run observations never become a model answer or current
+            # model context through this opt-in.
+            valid,reason=current_sources(
+                connection, run_id, allow_failed_chat_observations=True,
+            )
             items=[]
             for call in connection.execute("SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' ORDER BY created_at",(run_id,)):
                 request=json.loads(call['request_json'])
@@ -739,18 +798,55 @@ def create_app(
     @app.get("/api/sessions/{session_id}/messages")
     async def get_messages(
         session_id: str,
-        after_seq: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=500),
+        response: Response,
+        after_seq: int = Query(default=0, ge=0),
+        before_seq: int | None = Query(default=None, ge=1),
+        latest: bool = Query(default=False),
+        limit: int = Query(default=100, ge=1, le=500),
         context: AuthContext = Depends(current_user),
     ) -> dict[str, Any]:
+        from opspilot.domain.assistant import s3_answer_sources_for_display, sources_current
+        from opspilot.domain.chat import personal_memory_answer_is_current, s3_snapshot_dependencies_are_current
+        from opspilot.domain.d2 import ScopeDenied
+        from opspilot.domain.s3 import SERVICE as S3_SERVICE, get_s3_binding
+        from opspilot.model_io import redact_text
+
         require_session_owner(context.identity, session_id)
+        if before_seq is not None and (latest or after_seq > 0):
+            raise HTTPException(status_code=422, detail="Choose one message page cursor.")
+        if latest and after_seq > 0:
+            raise HTTPException(status_code=422, detail="Choose one message page cursor.")
+        response.headers["Cache-Control"] = "no-store"
         with connect(resolved_db) as connection:
-            rows = connection.execute(
-                """SELECT message_id, task_id, sequence, role, input_kind, body, created_at, command_id,
-                          application_state, applied_run_id
-                   FROM messages WHERE session_id = ? AND tenant_id = ? AND sequence > ?
-                   ORDER BY sequence LIMIT ?""",
-                (session_id, context.identity.tenant_id, after_seq, limit),
-            ).fetchall()
+            connection.execute("BEGIN")
+            select = """SELECT message_id, task_id, sequence, role, input_kind, body, created_at, command_id,
+                              application_state, applied_run_id
+                       FROM messages WHERE session_id = ? AND tenant_id = ?"""
+            params: tuple[Any, ...]
+            if before_seq is not None:
+                rows = connection.execute(
+                    select + " AND sequence < ? ORDER BY sequence DESC LIMIT ?",
+                    (session_id, context.identity.tenant_id, before_seq, limit + 1),
+                ).fetchall()
+                has_more_before = len(rows) > limit
+                has_more_after = True
+                rows = list(reversed(rows[:limit]))
+            elif latest:
+                rows = connection.execute(
+                    select + " ORDER BY sequence DESC LIMIT ?",
+                    (session_id, context.identity.tenant_id, limit + 1),
+                ).fetchall()
+                has_more_before = len(rows) > limit
+                has_more_after = False
+                rows = list(reversed(rows[:limit]))
+            else:
+                rows = connection.execute(
+                    select + " AND sequence > ? ORDER BY sequence LIMIT ?",
+                    (session_id, context.identity.tenant_id, after_seq, limit + 1),
+                ).fetchall()
+                has_more_before = after_seq > 0
+                has_more_after = len(rows) > limit
+                rows = rows[:limit]
             items = []
             for row in rows:
                 item = {key: row[key] for key in row.keys()}
@@ -771,14 +867,6 @@ def create_app(
                     ).fetchone()
                     if origin and hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() == str(origin["body_digest"]):
                         item["investigation_origin_message_id"] = str(origin["message_id"])
-                if row['role'] == 'ASSISTANT':
-                    from opspilot.domain.assistant import sources_current as assistant_sources_current
-                    assistant_answer=connection.execute('SELECT a.run_id FROM chat_run_answers a JOIN assistant_runs r ON r.run_id=a.run_id WHERE a.message_id=?',(row['message_id'],)).fetchone()
-                    if assistant_answer:
-                        valid,reason=assistant_sources_current(connection,assistant_answer['run_id'])
-                        if not valid:
-                            item['body']='这条历史答复的来源已失效，不能作为当前依据。请重新查询。'
-                            item['source_status']=reason
                 item["answer_run_id"] = None
                 item["answer_source_message_id"] = None
                 item["answer_kind"] = None
@@ -827,32 +915,64 @@ def create_app(
                         item["answer_run_id"] = str(association["run_id"])
                         item["answer_source_message_id"] = str(association["source_message_id"])
                         item["answer_kind"] = str(association["answer_kind"])
-                if str(row["role"]) == "ASSISTANT" and row["task_id"]:
+                    chat_answer = connection.execute(
+                        """SELECT a.run_id,r.session_id,r.tenant_id,r.task_id,x.run_id IS NOT NULL AS assistant_core
+                           FROM chat_run_answers a JOIN task_runs r ON r.run_id=a.run_id
+                           LEFT JOIN assistant_runs x ON x.run_id=a.run_id WHERE a.message_id=?""",
+                        (row["message_id"],),
+                    ).fetchone()
                     task = connection.execute(
                         "SELECT actor_id,service_id FROM task_bindings WHERE tenant_id=? AND task_id=?",
-                        (context.identity.tenant_id, str(row["task_id"])),
-                    ).fetchone()
-                    if task is not None and str(task["service_id"]) == "orders-async-demo":
-                        authorized = (
-                            context.identity.role == "SUPPORT"
-                            and str(task["actor_id"]) == context.identity.actor_id
+                        (context.identity.tenant_id, row["task_id"]),
+                    ).fetchone() if row["task_id"] else None
+                    s3_bound = task is not None and task["service_id"] == S3_SERVICE
+                    valid, reason = True, None
+                    if s3_bound:
+                        try:
+                            if (context.identity.role != "SUPPORT" or task["actor_id"] != context.identity.actor_id):
+                                raise ScopeDenied("S3_SCOPE_AUTHORIZATION_DENIED")
+                            get_s3_binding(connection, row["task_id"])
+                        except ScopeDenied:
+                            valid, reason = False, "S3_AUTHORIZATION_UNAVAILABLE"
+                    if valid and chat_answer and chat_answer["assistant_core"]:
+                        if s3_bound:
+                            if (chat_answer["session_id"], chat_answer["tenant_id"], chat_answer["task_id"]) != (
+                                session_id, context.identity.tenant_id, row["task_id"],
+                            ) or item["answer_run_id"] != chat_answer["run_id"]:
+                                valid, reason = False, "S3_HISTORY_SOURCE_UNVERIFIED"
+                            else:
+                                valid, reason = s3_answer_sources_for_display(connection, chat_answer["run_id"])
+                        else:
+                            valid, reason = sources_current(connection, chat_answer["run_id"])
+                    if chat_answer and (valid or not s3_bound):
+                        memory_current, memory_reason = personal_memory_answer_is_current(
+                            connection, message_id=row["message_id"], tenant_id=context.identity.tenant_id,
+                            owner_actor_id=context.identity.actor_id,
                         )
-                        if authorized:
-                            from opspilot.domain.d2 import ScopeDenied
-                            from opspilot.domain.s3 import get_s3_binding
-
-                            try:
-                                get_s3_binding(connection, str(row["task_id"]))
-                            except ScopeDenied:
-                                authorized = False
-                        if not authorized:
+                        if not memory_current:
+                            valid, reason = False, memory_reason
+                    if s3_bound and valid and reason:
+                        body = str(row["body"])
+                        if (_SENSITIVE_ANSWER_VALUE.search(body) or redact_text(body, limit=len(body)) != body
+                            or any(secret and secret in body for secret in passwords.values())):
+                            valid, reason = False, "S3_HISTORY_SENSITIVE_CONTENT"
+                        elif not s3_snapshot_dependencies_are_current(connection, row["message_id"], context.identity):
+                            valid, reason = False, "S3_HISTORY_SOURCE_UNVERIFIED"
+                    if s3_bound:
+                        item["answer_visibility"] = ("HISTORICAL_SNAPSHOT" if reason else "CURRENT") if valid else "HIDDEN"
+                    if reason:
+                        item["source_status"] = reason
+                    if not valid:
+                        if s3_bound and reason == "S3_AUTHORIZATION_UNAVAILABLE":
                             item["body"] = "[S3 受限历史回答已隐藏：当前授权不可用]"
-                            item["answer_run_id"] = None
-                            item["answer_source_message_id"] = None
-                            item["answer_kind"] = None
+                            item["answer_run_id"] = item["answer_source_message_id"] = item["answer_kind"] = None
+                        elif reason and reason.startswith("PERSONAL_MEMORY_"):
+                            item["body"] = "这条历史答复引用的个人记忆已撤销或失效，不能继续作为有效依据。"
+                        else:
+                            item["body"] = "这条历史答复的来源已失效，不能作为当前依据。请重新查询。"
                 item.pop("command_id", None)
                 items.append(item)
-        return {"items": items}
+        return {"items": items, "has_more_before": has_more_before, "has_more_after": has_more_after}
 
     @app.get("/api/tasks/{task_id}/condition-review")
     async def get_condition_review(
@@ -873,6 +993,7 @@ def create_app(
         context: AuthContext = Depends(write_user),
     ) -> dict[str, Any]:
         from opspilot.config import MODEL_API_KEY, MODEL_NAME
+        from opspilot.config import require_legacy_provider_authorization
         from opspilot.domain.condition_review import (
             MAX_OUTPUT, assert_ready_to_discover, get_review, reserve_review, settle_review,
         )
@@ -886,6 +1007,11 @@ def create_app(
             resolved_experiment is None
             and bool(model_id and os.environ.get(MODEL_API_KEY, "").strip())
         )
+        if available and condition_model_factory is None:
+            try:
+                require_legacy_provider_authorization()
+            except TaskControlError:
+                available = False
         try:
             prepared = await asyncio.to_thread(
                 reserve_review, resolved_db, context.identity, task_id, body.source_message_id,
@@ -1176,6 +1302,166 @@ def create_app(
         except MemoryIdempotencyConflict as error:
             raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
 
+    @app.get("/api/personal-memory-settings")
+    async def get_personal_memory_settings_route(
+        context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied
+        from opspilot.domain.personal_memory_consolidation import personal_memory_consolidation_status
+        from opspilot.domain.semantic_memory import get_personal_memory_settings
+
+        try:
+            settings = get_personal_memory_settings(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+            )
+            settings["auto_learn_available"] = personal_memory_auto_learn_available()
+            consolidation = personal_memory_consolidation_status(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+            )
+            settings["consolidation_status"] = consolidation["statuses"]
+            settings["consolidation_latest_job"] = consolidation["latest_job"]
+            return settings
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+
+    @app.put("/api/personal-memory-settings")
+    async def set_personal_memory_settings_route(
+        body: PersonalMemorySettingsRequest, context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied
+        from opspilot.domain.semantic_memory import set_personal_memory_recall
+
+        if body.auto_learn_enabled is True and not personal_memory_auto_learn_available():
+            raise HTTPException(status_code=409, detail="PERSONAL_MEMORY_AUTO_LEARN_UNAVAILABLE")
+        try:
+            settings = set_personal_memory_recall(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+                recall_enabled=body.recall_enabled,
+                auto_learn_enabled=body.auto_learn_enabled,
+            )
+            settings["auto_learn_available"] = personal_memory_auto_learn_available()
+            from opspilot.domain.personal_memory_consolidation import personal_memory_consolidation_status
+
+            consolidation = personal_memory_consolidation_status(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+            )
+            settings["consolidation_status"] = consolidation["statuses"]
+            settings["consolidation_latest_job"] = consolidation["latest_job"]
+            return settings
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+
+    @app.get("/api/personal-memories")
+    async def list_personal_memories_route(
+        state: str | None = Query(default=None),
+        context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import list_personal_memories
+
+        try:
+            return {"items": list_personal_memories(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id, state=state,
+            )}
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+
+    @app.get("/api/personal-memories/{memory_id}")
+    async def get_personal_memory_route(
+        memory_id: str, context: AuthContext = Depends(current_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import list_personal_memories
+
+        try:
+            items = list_personal_memories(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id, memory_id=memory_id,
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+        if not items:
+            raise TaskControlError("RESOURCE_NOT_FOUND")
+        return items[0]
+
+    @app.post("/api/personal-memories/candidates", status_code=201)
+    async def create_personal_memory_candidate_route(
+        body: PersonalMemoryCandidateRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import SemanticMemoryConflict, create_personal_candidate
+
+        try:
+            return create_personal_candidate(
+                resolved_db, context.identity.tenant_id, context.identity.actor_id,
+                memory_kind=body.memory_kind, memory_mode=body.memory_mode,
+                memory_key=body.memory_key, content=body.content,
+                source_message_id=body.source_message_id, ttl_days=body.ttl_days,
+                supersedes_memory_id=body.supersedes_memory_id, expected_version=body.expected_version,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+        except SemanticMemoryConflict as error:
+            raise TaskControlError("PERSONAL_MEMORY_CONFLICT") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.post("/api/personal-memories/{memory_id}/confirm")
+    async def confirm_personal_memory_route(
+        memory_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import SemanticMemoryConflict, confirm_personal_memory
+
+        try:
+            return confirm_personal_memory(
+                resolved_db, context.identity.tenant_id, memory_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+        except SemanticMemoryConflict as error:
+            raise TaskControlError("PERSONAL_MEMORY_CONFLICT") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
+    @app.post("/api/personal-memories/{memory_id}/revoke")
+    async def revoke_personal_memory_route(
+        memory_id: str,
+        body: MemoryCommandRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        context: AuthContext = Depends(write_user),
+    ) -> dict[str, Any]:
+        del body
+        from opspilot.domain.episodic_memory import MemoryIdempotencyConflict, MemoryScopeDenied, MemorySourceRejected
+        from opspilot.domain.semantic_memory import revoke_personal_memory
+
+        try:
+            return revoke_personal_memory(
+                resolved_db, context.identity.tenant_id, memory_id, context.identity.actor_id,
+                idempotency_key=require_idempotency_key(idempotency_key),
+            )
+        except MemoryScopeDenied as error:
+            raise TaskControlError("MEMORY_SCOPE_DENIED") from error
+        except MemorySourceRejected as error:
+            raise TaskControlError("PERSONAL_MEMORY_SOURCE_REJECTED") from error
+        except MemoryIdempotencyConflict as error:
+            raise TaskControlError("MEMORY_IDEMPOTENCY_CONFLICT") from error
+
     @app.get("/api/tasks/{task_id}/semantic-memories")
     async def get_task_semantic_memories(
         task_id: str, context: AuthContext = Depends(current_user),
@@ -1352,7 +1638,7 @@ def create_app(
         async def stream() -> AsyncIterator[str]:
             nonlocal cursor
             last_heartbeat = time.monotonic()
-            while not await request.is_disconnected():
+            while not app.state.shutdown_requested.is_set() and not await request.is_disconnected():
                 try:
                     authenticate_session(resolved_db, request.cookies.get(COOKIE_NAME))
                 except TaskControlError:

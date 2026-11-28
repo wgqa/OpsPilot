@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acknowledgeAssistantOperation, beginAssistantOperation, type OperationStore } from '../src/assistant-entry.ts';
+import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests, type OperationStore } from '../src/assistant-entry.ts';
 import { api } from '../src/api.ts';
 import { projectConversation } from '../src/conversation.ts';
 
@@ -12,6 +12,50 @@ function store(): OperationStore {
     removeItem: (key) => { values.delete(key); },
   };
 }
+
+test('controlled-investigation CTA requires a current proposal tied to the exact original user message', () => {
+  const result = {
+    success: true,
+    proposal_type: 'CONTROLLED_AUTH_INVESTIGATION',
+    authority: 'MODEL_SUGGESTION_ONLY_UNTRUSTED',
+    rationale: '需要检查可信资源范围。',
+    source_message_id: 'message-original',
+    task_created: false,
+    authorization_created: false,
+    requires_explicit_user_confirmation: true,
+  };
+  const sources = {
+    current: true,
+    items: [{ tool_name: 'propose_controlled_auth_investigation', status: 'OK', result }],
+  };
+  assert.deepEqual(controlledInvestigationProposal(sources, 'message-original'), {
+    rationale: '需要检查可信资源范围。', sourceMessageId: 'message-original',
+  });
+  assert.equal(controlledInvestigationProposal(sources, 'adjacent-message'), null);
+  assert.equal(controlledInvestigationProposal({ ...sources, current: false }, 'message-original'), null);
+  assert.equal(controlledInvestigationProposal({
+    current: true,
+    items: [{ tool_name: 'propose_controlled_auth_investigation', status: 'OK', result: { ...result, task_created: true } }],
+  }, 'message-original'), null);
+});
+
+test('restored Assistant sources use exact persisted question links and a small bounded recent set', () => {
+  const items = [
+    { role: 'USER' as const, message_id: 'u1', task_id: null, answer_run_id: null, answer_source_message_id: null, answer_kind: null },
+    { role: 'ASSISTANT' as const, message_id: 'a1', task_id: null, answer_run_id: 'run-1', answer_source_message_id: 'u1', answer_kind: 'CHAT_MODEL' as const },
+    { role: 'USER' as const, message_id: 'u2', task_id: null, answer_run_id: null, answer_source_message_id: null, answer_kind: null },
+    { role: 'ASSISTANT' as const, message_id: 'a2', task_id: null, answer_run_id: 'run-2', answer_source_message_id: 'u2', answer_kind: 'CHAT_MODEL' as const },
+    { role: 'ASSISTANT' as const, message_id: 'program', task_id: null, answer_run_id: 'run-program', answer_source_message_id: 'u2', answer_kind: 'PROGRAM_LIMIT' as const },
+    { role: 'ASSISTANT' as const, message_id: 'wrong-link', task_id: null, answer_run_id: 'run-wrong', answer_source_message_id: 'absent-user', answer_kind: 'CHAT_MODEL' as const },
+  ];
+  assert.deepEqual(recentAssistantSourceRequests(items, 1), [
+    { runId: 'run-2', sourceMessageId: 'u2', taskId: null },
+  ]);
+  assert.deepEqual(recentAssistantSourceRequests(items, 8), [
+    { runId: 'run-2', sourceMessageId: 'u2', taskId: null },
+    { runId: 'run-1', sourceMessageId: 'u1', taskId: null },
+  ]);
+});
 
 test('unknown HTTP result reuses operation after reconstruction without storing pasted text', async () => {
   const storage = store();

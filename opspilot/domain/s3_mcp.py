@@ -43,19 +43,19 @@ def build_s3_server(db_path, task_id, api_url):
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def get_callback_delivery(reason: Reason, ctx: Context) -> D2ToolFact:
-        """Read current bound callback event, order version and actual transport acknowledgement/failure."""
+        """Read the current Delivery row for the trusted bound order. It returns its actual event_id; use it for a requested Event only when that ID matches. It does not change or expand the TaskBinding."""
         validate(reason,ctx,{"reason"})
         return D2ToolFact.model_validate(get_callback_delivery_fact(db_path, task_id))
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def get_receiver_processing(reason: Reason, ctx: Context) -> D2ToolFact:
-        """Read current processing state for the bound callback event. ACK is not completed processing."""
+        """Read the current Receiver row for the trusted bound order. It returns its actual event_id; use it for a requested Event only when that ID matches. ACK is not completed processing."""
         validate(reason,ctx,{"reason"})
         return D2ToolFact.model_validate(get_receiver_processing_fact(db_path, task_id))
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True,open_world_hint=False))
     def get_callback_transport_history(reason: Reason, ctx: Context, event_id: Annotated[StrictStr,Field(min_length=1,max_length=128)] | None = None) -> D2ToolFact:
-        """Read up to 12 actual callback Transport Attempts for the bound order. Omit event_id to discover related Events; an event_id filter must belong to this order. Records are known observations, not a complete audit or current receiver processing. A different Event success never proves the target Event success. No sends or writes."""
+        """Read up to 12 recorded Transport Attempts for the trusted bound order. event_id is a read-only query selector within that order, not a TaskBinding change; the Domain verifies membership and refuses out-of-scope Events. Records are known transport observations, not a complete audit or current Receiver state. A different Event's success never proves the target Event's success. No sends or writes."""
         from opspilot.domain.s3_history import get_transport_history_fact
         raw = ctx._input_params.arguments if ctx._input_params else {}
         validate(reason,ctx,{"reason","event_id"} if "event_id" in raw else {"reason"})

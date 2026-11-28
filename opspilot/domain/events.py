@@ -16,6 +16,8 @@ _PUBLIC_PAYLOAD_KEYS = {
     "chunk_id", "chunk_seq", "manifest_id", "answer_message_id", "model_attempt_id",
     "operation_id", "receipt_id", "queue_entry_id", "draft_id", "draft_digest",
     "business_outcome", "handoff_status", "scope_authorized", "recovered",
+    "stage", "activity_status", "tool_name", "duration_ms", "memory_count",
+    "reset_before_chunk_seq",
 }
 
 

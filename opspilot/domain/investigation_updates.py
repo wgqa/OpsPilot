@@ -164,8 +164,9 @@ def classify_input(
 def input_classifier_model(model_id, *, api_key=None, base_url=None, review_output_limit=None):
     from langchain_openai import ChatOpenAI
     from urllib.parse import urlsplit
-    from opspilot.config import MODEL_API_KEY
+    from opspilot.config import MODEL_API_KEY, require_legacy_provider_authorization
 
+    require_legacy_provider_authorization()
     key = (api_key or os.environ.get(MODEL_API_KEY, "")).strip()
     if not model_id.strip() or not key:
         raise RuntimeError("MODEL_CONFIGURATION_MISSING")

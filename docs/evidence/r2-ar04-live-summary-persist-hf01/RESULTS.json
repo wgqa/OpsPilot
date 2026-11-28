@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-LIVE-SUMMARY-PERSIST-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_sha": "850dd6a61af58db77db6c46ea64360e22129da1a",
+  "candidate_branch": "codex/r2-ar04-live-summary-persist-hf01",
+  "execution_scope": "offline diagnosis and isolated tests only",
+  "provider_requests": 0,
+  "provider_cost_usd": 0,
+  "external_mcp_calls": 0,
+  "production_database_writes": 0,
+  "governance_reads": {
+    "PROJECT_NORTH_STAR.md_blob": "43dabda468506717c6956e676dfad4304c4f38e6",
+    "AGENTS.md_blob": "807b928686a4dd2cac7b15b3c354b9943c93c910",
+    "opspilot-slice-review_SKILL_blob": "d405c8d413d633824b279202cc1503dab4cf0b03"
+  },
+  "frozen_live_summary": {
+    "case": "Q02-A:SUMMARY:1",
+    "provider_response_id": "c3435ff4-fc27-4ffb-b053-bbfcabc600e0",
+    "model": "deepseek-flash",
+    "provider_usage": {
+      "input_tokens": 4106,
+      "output_tokens": 481,
+      "total_tokens": 4587
+    },
+    "estimated_summary_tokens": 501,
+    "historical_persist_attempt_status": "FAILED",
+    "historical_exception_class": "TaskControlError",
+    "historical_error_code": "UNVERIFIED_NOT_CAPTURED",
+    "historical_source_sequence_message_id_map_recoverable": false,
+    "actual_stop_records": "live_run_01/; root RESULTS.json remains preauthorization snapshot"
+  },
+  "offline_full_domain_replay": {
+    "evidence_level": "FIXTURE_WITH_ISOLATED_REAL_DOMAIN_API_AND_SQLITE; NO_PROVIDER",
+    "case": "Q02-A",
+    "history_rows": 29,
+    "compression_input_budget_tokens": 6000,
+    "summary_output_cap_tokens": 512,
+    "synthetic_source_message_id_token_estimate_range": [
+      20,
+      31
+    ],
+    "validated_document_tokens_range": [
+      1036,
+      1075
+    ],
+    "before_patch": {
+      "sample_count": 12,
+      "successful": 10,
+      "failed": 2,
+      "failed_samples": [
+        3,
+        10
+      ],
+      "error_code": "CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED",
+      "safe_detail": "CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED:unresolved_items:2",
+      "selected_tokens_before_failed_anchor": [
+        464,
+        464
+      ],
+      "trial_48_char_tokens": [
+        528,
+        529
+      ],
+      "trial_48_char_without_derived_sequence_tokens": [
+        496,
+        497
+      ],
+      "persisted_summaries": 0,
+      "answer_manifest_count": 0
+    },
+    "after_patch": {
+      "sample_count": 12,
+      "successful": 12,
+      "failed": 0,
+      "persisted_tokens_range": [
+        488,
+        512
+      ],
+      "anchor_selection_token_range": [
+        469,
+        497
+      ],
+      "persisted_summaries_per_case": 1,
+      "source_ids_resolve_in_all_samples": true,
+      "fact_status_counts": {
+        "callback_endpoint_seq3": {
+          "PRESENT": 12
+        },
+        "early_retry_value_seq3": {
+          "PARTIAL": 2,
+          "PRESENT": 10
+        },
+        "formal_request_correction": {
+          "PRESENT": 12
+        },
+        "protocol_version_change": {
+          "PRESENT": 12
+        },
+        "retry_limit_change": {
+          "PRESENT": 12
+        },
+        "deployment_version_unknown": {
+          "PRESENT": 12
+        },
+        "http_202_negation_marker": {
+          "PRESENT": 12
+        },
+        "receiver_completion_unresolved": {
+          "PRESENT": 12
+        }
+      }
+    }
+  },
+  "runner_failure_injection": {
+    "evidence_level": "MOCKTRANSPORT_WITH_INJECTED_TASKCONTROLERROR_THROUGH_ASSISTANT_RUNTIME",
+    "status": "STOPPED",
+    "domain_error_code": "CONTEXT_SUMMARY_FACT_RETENTION_BUDGET_EXCEEDED",
+    "answer_manifest_present": false,
+    "answer_requests": 0,
+    "external_provider_requests": 0,
+    "later_cases": [
+      "NOT_STARTED",
+      "NOT_STARTED"
+    ],
+    "secondary_keyerror": false
+  },
+  "code_changes": [
+    {
+      "path": "opspilot/domain/chat.py",
+      "change": "Do not count or persist sequence fields that are derivable from source_message_ids and Domain mapping; keep 512 Token cap."
+    },
+    {
+      "path": "opspilot/assistant.py",
+      "change": "Persist/return safe TaskControlError.code for compression failures, otherwise bounded exception class name."
+    },
+    {
+      "path": "docs/evidence/abc-live-env-unblock-01/run_abc_eval.py",
+      "change": "Return structured STOPPED when Answer Manifest is absent; preserve Domain failure reason."
+    },
+    {
+      "path": "tests/test_ar04_live_summary_persist_hf_01.py",
+      "change": "Full Domain replay, source/fact assertions, and Runner stop injection."
+    },
+    {
+      "path": "tests/test_ar04_summary_fact_retention_edges_hf_02.py",
+      "change": "Assert full negated constraint now fits under 512 when duplicate sequence metadata is removed."
+    }
+  ],
+  "historical_evidence_integrity": {
+    "all_selected_paths_tracked": true,
+    "all_selected_paths_clean": true,
+    "sha256": {
+      "docs/evidence/r2-ar04-live-retention-recheck-01/RESULTS.json": {
+        "sha256": "08216b1326711a3fed644c36cf5a625d196bc0ba88ddc5ea4cd93b9184dfe6fc",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-live-retention-recheck-01/live_run_01/LIVE_RESULTS.json": {
+        "sha256": "e19251494cf0bbb09b63fdad4c2f5cd794af777a914ad17a88e273b30e596c54",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-live-retention-recheck-01/live_run_01/LIVE_REQUESTS.jsonl.gz": {
+        "sha256": "3c6552bfe411a4bd362e355c7725f5185717fb621308cb0493dcd36aaa5d50f7",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-live-retention-recheck-01/live_run_01/COST_LEDGER.json": {
+        "sha256": "22e2f6a43f4daac82d9f1669c705b2532f8c400304048e784161982a46e16cf2",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-live-retention-recheck-01/LIVE_AUDIT.json": {
+        "sha256": "cc90eb247bd894f76a8048f1fef4a21f1e9a33099c538df95722c21e75e778e3",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-long-context-journey-01/QUESTIONS.json": {
+        "sha256": "ea3d6554eafa433d1617dc5a5ba9f140471f3cb95f8ae10bcd25b807a4e7afe2",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-long-context-journey-01/HISTORY_SNAPSHOT.json": {
+        "sha256": "356512f611b046a04e33506a0fb1a88c6a08af93517b2134125dd6771b282c16",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-compaction-audit-01/BENCHMARK_CASES.json": {
+        "sha256": "95f94ef8aca5f04cd21c1a4708f872fcc956e77a9ea798e1af8933369f3c2fd2",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-compaction-audit-01/case_traces/WP3_INFORMATION_RETENTION.json": {
+        "sha256": "a588740709e104bb6204014297e81cc21aaa4b2516b309b944e3bf49dbf60034",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-compaction-c06-hf01/RESULTS.json": {
+        "sha256": "c283bd91404f84b5908f528e8625bbe11e1f7c41dba13f71970ebacae88cc1e7",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-compaction-c06-hf01/RED_REPRO_TRACE.json": {
+        "sha256": "a820169936e3b4df2a2ca3120a606cdcd2df09d7dff92d0c590da3ea9b8ae13f",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-compaction-c06-hf01/RED_REPRO.txt": {
+        "sha256": "c50a84527f5f331b22cebbd24be9d71061ace1bf4f8f0503972a01999ea3e3fc",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-compaction-c06-hf01/TEST_RUN.txt": {
+        "sha256": "7a828ca94734223d8ab29c3beeabb180c409f5730379c92011e06e1052d9b27d",
+        "tracked": true,
+        "working_tree_clean": true
+      },
+      "docs/evidence/r2-ar04-base-diff-edge-gate-hf02/F01_RUN.txt": {
+        "sha256": "51226070f355aab33928c07f75fd6b53b880a9de5647b4c9377a3e995fb0f577",
+        "tracked": true,
+        "working_tree_clean": true
+      }
+    },
+    "c06_red_status": "preserved unchanged; existing expected RED evidence remains"
+  },
+  "tests": [
+    {
+      "suite": "core summary/fact/source/context",
+      "command": "python -B -s -m pytest -q -p no:cacheprovider --basetemp <unique-temp> tests/test_ar04_live_summary_persist_hf_01.py tests/test_ar04_summary_fact_retention_hf_01.py tests/test_ar04_summary_fact_retention_edges_hf_02.py tests/test_m302_context.py",
+      "result": "PASS",
+      "passed": 30,
+      "failed": 0,
+      "exit_code": 0,
+      "log": "CORE_TEST_OUTPUT.txt"
+    },
+    {
+      "suite": "context/cancel/C06/Grant regressions",
+      "command": "python -B -s -m pytest -q -p no:cacheprovider --basetemp <unique-temp> tests/test_ar04a_context_journey_01.py tests/test_ar04a_compression_budget_hf_01.py tests/test_ar04a_compression_cancel_hf_01.py tests/test_r2_ar04_compaction_c06_hf_01.py tests/test_product_01_runtime_grant_01.py::test_database_copy_cannot_reuse_runtime_grant_or_pool tests/test_product_01_runtime_grant_01.py::test_expired_grant_is_not_bound_and_zero_price_cannot_authorize_paid_calls",
+      "result": "PASS",
+      "passed": 21,
+      "failed": 0,
+      "exit_code": 0,
+      "log": "SECURITY_TEST_OUTPUT.txt"
+    },
+    {
+      "suite": "frozen evidence and JSON validity",
+      "result": "PASS",
+      "exit_code": 0,
+      "log": "LIVE_EVIDENCE_INDEX.md"
+    }
+  ],
+  "preserved_failed_test_attempt": {
+    "log": "CORE_TEST_OUTPUT_CHECKOUT_PIN_FAIL.txt",
+    "result": "29 passed / 1 failed; stale frozen source pin stopped runner test before target branch; fixed by isolating that unrelated pin in test only; no run_recheck.py change retained."
+  },
+  "known_limits": [
+    "The exact historical live TaskControlError code and original Message ID map were not captured; this report does not infer them.",
+    "In sample IDs 0 and 8, the early seq3 max_attempts=3 text is PARTIAL (max_attempts=…); the 3-to-5 change is still present under seq11 with its own source.",
+    "Natural-language model answer quality was not evaluated; no new live summary or answer was generated.",
+    "Historical F01 completed_tools mismatch remains a prior recorded issue and was not rerun or fixed.",
+    "C06 RED files and all frozen Trace/Gold/ledger files remain unchanged.",
+    "768/1024 are offline design scenarios only; cap remains 512."
+  ],
+  "frozen_contracts": {
+    "docs/evidence/r2-ar04-live-retention-recheck-01/PLAN.md_sha256": "c268a953735fc3420da33f657a0db1c0fa759aad260619121ab41291eb15729d",
+    "docs/evidence/r2-ar04-live-retention-recheck-01/REPORT.md_sha256": "a45304da0dc6eee326f6e9ae2a6a142dbabe89716a713b26ce20576d48502582",
+    "docs/evidence/r2-ar04-live-retention-recheck-01/LIVE_AUDIT.json_sha256": "cc90eb247bd894f76a8048f1fef4a21f1e9a33099c538df95722c21e75e778e3"
+  }
+}

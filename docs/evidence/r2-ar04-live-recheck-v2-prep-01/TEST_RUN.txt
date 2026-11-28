@@ -1,0 +1,19 @@
+# Test and execution record
+
+## Final accepted offline run
+
+1. `python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-prep-01/run_v2.py` — exit 0. The final pytest import also compiled both Python files after the last edits.
+2. `python docs/evidence/r2-ar04-live-recheck-v2-prep-01/run_v2.py mock --output docs/evidence/r2-ar04-live-recheck-v2-prep-01/mock_run_05` — exit 0; 3/3 cases, 6 Mock summaries, 3 Mock answers, 9 records; actual Provider requests 0; actual cost USD 0. The final output was copied to the root `MOCK_*` evidence files.
+3. `python -m pytest -q --basetemp docs/evidence/r2-ar04-live-recheck-v2-prep-01/.pytest-v2-final-2 docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py` — exit 0; **10 passed**, 56.86s. Full final stdout and exit code: [`TEST_RUN_PYTEST_FINAL.txt`](TEST_RUN_PYTEST_FINAL.txt).
+4. `python docs/evidence/r2-ar04-live-recheck-v2-prep-01/run_v2.py preflight --mock-results docs/evidence/r2-ar04-live-recheck-v2-prep-01/mock_run_05/MOCK_RESULTS.json --output docs/evidence/r2-ar04-live-recheck-v2-prep-01/PREFLIGHT.json` — exit 0; `READY_FOR_AUTHORIZATION`; Provider requests 0; cost USD 0. The key was tested for presence only; no network authentication request occurred.
+5. `assert_frozen()` — passed before each Mock send and in final protected-file checks. Current `chat.py` and `assistant.py` Git blobs match the fixed manifest; protected historical Git blobs match Base.
+
+## Failed preparation attempts retained in this log
+
+- The first V2 CLI attempt exited 1 because the evidence script directory was not on `sys.path` (`ModuleNotFoundError: opspilot`). Added the explicit checkout root import path.
+- The next CLI attempt exited 1 because the old network-block helper was in `run_recheck.py`, not `run_abc_eval.py`. V2 now owns a local outbound-network audit hook.
+- A full 9-request Mock run then completed the cases, but the initial acceptance predicate incorrectly required both the superseded first Summary and current second Summary to be `CURRENT`. The first persisted Summary is legitimately `SUPERSEDED`; the predicate now requires both versions persisted and the latest version `CURRENT`. This was a harness assertion defect, not a Domain/Assistant failure.
+- Initial pytest using the default Windows temporary directory exited 1: **2 passed, 7 fixture setup errors** because `os.scandir(%LOCALAPPDATA%\\Temp\\pytest-of-tu me manques)` returned `PermissionError [WinError 5]`. The same tests were rerun with a task-local `--basetemp`; the final 10-test run passed.
+- The first preflight attempt rejected a prior Mock result produced before the new run-id isolation pin was added. It stopped before reading `.env`; no request was sent. The final preflight used the final 3-case result and returned `READY_FOR_AUTHORIZATION`.
+
+These intermediate runs used only HTTPX MockTransport; none used a real Provider, external MCP, production database or business write. The final accepted artifacts are the root `MOCK_RESULTS.json`, `MOCK_TRACE.jsonl.gz`, `MOCK_COST_LEDGER.json` and `PREFLIGHT.json`.

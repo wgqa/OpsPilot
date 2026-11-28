@@ -11,6 +11,23 @@ DEFAULT_CHECKPOINT_DB_PATH = ROOT / ".runtime" / "opspilot-checkpoints.sqlite3"
 MODEL_API_KEY = "OPSPILOT_MODEL_API_KEY"
 MODEL_BASE_URL = "OPSPILOT_MODEL_BASE_URL"
 MODEL_NAME = "OPSPILOT_MODEL_NAME"
+LEGACY_PROVIDER_ENABLED = "OPSPILOT_LEGACY_PROVIDER_ENABLED"
+
+
+def require_legacy_provider_authorization() -> None:
+    """Require the independent opt-in for pre-Runtime-Grant Provider paths.
+
+    The ordinary ASSISTANT_V1 path uses its persisted Runtime Grant. Legacy
+    Chat and Investigator paths do not, so API-key presence and the normal
+    Provider switch alone must never authorize them.
+    """
+    if (
+        os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "").strip() != "1"
+        or os.environ.get(LEGACY_PROVIDER_ENABLED, "").strip() != "1"
+    ):
+        from opspilot.domain.task_control import TaskControlError
+
+        raise TaskControlError("LEGACY_PROVIDER_AUTHORIZATION_REQUIRED")
 
 
 def load_local_environment(path: Path | None = None) -> None:

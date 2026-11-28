@@ -1,0 +1,20 @@
+R2-AR04-LIVE-RETENTION-RECHECK-01
+Work directory D:\学习\agent新项目\.worktrees\ar04a-context-journey-01
+Runner HEAD at dispatch 0878683773e8bfef9c33f809be538b39df63fb66
+Python 3.14.0. Frozen preflight previously ran 35 focused offline tests, shown in TEST_RUN.txt.
+
+1. Actual run after fresh official price/model check and explicit new authorization
+$env:PYTHONUTF8 = '1'
+$dir = 'docs/evidence/r2-ar04-live-retention-recheck-01'
+python -B -s "$dir/run_recheck.py" live --mock-results "$dir/mock_run_04/MOCK_RESULTS.json" --authorized-task R2-AR04-LIVE-RETENTION-RECHECK-01
+Exit 1.
+{"status": "STOPPED", "stop_reason": "KeyError", "external_provider_requests": 1}
+The command recorded a fresh zero-send preflight and one SEND_STARTED / RESPONSE_RECEIVED pair for Q02-A:SUMMARY:1. HTTP 200, finish_reason=stop, 4106/481/4587 tokens. The Domain compression attempt failed with TaskControlError before persistence. All eight remaining requests are NOT_SENT_FINAL. The ledger preserves estimated USD 0.001809 and zero unknown reserve. No new campaign was run after the stop.
+
+2. Offline audit and reproduction
+python -B -s "$dir/verify_stopped_run.py" --output "$dir/LIVE_AUDIT.json"
+Exit 0.
+{"live_dispatches_verified": 1, "answer_requests": 0, "offline_uuid_replays": 3}
+The verifier reads the original stored Provider responses and runs only the local validation and compaction functions after installing a non-loopback socket guard. It verified dispatch order, settlement, resume state, raw Prompt setting parity and excerpt differences. For the actual recheck response, two deterministic Message ID maps fit and one rejected the required anchor at 515 estimated Token with a 512 Token threshold. The old Q02-A response fit all three maps under the current compactor.
+
+L3 grading, repeat live execution, and account-charge reconciliation: NOT_RUN.

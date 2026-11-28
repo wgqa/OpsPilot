@@ -30,7 +30,18 @@ spec.loader.exec_module(offline)
 frozen = offline.frozen
 
 
-def test_bridge_review_api_exists_for_bound_task(demo_db):
+def test_bridge_review_requires_provider_authorization_for_bound_task(demo_db, monkeypatch):
+    from opspilot.config import LEGACY_PROVIDER_ENABLED, MODEL_API_KEY, MODEL_NAME
+    from opspilot.domain import investigation_updates
+
+    monkeypatch.setenv(MODEL_NAME, "deepseek-flash")
+    monkeypatch.setenv(MODEL_API_KEY, "offline-fixture-key")
+    monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+    monkeypatch.setenv(LEGACY_PROVIDER_ENABLED, "0")
+    monkeypatch.delenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", raising=False)
+    constructed = []
+    monkeypatch.setattr(investigation_updates, "input_classifier_model", lambda *args, **kwargs: constructed.append(args))
+
     prepare_s3_fixture(demo_db, "DELIVERED_PENDING", order_id="bridge-order", contract_version=2)
     app = create_app(db_path=demo_db, start_worker=False, expected_origin=ORIGIN,
                      credentials={"support-a": PASSWORD})
@@ -40,14 +51,33 @@ def test_bridge_review_api_exists_for_bound_task(demo_db):
         assert login.status_code == 200
         headers = {"Origin": ORIGIN, "X-CSRF-Token": login.json()["csrf_token"]}
         session = client.post("/api/sessions", headers=headers).json()["session_id"]
-        task = client.post(
+        binding = client.post(
             f"/api/sessions/{session}/assistant/order",
             headers={**headers, "Idempotency-Key": "bind"},
             json={"order_id": "bridge-order", "initial_message": "Investigate the callback"},
-        ).json()["task_id"]
-        response = client.get(f"/api/tasks/{task}/condition-review")
+        )
+        assert binding.status_code == 202, binding.text
+        task = binding.json()["task_id"]
+        review_url = f"/api/tasks/{task}/condition-review"
+        response = client.get(review_url)
         assert response.status_code == 200, response.text
         assert response.json() == {"active": [], "review": None}
+
+        accepted = client.post(
+            f"/api/sessions/{session}/assistant/messages",
+            headers={**headers, "Idempotency-Key": "review-source"},
+            json={"task_id": task, "body": "整理当前任务条件"},
+        )
+        assert accepted.status_code == 202, accepted.text
+        source_id = accepted.json()["message_id"]
+        response = client.post(review_url, headers={**headers, "Idempotency-Key": source_id},
+                               json={"source_message_id": source_id})
+        assert response.status_code == 200, response.text
+        review = response.json()["review"]
+        assert review["status"] == "FAILED" and review["reason"] == "MODEL_CONFIGURATION_MISSING"
+        assert constructed == []
+        with connect(demo_db) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM investigation_update_attempts").fetchone()[0] == 0
 
 
 @pytest.fixture
@@ -149,7 +179,9 @@ def test_full_recovery_from_frozen_24_turns(demo_db, bridge):
     for index, entry in enumerate(schedule, 1):
         before = dispatch(f"turn-{index}", entry)
     assert not _active_wire(before)
-    assert not frozen.scan_answer(before, frozen.CONDITIONS)[frozen.CONDITIONS[0]]
+    before_coverage = frozen.scan_answer(before, frozen.CONDITIONS)
+    # R2 may retain E7 in the historical summary. Only formal confirmation
+    # can place a requirement in the active block, checked above and below.
     outgoing = [call for call in wire.calls if call["phase"] == "compression"]
     assert len(outgoing) >= 2
     url = f"/api/tasks/{task}/condition-review"
@@ -247,6 +279,7 @@ def test_full_recovery_from_frozen_24_turns(demo_db, bridge):
     assert frozen.protected_counts(demo_db) == protected
     frozen.save(output / "results.json", {
         "bound_turns": 24, "compression": len(outgoing), "before": before, "discovery": discovery_wire,
+        "before_coverage": before_coverage,
         "after": after, "candidate_review": review, "active": client.get(url).json()["active"], "protected": protected,
     })
 
@@ -303,7 +336,7 @@ def test_migrates_v18_proposal_storage(demo_db):
     initialize(demo_db)
     initialize(demo_db)
     with connect(demo_db) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 19
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 25
         assert [entry["name"] for entry in connection.execute(
             "PRAGMA table_info(investigation_update_assessments)"
         )].count("condition_review_json") == 1

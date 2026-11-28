@@ -1,0 +1,55 @@
+HTTP Request: GET http://127.0.0.1:60660/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+TTL owner snapshot retained across cursors and SSE; no stale model input or action
+HTTP Request: GET http://127.0.0.1:60741/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:60764/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Versioned business change preserved the old text and admitted a fresh same-scope observation
+HTTP Request: GET http://127.0.0.1:60795/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_AUTHORIZATION_UNAVAILABLE
+HTTP Request: GET http://127.0.0.1:60830/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_AUTHORIZATION_CHANGED
+HTTP Request: GET http://127.0.0.1:60865/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: ASSISTANT_SOURCE_RESULT_INVALID
+HTTP Request: GET http://127.0.0.1:55610/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_HISTORY_SOURCE_UNVERIFIED
+HTTP Request: GET http://127.0.0.1:55644/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_CURRENT_FACT_MISMATCH
+HTTP Request: GET http://127.0.0.1:55673/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_HISTORY_SENSITIVE_CONTENT
+.zh-backend: model input recalled=True
+zh-agent: model input recalled=True
+en-backend: model input recalled=True
+en-agent: model input recalled=True
+both-directions: model input recalled=True
+unrelated-zh: model input recalled=False
+unrelated-en: model input recalled=False
+nearby-backend: model input recalled=False
+Other owner, invalid source, zero selection budget and revoked memory remained excluded
+HTTP Request: GET http://127.0.0.1:53310/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.queued-before: QUEUED, WITHIN_SLA, source/Observation/Event/versions match
+HTTP Request: GET http://127.0.0.1:53337/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.queued-next-day: QUEUED, OVERDUE, source/Observation/Event/versions match
+HTTP Request: GET http://127.0.0.1:62467/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.processed: PROCESSED, PROCESSED, source/Observation/Event/versions match
+HTTP Request: GET http://127.0.0.1:62493/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.transport-exhausted: NOT_RECEIVED, NOT_APPLICABLE, source/Observation/Event/versions match
+.....
+=================================== PASSES ====================================
+=========================== short test summary info ===========================
+PASSED tests/test_live_02_fix_01_history.py::test_ttl_allows_owner_snapshot_but_never_new_model_input
+PASSED tests/test_live_02_fix_01_history.py::test_business_version_change_keeps_snapshot_and_fresh_query
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[revoked-S3_AUTHORIZATION_UNAVAILABLE]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[grant-version-S3_AUTHORIZATION_CHANGED]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[corrupt-result-ASSISTANT_SOURCE_RESULT_INVALID]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[source-message-changed-S3_HISTORY_SOURCE_UNVERIFIED]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[unversioned-fact-S3_CURRENT_FACT_MISMATCH]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[sensitive-S3_HISTORY_SENSITIVE_CONTENT]
+PASSED tests/test_live_02_fix_01_memory.py::test_auto_learned_project_background_uses_bilingual_topic_evidence
+PASSED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[queued-before-QUEUED-WITHIN_SLA]
+PASSED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[queued-next-day-QUEUED-OVERDUE]
+PASSED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[processed-PROCESSED-PROCESSED]
+PASSED tests/test_live_02_fix_01_sla.py::test_assistant_receives_sla_from_current_real_mcp_observation[transport-exhausted-NOT_RECEIVED-NOT_APPLICABLE]
+PASSED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:18:25.999Z-WITHIN_SLA]
+PASSED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:18:26Z-OVERDUE]
+PASSED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-12T15:13:26Z-OVERDUE]
+PASSED tests/test_live_02_fix_01_sla.py::test_receiver_sla_uses_observation_time_at_the_exact_deadline[2026-11-11T15:13:25Z-UNKNOWN]
+17 passed in 62.74s (0:01:02)

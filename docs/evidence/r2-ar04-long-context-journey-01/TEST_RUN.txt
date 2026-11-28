@@ -1,0 +1,55 @@
+R2-AR04-LONG-CONTEXT-JOURNEY-01 — Phase A evidence run
+
+Date: 2026-11-14
+Branch: codex/r2-ar04-long-context-journey-01
+Base: 04b01d5c1e542910c4841bd12a065878f06456b4
+Evidence mode: local FastAPI / Worker / Domain / SQLite checkpointer with AuditFixtureModel; no real Provider.
+
+Commands run
+============
+
+0. Harness preflight corrections (not counted as experiment runs)
+
+   - The first fixture-history recreation included seq 30, the scripted assistant reply to the latest observation, which failed the source-body digest assertion. The replay was corrected to use the 29-row pre-question state and not seed an answer to Q11. The final `HISTORY_SNAPSHOT.json` verifies seq 1–28 against the frozen trace and records the seq 29 marker normalization.
+   - An early scorer prototype searched serialized provenance as well as message bodies, so digits embedded in source IDs could create false fact matches. The scorer was restricted to allowed source text, then the full 48-run matrix was regenerated; no question was dropped from the denominator.
+
+1. Syntax validation
+
+   python -m py_compile docs/evidence/r2-ar04-long-context-journey-01/run_long_context_eval.py
+
+   Result: passed.
+
+2. Full deterministic experiment
+
+   python docs/evidence/r2-ar04-long-context-journey-01/run_long_context_eval.py --overwrite
+
+   Result: 48/48 answer runs completed. A/B/C used the same 12-question input set; D is the separately budgeted full-history reference. `provider_requests=0`, `external_business_writes=0`, and `phase_b_status=NOT_RUN`. The runner verified the static SYSTEM digest, tool-schema digest and Fixture model ID were identical across all 48 answer requests. L1 was complete for all 12 questions in each group. A/B made 24 successful compression attempts per group with zero failures; C/D made none.
+
+3. Current-summary invalidation regression
+
+   First attempt, using pytest's default temp root:
+
+   python -m pytest -q tests/test_ar04a_context_journey_01.py -k invalidated_summary_is_not_sent_to_the_model
+
+   Result: pytest could not create its temp root and stopped during fixture setup with `PermissionError: [WinError 5] Access is denied` for `C:\Users\tu me manques\AppData\Local\Temp\pytest-of-tu me manques`. The test body did not run.
+
+   Successful retry with an explicit isolated temp path:
+
+   python -m pytest -q tests/test_ar04a_context_journey_01.py -k invalidated_summary_is_not_sent_to_the_model --basetemp=docs/evidence/r2-ar04-long-context-journey-01/.pytest-basetemp-final
+
+   Result: 1 passed, 3 deselected (10.24 s). The test checks that an invalidated summary is not projected into the model request.
+
+Reproducibility and evidence checks
+===================================
+
+- `HISTORY_SNAPSHOT.json`: 29 pre-question rows recreated; seq 1–28 body digests match the frozen trace and seq 29 has only the Q11 answer marker removed. Every strategy/question clone shares the same first 29 message IDs, sequence numbers and body digests. Gold is not inserted into prompts.
+- `RESULTS.json`: 48 answer result rows, all `SUCCEEDED`; L1 `COMPLETE_FOR_ALL_QUESTIONS`; L3 `NOT_EVALUATED`; all Summary citations resolve to existing Domain rows and projected Summaries are current.
+- `MODEL_REQUESTS.jsonl.gz`: 96 local Fixture request/response records (48 answer requests and 48 compression requests); no Provider usage is represented by the Fixture's dummy usage metadata.
+- `RUN_DETAILS.jsonl.gz`: per-run Manifest, source and budget evidence. Token values use local `tiktoken:cl100k_base:0.14.0` estimates, not Provider usage.
+- `RESULTS.json` records A/B/C input limits of 12,000 tokens and D's 60,000-token limit. A/B/C window is 16,384; D window is 65,536. The budget records reserve 512 output tokens and 1,024 safety-margin tokens.
+- Historical WP3 trace/RESULTS and the C06 RED record were preserved without edits. No production file was changed. The pre-existing untracked `.pytest-tmp/` was left untouched.
+
+Interpretation limit
+====================
+
+These checks prove reproducible local prompt construction, L1 history retention, L2 source availability, and source-ID validity. Fixture outputs do not prove live semantic recall, answer correctness, or autonomous next-step quality. Those remain `NEEDS_LIVE_SEMANTIC_EVAL`; Phase B is a proposal only and was not run.

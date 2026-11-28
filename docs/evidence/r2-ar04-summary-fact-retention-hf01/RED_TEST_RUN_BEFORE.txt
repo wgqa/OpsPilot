@@ -1,0 +1,109 @@
+FF...F.                                                                  [100%]
+================================== FAILURES ===================================
+_ test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection[Q02-A-endpoint_seq3] _
+
+case_id = 'Q02-A', fact = 'endpoint_seq3'
+
+    @pytest.mark.parametrize(
+        ("case_id", "fact"),
+        [
+            ("Q02-A", "endpoint_seq3"),
+            ("Q02-B", "endpoint_seq3"),
+            ("Q03-A", "formal_request_correction_seq7"),
+            ("Q03-B", "formal_request_correction_seq7"),
+            ("Q06-A", "protocol_and_parameter_change_seq11"),
+            ("Q06-B", "protocol_and_parameter_change_seq11"),
+        ],
+    )
+    def test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection(
+        case_id: str, fact: str,
+    ) -> None:
+        """Replay actual frozen Provider summaries through the current app compactor."""
+        records = TRACE_RECONSTRUCTOR._read_jsonl_gzip(TRACE_RECONSTRUCTOR.TRACE_PATH)
+        results = json.loads(TRACE_RECONSTRUCTOR.RESULTS_PATH.read_text(encoding="utf-8"))
+        calls = TRACE_RECONSTRUCTOR._request_pair_index(records)
+        row = next(
+            item for item in results["rows"]
+            if item["input_manifest"]["case_id"] == case_id
+        )
+
+        analysis = TRACE_RECONSTRUCTOR._analyze_case(case_id, calls, row)
+        stages = analysis["stages"]
+        assert stages["first_provider_summary"]["fact_visibility"][fact] is True
+>       assert stages["application_persisted_projection_replay"]["fact_visibility"][fact] is True
+E       assert False is True
+
+tests\test_ar04_summary_fact_retention_hf_01.py:45: AssertionError
+_ test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection[Q02-B-endpoint_seq3] _
+
+case_id = 'Q02-B', fact = 'endpoint_seq3'
+
+    @pytest.mark.parametrize(
+        ("case_id", "fact"),
+        [
+            ("Q02-A", "endpoint_seq3"),
+            ("Q02-B", "endpoint_seq3"),
+            ("Q03-A", "formal_request_correction_seq7"),
+            ("Q03-B", "formal_request_correction_seq7"),
+            ("Q06-A", "protocol_and_parameter_change_seq11"),
+            ("Q06-B", "protocol_and_parameter_change_seq11"),
+        ],
+    )
+    def test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection(
+        case_id: str, fact: str,
+    ) -> None:
+        """Replay actual frozen Provider summaries through the current app compactor."""
+        records = TRACE_RECONSTRUCTOR._read_jsonl_gzip(TRACE_RECONSTRUCTOR.TRACE_PATH)
+        results = json.loads(TRACE_RECONSTRUCTOR.RESULTS_PATH.read_text(encoding="utf-8"))
+        calls = TRACE_RECONSTRUCTOR._request_pair_index(records)
+        row = next(
+            item for item in results["rows"]
+            if item["input_manifest"]["case_id"] == case_id
+        )
+
+        analysis = TRACE_RECONSTRUCTOR._analyze_case(case_id, calls, row)
+        stages = analysis["stages"]
+        assert stages["first_provider_summary"]["fact_visibility"][fact] is True
+>       assert stages["application_persisted_projection_replay"]["fact_visibility"][fact] is True
+E       assert False is True
+
+tests\test_ar04_summary_fact_retention_hf_01.py:45: AssertionError
+_ test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection[Q06-B-protocol_and_parameter_change_seq11] _
+
+case_id = 'Q06-B', fact = 'protocol_and_parameter_change_seq11'
+
+    @pytest.mark.parametrize(
+        ("case_id", "fact"),
+        [
+            ("Q02-A", "endpoint_seq3"),
+            ("Q02-B", "endpoint_seq3"),
+            ("Q03-A", "formal_request_correction_seq7"),
+            ("Q03-B", "formal_request_correction_seq7"),
+            ("Q06-A", "protocol_and_parameter_change_seq11"),
+            ("Q06-B", "protocol_and_parameter_change_seq11"),
+        ],
+    )
+    def test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection(
+        case_id: str, fact: str,
+    ) -> None:
+        """Replay actual frozen Provider summaries through the current app compactor."""
+        records = TRACE_RECONSTRUCTOR._read_jsonl_gzip(TRACE_RECONSTRUCTOR.TRACE_PATH)
+        results = json.loads(TRACE_RECONSTRUCTOR.RESULTS_PATH.read_text(encoding="utf-8"))
+        calls = TRACE_RECONSTRUCTOR._request_pair_index(records)
+        row = next(
+            item for item in results["rows"]
+            if item["input_manifest"]["case_id"] == case_id
+        )
+
+        analysis = TRACE_RECONSTRUCTOR._analyze_case(case_id, calls, row)
+        stages = analysis["stages"]
+        assert stages["first_provider_summary"]["fact_visibility"][fact] is True
+>       assert stages["application_persisted_projection_replay"]["fact_visibility"][fact] is True
+E       assert False is True
+
+tests\test_ar04_summary_fact_retention_hf_01.py:45: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04_summary_fact_retention_hf_01.py::test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection[Q02-A-endpoint_seq3]
+FAILED tests/test_ar04_summary_fact_retention_hf_01.py::test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection[Q02-B-endpoint_seq3]
+FAILED tests/test_ar04_summary_fact_retention_hf_01.py::test_frozen_live_summary_facts_survive_persistence_and_second_prompt_projection[Q06-B-protocol_and_parameter_change_seq11]
+3 failed, 4 passed in 0.28s

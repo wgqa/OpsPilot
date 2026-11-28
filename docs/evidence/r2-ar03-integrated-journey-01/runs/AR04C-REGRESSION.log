@@ -1,0 +1,37 @@
+...F..                                                                   [100%]
+================================== FAILURES ===================================
+_ test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff _
+
+tmp_path = WindowsPath('C:/Users/tu me manques/AppData/Local/Temp/r2-ar03-ar04c-regression/test_ar04c_formal_worker_mock_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001DBC4C98510>
+
+    def test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff(tmp_path: Path, monkeypatch):
+        import json
+        from opspilot.assistant import (
+            AR04C_AUTH_RECORD, AR04C_CLAIM, _ar04c_create_one_shot_claim,
+            _ar04c_claim_state_path,
+        )
+        from opspilot.domain.assistant_experiment import initialize_experiment
+
+        real_auth_record, real_claim = AR04C_AUTH_RECORD, AR04C_CLAIM
+        assert not real_auth_record.exists()
+        assert not real_claim.exists()
+        from test_ar04c_prelive_hf01 import _write_authorization
+        _write_authorization(tmp_path / "paid-auth-fixture", monkeypatch)
+>       _ar04c_create_one_shot_claim()
+
+tests\test_ar04c_real_journey_01.py:756:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _ar04c_create_one_shot_claim() -> dict[str, str]:
+        """Atomically create a claim from a valid grant; never re-open a used claim."""
+        scope = _ar04c_active_scope()
+        context = _ar04c_authorization_context(scope['id']) if scope else None
+        if context is None:
+>           raise RuntimeError("AR04C_ONE_SHOT_AUTHORIZATION_INVALID")
+E           RuntimeError: AR04C_ONE_SHOT_AUTHORIZATION_INVALID
+
+opspilot\assistant.py:323: RuntimeError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff
+1 failed, 5 passed in 6.67s

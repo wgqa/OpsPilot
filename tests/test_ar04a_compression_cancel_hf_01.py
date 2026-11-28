@@ -10,6 +10,7 @@ import threading
 import time
 
 import httpx
+import pytest
 from langchain_openai import ChatOpenAI
 
 from test_ar04a_compression_budget_hf_01 import (
@@ -232,14 +233,19 @@ def test_cancelled_compression_is_not_resent_on_recovery(demo_db, tmp_path):
     assert budget_status == "BUDGET_BREACH"
 
 
-def test_second_compression_cancel_keeps_first_settled(demo_db, tmp_path, monkeypatch):
-    """Two compression batches in one Run: the first stays settled, the second is UNKNOWN."""
+@pytest.mark.parametrize(
+    ("history_turns", "second_required"), [(13, True), (7, False)],
+    ids=["cancel-second", "no-longer-needed"],
+)
+def test_second_compression_cancel_keeps_first_settled(demo_db, tmp_path, monkeypatch, history_turns, second_required):
+    """Keep the first dispatch settled when invalidation changes the remaining work."""
     import hashlib
 
     from fastapi.testclient import TestClient
     from opspilot.domain import chat as chat_domain
     from opspilot.domain.assistant_experiment import initialize_experiment
     from opspilot.domain.database import connect
+    from test_ar02_journey_p0 import _wait_run
 
     initialize_experiment(demo_db, EXPERIMENT_ID)
     provider = TwoBatchProvider()
@@ -251,8 +257,7 @@ def test_second_compression_cancel_keeps_first_settled(demo_db, tmp_path, monkey
     def assert_then_mutate(*args, **kwargs):
         result = real_assert(*args, **kwargs)
         if result.get("current") and not mutated["done"]:
-            # Simulate a source change between compression reservation and commit:
-            # the first summary is invalidated, so a second batch is needed.
+            # Invalidate a source between compression reservation and commit.
             mutated["done"] = True
             with connect(demo_db) as connection:
                 row = connection.execute(
@@ -274,12 +279,12 @@ def test_second_compression_cancel_keeps_first_settled(demo_db, tmp_path, monkey
     try:
         headers = _login(client)
         session_id = client.post("/api/sessions", headers=headers).json()["session_id"]
-        # Seven moderate turns stay below the budget; the eighth (pasted material)
-        # triggers compression once the first user/assistant pair is old history.
-        for index in range(1, 8):
+        # Keep enough accepted user messages in the long case to require a
+        # second compression even when the polluted answer chain is excluded.
+        for index in range(1, history_turns + 1):
             item, run = _send(
                 client, headers, session_id, f"hf-two-batch-history-{index}",
-                _padded(f"第 {index} 轮追问：协议里的重试与 ACK 语义是什么？", 600),
+                _padded(f"第 {index} 轮追问：协议里的重试与 ACK 语义是什么？", 400 if second_required else 600),
             )
             assert run["status"] == "SUCCEEDED", run
         response = client.post(
@@ -288,7 +293,11 @@ def test_second_compression_cancel_keeps_first_settled(demo_db, tmp_path, monkey
             json={"body": _padded("最后一批排查材料：回调配置如下。", 5000)},
         )
         assert response.status_code == 202, response.text
-        if not provider.second_started.wait(timeout=30):
+        if not second_required:
+            run = _wait_run(client, response.json()["run_id"])
+            assert run["status"] == "SUCCEEDED", run
+            assert "[source updated]" not in json.dumps(provider.requests[-1]["messages"])
+        elif not provider.second_started.wait(timeout=30):
             with connect(demo_db) as connection:
                 attempts = connection.execute(
                     "SELECT status, error_class FROM context_compression_attempts ORDER BY created_at"
@@ -330,21 +339,24 @@ def test_second_compression_cancel_keeps_first_settled(demo_db, tmp_path, monkey
         ).fetchone()
         summary_count = connection.execute("SELECT COUNT(*) FROM context_summaries").fetchone()[0]
 
-    assert len(calls) == 2, [str(row["status"]) for row in calls]
+    assert len(calls) == len(dispatches) == (2 if second_required else 1)
     assert str(calls[0]["status"]) == "OK"
-    assert str(calls[1]["status"]) == "UNKNOWN"
-    assert len(dispatches) == 2
     assert str(dispatches[0]["status"]) == "OK"
     assert str(dispatches[0]["usage_state"]) == "KNOWN"
     assert int(dispatches[0]["settled_usd_micro"]) > 0
-    assert str(dispatches[1]["status"]) == "UNKNOWN"
-    assert int(dispatches[1]["reserved_usd_micro"]) > 0
-    assert str(budget["status"]) == "BUDGET_BREACH"
+    if second_required:
+        assert str(calls[1]["status"]) == "UNKNOWN"
+        assert str(dispatches[1]["status"]) == "UNKNOWN"
+        assert int(dispatches[1]["reserved_usd_micro"]) > 0
+        assert str(budget["status"]) == "BUDGET_BREACH"
+    else:
+        assert len(attempts) == 1
+        assert str(attempts[0]["status"]) == "INVALIDATED"
     assert summary_count == 0
     assert not any(str(row["status"]) == "RESERVED" for row in calls)
     assert not any(str(row["status"]) == "RESERVED" for row in dispatches)
     assert not any(str(row["status"]) == "RESERVED" for row in attempts)
-    assert provider.compression_seen == 2
+    assert provider.compression_seen == (2 if second_required else 1)
 
 
 def test_cancel_during_reservation_leaves_no_dangling_dispatch(demo_db, tmp_path, monkeypatch):

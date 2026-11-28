@@ -1,0 +1,57 @@
+OpsPilot ABC-LIVE-ENV-UNBLOCK-01 — test and execution log
+Base: e8ddb1cae60dc2782d0d3581856d1aaa3ea35775
+Candidate branch: codex/r2-ar04-live-semantic-abc-01
+All commands ran in the existing Worktree. No command copied or printed API credentials.
+
+1. Initial source parse of run_abc_eval.py — PASS, exit 0 (AST_PARSE_OK).
+
+2. Initial full Mock Runner:
+   python -B docs/evidence/abc-live-env-unblock-01/run_abc_eval.py --mock --output-dir docs/evidence/abc-live-env-unblock-01/mock_run_01
+   Mock execution completed nine cases (21 MockTransport calls, 0 Provider calls), then exited nonzero while promoting artifacts across volumes (WinError 17). Preserved MOCK_RESULTS.json and recovered MOCK_TRACE.partial.jsonl.gz under mock_run_01/; details in mock_run_01/RUN_FAILURE.txt.
+
+3. Initial pytest invocation with the default Windows temp root — FAIL, exit 1, 6 fixture-setup errors before any test body. pytest received WinError 5 while enumerating C:\Users\...\AppData\Local\Temp\pytest-of-... . No Provider calls occurred.
+
+4. Dedicated-basetemp offline assertions:
+   python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/abc-live-env-unblock-01/.pytest-tmp-run-02 docs/evidence/abc-live-env-unblock-01/test_abc_runner.py
+   PASS, 6 passed, exit 0.
+
+5. Mock Runner artifact packaging fix:
+   python -B docs/evidence/abc-live-env-unblock-01/run_abc_eval.py --mock --output-dir docs/evidence/abc-live-env-unblock-01/mock_run_02
+   PASS, 9 isolated cases, 12 summary calls, 9 answer calls, 21 MockTransport calls, 0 Provider requests, USD 0.00, exit 0.
+
+6. First zero-cost main-environment preflight:
+   python -B docs/evidence/abc-live-env-unblock-01/run_abc_eval.py --preflight --mock-results docs/evidence/abc-live-env-unblock-01/mock_run_01/MOCK_RESULTS.json --output-dir docs/evidence/abc-live-env-unblock-01/live_run_01
+   BLOCKED_BEFORE_PROVIDER_SEND because this Runner initially compared the configured official endpoint string to the root URL without normalizing its optional /v1 path. All six presence booleans were printed without values; Provider calls 0; cost USD 0.00; command exited nonzero. Original PREFLIGHT.json retained in live_run_01/.
+
+7. Endpoint normalization assertion suite:
+   python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/abc-live-env-unblock-01/.pytest-tmp-run-03 docs/evidence/abc-live-env-unblock-01/test_abc_runner.py
+   PASS, 7 passed, exit 0. Verified official /v1 normalization, refusal to rewrite other hosts, and no key output.
+
+8. Final Runner MockTransport suite:
+   python -B docs/evidence/abc-live-env-unblock-01/run_abc_eval.py --mock --output-dir docs/evidence/abc-live-env-unblock-01/mock_run_03
+   PASS, 9 isolated cases, 12 summary calls, 9 answer calls, 21 MockTransport calls, 0 Provider requests, USD 0.00, exit 0.
+
+9. Final zero-cost configuration and Runtime Grant preflight:
+   python -B docs/evidence/abc-live-env-unblock-01/run_abc_eval.py --preflight --mock-results docs/evidence/abc-live-env-unblock-01/mock_run_03/MOCK_RESULTS.json --output-dir docs/evidence/abc-live-env-unblock-01/live_run_02
+   PASS. Main .env found and loaded; three missing non-sensitive values supplemented; Grant bound; Assistant model constructed with MockTransport; transport invocations 0; Provider requests 0; cost USD 0.00; exit 0. Evidence: live_run_02/PREFLIGHT.json.
+
+10. Bounded live run, authorized by the task card after the preflight passed:
+    python -B docs/evidence/abc-live-env-unblock-01/run_abc_eval.py --live --output-dir docs/evidence/abc-live-env-unblock-01/live_run_02
+    PASS / COMPLETED, 21 Provider requests (12 summaries + 9 answers), 9/9 cases, USD 0.032708, no stop reason, exit 0. No retries, UNKNOWN requests, tool calls, or out-of-scope calls. Evidence: live_run_02/LIVE_RESULTS.json, COST_LEDGER.json, LIVE_REQUESTS.jsonl.gz.
+
+11. Final offline test suite, including send-failure stop / retry refusal:
+    python -B -m pytest -q -p no:cacheprovider --basetemp docs/evidence/abc-live-env-unblock-01/.pytest-tmp-run-04 docs/evidence/abc-live-env-unblock-01/test_abc_runner.py
+    PASS, 8 passed, exit 0.
+
+12. Deterministic evidence verifier:
+    python -B docs/evidence/abc-live-env-unblock-01/verify_live_evidence.py
+    PASS, all checks true; 21 request/response pairs, 21 unique Provider IDs, 0 UNKNOWN, API Key absent from evidence files. Exit 0. Final machine report: VERIFY_RESULTS.json.
+
+13. Preliminary score extraction:
+    python -B docs/evidence/abc-live-env-unblock-01/score_live_results_preliminary.py
+    PASS, 9 answers classified as 3 CORRECT_SUPPORTED, 1 CORRECT_UNSUPPORTED, 5 SAFE_ABSTENTION, 0 INCORRECT_OR_UNSAFE. Review authority remains IMPLEMENTER_PRELIMINARY_REVIEW; no main-agent sign-off created.
+
+Notes:
+- VERIFY_RESULTS_INITIAL.json preserves the first successful, narrower audit. The final VERIFY_RESULTS.json adds separate Search/Fetch checks, bounded per-case Grant checks, input-token estimates and all 12 actual summary-version checks.
+- The first import-failed and intermediate verifier runs were local audit-script setup errors only; no Provider calls occurred. The final verifier command above is the authoritative result.
+- Earlier blocked/preflight and failed packaging records are preserved. Historical pilot/Setup-HF01 files and ledgers were not overwritten.

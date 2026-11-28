@@ -1,0 +1,23 @@
+R1-J2-LIVE-RECHECK-02 — final SHA targeted test evidence
+
+Execution source SHA: 7f8df218415fbbcf4df33001fc593bd772ab880e
+Branch: codex/r1-j2-live-recheck-02
+
+1) Prior completed run on the same execution SHA
+Command:
+  python -m pytest -q --tb=short --basetemp D:/pytest-r1-j2-live-recheck-02-execsha tests/test_r1_live_campaign_budget.py
+Observed result: 42 passed, exit code 0.
+The pass count and exit code were captured in the active task execution output. A separate raw stdout file was not saved at that time.
+
+2) Attempt to recapture raw output on 2026-11-09
+The same command was started with PowerShell Tee-Object writing to this file. The Python process remained alive with no observable test progress and no pytest output for more than two minutes. It was interrupted by the implementation agent. The tool reported PowerShell exit code 1; the pipe produced no flushed pytest stdout, so this attempt is INCOMPLETE and is not counted as a pass.
+No Provider request, browser automation, or external business write occurred during either test run.
+
+3) Preserved preparation regressions (unchanged files)
+  TEST_LOG_TARGETED.txt: 28 passed, exit 0.
+  TEST_LOG_MCP.txt: 2 passed, exit 0.
+  TEST_LOG_REGRESSION.txt: 59 passed, 1 failed, exit 1.
+    Failure: test_ar04c_f01_context_currentness.py::test_zero_tool_followup_can_explain_valid_historical_snapshot
+    Error: KeyError: completed_tools.
+
+This file intentionally distinguishes the completed 42/42 result from the incomplete recapture; no interrupted run is represented as passing.

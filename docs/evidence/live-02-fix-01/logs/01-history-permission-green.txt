@@ -1,0 +1,53 @@
+HTTP Request: GET http://127.0.0.1:53688/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+TTL owner snapshot retained across cursors and SSE; no stale model input or action
+HTTP Request: GET http://127.0.0.1:63812/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+HTTP Request: GET http://127.0.0.1:63825/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Versioned business change preserved the old text and admitted a fresh same-scope observation
+HTTP Request: GET http://127.0.0.1:63840/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_AUTHORIZATION_UNAVAILABLE
+HTTP Request: GET http://127.0.0.1:63863/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_AUTHORIZATION_CHANGED
+HTTP Request: GET http://127.0.0.1:63877/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: ASSISTANT_SOURCE_RESULT_INVALID
+HTTP Request: GET http://127.0.0.1:63891/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_HISTORY_SOURCE_UNVERIFIED
+HTTP Request: GET http://127.0.0.1:63905/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_CURRENT_FACT_MISMATCH
+HTTP Request: GET http://127.0.0.1:63929/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+.Stale answer withheld: S3_HISTORY_SENSITIVE_CONTENT
+.........................
+=================================== PASSES ====================================
+=========================== short test summary info ===========================
+PASSED tests/test_live_02_fix_01_history.py::test_ttl_allows_owner_snapshot_but_never_new_model_input
+PASSED tests/test_live_02_fix_01_history.py::test_business_version_change_keeps_snapshot_and_fresh_query
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[revoked-S3_AUTHORIZATION_UNAVAILABLE]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[grant-version-S3_AUTHORIZATION_CHANGED]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[corrupt-result-ASSISTANT_SOURCE_RESULT_INVALID]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[source-message-changed-S3_HISTORY_SOURCE_UNVERIFIED]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[unversioned-fact-S3_CURRENT_FACT_MISMATCH]
+PASSED tests/test_live_02_fix_01_history.py::test_stale_snapshot_fails_closed[sensitive-S3_HISTORY_SENSITIVE_CONTENT]
+PASSED tests/test_m4_03_hf_02.py::test_revoked_support_event_history_hides_only_s3_diagnosis_and_handoff
+PASSED tests/test_m4_03_hf_02.py::test_revoked_support_sse_uses_same_s3_event_filter
+PASSED tests/test_m4_03_hf_02.py::test_scope_revocation_audits_task_run_inspector_context_chunks_and_messages
+PASSED tests/test_m4_03_hf_02.py::test_revoked_scope_blocks_s3_chat_context_chunks_and_redacts_bound_answer
+PASSED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[route_scope_policies-scope_policy_version-tenant_id=? AND service_id=? AND route=?-params0]
+PASSED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[principal_scope_grants-grant_version-tenant_id=? AND principal_id=?-params1]
+PASSED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[principals-principal_version-tenant_id=? AND principal_id=?-params2]
+PASSED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[auth_policies-policy_version-tenant_id=? AND service_id=?-params3]
+PASSED tests/test_m4_03_hf_02.py::test_fractional_authorization_versions_fail_closed_in_domain[integrations-config_version-tenant_id=? AND integration_id=?-params4]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[True]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[False]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[1.0]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[1.5]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[1]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[bad]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[None]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[0]
+PASSED tests/test_m4_03_hf_02.py::test_s3_positive_version_parser_is_strict[-1]
+PASSED tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[domain]
+PASSED tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[web]
+PASSED tests/test_m4_03_hf_02.py::test_fractional_scope_policy_version_fails_closed_across_read_surfaces[mcp]
+PASSED tests/test_m4_03_hf_02.py::test_sla_gate_exact_deadline_is_wait_before_contact_at_and_after
+PASSED tests/test_m4_03_hf_02.py::test_sla_expiry_at_exact_deadline_keeps_evidence_but_invalidates_immutable_wait
+PASSED tests/test_m4_03_hf_02.py::test_sla_recovery_uses_fresh_real_http_mcp_evidence_before_one_handoff
+32 passed in 58.50s

@@ -1,0 +1,529 @@
+FFOS BEFORE 86  HTTP Request: GET http://127.0.0.1:61977/api/async-orders/async-order?order_id=ar02-order "HTTP/1.0 200 OK"
+
+OS AFTER 0 {'status': 'SUCCEEDED', 'run_id': 'run-0c6ba1aa-e34c-4b87-8768-6f3153a3c112', 'message_id': 'message-bb387d39-ee88-48cc-9e15-17af9642e682', 'attempt_id': 'chat-attempt-5803f1e8-e0d2-44ab-b70b-e13ba0cef2b1', 'manifest_id': 'chat-manifest-c46b29cb-aef5-4de7-9e8f-63dd430978ba', 'body_digest': '4e21838553659b2f781407bf11fa0dc16254d5d7170f69e8d14458adce02ae2b'}
+ 
+.
+================================== FAILURES ===================================
+_ test_current_readonly_followup_can_get_send_permit_while_correction_is_pending _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ops-assistant-core-cleanup-01/docs/evidence/assistant-core-cleanup-01/runs/pytest-tmp-send-01/test_current_readonly_followup0/domain.sqlite3')
+identity = TrustedIdentity(actor_id='support-a', tenant_id='tenant-a', role='SUPPORT')
+session_id = 'session-695d0c5f-43b2-4df7-97ab-b15e8a9e4c78'
+service_id = 'orders-async-demo', integration_id = 'async-integration-a'
+ticket_id = 'INC-A-001', initial_message = '�˲鵱ǰ����'
+idempotency_key = 'pending-send', deadline_ms = 300000
+s3_order_id = 'ar02-order', assistant_core = True, source_message_id = None
+
+    def create_task_with_initial_run(
+        path: str | Path,
+        identity: TrustedIdentity,
+        *,
+        session_id: str,
+        service_id: str,
+        integration_id: str,
+        ticket_id: str,
+        initial_message: str,
+        idempotency_key: str,
+        deadline_ms: int = 300_000,
+        s3_order_id: str | None = None,
+        assistant_core: bool = False,
+        source_message_id: str | None = None,
+    ) -> dict[str, object]:
+        """Atomically create a trusted S1 binding and its first Message/Command/Run."""
+        if not initial_message.strip():
+            raise ValueError("Initial message must be non-empty text.")
+        if not idempotency_key.strip() or len(idempotency_key) > 200:
+            raise ValueError("A non-empty idempotency key of at most 200 characters is required.")
+        if deadline_ms < 1000 or deadline_ms > 86_400_000:
+            raise ValueError("Investigation deadline must be between 1 second and 24 hours.")
+        initialize(path)
+        command_kind = "CREATE_TASK"
+        request = {
+            "command_kind": command_kind,
+            "target_ref": session_id,
+            "session_id": session_id,
+            "service_id": service_id,
+            "integration_id": integration_id,
+            "s3_order_id": s3_order_id if service_id == "orders-async-demo" else None,
+            "ticket_id": ticket_id,
+            "initial_message": initial_message,
+        }
+        if assistant_core:
+            if service_id != "orders-async-demo":
+                raise TaskControlError("ASSISTANT_BINDING_KIND_INVALID")
+            request["execution_core"] = "ASSISTANT_V1"
+        if source_message_id is not None:
+            if service_id == "orders-async-demo" or assistant_core:
+                raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+            request["origin_message_id"] = source_message_id
+        request_digest = _digest(request)
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _verify_identity(connection, identity)
+            if identity.role != "SUPPORT":
+                raise TaskControlError("TASK_OWNER_REQUIRED")
+            duplicate = _find_idempotent_command(
+                connection, identity, idempotency_key, command_kind, session_id, request_digest
+            )
+            if duplicate is not None:
+                return {**duplicate, "replayed": True}
+            session = connection.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ? AND tenant_id = ? AND owner_id = ?",
+                (session_id, identity.tenant_id, identity.actor_id),
+            ).fetchone()
+            if session is None:
+                raise TaskControlError("SESSION_SCOPE_DENIED")
+            origin = None
+            if source_message_id is not None:
+                origin = connection.execute(
+                    """SELECT message_id, body, body_digest FROM messages
+                       WHERE message_id = ? AND tenant_id = ? AND session_id = ? AND role = 'USER'""",
+                    (source_message_id, identity.tenant_id, session_id),
+                ).fetchone()
+                if origin is None or hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() != str(origin["body_digest"]):
+                    raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+            try:
+                from opspilot.domain.d2 import ScopeDenied, _create_task_binding_in_transaction
+    
+                binding = _create_task_binding_in_transaction(
+                    connection, identity.actor_id, service_id, integration_id, ticket_id,
+                    session_id=session_id,
+                )
+            except ScopeDenied as error:
+                raise TaskControlError("RESOURCE_NOT_FOUND") from error
+            task_id = str(binding["task_id"])
+            if service_id == "orders-async-demo":
+                try:
+                    from opspilot.domain.s3 import ORDER, bind_s3_order_in_transaction
+>                   bind_s3_order_in_transaction(
+                        connection, task_id=task_id, tenant_id=identity.tenant_id,
+                        service_id=service_id, integration_id=integration_id,
+                        order_id=s3_order_id or ORDER, actor_id=identity.actor_id,
+                        confirmed_at=_utc_now(),
+                    )
+
+opspilot\domain\task_control.py:1067: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x0000019765064F40>
+task_id = 'task-1c21beb6-05d0-43a9-8037-fa58f2b3e36e', tenant_id = 'tenant-a'
+service_id = 'orders-async-demo', integration_id = 'async-integration-a'
+order_id = 'ar02-order', actor_id = 'support-a'
+confirmed_at = '2026-11-10T01:41:44.162+00:00'
+
+    def bind_s3_order_in_transaction(
+        connection: sqlite3.Connection, *, task_id: str, tenant_id: str, service_id: str,
+        integration_id: str, order_id: str, actor_id: str, confirmed_at: str,
+    ) -> dict[str, object]:
+        """Persist the owner's confirmed directory selection with the TaskBinding transaction."""
+        if service_id != SERVICE or not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", order_id):
+            raise ScopeDenied("S3_ORDER_NOT_REGISTERED")
+        row = connection.execute(
+            """SELECT b.task_id,b.tenant_id,b.integration_id,b.principal_id,o.contract_version,
+                      i.credential_ref,s.route
+               FROM task_bindings b JOIN s3_orders o ON o.tenant_id=b.tenant_id AND o.service_id=b.service_id
+                 AND o.integration_id=b.integration_id AND o.order_id=?
+               JOIN integrations i ON i.tenant_id=b.tenant_id AND i.integration_id=b.integration_id
+               JOIN services s ON s.tenant_id=b.tenant_id AND s.service_id=b.service_id
+                 AND s.integration_id=b.integration_id AND s.route=?
+               JOIN trusted_operators actor ON actor.tenant_id=b.tenant_id AND actor.actor_id=? AND actor.role='SUPPORT'
+               WHERE b.task_id=? AND b.tenant_id=? AND b.service_id=? AND b.integration_id=?""",
+            (order_id, ROUTE, actor_id, task_id, tenant_id, service_id, integration_id),
+        ).fetchone()
+        if row is None:
+>           raise ScopeDenied("S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED")
+E           opspilot.domain.d2.ScopeDenied: S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED
+
+opspilot\domain\s3.py:271: ScopeDenied
+
+The above exception was the direct cause of the following exception:
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ops-assistant-core-cleanup-01/docs/evidence/assistant-core-cleanup-01/runs/pytest-tmp-send-01/test_current_readonly_followup0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019764FEAD70>
+
+    def test_current_readonly_followup_can_get_send_permit_while_correction_is_pending(
+        demo_db, monkeypatch,
+    ):
+        from test_ar02_runtime import setup_run
+        from opspilot.domain.assistant_runtime_grant import (
+            bind_run, claim_send, mark_unknown, runtime_config_from_env, validate_http_request,
+        )
+        from opspilot.domain.task_control import admit_task_message, claim_task_run, trusted_identity
+    
+        _configure(monkeypatch)
+        _provision(demo_db, total=30_000)
+        worker = _worker(demo_db)
+        try:
+>           initial = setup_run(demo_db, "�˲鵱ǰ����", "pending-send", bind=True)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_product_01_runtime_grant_01.py:464: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar02_runtime.py:63: in setup_run
+    created=create_task_with_initial_run(db,actor,session_id=session,service_id='orders-async-demo',integration_id='async-integration-a',s3_order_id='ar02-order',ticket_id='INC-A-001',initial_message=question,idempotency_key=key,assistant_core=True)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ops-assistant-core-cleanup-01/docs/evidence/assistant-core-cleanup-01/runs/pytest-tmp-send-01/test_current_readonly_followup0/domain.sqlite3')
+identity = TrustedIdentity(actor_id='support-a', tenant_id='tenant-a', role='SUPPORT')
+session_id = 'session-695d0c5f-43b2-4df7-97ab-b15e8a9e4c78'
+service_id = 'orders-async-demo', integration_id = 'async-integration-a'
+ticket_id = 'INC-A-001', initial_message = '�˲鵱ǰ����'
+idempotency_key = 'pending-send', deadline_ms = 300000
+s3_order_id = 'ar02-order', assistant_core = True, source_message_id = None
+
+    def create_task_with_initial_run(
+        path: str | Path,
+        identity: TrustedIdentity,
+        *,
+        session_id: str,
+        service_id: str,
+        integration_id: str,
+        ticket_id: str,
+        initial_message: str,
+        idempotency_key: str,
+        deadline_ms: int = 300_000,
+        s3_order_id: str | None = None,
+        assistant_core: bool = False,
+        source_message_id: str | None = None,
+    ) -> dict[str, object]:
+        """Atomically create a trusted S1 binding and its first Message/Command/Run."""
+        if not initial_message.strip():
+            raise ValueError("Initial message must be non-empty text.")
+        if not idempotency_key.strip() or len(idempotency_key) > 200:
+            raise ValueError("A non-empty idempotency key of at most 200 characters is required.")
+        if deadline_ms < 1000 or deadline_ms > 86_400_000:
+            raise ValueError("Investigation deadline must be between 1 second and 24 hours.")
+        initialize(path)
+        command_kind = "CREATE_TASK"
+        request = {
+            "command_kind": command_kind,
+            "target_ref": session_id,
+            "session_id": session_id,
+            "service_id": service_id,
+            "integration_id": integration_id,
+            "s3_order_id": s3_order_id if service_id == "orders-async-demo" else None,
+            "ticket_id": ticket_id,
+            "initial_message": initial_message,
+        }
+        if assistant_core:
+            if service_id != "orders-async-demo":
+                raise TaskControlError("ASSISTANT_BINDING_KIND_INVALID")
+            request["execution_core"] = "ASSISTANT_V1"
+        if source_message_id is not None:
+            if service_id == "orders-async-demo" or assistant_core:
+                raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+            request["origin_message_id"] = source_message_id
+        request_digest = _digest(request)
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _verify_identity(connection, identity)
+            if identity.role != "SUPPORT":
+                raise TaskControlError("TASK_OWNER_REQUIRED")
+            duplicate = _find_idempotent_command(
+                connection, identity, idempotency_key, command_kind, session_id, request_digest
+            )
+            if duplicate is not None:
+                return {**duplicate, "replayed": True}
+            session = connection.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ? AND tenant_id = ? AND owner_id = ?",
+                (session_id, identity.tenant_id, identity.actor_id),
+            ).fetchone()
+            if session is None:
+                raise TaskControlError("SESSION_SCOPE_DENIED")
+            origin = None
+            if source_message_id is not None:
+                origin = connection.execute(
+                    """SELECT message_id, body, body_digest FROM messages
+                       WHERE message_id = ? AND tenant_id = ? AND session_id = ? AND role = 'USER'""",
+                    (source_message_id, identity.tenant_id, session_id),
+                ).fetchone()
+                if origin is None or hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() != str(origin["body_digest"]):
+                    raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+            try:
+                from opspilot.domain.d2 import ScopeDenied, _create_task_binding_in_transaction
+    
+                binding = _create_task_binding_in_transaction(
+                    connection, identity.actor_id, service_id, integration_id, ticket_id,
+                    session_id=session_id,
+                )
+            except ScopeDenied as error:
+                raise TaskControlError("RESOURCE_NOT_FOUND") from error
+            task_id = str(binding["task_id"])
+            if service_id == "orders-async-demo":
+                try:
+                    from opspilot.domain.s3 import ORDER, bind_s3_order_in_transaction
+                    bind_s3_order_in_transaction(
+                        connection, task_id=task_id, tenant_id=identity.tenant_id,
+                        service_id=service_id, integration_id=integration_id,
+                        order_id=s3_order_id or ORDER, actor_id=identity.actor_id,
+                        confirmed_at=_utc_now(),
+                    )
+                except ScopeDenied as error:
+>                   raise TaskControlError("S3_ORDER_NOT_REGISTERED") from error
+E                   opspilot.domain.task_control.TaskControlError: S3_ORDER_NOT_REGISTERED
+
+opspilot\domain\task_control.py:1074: TaskControlError
+____________ test_aborted_task_cannot_get_new_provider_send_permit ____________
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ops-assistant-core-cleanup-01/docs/evidence/assistant-core-cleanup-01/runs/pytest-tmp-send-01/test_aborted_task_cannot_get_n0/domain.sqlite3')
+identity = TrustedIdentity(actor_id='support-a', tenant_id='tenant-a', role='SUPPORT')
+session_id = 'session-be836f48-293f-49c7-85a9-edde3428675d'
+service_id = 'orders-async-demo', integration_id = 'async-integration-a'
+ticket_id = 'INC-A-001', initial_message = '�˲鵱ǰ����'
+idempotency_key = 'abort-send', deadline_ms = 300000, s3_order_id = 'ar02-order'
+assistant_core = True, source_message_id = None
+
+    def create_task_with_initial_run(
+        path: str | Path,
+        identity: TrustedIdentity,
+        *,
+        session_id: str,
+        service_id: str,
+        integration_id: str,
+        ticket_id: str,
+        initial_message: str,
+        idempotency_key: str,
+        deadline_ms: int = 300_000,
+        s3_order_id: str | None = None,
+        assistant_core: bool = False,
+        source_message_id: str | None = None,
+    ) -> dict[str, object]:
+        """Atomically create a trusted S1 binding and its first Message/Command/Run."""
+        if not initial_message.strip():
+            raise ValueError("Initial message must be non-empty text.")
+        if not idempotency_key.strip() or len(idempotency_key) > 200:
+            raise ValueError("A non-empty idempotency key of at most 200 characters is required.")
+        if deadline_ms < 1000 or deadline_ms > 86_400_000:
+            raise ValueError("Investigation deadline must be between 1 second and 24 hours.")
+        initialize(path)
+        command_kind = "CREATE_TASK"
+        request = {
+            "command_kind": command_kind,
+            "target_ref": session_id,
+            "session_id": session_id,
+            "service_id": service_id,
+            "integration_id": integration_id,
+            "s3_order_id": s3_order_id if service_id == "orders-async-demo" else None,
+            "ticket_id": ticket_id,
+            "initial_message": initial_message,
+        }
+        if assistant_core:
+            if service_id != "orders-async-demo":
+                raise TaskControlError("ASSISTANT_BINDING_KIND_INVALID")
+            request["execution_core"] = "ASSISTANT_V1"
+        if source_message_id is not None:
+            if service_id == "orders-async-demo" or assistant_core:
+                raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+            request["origin_message_id"] = source_message_id
+        request_digest = _digest(request)
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _verify_identity(connection, identity)
+            if identity.role != "SUPPORT":
+                raise TaskControlError("TASK_OWNER_REQUIRED")
+            duplicate = _find_idempotent_command(
+                connection, identity, idempotency_key, command_kind, session_id, request_digest
+            )
+            if duplicate is not None:
+                return {**duplicate, "replayed": True}
+            session = connection.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ? AND tenant_id = ? AND owner_id = ?",
+                (session_id, identity.tenant_id, identity.actor_id),
+            ).fetchone()
+            if session is None:
+                raise TaskControlError("SESSION_SCOPE_DENIED")
+            origin = None
+            if source_message_id is not None:
+                origin = connection.execute(
+                    """SELECT message_id, body, body_digest FROM messages
+                       WHERE message_id = ? AND tenant_id = ? AND session_id = ? AND role = 'USER'""",
+                    (source_message_id, identity.tenant_id, session_id),
+                ).fetchone()
+                if origin is None or hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() != str(origin["body_digest"]):
+                    raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+            try:
+                from opspilot.domain.d2 import ScopeDenied, _create_task_binding_in_transaction
+    
+                binding = _create_task_binding_in_transaction(
+                    connection, identity.actor_id, service_id, integration_id, ticket_id,
+                    session_id=session_id,
+                )
+            except ScopeDenied as error:
+                raise TaskControlError("RESOURCE_NOT_FOUND") from error
+            task_id = str(binding["task_id"])
+            if service_id == "orders-async-demo":
+                try:
+                    from opspilot.domain.s3 import ORDER, bind_s3_order_in_transaction
+>                   bind_s3_order_in_transaction(
+                        connection, task_id=task_id, tenant_id=identity.tenant_id,
+                        service_id=service_id, integration_id=integration_id,
+                        order_id=s3_order_id or ORDER, actor_id=identity.actor_id,
+                        confirmed_at=_utc_now(),
+                    )
+
+opspilot\domain\task_control.py:1067: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x000001976517D990>
+task_id = 'task-eececd55-c605-4018-bd18-f80356595d25', tenant_id = 'tenant-a'
+service_id = 'orders-async-demo', integration_id = 'async-integration-a'
+order_id = 'ar02-order', actor_id = 'support-a'
+confirmed_at = '2026-11-10T01:41:44.517+00:00'
+
+    def bind_s3_order_in_transaction(
+        connection: sqlite3.Connection, *, task_id: str, tenant_id: str, service_id: str,
+        integration_id: str, order_id: str, actor_id: str, confirmed_at: str,
+    ) -> dict[str, object]:
+        """Persist the owner's confirmed directory selection with the TaskBinding transaction."""
+        if service_id != SERVICE or not isinstance(order_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", order_id):
+            raise ScopeDenied("S3_ORDER_NOT_REGISTERED")
+        row = connection.execute(
+            """SELECT b.task_id,b.tenant_id,b.integration_id,b.principal_id,o.contract_version,
+                      i.credential_ref,s.route
+               FROM task_bindings b JOIN s3_orders o ON o.tenant_id=b.tenant_id AND o.service_id=b.service_id
+                 AND o.integration_id=b.integration_id AND o.order_id=?
+               JOIN integrations i ON i.tenant_id=b.tenant_id AND i.integration_id=b.integration_id
+               JOIN services s ON s.tenant_id=b.tenant_id AND s.service_id=b.service_id
+                 AND s.integration_id=b.integration_id AND s.route=?
+               JOIN trusted_operators actor ON actor.tenant_id=b.tenant_id AND actor.actor_id=? AND actor.role='SUPPORT'
+               WHERE b.task_id=? AND b.tenant_id=? AND b.service_id=? AND b.integration_id=?""",
+            (order_id, ROUTE, actor_id, task_id, tenant_id, service_id, integration_id),
+        ).fetchone()
+        if row is None:
+>           raise ScopeDenied("S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED")
+E           opspilot.domain.d2.ScopeDenied: S3_ORDER_NOT_REGISTERED_OR_AUTHORIZED
+
+opspilot\domain\s3.py:271: ScopeDenied
+
+The above exception was the direct cause of the following exception:
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ops-assistant-core-cleanup-01/docs/evidence/assistant-core-cleanup-01/runs/pytest-tmp-send-01/test_aborted_task_cannot_get_n0/domain.sqlite3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000197650E0B00>
+
+    def test_aborted_task_cannot_get_new_provider_send_permit(demo_db, monkeypatch):
+        from test_ar02_runtime import setup_run
+        from opspilot.domain.assistant_runtime_grant import (
+            RuntimeGrantError, bind_run, claim_send, close_unfinished_dispatch,
+            runtime_config_from_env, validate_http_request,
+        )
+        from opspilot.domain.task_control import abort_task, claim_task_run, trusted_identity
+    
+        _configure(monkeypatch)
+        _provision(demo_db, total=30_000)
+        worker = _worker(demo_db)
+        try:
+>           run = setup_run(demo_db, "�˲鵱ǰ����", "abort-send", bind=True)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_product_01_runtime_grant_01.py:515: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_ar02_runtime.py:63: in setup_run
+    created=create_task_with_initial_run(db,actor,session_id=session,service_id='orders-async-demo',integration_id='async-integration-a',s3_order_id='ar02-order',ticket_id='INC-A-001',initial_message=question,idempotency_key=key,assistant_core=True)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ops-assistant-core-cleanup-01/docs/evidence/assistant-core-cleanup-01/runs/pytest-tmp-send-01/test_aborted_task_cannot_get_n0/domain.sqlite3')
+identity = TrustedIdentity(actor_id='support-a', tenant_id='tenant-a', role='SUPPORT')
+session_id = 'session-be836f48-293f-49c7-85a9-edde3428675d'
+service_id = 'orders-async-demo', integration_id = 'async-integration-a'
+ticket_id = 'INC-A-001', initial_message = '�˲鵱ǰ����'
+idempotency_key = 'abort-send', deadline_ms = 300000, s3_order_id = 'ar02-order'
+assistant_core = True, source_message_id = None
+
+    def create_task_with_initial_run(
+        path: str | Path,
+        identity: TrustedIdentity,
+        *,
+        session_id: str,
+        service_id: str,
+        integration_id: str,
+        ticket_id: str,
+        initial_message: str,
+        idempotency_key: str,
+        deadline_ms: int = 300_000,
+        s3_order_id: str | None = None,
+        assistant_core: bool = False,
+        source_message_id: str | None = None,
+    ) -> dict[str, object]:
+        """Atomically create a trusted S1 binding and its first Message/Command/Run."""
+        if not initial_message.strip():
+            raise ValueError("Initial message must be non-empty text.")
+        if not idempotency_key.strip() or len(idempotency_key) > 200:
+            raise ValueError("A non-empty idempotency key of at most 200 characters is required.")
+        if deadline_ms < 1000 or deadline_ms > 86_400_000:
+            raise ValueError("Investigation deadline must be between 1 second and 24 hours.")
+        initialize(path)
+        command_kind = "CREATE_TASK"
+        request = {
+            "command_kind": command_kind,
+            "target_ref": session_id,
+            "session_id": session_id,
+            "service_id": service_id,
+            "integration_id": integration_id,
+            "s3_order_id": s3_order_id if service_id == "orders-async-demo" else None,
+            "ticket_id": ticket_id,
+            "initial_message": initial_message,
+        }
+        if assistant_core:
+            if service_id != "orders-async-demo":
+                raise TaskControlError("ASSISTANT_BINDING_KIND_INVALID")
+            request["execution_core"] = "ASSISTANT_V1"
+        if source_message_id is not None:
+            if service_id == "orders-async-demo" or assistant_core:
+                raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+            request["origin_message_id"] = source_message_id
+        request_digest = _digest(request)
+        with connect(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            _verify_identity(connection, identity)
+            if identity.role != "SUPPORT":
+                raise TaskControlError("TASK_OWNER_REQUIRED")
+            duplicate = _find_idempotent_command(
+                connection, identity, idempotency_key, command_kind, session_id, request_digest
+            )
+            if duplicate is not None:
+                return {**duplicate, "replayed": True}
+            session = connection.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ? AND tenant_id = ? AND owner_id = ?",
+                (session_id, identity.tenant_id, identity.actor_id),
+            ).fetchone()
+            if session is None:
+                raise TaskControlError("SESSION_SCOPE_DENIED")
+            origin = None
+            if source_message_id is not None:
+                origin = connection.execute(
+                    """SELECT message_id, body, body_digest FROM messages
+                       WHERE message_id = ? AND tenant_id = ? AND session_id = ? AND role = 'USER'""",
+                    (source_message_id, identity.tenant_id, session_id),
+                ).fetchone()
+                if origin is None or hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() != str(origin["body_digest"]):
+                    raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+            try:
+                from opspilot.domain.d2 import ScopeDenied, _create_task_binding_in_transaction
+    
+                binding = _create_task_binding_in_transaction(
+                    connection, identity.actor_id, service_id, integration_id, ticket_id,
+                    session_id=session_id,
+                )
+            except ScopeDenied as error:
+                raise TaskControlError("RESOURCE_NOT_FOUND") from error
+            task_id = str(binding["task_id"])
+            if service_id == "orders-async-demo":
+                try:
+                    from opspilot.domain.s3 import ORDER, bind_s3_order_in_transaction
+                    bind_s3_order_in_transaction(
+                        connection, task_id=task_id, tenant_id=identity.tenant_id,
+                        service_id=service_id, integration_id=integration_id,
+                        order_id=s3_order_id or ORDER, actor_id=identity.actor_id,
+                        confirmed_at=_utc_now(),
+                    )
+                except ScopeDenied as error:
+>                   raise TaskControlError("S3_ORDER_NOT_REGISTERED") from error
+E                   opspilot.domain.task_control.TaskControlError: S3_ORDER_NOT_REGISTERED
+
+opspilot\domain\task_control.py:1074: TaskControlError
+=========================== short test summary info ===========================
+FAILED tests/test_product_01_runtime_grant_01.py::test_current_readonly_followup_can_get_send_permit_while_correction_is_pending
+FAILED tests/test_product_01_runtime_grant_01.py::test_aborted_task_cannot_get_new_provider_send_permit
+2 failed, 1 passed in 8.50s

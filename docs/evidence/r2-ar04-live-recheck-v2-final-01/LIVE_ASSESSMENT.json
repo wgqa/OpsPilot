@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-LIVE-RECHECK-V2-FINAL-01",
+  "candidate_status": "ACCEPTANCE_CANDIDATE",
+  "assessment_authority": "IMPLEMENTER_PRELIMINARY_REVIEW",
+  "independent_main_agent_review": "NOT_PERFORMED",
+  "execution": {
+    "branch": "codex/r2-ar04-live-recheck-v2-final-01",
+    "authorized_dispatch_head": "d69b06c3005b07df9c7c8619b373c4d7547e991d",
+    "candidate_head_at_check": "d69b06c3005b07df9c7c8619b373c4d7547e991d",
+    "runner_legacy_base_sha_field": "d8a526daa9c811814a5e2463b34eb37037ae1a8e",
+    "legacy_base_sha_note": "Inherited harness metadata; candidate_head_at_check and frozen dispatch checks match the authorized HEAD.",
+    "status": "STOPPED",
+    "stop_reason": "PROVIDER_OUTPUT_NOT_COMPLETE",
+    "domain_error_code": "CONTEXT_SUMMARY_INVALID_JSON",
+    "failure_stage": "Q02-B first summary response incomplete at 512 output tokens; summary validation and persistence stopped before answer construction.",
+    "retry_count": 0,
+    "external_mcp_calls": 0,
+    "production_database_writes": 0
+  },
+  "preflight": {
+    "checked_at_utc": "2026-11-15T12:10:52Z",
+    "status": "AUTHORIZED_FOR_BOUNDED_LIVE_EXECUTION",
+    "main_repo_env_found_and_loaded": true,
+    "api_key_presence_only": true,
+    "api_key_value_recorded": false,
+    "required_nonsecret_values_supplemented": true,
+    "runtime_config_valid": true,
+    "isolated_runtime_grant_bindable": true,
+    "mock_transport_invocations": 0,
+    "preflight_provider_requests": 0,
+    "production_database_opened": false
+  },
+  "provider": {
+    "name": "DeepSeek",
+    "model_alias": "deepseek-flash",
+    "published_model_version": "DeepSeek-V4.1-Flash-1017",
+    "thinking_mode": "non-thinking",
+    "temperature": 0,
+    "tool_choice": "none",
+    "external_mcp_calls": 0,
+    "official_price_page": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "price_checked_on": "2026-11-15",
+    "price_peak_input_cache_miss_usd_per_million": 0.3,
+    "price_peak_output_usd_per_million": 1.2,
+    "price_schedule_note": "Official page states weekend off-peak rates are half peak rates.",
+    "account_debit_verification": "NOT_VERIFIED"
+  },
+  "authorization": {
+    "scope": ["Q02-A", "Q02-B", "Q06-B"],
+    "max_summary_requests": 6,
+    "max_answer_requests": 3,
+    "max_provider_requests": 9,
+    "hard_cap_usd": 0.06,
+    "manifest_sha256": "3c50e2d883d1cbbf7856c8dd95b3a6810f0cc8fb7b498f42902ca82bfad507f6",
+    "manifest_committed": false,
+    "authorization_reused_or_extended": false
+  },
+  "requests": [
+    {"logical_id":"Q02-A:SUMMARY:1","status":"COMPLETED","http_status":200,"input_tokens":4106,"output_tokens":505,"provider_response_id":"f90b5beb-436b-4b4a-a7fa-bfe48be78849","finish_reason":"stop","peak_conservative_cost_usd":0.001838},
+    {"logical_id":"Q02-A:SUMMARY:2","status":"COMPLETED","http_status":200,"input_tokens":3236,"output_tokens":373,"provider_response_id":"97b59654-47eb-4fe4-8167-6121eb21ec46","finish_reason":"stop","peak_conservative_cost_usd":0.001419},
+    {"logical_id":"Q02-A:ANSWER:1","status":"COMPLETED","http_status":200,"input_tokens":4493,"output_tokens":248,"provider_response_id":"a35a2fd4-36e3-421f-8926-4101a5cd97cc","finish_reason":"stop","peak_conservative_cost_usd":0.001646},
+    {"logical_id":"Q02-B:SUMMARY:1","status":"INCOMPLETE","http_status":200,"input_tokens":4103,"output_tokens":512,"provider_response_id":"9a2e0db7-153f-4419-91b2-416d2e7ef9ff","finish_reason":"length","runner_error":"FINISH_REASON_length","peak_conservative_cost_usd":0.001846},
+    {"logical_id":"Q02-B:SUMMARY:2","status":"NOT_SENT_FINAL"},
+    {"logical_id":"Q02-B:ANSWER:1","status":"NOT_SENT_FINAL"},
+    {"logical_id":"Q06-B:SUMMARY:1","status":"NOT_SENT_FINAL"},
+    {"logical_id":"Q06-B:SUMMARY:2","status":"NOT_SENT_FINAL"},
+    {"logical_id":"Q06-B:ANSWER:1","status":"NOT_SENT_FINAL"}
+  ],
+  "usage_totals": {
+    "provider_requests_started": 4,
+    "summary_requests": 3,
+    "answer_requests": 1,
+    "input_tokens": 15938,
+    "output_tokens": 1638,
+    "total_tokens": 17576,
+    "peak_conservative_ledger_cost_usd": 0.006749,
+    "sunday_offpeak_usage_price_estimate_usd": 0.003374,
+    "currently_reserved_usd": 0.0,
+    "unknown_requests": 0
+  },
+  "cases": [
+    {
+      "case_id":"Q02-A",
+      "strategy":"HYBRID",
+      "run_status":"SUCCEEDED",
+      "summary_calls":2,
+      "answer_calls":1,
+      "summary_persistence":"Two summaries persisted; v2 CURRENT covers seq 1-18 and was used on answer wire.",
+      "l2":"PASS_FOR_TARGET_FACT",
+      "l2_target_fact":"endpoint=/callback with source seq 3",
+      "l2_additional_supported_facts":["seq 7 correction req-482 to req-483; Event ID remains evt-731","deployment version unknown from seq 11","HTTP 202/QUEUED not proof of completion"],
+      "l2_non_target_omissions":["rejected timeout hypothesis","v1.2 to v1.3 transition","max_attempts 3 to 5 transition"],
+      "l3":"CORRECT_SUPPORTED",
+      "l3_authority":"IMPLEMENTER_PRELIMINARY_REVIEW",
+      "answer_summary":"Answers /callback from historical source, distinguishes corrected IDs and unknown deployed version, and does not claim QUEUED/HTTP 202 means complete.",
+      "prior_abc_live_l3":"SAFE_ABSTENTION",
+      "prior_abc_live_l2":"FAIL: endpoint absent from final prompt",
+      "comparison":"Target fact and supported answer improved; not proof of lossless history."
+    },
+    {
+      "case_id":"Q02-B",
+      "strategy":"ROLLING_SUMMARY",
+      "run_status":"STOPPED",
+      "summary_calls":1,
+      "answer_calls":0,
+      "l2":"FAILED_BEFORE_FINAL_PROMPT",
+      "l3":"NOT_RUN",
+      "failure":"First summary ended at output limit with incomplete JSON; no Summary persisted and no answer prompt was built.",
+      "prior_abc_live_l3":"SAFE_ABSTENTION",
+      "prior_abc_live_l2":"FAIL: endpoint absent from final prompt",
+      "comparison":"No improvement established; stopped at summary generation."
+    },
+    {
+      "case_id":"Q06-B",
+      "strategy":"ROLLING_SUMMARY",
+      "run_status":"NOT_STARTED",
+      "summary_calls":0,
+      "answer_calls":0,
+      "l2":"NOT_RUN",
+      "l3":"NOT_RUN",
+      "prior_abc_live_l3":"SAFE_ABSTENTION",
+      "prior_abc_live_l2":"FAIL: protocol transition absent from final prompt",
+      "comparison":"No new result."
+    }
+  ],
+  "closeout_recommendation": "DO_NOT_CLOSE_AR04",
+  "accounting_note": "Provider billing account was not queried. All amounts are usage-price estimates, not a verified account debit.",
+  "artifact_sha256": {
+    "live_run_01/LIVE_RESULTS.json":"3c3d889c6fe5e5b2053de9e7a2185404774631aaad32731c630916d7f568e5ff",
+    "live_run_01/COST_LEDGER.json":"cb104366e5df3989eff8e2231e7a498baaf6ff96450953e8da031a2467404136",
+    "live_run_01/LIVE_REQUESTS.jsonl.gz":"6c6d5b8d006c775a4393894b59ce5a8b722aa89a71c8ca427868a2b8c3db20e2"
+  },
+  "source_integrity": {
+    "frozen_history_questions_gold_hashes_match": true,
+    "protected_historical_evidence_hashes_match": true,
+    "production_context_source_modified": false,
+    "main_merged": false,
+    "credential_scan": "NO_BEARER_OR_API_KEY_ASSIGNMENT_FOUND_IN_LIVE_EVIDENCE"
+  }
+}

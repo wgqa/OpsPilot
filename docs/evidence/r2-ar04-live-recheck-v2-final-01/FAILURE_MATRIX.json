@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "task": "R2-AR04-LIVE-RECHECK-V2-FINAL-01",
+  "evidence_level": "ACTUAL_LOCAL_PYTEST_WITH_MOCKTRANSPORT_AND_ZERO_COST_PREFLIGHT",
+  "provider_requests_sent": 0,
+  "provider_cost_usd": "0.00",
+  "cases": [
+    {
+      "id": "C01_DOMAIN_PERSISTENCE_FAILURE",
+      "status": "PASS",
+      "test": "test_domain_persistence_failure_stops_and_does_not_answer",
+      "observed": "Injected TaskControlError retained; one Mock request; no Answer Manifest; no answer and no later Case."
+    },
+    {
+      "id": "C02_SOURCE_INVALIDATION",
+      "status": "PASS",
+      "test": "test_source_invalidation_stops_before_answer_and_later_cases",
+      "observed": "Source invalidation between summary rounds stops before the answer; later Cases remain NOT_STARTED."
+    },
+    {
+      "id": "C03_BUDGET_INSUFFICIENT",
+      "status": "PASS",
+      "test": "test_global_budget_rejects_before_dispatch",
+      "observed": "Shared ledger rejects a reserve one microdollar below the request reserve before request digest or transport dispatch."
+    },
+    {
+      "id": "C04_UNKNOWN_SEND",
+      "status": "PASS",
+      "test": "test_unknown_send_is_reserved_without_retry_or_next_case",
+      "observed": "One Mock send becomes UNKNOWN, retains the worst-case reserve, is not retried, and stops later Cases."
+    },
+    {
+      "id": "C05_STALE_OR_WRONG_AUTHORIZATION",
+      "status": "PASS",
+      "test": "test_authorization_requires_new_exact_task_and_recent_price_snapshot",
+      "observed": "Old task token, stale price snapshot, cap above USD 0.06 and cap below the 9-request worst-case reserve are rejected. A lower valid cap is bound into the shared ledger. No live output is created."
+    },
+    {
+      "id": "C06_MISSING_AUTHORIZATION",
+      "status": "PASS",
+      "test": "test_live_without_fresh_authorization_fails_before_creating_output",
+      "observed": "Missing task-specific authorization is rejected before Mock input read or output directory creation."
+    },
+    {
+      "id": "C07_FROZEN_SOURCE_AND_TASK_BASE",
+      "status": "PASS",
+      "test": "test_task_base_and_current_production_freeze_are_bound",
+      "observed": "Task Base, no-merge ancestry, governance Blobs, production Blobs and protected historical records match."
+    }
+  ],
+  "not_run": [
+    "Actual Provider send, by task boundary.",
+    "Provider timeout/UNKNOWN against a real network response.",
+    "Live L2/L3 semantic scoring."
+  ]
+}

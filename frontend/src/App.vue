@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import TaskConditionReview from './TaskConditionReview.vue';
-import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PlanReview, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
-import { acknowledgeAssistantOperation, beginAssistantOperation } from './assistant-entry';
+import { api, explainError, type ApprovalResult, type AssistantScopes, type AssistantSources, type ChatChunk, type ChatRunContext, type Inspector, type InvestigationUpdateAssessment, type InvestigationUpdateProposal, type MemoryRecord, type MessageItem, type PendingApproval, type PersonalMemoryRecord, type PersonalMemorySettings, type PlanReview, type RunActivity, type RunItem, type S3OrderResource, type SemanticMemoryContext, type SemanticMemoryRecord, type SessionItem, type TaskMemoryContext, type TaskOutcome } from './api';
+import { acknowledgeAssistantOperation, beginAssistantOperation, controlledInvestigationProposal, recentAssistantSourceRequests } from './assistant-entry';
 import { assistantTaskForSend, s1OutcomeText } from './s1-bridge';
-import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
+import { clearS3RestrictedResultCache, createS3ReadResponseFence, filterDeniedS3AssistantMessages, maskS3AnswersForRevalidation, mergeChatChunks, projectConversation, projectSessionEvent, s3InspectorAuthorizationUnavailable, type CachedS3Inspector, type ConversationAssessment, type ConversationAnswer, type ConversationFollowup, type ConversationRun } from './conversation';
+import { renderAssistantMarkdown } from './markdown';
+import AssistantRunActivity from './AssistantRunActivity.vue';
 
 interface UserContext { actor_id: string; tenant_id: string; role: string }
 interface EventItem { event_seq: number; event_kind: string; happened_at: string; payload: Record<string, unknown> }
@@ -17,6 +19,10 @@ const sessions = ref<SessionItem[]>([]);
 const sessionId = ref('');
 const messages = ref<MessageItem[]>([]);
 const sessionHistoryReady = ref(false);
+const hasOlderMessages = ref(false);
+const loadingOlderMessages = ref(false);
+const revalidatingSessionId = ref('');
+const revalidatingSessionMessages = computed(() => revalidatingSessionId.value === sessionId.value);
 const taskId = ref('');
 const investigationUpdates = ref<InvestigationUpdateAssessment[]>([]);
 const investigationKind = ref<'AUTH_INCIDENT' | 'ASYNC_CALLBACK'>('AUTH_INCIDENT');
@@ -27,6 +33,24 @@ const taskOutcome = ref<TaskOutcome | null>(null);
 const s3HandoffOutcome = ref<Record<string, unknown> | null>(null);
 const taskMemoryContext = ref<TaskMemoryContext | null>(null);
 const taskSemanticContext = ref<SemanticMemoryContext | null>(null);
+const personalMemories = ref<PersonalMemoryRecord[]>([]);
+const personalMemoryRecallEnabled = ref(true);
+const personalMemoryAutoLearnEnabled = ref(false);
+const personalMemoryAutoLearnAvailable = ref(false);
+const personalMemoryConsolidationStatus = ref<Record<string, number>>({});
+const personalMemoryLatestJob = ref<PersonalMemorySettings['consolidation_latest_job']>(null);
+const personalMemoryAutoLearnProgress = ref('');
+const personalMemorySettingsReady = ref(false);
+const personalMemorySettingsSaving = ref(false);
+const personalMemorySettingsError = ref('');
+const selectedPersonalMemory = ref<PersonalMemoryRecord | null>(null);
+const personalMemoryRevisionTarget = ref<PersonalMemoryRecord | null>(null);
+const personalMemoryDraftKind = ref<PersonalMemoryRecord['memory_kind']>('PREFERENCE');
+const personalMemoryDraftMode = ref<PersonalMemoryRecord['memory_mode']>('RELEVANT');
+const personalMemoryDraftKey = ref('');
+const personalMemoryDraftContent = ref('');
+const personalMemorySourceMessageId = ref('');
+const latestChatContext = ref<ChatRunContext | null>(null);
 const memoryCandidates = ref<MemoryRecord[]>([]);
 const selectedMemory = ref<MemoryRecord | null>(null);
 const semanticMemoryCandidates = ref<SemanticMemoryRecord[]>([]);
@@ -45,7 +69,6 @@ const investigationOriginMessageId = ref('');
 const s1DemoResource = ref<{ service_id: string; integration_id: string; principal_id: string } | null>(null);
 const correctionDraft = ref('');
 const showTaskForm = ref(false);
-const professionalMode = ref(true);
 const assistantScopes = ref<AssistantScopes>({ items: [], selected_project: null });
 const assistantScopeNotice = ref('');
 const showAssistantOrderForm = ref(false);
@@ -58,25 +81,42 @@ const notice = ref('');
 const activeChatRun = ref<RunItem | null>(null);
 const chunks = ref<ChatChunk[]>([]);
 const lastChunkSeq = ref(0);
+const chatActivities = ref<RunActivity[]>([]);
 const reconnectCount = ref(0);
 const reconnectPaused = ref(false);
 const narrowInspectorOpen = ref(false);
-const conversationEnd = ref<HTMLElement | null>(null);
+const conversationScroll = ref<HTMLElement | null>(null);
+const conversationPinned = ref(true);
+let olderScrollPosition: { top: number; height: number } | null = null;
 const messageComposer = ref<HTMLTextAreaElement | null>(null);
 
 let eventSource: EventSource | null = null;
 let reconnectTimer: number | undefined;
 let runPollTimer: number | undefined;
+let finishRunPoll: (() => void) | null = null;
+let runPollGeneration = 0;
+let memoryStatusPollTimer: number | undefined;
+let memoryStatusPollPending = false;
+let chunkProjectionGeneration = 0;
+let loadingChunksTicket = 0;
 let loadingChunksRunId: string | null = null;
+let requestedChunkSeq = 0;
 let assistantScopeGeneration = 0;
+let personalMemoryGeneration = 0;
+let personalMemorySettingsGeneration = 0;
+let latestChatContextGeneration = 0;
 const assistantSourceRequests = new Map<string, number>();
 let assistantSourceGeneration = 0;
 let seenEventSeq = new Set<number>();
 const s3ReadResponseFence = createS3ReadResponseFence();
+let activeSessionMessageRevalidation: {
+  sessionId: string; queueIncremental: boolean; queueRevalidation: boolean;
+} | null = null;
+const RESTORED_ASSISTANT_SOURCE_LIMIT = 8;
+const RESTORED_ASSISTANT_SOURCE_CONCURRENCY = 3;
 
 const canCreateTask = computed(() => user.value?.role === 'SUPPORT');
 const isApprover = computed(() => user.value?.role === 'APPROVER');
-const useProfessionalAssistant = computed(() => professionalMode.value);
 const assistantTaskId = computed(() => assistantTaskForSend(taskId.value, inspector.value?.task ?? null));
 const conditionReviewSource = computed(() => messages.value.reduce<MessageItem | undefined>((latest, item) => {
   if (item.task_id === taskId.value && item.role === 'USER' && item.input_kind === 'CHAT_READONLY'
@@ -93,6 +133,7 @@ const conversationProjection = computed(() => projectConversation({
   assessments: investigationUpdates.value as unknown as ConversationAssessment[],
   activeChatRun: activeChatRun.value as unknown as ConversationRun | null,
   chunks: chunks.value,
+  activities: chatActivities.value,
   s3Outcome: inspector.value?.trusted_state.s3_outcome as Record<string, unknown> | null,
 }));
 const latestContextProvenance = computed(() => inspector.value?.investigator_context_provenance[0] ?? null);
@@ -110,6 +151,19 @@ const latestExcludedMemorySources = computed(() => Array.isArray(latestContextPr
 const latestSelectedSemanticMemories = computed(() => latestSelectedMemories.value.filter(
   (item) => item.memory_type === 'SEMANTIC',
 ));
+const personalSourceMessages = computed(() => messages.value.filter((item) =>
+  item.role === 'USER' && ['CHAT_READONLY', 'CORRECT_TASK_INPUT'].includes(item.input_kind),
+));
+const latestChatManifest = computed(() => latestChatContext.value?.attempts.at(-1)?.manifest ?? null);
+const latestPersonalMemorySelection = computed(() => {
+  if (latestChatContext.value?.attempts.at(-1)?.status !== 'SUCCEEDED') return [];
+  const refs = latestChatManifest.value?.memory_refs ?? [];
+  return refs.filter((item) => item.memory_type === 'PERSONAL');
+});
+const latestPersonalMemoryExclusions = computed(() => {
+  const refs = latestChatManifest.value?.excluded_sources ?? latestChatContext.value?.excluded_sources ?? [];
+  return refs.filter((item) => item.category === 'PERSONAL_MEMORY' || String(item.source_id ?? '').startsWith('personal-'));
+});
 const sourceMemoryExists = computed(() => (taskMemoryContext.value?.source_memories ?? []).length > 0);
 const sourceMemoryEligible = computed(() => {
   if (['DELIVERED', 'DIAGNOSED', 'SCOPE_ESCALATED'].includes(String(taskOutcome.value?.business_outcome ?? ''))) return true;
@@ -146,9 +200,9 @@ function dateLabel(value: unknown): string {
 
 function statusTone(value: unknown): string {
   const status = String(value ?? '').toUpperCase();
-  if (['SUCCEEDED', 'COMPLETED', 'ENABLED', 'ACTIVE', 'APPROVED', 'READY', 'DELIVERED'].includes(status)) return 'good';
+  if (['SUCCEEDED', 'COMPLETED', 'ENABLED', 'ACTIVE', 'APPROVED', 'READY', 'DELIVERED', 'REPAIRED_VERIFIED'].includes(status)) return 'good';
   if (['FAILED', 'BLOCKED', 'ABORTED', 'REJECTED', 'DISABLED', 'INCONCLUSIVE'].includes(status)) return 'bad';
-  if (['WAITING_APPROVAL', 'WAITING_INPUT', 'QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE', 'RECOVERED_NOT_DELIVERED', 'APPROVAL_ACCEPTED', 'SCOPE_ESCALATED', 'PENDING_REVIEW', 'OVERDUE'].includes(status)) return 'warm';
+  if (['WAITING_APPROVAL', 'WAITING_INPUT', 'QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE', 'RECOVERED_NOT_DELIVERED', 'APPROVAL_ACCEPTED', 'HANDOFF_READY', 'DIAGNOSED', 'REPAIR_COMMITTED', 'REAPPROVAL_REQUIRED', 'REVALIDATION_BLOCKED', 'SCOPE_ESCALATED', 'PENDING_REVIEW', 'OVERDUE'].includes(status)) return 'warm';
   return 'neutral';
 }
 
@@ -160,7 +214,10 @@ function readableStatus(value: unknown): string {
     FAILED: '失败', BLOCKED: '已阻止', INCONCLUSIVE: '结论不足', ENABLED: '已启用',
     DISABLED: '已停用', ACTIVE: '生效中', APPROVED: '已批准', REJECTED: '已拒绝',
     CHAT_READONLY: '只读聊天', INVESTIGATE: '调查', APPROVAL_RESUME: '审批恢复',
-    SCOPE_ESCALATED: '已交本地队列', PENDING_REVIEW: '等待人工处理', OVERDUE: '超过处理目标',
+    HANDOFF_READY: '交接草稿待确认', DIAGNOSED: '已形成可信诊断', SCOPE_ESCALATED: '已交受控队列',
+    PENDING_REVIEW: '等待人工处理', OVERDUE: '超过处理目标', REPAIRED_VERIFIED: '修复已验证',
+    REPAIR_COMMITTED: '配置已提交，待验证', RECOVERED_NOT_DELIVERED: '已验证恢复，待交付',
+    REAPPROVAL_REQUIRED: '需要重新审批', REVALIDATION_BLOCKED: '复核阻止执行',
   };
   return names[status] ?? status;
 }
@@ -177,7 +234,7 @@ async function login(): Promise<void> {
     password.value = '';
     if (result.role === 'APPROVER') await loadPendingApprovals();
     else {
-      await loadSessions();
+      await Promise.all([loadSessions(), loadPersonalMemorySettings()]);
       await loadS3OrderResources();
     }
     notice.value = '已通过本地可信身份登录。';
@@ -194,7 +251,7 @@ async function restoreLogin(): Promise<void> {
     if (!csrf.value) notice.value = '登录已恢复；请重新登录一次以继续发送或创建会话。';
     if (user.value.role === 'APPROVER') await loadPendingApprovals();
     else {
-      await loadSessions();
+      await Promise.all([loadSessions(), loadPersonalMemorySettings()]);
       await loadS3OrderResources();
     }
   } catch {
@@ -209,12 +266,17 @@ async function logout(): Promise<void> {
     errorMessage.value = explainError(error);
   }
   stopEvents();
+  stopRunPolling();
+  stopPersonalMemoryStatusPolling();
   user.value = null;
+  activeSessionMessageRevalidation = null;
+  revalidatingSessionId.value = '';
   csrf.value = '';
   sessionStorage.removeItem('opspilot.csrf');
   sessions.value = [];
   sessionId.value = '';
   messages.value = [];
+  setActiveChatRun(null);
   inspector.value = null;
   taskOutcome.value = null;
   s3HandoffOutcome.value = null;
@@ -225,6 +287,22 @@ async function logout(): Promise<void> {
   taskSemanticContext.value = null;
   memoryCandidates.value = [];
   selectedMemory.value = null;
+  personalMemoryGeneration += 1;
+  personalMemorySettingsGeneration += 1;
+  latestChatContextGeneration += 1;
+  personalMemories.value = [];
+  personalMemoryRecallEnabled.value = true;
+  personalMemoryAutoLearnEnabled.value = false;
+  personalMemoryAutoLearnAvailable.value = false;
+  personalMemoryConsolidationStatus.value = {};
+  personalMemoryLatestJob.value = null;
+  personalMemoryAutoLearnProgress.value = '';
+  personalMemorySettingsReady.value = false;
+  personalMemorySettingsSaving.value = false;
+  personalMemorySettingsError.value = '';
+  selectedPersonalMemory.value = null;
+  personalMemoryRevisionTarget.value = null;
+  latestChatContext.value = null;
   semanticMemoryCandidates.value = [];
   selectedSemanticMemory.value = null;
   pendingApprovals.value = [];
@@ -234,9 +312,51 @@ async function logout(): Promise<void> {
 
 async function loadSessions(): Promise<void> {
   const response = await api.sessions();
-  sessions.value = response.items;
-  if (sessions.value.length > 0 && !sessions.value.some((item) => item.session_id === sessionId.value)) {
-    await selectSession(sessions.value[0].session_id);
+  const items = [...response.items];
+  const saved = savedSessionId();
+  if (saved && !items.some((item) => item.session_id === saved)) {
+    try {
+      const detail = await api.session(saved);
+      items.unshift({
+        session_id: detail.session_id,
+        created_at: detail.created_at,
+        updated_at: detail.updated_at,
+        task_count: detail.tasks.length,
+      });
+    } catch {
+      // A stale or no-longer-accessible browser selection falls back to an owned Session.
+    }
+  }
+  sessions.value = items;
+  const available = new Set(sessions.value.map((item) => item.session_id));
+  const selected = (saved && available.has(saved) ? saved : null)
+    ?? (available.has(sessionId.value) ? sessionId.value : null)
+    ?? sessions.value[0]?.session_id
+    ?? '';
+  rememberSelectedSession(selected);
+  if (selected !== sessionId.value) await selectSession(selected);
+  else if (!selected) await selectSession('');
+}
+
+function selectedSessionKey(): string | null {
+  if (!user.value) return null;
+  return `opspilot.selected-session.${user.value.tenant_id}.${user.value.actor_id}`;
+}
+
+function savedSessionId(): string | null {
+  const key = selectedSessionKey();
+  if (!key) return null;
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+
+function rememberSelectedSession(value: string): void {
+  const key = selectedSessionKey();
+  if (!key) return;
+  try {
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // Session restoration remains available through the current page if browser storage is disabled.
   }
 }
 
@@ -271,6 +391,316 @@ async function loadPendingApprovals(): Promise<void> {
   if (selectedSemanticMemory.value) {
     selectedSemanticMemory.value = semanticMemoryCandidates.value.find((item) => item.memory_id === selectedSemanticMemory.value?.memory_id)
       ?? selectedSemanticMemory.value;
+  }
+}
+
+async function loadPersonalMemories(): Promise<void> {
+  const identity = user.value;
+  if (!identity) {
+    personalMemories.value = [];
+    selectedPersonalMemory.value = null;
+    return;
+  }
+  const generation = ++personalMemoryGeneration;
+  try {
+    const response = await api.personalMemories();
+    if (generation !== personalMemoryGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemories.value = response.items;
+    if (selectedPersonalMemory.value) {
+      selectedPersonalMemory.value = response.items.find(
+        (item) => item.memory_id === selectedPersonalMemory.value?.memory_id,
+      ) ?? null;
+    }
+  } catch (error) {
+    if (generation === personalMemoryGeneration && user.value?.actor_id === identity.actor_id) {
+      personalMemories.value = [];
+      errorMessage.value = explainError(error);
+    }
+  }
+}
+
+async function loadPersonalMemorySettings(): Promise<void> {
+  const identity = user.value;
+  const generation = ++personalMemorySettingsGeneration;
+  personalMemorySettingsReady.value = false;
+  personalMemorySettingsError.value = '';
+  if (!identity || identity.role !== 'SUPPORT') return;
+  try {
+    const setting = await api.personalMemorySettings();
+    if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemoryRecallEnabled.value = setting.recall_enabled;
+    personalMemoryAutoLearnEnabled.value = setting.auto_learn_enabled;
+    personalMemoryAutoLearnAvailable.value = setting.auto_learn_available;
+    personalMemoryConsolidationStatus.value = setting.consolidation_status ?? {};
+    personalMemoryLatestJob.value = setting.consolidation_latest_job ?? null;
+    personalMemorySettingsReady.value = true;
+    ensurePersonalMemoryStatusPolling();
+  } catch {
+    if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
+      && user.value?.tenant_id === identity.tenant_id) {
+      personalMemorySettingsError.value = '当前无法读取个人记忆设置；本轮不会把未确认状态显示为已生效。';
+    }
+  }
+}
+
+async function refreshPersonalMemoryProgress(): Promise<void> {
+  const identity = user.value;
+  if (!identity || identity.role !== 'SUPPORT' || memoryStatusPollPending || personalMemorySettingsSaving.value) return;
+  memoryStatusPollPending = true;
+  const generation = personalMemorySettingsGeneration;
+  try {
+    const setting = await api.personalMemorySettings();
+    if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemoryConsolidationStatus.value = setting.consolidation_status ?? {};
+    personalMemoryLatestJob.value = setting.consolidation_latest_job ?? null;
+    personalMemoryAutoLearnAvailable.value = setting.auto_learn_available;
+    personalMemoryAutoLearnProgress.value = '';
+  } catch {
+    if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
+      && user.value?.tenant_id === identity.tenant_id) {
+      personalMemoryAutoLearnProgress.value = '后台整理状态暂时无法读取';
+    }
+  } finally {
+    memoryStatusPollPending = false;
+  }
+}
+
+function ensurePersonalMemoryStatusPolling(): void {
+  if (!user.value || user.value.role !== 'SUPPORT' || !personalMemorySettingsReady.value
+    || !personalMemoryAutoLearnEnabled.value || !personalMemoryAutoLearnAvailable.value) {
+    stopPersonalMemoryStatusPolling();
+    return;
+  }
+  if (memoryStatusPollTimer === undefined) {
+    void refreshPersonalMemoryProgress();
+    memoryStatusPollTimer = window.setInterval(() => void refreshPersonalMemoryProgress(), 2500);
+  }
+}
+
+function stopPersonalMemoryStatusPolling(): void {
+  if (memoryStatusPollTimer !== undefined) window.clearInterval(memoryStatusPollTimer);
+  memoryStatusPollTimer = undefined;
+  memoryStatusPollPending = false;
+}
+
+async function updatePersonalMemorySetting(event: Event, settingName: 'recall' | 'auto-learn'): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const identity = user.value;
+  const generation = personalMemorySettingsGeneration;
+  const previous = settingName === 'recall'
+    ? personalMemoryRecallEnabled.value : personalMemoryAutoLearnEnabled.value;
+  const previousRecall = personalMemoryRecallEnabled.value;
+  const previousAutoLearn = personalMemoryAutoLearnEnabled.value;
+  const requested = input.checked;
+  if (!identity || !csrf.value || !personalMemorySettingsReady.value || personalMemorySettingsSaving.value) {
+    input.checked = previous;
+    return;
+  }
+  const recallEnabled = settingName === 'recall' ? requested : previousRecall;
+  const autoLearnEnabled = settingName === 'auto-learn'
+    ? requested && recallEnabled : requested ? previousAutoLearn : false;
+  personalMemorySettingsSaving.value = true;
+  personalMemorySettingsError.value = '';
+  try {
+    const setting = await api.updatePersonalMemorySettings(recallEnabled, autoLearnEnabled, csrf.value);
+    if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemoryRecallEnabled.value = setting.recall_enabled;
+    personalMemoryAutoLearnEnabled.value = setting.auto_learn_enabled;
+    personalMemoryAutoLearnAvailable.value = setting.auto_learn_available;
+    personalMemoryConsolidationStatus.value = setting.consolidation_status ?? {};
+    personalMemoryLatestJob.value = setting.consolidation_latest_job ?? null;
+    ensurePersonalMemoryStatusPolling();
+    notice.value = settingName === 'auto-learn'
+      ? setting.auto_learn_enabled
+        ? '自动学习已开启；后台按批次调用一次模型，费用受 Runtime Grant 约束。'
+        : '自动学习已关闭；已保存记忆仍保留。'
+      : setting.recall_enabled
+        ? '个人记忆召回已开启；后续聊天会按固定偏好和问题相关性选择。'
+        : '个人记忆召回已关闭；自动学习同步暂停，已保存记忆仍保留。';
+  } catch (error) {
+    if (generation !== personalMemorySettingsGeneration || user.value?.actor_id !== identity.actor_id
+      || user.value?.tenant_id !== identity.tenant_id) return;
+    personalMemoryRecallEnabled.value = previousRecall;
+    personalMemoryAutoLearnEnabled.value = previousAutoLearn;
+    input.checked = previous;
+    personalMemorySettingsError.value = explainError(error);
+  } finally {
+    if (generation === personalMemorySettingsGeneration && user.value?.actor_id === identity.actor_id
+      && user.value?.tenant_id === identity.tenant_id) personalMemorySettingsSaving.value = false;
+  }
+}
+
+function updatePersonalMemoryRecall(event: Event): Promise<void> {
+  return updatePersonalMemorySetting(event, 'recall');
+}
+
+function updatePersonalMemoryAutoLearn(event: Event): Promise<void> {
+  return updatePersonalMemorySetting(event, 'auto-learn');
+}
+
+async function refreshLatestChatContext(
+  requestedSession = sessionId.value,
+  runId: string | null = activeChatRun.value?.run_id ?? null,
+): Promise<void> {
+  const generation = ++latestChatContextGeneration;
+  if (!requestedSession || !runId) {
+    latestChatContext.value = null;
+    return;
+  }
+  try {
+    const context = await api.runContext(runId);
+    if (generation !== latestChatContextGeneration || sessionId.value !== requestedSession
+      || activeChatRun.value?.run_id !== runId) return;
+    latestChatContext.value = context;
+  } catch {
+    if (generation === latestChatContextGeneration && sessionId.value === requestedSession) {
+      latestChatContext.value = null;
+    }
+  }
+}
+
+function selectPersonalMemory(item: PersonalMemoryRecord): void {
+  selectedPersonalMemory.value = item;
+}
+
+function beginPersonalMemoryRevision(item: PersonalMemoryRecord): void {
+  if (item.state !== 'ACTIVE') return;
+  personalMemoryRevisionTarget.value = item;
+  personalMemoryDraftKind.value = item.memory_kind;
+  personalMemoryDraftMode.value = item.memory_mode;
+  personalMemoryDraftKey.value = item.memory_key;
+  personalMemoryDraftContent.value = item.content;
+  selectedPersonalMemory.value = item;
+  if (!personalSourceMessages.value.some((message) => message.message_id === personalMemorySourceMessageId.value)) {
+    personalMemorySourceMessageId.value = item.source_message_id;
+  }
+}
+
+function cancelPersonalMemoryRevision(): void {
+  personalMemoryRevisionTarget.value = null;
+  personalMemoryDraftKey.value = '';
+  personalMemoryDraftContent.value = '';
+}
+
+async function createPersonalMemoryCandidate(): Promise<void> {
+  const sourceMessageId = personalMemorySourceMessageId.value
+    || personalSourceMessages.value.at(-1)?.message_id || '';
+  if (!csrf.value || !sessionId.value || busy.value || !sourceMessageId
+    || !personalMemoryDraftKey.value.trim() || !personalMemoryDraftContent.value.trim()) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const revision = personalMemoryRevisionTarget.value;
+    const payload = {
+      memory_kind: personalMemoryDraftKind.value,
+      memory_mode: personalMemoryDraftMode.value,
+      memory_key: personalMemoryDraftKey.value.trim(),
+      content: personalMemoryDraftContent.value.trim(),
+      source_message_id: sourceMessageId,
+      ttl_days: 180,
+      ...(revision ? {
+        supersedes_memory_id: revision.memory_id,
+        expected_version: revision.version,
+      } : {}),
+    };
+    const target = [payload.memory_kind, payload.memory_mode, payload.memory_key, payload.content, sourceMessageId,
+      payload.supersedes_memory_id ?? '', payload.expected_version ?? ''].join(':');
+    const operationKey = memoryOperationKey('personal-candidate', target);
+    const candidate = await api.createPersonalMemoryCandidate(payload, csrf.value, operationKey);
+    completeMemoryOperation('personal-candidate', target);
+    personalMemoryRevisionTarget.value = null;
+    personalMemoryDraftKey.value = '';
+    personalMemoryDraftContent.value = '';
+    await loadPersonalMemories();
+    selectedPersonalMemory.value = personalMemories.value.find((item) => item.memory_id === candidate.memory_id) ?? candidate;
+    notice.value = `个人记忆候选已建立并保持未生效：${candidate.memory_id}。请核对内容、来源和个人作用域后确认。`;
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function decidePersonalMemory(memory: PersonalMemoryRecord, action: 'confirm' | 'revoke'): Promise<void> {
+  if (!csrf.value || busy.value) return;
+  const message = action === 'confirm'
+    ? `确认将此内容作为个人长期记忆保存？\n\n${memory.memory_key}: ${memory.content}\n\n仅 ${memory.owner_actor_id} 可跨 Session 使用；它不会成为业务事实或项目共享约定。`
+    : `撤销这条个人记忆？后续模型请求会排除它；原始聊天消息仍保留在会话历史中。`;
+  if (!window.confirm(message)) return;
+  busy.value = true;
+  errorMessage.value = '';
+  try {
+    const operation = action === 'confirm' ? 'personal-confirm' : 'personal-revoke';
+    const key = memoryOperationKey(operation, memory.memory_id);
+    const updated = action === 'confirm'
+      ? await api.confirmPersonalMemory(memory.memory_id, csrf.value, key)
+      : await api.revokePersonalMemory(memory.memory_id, csrf.value, key);
+    completeMemoryOperation(operation, memory.memory_id);
+    await loadPersonalMemories();
+    selectedPersonalMemory.value = personalMemories.value.find((item) => item.memory_id === updated.memory_id) ?? updated;
+    if (action === 'revoke') {
+      // Force the server to revalidate already loaded answers and summaries.
+      await refreshSessionMessagesOnly(true);
+      await refreshLatestChatContext(sessionId.value, activeChatRun.value?.run_id ?? null);
+    }
+    notice.value = action === 'confirm'
+      ? '个人记忆已由本人确认并生效；后续会话仅在相关时按需检索。'
+      : '个人记忆已撤销；后续请求不会注入，原始来源消息仍保留。';
+  } catch (error) {
+    errorMessage.value = explainError(error);
+  } finally {
+    busy.value = false;
+  }
+}
+
+function currentPersonalMemoryState(memoryId: string): string {
+  return personalMemories.value.find((item) => item.memory_id === memoryId)?.state ?? 'UNKNOWN';
+}
+
+function personalMemoryModeLabel(mode: PersonalMemoryRecord['memory_mode']): string {
+  return mode === 'PINNED' ? '固定偏好' : '相关时召回';
+}
+
+function personalMemoryCreationSourceLabel(source: PersonalMemoryRecord['creation_source']): string {
+  if (source === 'USER_EXPLICIT') return '用户在聊天中明确要求记住';
+  if (source === 'USER_CONFIRMED') return '用户确认候选';
+  if (source === 'AUTO_LEARNED') return '自动从对话学习';
+  return '尚未生效的候选';
+}
+
+function personalMemoryAutoLearnStatusText(): string {
+  if (!personalMemoryAutoLearnEnabled.value) return '自动学习未启用；现有记忆不会被删除。';
+  if (!personalMemoryAutoLearnAvailable.value) return '自动学习当前不可用；不会发起提取请求。';
+  const completed = personalMemoryConsolidationStatus.value.SUCCEEDED ?? 0;
+  const failed = (personalMemoryConsolidationStatus.value.FAILED ?? 0)
+    + (personalMemoryConsolidationStatus.value.UNKNOWN ?? 0);
+  const queued = personalMemoryConsolidationStatus.value.PENDING ?? 0;
+  const running = personalMemoryConsolidationStatus.value.RUNNING ?? 0;
+  const latest = personalMemoryLatestJob.value;
+  if (personalMemoryAutoLearnProgress.value) return `${personalMemoryAutoLearnProgress.value}；已完成 ${completed} 批。`;
+  if (latest?.status === 'RUNNING') return `正在整理本批聊天 · 已新增 ${latest.written_count} 条记忆。`;
+  if (latest?.status === 'PENDING') return `自动整理已排队 · 等待 Worker 处理。`;
+  if (latest?.status === 'SUCCEEDED') {
+    return latest.written_count > 0
+      ? `最近一批新增 ${latest.written_count} 条记忆 · 跳过 ${latest.duplicate_count} 条重复项。`
+      : `最近一批没有新增记忆 · 跳过 ${latest.duplicate_count} 条重复项。`;
+  }
+  if (latest?.status === 'FAILED' || latest?.status === 'UNKNOWN') {
+    return `最近一批整理${latest.status === 'FAILED' ? '失败' : '结果未知'}${latest.failure_code ? ` · ${latest.failure_code}` : ''}。`;
+  }
+  if (running > 0) return `后台正在整理 ${running} 批 · 已完成 ${completed} 批 · 失败或结果未知 ${failed} 批。`;
+  if (queued > 0) return `自动整理已排队 ${queued} 批 · 已完成 ${completed} 批 · 失败或结果未知 ${failed} 批。`;
+  if (completed === 0 && failed === 0) return '等待累计至少 6 条成功的普通聊天消息后自动整理。';
+  return `已完成 ${completed} 批 · 失败或结果未知 ${failed} 批 · 等待新一批成功聊天。`;
+}
+
+function adjustPersonalMemoryModeForKind(): void {
+  if (personalMemoryDraftKind.value === 'PROJECT_BACKGROUND' && personalMemoryDraftMode.value === 'PINNED') {
+    personalMemoryDraftMode.value = 'RELEVANT';
   }
 }
 
@@ -394,8 +824,16 @@ async function createSession(): Promise<void> {
 }
 
 async function selectSession(value: string): Promise<void> {
+  stopRunPolling();
+  activeSessionMessageRevalidation = null;
+  revalidatingSessionId.value = '';
+  setActiveChatRun(null);
   sessionId.value = value;
+  rememberSelectedSession(value);
+  olderScrollPosition = null;
   sessionHistoryReady.value = false;
+  hasOlderMessages.value = false;
+  loadingOlderMessages.value = false;
   taskId.value = '';
   investigationOriginMessageId.value = '';
   s1DemoResource.value = null;
@@ -404,12 +842,14 @@ async function selectSession(value: string): Promise<void> {
   taskMemoryContext.value = null;
   taskSemanticContext.value = null;
   messages.value = [];
+  latestChatContextGeneration += 1;
+  latestChatContext.value = null;
   inspector.value = null;
   taskOutcome.value = null;
   s3HandoffOutcome.value = null;
   sessionEvents.value = [];
-  chunks.value = [];
-  activeChatRun.value = null;
+  seenEventSeq = new Set<number>();
+  conversationPinned.value = true;
   errorMessage.value = '';
   assistantScopes.value = { items: [], selected_project: null };
   assistantScopeNotice.value = '';
@@ -418,6 +858,7 @@ async function selectSession(value: string): Promise<void> {
   showAssistantOrderForm.value = false;
   stopEvents();
   await refreshSession();
+  await loadPersonalMemories();
   await refreshAssistantScopes();
 }
 
@@ -461,6 +902,12 @@ async function changeAssistantScope(event: Event): Promise<void> {
 
 async function loadAssistantSources(event: Event, runId: string | null | undefined, sourceTaskId: string | null): Promise<void> {
   if (!runId || !(event.target as HTMLElement).hasAttribute('open')) return;
+  await refreshAssistantSource(runId, sourceTaskId);
+}
+
+async function refreshAssistantSource(runId: string, sourceTaskId: string | null): Promise<void> {
+  if (messages.value.some((message) => message.answer_run_id === runId
+    && message.answer_visibility && message.answer_visibility !== 'CURRENT')) return;
   const requestedSession = sessionId.value;
   const generation = ++assistantSourceGeneration;
   assistantSourceRequests.set(runId, generation);
@@ -474,13 +921,52 @@ async function loadAssistantSources(event: Event, runId: string | null | undefin
       ...assistantSourceDetails.value,
       [runId]: { taskId: sourceTaskId, data, message: data.current ? '' : '部分来源已经失效，不能作为当前事实。' },
     };
+    if (sourceTaskId && !data.current) void refreshSessionMessagesOnly(true);
   } catch (error) {
     if (requestedSession !== sessionId.value || assistantSourceRequests.get(runId) !== generation) return;
     // Never leave a prior authorized body visible after this read is rejected.
     assistantSourceDetails.value = {
       ...assistantSourceDetails.value, [runId]: { taskId: sourceTaskId, data: null, message: `此来源读取未获确认：${explainError(error)}` },
     };
+    if (sourceTaskId) void refreshSessionMessagesOnly(true);
   }
+}
+
+async function restoreRecentAssistantSources(items: MessageItem[], requestedSessionId: string): Promise<void> {
+  const requests = recentAssistantSourceRequests(items, RESTORED_ASSISTANT_SOURCE_LIMIT);
+  for (let index = 0; index < requests.length; index += RESTORED_ASSISTANT_SOURCE_CONCURRENCY) {
+    if (sessionId.value !== requestedSessionId) return;
+    const batch = requests.slice(index, index + RESTORED_ASSISTANT_SOURCE_CONCURRENCY);
+    await Promise.all(batch.map((source) => refreshAssistantSource(source.runId, source.taskId)));
+  }
+}
+
+function assistantInvestigationProposal(runId: string | null | undefined, sourceMessageId: string) {
+  return runId
+    ? controlledInvestigationProposal(assistantSourceDetails.value[runId]?.data, sourceMessageId)
+    : null;
+}
+
+function assistantTurnMessages(item: { messages?: MessageItem[]; message?: MessageItem }): MessageItem[] {
+  return item.messages?.length ? item.messages : item.message ? [item.message] : [];
+}
+
+function assistantTurnLabel(item: { messages?: MessageItem[]; message?: MessageItem }): string {
+  const turnMessages = assistantTurnMessages(item);
+  if (turnMessages.length && turnMessages.every((message) => message.answer_kind === 'PROGRAM_LIMIT')) {
+    return '程序限制说明 · 非模型答复';
+  }
+  if (turnMessages.some((message) => message.answer_kind === 'PROGRAM_LIMIT')) {
+    return `同一轮答复 · 含程序状态（${turnMessages.length} 条记录）`;
+  }
+  return turnMessages.length > 1 ? `同一轮答复 · ${turnMessages.length} 条消息` : '聊天答复';
+}
+
+function assistantTurnSourceLabel(item: { messages?: MessageItem[]; message?: MessageItem }): string {
+  const turnMessages = assistantTurnMessages(item);
+  return turnMessages.every((message) => message.answer_kind === 'PROGRAM_LIMIT')
+    ? '程序生成的限制说明，不是模型答复'
+    : '该 Run 的工具调用与答复来源；刷新时会重新核验访问资格';
 }
 
 async function openAssistantOrderForm(): Promise<void> {
@@ -523,6 +1009,9 @@ async function bindAssistantOrder(): Promise<void> {
 async function refreshSession(): Promise<void> {
   if (!sessionId.value) return;
   const requestedSessionId = sessionId.value;
+  // Source results are authorization-sensitive. Drop page memory before the
+  // server revalidates a bounded set of recent persisted model answers.
+  maskLoadedS3History();
   const messageTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
   const isCurrentSession = (): boolean => sessionId.value === requestedSessionId;
   loading.value = true;
@@ -530,10 +1019,12 @@ async function refreshSession(): Promise<void> {
     const response = await api.messages(requestedSessionId);
     if (!s3ReadResponseFence.isCurrentSessionMessages(messageTicket, sessionId.value)) return;
     messages.value = response.items;
+    hasOlderMessages.value = response.has_more_before;
     // The messages endpoint revalidates and sanitizes persisted answers. Their
     // explicit source IDs make the conversation safe to project before the
     // parallel Task Inspector refresh finishes.
     sessionHistoryReady.value = true;
+    void restoreRecentAssistantSources(response.items, requestedSessionId);
     let linkedTask = [...response.items].reverse().find((item) => item.task_id)?.task_id ?? null;
     const linkedTasks = await api.session(requestedSessionId);
     if (!isCurrentSession()) return;
@@ -544,14 +1035,17 @@ async function refreshSession(): Promise<void> {
     const chatRuns = [...runs.items].filter((run) => run.kind === 'CHAT_READONLY');
     const latestChat = chatRuns.at(-1) ?? null;
     const recoverable = [...chatRuns].reverse().find((run) => ['QUEUED', 'RUNNING', 'INTERRUPTED_RECOVERABLE'].includes(run.status));
-    activeChatRun.value = recoverable ?? latestChat;
+    const chatRun = recoverable ?? latestChat;
+    setActiveChatRun(chatRun);
+    if (chatRun) void refreshRunActivity(chatRun.run_id, requestedSessionId);
     if (recoverable) {
-      chunks.value = await api.chunks(recoverable.run_id, 0).then((result) => result.items);
-      if (!isCurrentSession()) return;
-      lastChunkSeq.value = chunks.value.reduce((max, item) => Math.max(max, item.chunk_seq), 0);
+      await loadChunks(recoverable.run_id);
+      if (!isCurrentSession() || activeChatRun.value?.run_id !== recoverable.run_id) return;
       void watchRun(recoverable.run_id);
-    } else if (latestChat && ['FAILED', 'BLOCKED'].includes(latestChat.status)) {
-      errorMessage.value = `上次只读回答结束：${readableStatus(latestChat.status)}${latestChat.waiting_reason ? `（${latestChat.waiting_reason}）` : ''}`;
+    } else if (latestChat && ['FAILED', 'BLOCKED', 'CANCELLED'].includes(latestChat.status)) {
+      await loadChunks(latestChat.run_id);
+      if (!isCurrentSession() || activeChatRun.value?.run_id !== latestChat.run_id) return;
+      errorMessage.value = terminalRunMessage(latestChat);
     }
     if (!linkedTask) {
       linkedTask = [...linkedTasks.tasks].reverse().find((item) => item.task_id)?.task_id ?? null;
@@ -563,6 +1057,8 @@ async function refreshSession(): Promise<void> {
     }
     if (!isCurrentSession()) return;
     await refreshEventHistory();
+    if (!isCurrentSession()) return;
+    await refreshLatestChatContext(requestedSessionId, activeChatRun.value?.run_id ?? null);
     if (!isCurrentSession()) return;
     connectEvents();
   } catch (error) {
@@ -587,7 +1083,7 @@ async function refreshInspector(): Promise<boolean> {
       inspector.value = refreshed;
       clearS3TaskResultCache(requestedTaskId);
       try {
-        await refreshSessionMessagesOnly();
+        await refreshSessionMessagesOnly(true);
         if (!s3ReadResponseFence.isCurrentInspector(deniedTicket, taskId.value)) return false;
         clearS3TaskResultCache(requestedTaskId);
       } catch {
@@ -598,14 +1094,17 @@ async function refreshInspector(): Promise<boolean> {
       return true;
     }
     const isS3 = String(refreshed.task.service_id ?? '') === 'orders-async-demo';
+    const s3SourcesInvalidated = isS3
+      && (refreshed.trusted_state.s3_outcome as Record<string, unknown> | undefined)?.currentness
+        === 'INVALIDATED_BY_CURRENT_FACTS';
     const authorizationRestored = isS3 && s3ReadResponseFence.isTaskDenied(requestedTaskId);
     if (isS3 && !s3ReadResponseFence.acceptAuthorizedInspector(requestTicket)) return false;
     inspector.value = refreshed;
-    if (authorizationRestored) {
+    if (authorizationRestored || s3SourcesInvalidated) {
       try {
-        await refreshSessionMessagesOnly();
+        await refreshSessionMessagesOnly(true);
       } catch (error) {
-        errorMessage.value = `授权恢复后会话消息刷新失败：${explainError(error)}`;
+        errorMessage.value = `会话历史重新核验失败：${explainError(error)}`;
       }
       if (!stillShowingRequestedTask()) return false;
     }
@@ -642,7 +1141,7 @@ async function refreshInspector(): Promise<boolean> {
       if (!deniedTicket) return false;
       clearS3TaskResultCache(requestedTaskId);
       try {
-        await refreshSessionMessagesOnly();
+        await refreshSessionMessagesOnly(true);
         if (!s3ReadResponseFence.isCurrentInspector(deniedTicket, taskId.value)) return false;
         clearS3TaskResultCache(requestedTaskId);
       } catch {
@@ -676,9 +1175,7 @@ function clearS3TaskResultCache(expectedTaskId: string): void {
   s3HandoffOutcome.value = null;
   taskOutcome.value = null;
   if (activeChatRun.value?.task_id === expectedTaskId) {
-    activeChatRun.value = null;
-    chunks.value = [];
-    lastChunkSeq.value = 0;
+    setActiveChatRun(null);
   }
 }
 
@@ -792,65 +1289,41 @@ async function createDemoTask(): Promise<void> {
 async function sendMessage(): Promise<void> {
   const body = draft.value.trim();
   if (!sessionId.value || !body || !csrf.value || busy.value) return;
+  const requestedSession = sessionId.value;
   busy.value = true;
-  let fallbackChatRunId: string | null = null;
+  let acceptedRunForReconnect: string | null = null;
   errorMessage.value = '';
   notice.value = '';
-  chunks.value = [];
-  lastChunkSeq.value = 0;
   try {
-    const requestedSession = sessionId.value;
-    const professional = useProfessionalAssistant.value;
     const assistantTargetTask = assistantTaskId.value;
     const operationKey = assistantOperationKey('message', requestedSession);
-    const operation = professional ? await beginAssistantOperation(sessionStorage, operationKey, {
+    const operation = await beginAssistantOperation(sessionStorage, operationKey, {
       body, task_id: assistantTargetTask,
-    }) : null;
-    const accepted = professional && operation
-      ? await api.assistantSend(requestedSession, body, assistantTargetTask, csrf.value, operation.operationId)
-      : await api.send(requestedSession, body, taskId.value || null, csrf.value);
-    if (operation) acknowledgeAssistantOperation(sessionStorage, operationKey, operation.operationId);
-    fallbackChatRunId = taskId.value ? accepted.run_id : null;
+    });
+    const accepted = await api.assistantSend(
+      requestedSession, body, assistantTargetTask, csrf.value, operation.operationId,
+    );
+    acknowledgeAssistantOperation(sessionStorage, operationKey, operation.operationId);
+    if (sessionId.value !== requestedSession) return;
+    acceptedRunForReconnect = accepted.run_id;
     draft.value = '';
-    activeChatRun.value = await api.run(accepted.run_id);
+    const run = await api.run(accepted.run_id);
+    if (sessionId.value !== requestedSession) return;
+    setActiveChatRun(run);
     await refreshSessionMessagesOnly();
-    if (professional) {
-      // One product core owns this request; do not schedule a classification Chat sidecar.
-      fallbackChatRunId = null;
-      await watchRun(accepted.run_id);
-      if (taskId.value) await refreshInspector();
-    } else if (taskId.value) {
-      const assessment = await api.assessTaskUpdate(taskId.value, accepted.message_id, csrf.value);
-      investigationUpdates.value = [
-        ...investigationUpdates.value.filter((item) => item.source_message_id !== accepted.message_id),
-        assessment,
-      ];
-      if (assessment.proposal?.status === 'PENDING_CONFIRMATION') {
-        notice.value = 'OpsPilot 发现这条消息可能是 Task 关键纠错。请核对原文、当前输入和变更摘要，再决定是否重新调查。';
-      } else if (assessment.intent === 'FOLLOW_UP' && assessment.follow_up_action === 'INVESTIGATE' && assessment.investigation_run_id) {
-        activeChatRun.value = null;
-        chunks.value = [];
-        notice.value = 'OpsPilot 选择补查当前任务的可信事实；调查正在执行。';
-        await watchRun(assessment.investigation_run_id);
-        await refreshInspector();
-        const followup = inspector.value?.readonly_followups.find((item) => item.run_id === assessment.investigation_run_id);
-        notice.value = followup?.result_state === 'ANSWERED'
-          ? '只读补查已完成，答案与来源已显示在对话中。'
-          : followup?.result_state === 'PARTIAL'
-            ? '只读补查只完成了部分目标；请查看缺口和来源后继续对话。'
-            : '本次补查尚未形成完整结果；业务状态与诊断未改变。';
-      } else {
-        await watchRun(accepted.run_id);
-      }
-      await refreshInspector();
-    } else {
-      await watchRun(accepted.run_id);
+    acceptedRunForReconnect = null;
+    await watchRun(accepted.run_id);
+    if (sessionId.value !== requestedSession) return;
+    if (taskId.value) await refreshInspector();
+    if (assistantTargetTask === null && accepted.input_kind === 'CHAT_READONLY') {
+      await refreshAssistantSource(accepted.run_id, null);
     }
   } catch (error) {
-    if (fallbackChatRunId) {
-      notice.value = '调查意图判断暂不可用；系统将安全降级到同一消息的普通回答，不会重复调用 Chat。';
-      await watchRun(fallbackChatRunId);
-      await refreshInspector();
+    if (sessionId.value !== requestedSession) return;
+    if (acceptedRunForReconnect) {
+      notice.value = '助手运行已接收；正在恢复同一条会话回复。';
+      await watchRun(acceptedRunForReconnect);
+      if (taskId.value) await refreshInspector();
     } else {
       errorMessage.value = explainError(error);
     }
@@ -1220,62 +1693,292 @@ function readableRunReason(value: unknown): string {
   return reason;
 }
 
-async function refreshSessionMessagesOnly(): Promise<void> {
+function terminalRunMessage(run: RunItem): string {
+  const reason = String(run.waiting_reason ?? '');
+  if (run.kind === 'INVESTIGATE' && reason === 'LEGACY_PROVIDER_AUTHORIZATION_REQUIRED') {
+    const source = messages.value.find((item) => item.message_id === run.source_message_id);
+    if (
+      source?.input_kind === 'CORRECT_TASK_INPUT'
+      && source.application_state === 'RECEIVED_NOT_APPLIED'
+      && !source.applied_run_id
+    ) {
+      return '正式更正已受理但尚未应用；正式调查因 Legacy Investigator Provider 未授权而停止。你仍可在同一 Task 中使用普通只读聊天查询已绑定订单；这不会应用更正、创建 Plan 或执行业务写入。';
+    }
+    return '正式调查未执行：当前未授权 Legacy Investigator 的模型调用。你可以在同一 Task 中使用普通只读聊天查询已绑定订单；只读聊天不会执行正式调查或业务写入。';
+  }
+  return `本次运行结束：${readableStatus(run.status)}${reason ? `（${readableRunReason(reason)}）` : ''}`;
+}
+
+function maskLoadedS3History(): void {
+  messages.value = maskS3AnswersForRevalidation(messages.value);
+  assistantSourceDetails.value = {};
+  assistantSourceRequests.clear();
+}
+
+function invalidateHistoryOnStreamDisconnect(): void {
   if (!sessionId.value) return;
-  const requestedSessionId = sessionId.value;
-  const requestTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
-  const response = await api.messages(requestedSessionId);
-  if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
-    messages.value = filterDeniedS3AssistantMessages(response.items, (taskId) => s3ReadResponseFence.isTaskDenied(taskId));
-    sessionHistoryReady.value = true;
+  s3ReadResponseFence.beginSessionMessages(sessionId.value);
+  maskLoadedS3History();
+  if (activeChatRun.value?.task_id) {
+    chatActivities.value = [];
+    resetChunkProjection();
   }
 }
 
-async function loadChunks(runId: string): Promise<void> {
+async function refreshSessionMessagesOnly(revalidateLoaded = false): Promise<void> {
+  if (!sessionId.value) return;
+  const requestedSessionId = sessionId.value;
+  if (activeSessionMessageRevalidation?.sessionId === requestedSessionId) {
+    if (revalidateLoaded) activeSessionMessageRevalidation.queueRevalidation = true;
+    else activeSessionMessageRevalidation.queueIncremental = true;
+    return;
+  }
+  const revalidationState = revalidateLoaded
+    ? { sessionId: requestedSessionId, queueIncremental: false, queueRevalidation: false }
+    : null;
+  if (revalidationState) {
+    activeSessionMessageRevalidation = revalidationState;
+    revalidatingSessionId.value = requestedSessionId;
+    maskLoadedS3History();
+  }
+  const requestTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
+  const cachedFirstSequence = revalidateLoaded ? messages.value[0]?.sequence : undefined;
+  const lastSequence = messages.value.at(-1)?.sequence;
+  try {
+    if (revalidateLoaded) {
+      // Authorization and source currentness can change for any loaded page.
+      // Refetch the visible sequence window from the server, replacing the
+      // cache so sanitized or omitted historical answers cannot survive a no-op
+      // incremental response. The API page size stays bounded at 500.
+      let response = await api.messages(requestedSessionId);
+      if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+      const received = [...response.items];
+      let firstSequence = received[0]?.sequence;
+      while (cachedFirstSequence !== undefined && firstSequence !== undefined
+        && firstSequence > cachedFirstSequence && response.has_more_before) {
+        response = await api.messages(requestedSessionId, { beforeSeq: firstSequence });
+        if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+        if (!response.items.length) break;
+        received.unshift(...response.items);
+        const nextFirstSequence = response.items[0]?.sequence;
+        if (nextFirstSequence === undefined || nextFirstSequence >= firstSequence) break;
+        firstSequence = nextFirstSequence;
+      }
+      messages.value = filterDeniedS3AssistantMessages(
+        received, (requestedTaskId) => s3ReadResponseFence.isTaskDenied(requestedTaskId),
+      );
+      hasOlderMessages.value = response.has_more_before;
+      sessionHistoryReady.value = true;
+      return;
+    }
+
+    let response = await api.messages(
+      requestedSessionId,
+      lastSequence === undefined ? {} : { afterSeq: lastSequence },
+    );
+    if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+    const received = [...response.items];
+    let afterSequence = received.at(-1)?.sequence ?? lastSequence ?? 0;
+    // A delayed tab may have missed more than one page of events. Drain forward
+    // pages so the latest answer is visible while preserving any older pages.
+    while (response.has_more_after && afterSequence > 0) {
+      response = await api.messages(requestedSessionId, { afterSeq: afterSequence });
+      if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+      received.push(...response.items);
+      const nextSequence = received.at(-1)?.sequence ?? afterSequence;
+      if (nextSequence <= afterSequence) break;
+      afterSequence = nextSequence;
+    }
+    const safeItems = filterDeniedS3AssistantMessages(
+      received, (requestedTaskId) => s3ReadResponseFence.isTaskDenied(requestedTaskId),
+    );
+    if (safeItems.length) {
+      const merged = new Map(messages.value.map((item) => [item.message_id, item]));
+      for (const item of safeItems) merged.set(item.message_id, item);
+      messages.value = [...merged.values()].sort((left, right) => left.sequence - right.sequence);
+    } else if (lastSequence === undefined) {
+      messages.value = [];
+      hasOlderMessages.value = response.has_more_before;
+    }
+    sessionHistoryReady.value = true;
+  } catch (error) {
+    if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
+      errorMessage.value = explainError(error);
+    }
+  } finally {
+    if (revalidationState && activeSessionMessageRevalidation === revalidationState) {
+      const canDrainQueue = sessionId.value === requestedSessionId;
+      const rerunRevalidation = canDrainQueue && revalidationState.queueRevalidation;
+      const rerunIncremental = canDrainQueue && !rerunRevalidation && revalidationState.queueIncremental;
+      activeSessionMessageRevalidation = null;
+      revalidatingSessionId.value = '';
+      if (rerunRevalidation) void refreshSessionMessagesOnly(true);
+      else if (rerunIncremental) void refreshSessionMessagesOnly();
+    }
+  }
+}
+
+async function loadOlderMessages(): Promise<void> {
+  if (!sessionId.value || !hasOlderMessages.value || loadingOlderMessages.value) return;
+  if (activeSessionMessageRevalidation?.sessionId === sessionId.value) return;
+  const firstSequence = messages.value[0]?.sequence;
+  if (firstSequence === undefined) return;
+  const requestedSessionId = sessionId.value;
+  const requestTicket = s3ReadResponseFence.beginSessionMessages(requestedSessionId);
+  loadingOlderMessages.value = true;
+  errorMessage.value = '';
+  try {
+    const response = await api.messages(requestedSessionId, { beforeSeq: firstSequence });
+    if (!s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) return;
+    olderScrollPosition = conversationScroll.value
+      ? { top: conversationScroll.value.scrollTop, height: conversationScroll.value.scrollHeight }
+      : null;
+    const safeItems = filterDeniedS3AssistantMessages(
+      response.items, (requestedTaskId) => s3ReadResponseFence.isTaskDenied(requestedTaskId),
+    );
+    const merged = new Map(messages.value.map((item) => [item.message_id, item]));
+    for (const item of safeItems) merged.set(item.message_id, item);
+    messages.value = [...merged.values()].sort((left, right) => left.sequence - right.sequence);
+    hasOlderMessages.value = response.has_more_before;
+    await nextTick();
+    if (conversationScroll.value && olderScrollPosition) {
+      conversationScroll.value.scrollTop = olderScrollPosition.top
+        + conversationScroll.value.scrollHeight - olderScrollPosition.height;
+    }
+    olderScrollPosition = null;
+  } catch (error) {
+    if (s3ReadResponseFence.isCurrentSessionMessages(requestTicket, sessionId.value)) {
+      errorMessage.value = explainError(error);
+    }
+  } finally {
+    olderScrollPosition = null;
+    loadingOlderMessages.value = false;
+  }
+}
+
+function resetChunkProjection(afterSeq = 0): void {
+  chunkProjectionGeneration += 1;
+  loadingChunksTicket += 1;
+  loadingChunksRunId = null;
+  chunks.value = [];
+  lastChunkSeq.value = afterSeq;
+  requestedChunkSeq = afterSeq;
+}
+
+function setActiveChatRun(run: RunItem | null): void {
+  if (activeChatRun.value?.run_id !== run?.run_id) {
+    resetChunkProjection();
+    chatActivities.value = [];
+  }
+  activeChatRun.value = run;
+}
+
+async function loadChunks(runId: string, availableSeq = 0): Promise<void> {
+  if (activeChatRun.value?.run_id !== runId || (availableSeq > 0 && availableSeq <= lastChunkSeq.value)) return;
+  requestedChunkSeq = Math.max(requestedChunkSeq, availableSeq);
   if (loadingChunksRunId === runId) return;
   loadingChunksRunId = runId;
+  const requestTicket = ++loadingChunksTicket;
+  const generation = chunkProjectionGeneration;
+  const requestedSession = sessionId.value;
+  const isCurrent = () => sessionId.value === requestedSession && chunkProjectionGeneration === generation
+    && activeChatRun.value?.run_id === runId;
   try {
-    const response = await api.chunks(runId, lastChunkSeq.value);
-    if (activeChatRun.value?.run_id !== runId || response.items.length === 0) return;
-    const merged = new Map(chunks.value.map((chunk) => [chunk.chunk_seq, chunk]));
-    for (const chunk of response.items) {
-      if (!merged.has(chunk.chunk_seq)) merged.set(chunk.chunk_seq, chunk);
+    for (;;) {
+      const afterSeq = lastChunkSeq.value;
+      const response = await api.chunks(runId, afterSeq);
+      if (!isCurrent() || !response.items.length) return;
+      chunks.value = mergeChatChunks(chunks.value, response.items);
+      lastChunkSeq.value = chunks.value.at(-1)?.chunk_seq ?? afterSeq;
+      // Catch up to events received while this page was in flight.
+      if (lastChunkSeq.value <= afterSeq || (lastChunkSeq.value >= requestedChunkSeq && response.items.length < 500)) return;
     }
-    chunks.value = [...merged.values()].sort((left, right) => left.chunk_seq - right.chunk_seq);
-    lastChunkSeq.value = Math.max(lastChunkSeq.value, ...response.items.map((item) => item.chunk_seq));
+  } catch (error) {
+    if (!isCurrent()) return;
+    if (activeChatRun.value?.task_id) {
+      resetChunkProjection();
+      chatActivities.value = [];
+    }
+    errorMessage.value = explainError(error);
   } finally {
-    if (loadingChunksRunId === runId) loadingChunksRunId = null;
+    if (loadingChunksTicket === requestTicket && loadingChunksRunId === runId) loadingChunksRunId = null;
   }
+}
+
+async function refreshRunActivity(runId: string, requestedSession = sessionId.value): Promise<void> {
+  const generation = chunkProjectionGeneration;
+  try {
+    const response = await api.runActivity(runId);
+    if (sessionId.value !== requestedSession || activeChatRun.value?.run_id !== runId
+      || generation !== chunkProjectionGeneration) return;
+    const merged = new Map(chatActivities.value.map((item) => [item.event_seq, item]));
+    for (const item of response.items) merged.set(item.event_seq, item);
+    chatActivities.value = [...merged.values()].sort((left, right) => left.event_seq - right.event_seq);
+  } catch {
+    // Persisted Session events remain available if this run-scoped read fails.
+  }
+}
+
+function stopRunPolling(): void {
+  runPollGeneration += 1;
+  if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
+  runPollTimer = undefined;
+  const finish = finishRunPoll;
+  finishRunPoll = null;
+  finish?.();
 }
 
 async function watchRun(runId: string): Promise<void> {
-  if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
+  stopRunPolling();
+  const requestedSession = sessionId.value;
+  const pollGeneration = ++runPollGeneration;
   let polls = 0;
+  let reading = false;
   await new Promise<void>((resolve) => {
+    finishRunPoll = resolve;
     runPollTimer = window.setInterval(async () => {
+      if (runPollGeneration !== pollGeneration || reading) return;
+      reading = true;
       polls += 1;
       try {
         const run = await api.run(runId);
-        if (run.kind === 'CHAT_READONLY') activeChatRun.value = run;
-        if (run.kind === 'CHAT_READONLY') await loadChunks(runId);
-        if (['SUCCEEDED', 'FAILED', 'BLOCKED', 'WAITING_APPROVAL', 'WAITING_INPUT'].includes(run.status) || polls >= 240) {
-          if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
-          runPollTimer = undefined;
+        if (runPollGeneration !== pollGeneration) return;
+        if (sessionId.value !== requestedSession || run.session_id !== requestedSession) {
+          stopRunPolling();
+          return;
+        }
+        if (run.task_id && s3ReadResponseFence.isTaskDenied(run.task_id)) {
+          stopRunPolling();
+          return;
+        }
+        if (run.kind === 'CHAT_READONLY') {
+          setActiveChatRun(run);
+          await Promise.all([
+            run.status !== 'SUCCEEDED' ? loadChunks(runId) : Promise.resolve(),
+            refreshRunActivity(runId, requestedSession),
+          ]);
+        }
+        if (runPollGeneration !== pollGeneration) return;
+        if (['SUCCEEDED', 'FAILED', 'BLOCKED', 'CANCELLED', 'INTERRUPTED_RECOVERABLE', 'WAITING_APPROVAL', 'WAITING_INPUT'].includes(run.status) || polls >= 240) {
+          stopRunPolling();
           await refreshSessionMessagesOnly();
+          if (run.kind === 'CHAT_READONLY') await refreshLatestChatContext(sessionId.value, runId);
           if (run.task_id) {
             taskId.value = run.task_id;
             await refreshInspector();
           }
-          if (run.status === 'FAILED' || run.status === 'BLOCKED') {
-            errorMessage.value = `本次运行结束：${readableStatus(run.status)}${run.waiting_reason ? `（${run.waiting_reason}）` : ''}`;
+          if (run.status === 'FAILED' || run.status === 'BLOCKED' || run.status === 'CANCELLED' || run.status === 'INTERRUPTED_RECOVERABLE') {
+            if (notice.value.startsWith('正在提交关键更正；')) notice.value = '';
+            errorMessage.value = terminalRunMessage(run);
           }
           resolve();
         }
       } catch (error) {
-        if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
-        runPollTimer = undefined;
-        errorMessage.value = explainError(error);
-        resolve();
+        if (runPollGeneration !== pollGeneration) return;
+        if (sessionId.value === requestedSession) errorMessage.value = explainError(error);
+        stopRunPolling();
+      } finally {
+        reading = false;
       }
     }, 500);
   });
@@ -1283,21 +1986,36 @@ async function watchRun(runId: string): Promise<void> {
 
 async function refreshEventHistory(): Promise<void> {
   if (!sessionId.value) return;
-  const key = `opspilot.cursor.${sessionId.value}`;
+  const requestedSession = sessionId.value;
+  const key = `opspilot.cursor.${requestedSession}`;
   const cursor = Number(sessionStorage.getItem(key) ?? '0');
-  const response = await api.eventHistory(sessionId.value, Number.isFinite(cursor) ? cursor : 0);
-  for (const item of response.items) acceptEvent(item as unknown as EventItem);
+  const response = await api.eventHistory(requestedSession, Number.isFinite(cursor) ? cursor : 0);
+  if (sessionId.value !== requestedSession) return;
+  for (const item of response.items) acceptEvent(item as unknown as EventItem, requestedSession);
 }
 
-function acceptEvent(item: EventItem): void {
+function acceptEvent(item: EventItem, requestedSession = sessionId.value): void {
+  if (!requestedSession || sessionId.value !== requestedSession) return;
   if (seenEventSeq.has(item.event_seq)) return;
   seenEventSeq.add(item.event_seq);
   sessionEvents.value.unshift(item);
   sessionEvents.value = sessionEvents.value.slice(0, 60);
   if (sessionId.value) sessionStorage.setItem(`opspilot.cursor.${sessionId.value}`, String(item.event_seq));
   const runId = String(item.payload.run_id ?? '');
+  if (item.event_kind === 'ASSISTANT_ACTIVITY' && runId === activeChatRun.value?.run_id) {
+    const activity = item as unknown as RunActivity;
+    if (!chatActivities.value.some((entry) => entry.event_seq === item.event_seq)) {
+      chatActivities.value = [...chatActivities.value, activity].slice(-100);
+    }
+  }
+  if (item.event_kind === 'CHAT_CHUNKS_RESET' && runId === activeChatRun.value?.run_id) {
+    resetChunkProjection(Number(item.payload.reset_before_chunk_seq ?? 0));
+  }
+  if (item.event_kind === 'CHAT_ANSWER_COMMITTED' && runId === activeChatRun.value?.run_id) {
+    void refreshLatestChatContext(sessionId.value, runId);
+  }
   if (item.event_kind === 'CHAT_CHUNK_AVAILABLE' && runId && runId === activeChatRun.value?.run_id) {
-    void loadChunks(runId);
+    void loadChunks(runId, Number(item.payload.chunk_seq ?? 0));
   }
   if (item.event_kind.startsWith('RUN_STATUS_') || item.event_kind === 'CHAT_ANSWER_COMMITTED'
     || item.event_kind === 'CHAT_ROUTE_RESOLVED'
@@ -1307,19 +2025,29 @@ function acceptEvent(item: EventItem): void {
   }
 }
 
-function connectEvents(): void {
+function connectEvents(revalidateOnOpen = false): void {
   if (!sessionId.value || reconnectPaused.value || eventSource) return;
-  const cursor = sessionStorage.getItem(`opspilot.cursor.${sessionId.value}`) ?? '0';
-  const source = new EventSource(`/api/sessions/${encodeURIComponent(sessionId.value)}/events?after=${encodeURIComponent(cursor)}`);
+  const requestedSession = sessionId.value;
+  const cursor = sessionStorage.getItem(`opspilot.cursor.${requestedSession}`) ?? '0';
+  const source = new EventSource(`/api/sessions/${encodeURIComponent(requestedSession)}/events?after=${encodeURIComponent(cursor)}`);
   eventSource = source;
-  source.onopen = () => { reconnectCount.value = 0; notice.value = ''; };
+  source.onopen = () => {
+    if (sessionId.value !== requestedSession || eventSource !== source) return;
+    if (revalidateOnOpen || reconnectCount.value > 0) {
+      void refreshSessionMessagesOnly(true);
+      if (taskId.value) void refreshInspector();
+      if (activeChatRun.value) void refreshRunActivity(activeChatRun.value.run_id, requestedSession);
+    }
+    reconnectCount.value = 0; notice.value = '';
+  };
   const listener = (event: Event): void => {
+    if (sessionId.value !== requestedSession || eventSource !== source) return;
     const message = event as MessageEvent<string>;
     const sequence = Number(message.lastEventId);
     if (!Number.isFinite(sequence) || sequence <= 0 || seenEventSeq.has(sequence)) return;
     try {
       acceptEvent({ event_seq: sequence, event_kind: message.type, happened_at: new Date().toISOString(),
-                    payload: JSON.parse(message.data) as Record<string, unknown> });
+                    payload: JSON.parse(message.data) as Record<string, unknown> }, requestedSession);
     } catch {
       errorMessage.value = '收到无法解析的事件，已保留持久历史供刷新恢复。';
     }
@@ -1328,14 +2056,17 @@ function connectEvents(): void {
     'SESSION_CREATED', 'MESSAGE_ACCEPTED', 'TASK_CREATED', 'RUN_STATUS_QUEUED', 'RUN_STATUS_RUNNING',
     'RUN_STATUS_SUCCEEDED', 'RUN_STATUS_FAILED', 'RUN_STATUS_BLOCKED', 'RUN_STATUS_WAITING_APPROVAL',
     'RUN_STATUS_WAITING_INPUT', 'RUN_STATUS_INTERRUPTED_RECOVERABLE', 'CHAT_CHUNK_AVAILABLE',
+    'ASSISTANT_ACTIVITY', 'CHAT_CHUNKS_RESET',
     'CHAT_ANSWER_COMMITTED', 'CHAT_ATTEMPT_FAILED', 'RUN_RETRY_INTERRUPTED_RECOVERABLE', 'RUN_RETRY_BLOCKED',
     'PLAN_APPROVED', 'PLAN_REJECTED', 'APPROVAL_RESUME_QUEUED', 'REPAIR_COMMITTED',
     'REPORT_FROZEN', 'DELIVERY_COMMITTED', 'S3_DIAGNOSIS_FROZEN',
     'CHAT_ROUTE_RESOLVED',
   ]) source.addEventListener(name, listener);
   source.onerror = () => {
+    if (sessionId.value !== requestedSession || eventSource !== source) return;
     source.close();
     if (eventSource === source) eventSource = null;
+    invalidateHistoryOnStreamDisconnect();
     reconnectCount.value += 1;
     if (reconnectCount.value > 5) {
       reconnectPaused.value = true;
@@ -1348,9 +2079,16 @@ function connectEvents(): void {
 }
 
 function reconnectEvents(): void {
+  const requestedSession = sessionId.value;
+  stopEvents();
+  invalidateHistoryOnStreamDisconnect();
   reconnectPaused.value = false;
   reconnectCount.value = 0;
-  void refreshEventHistory().then(connectEvents).catch((error: unknown) => { errorMessage.value = explainError(error); });
+  void refreshEventHistory().then(() => {
+    if (sessionId.value === requestedSession) connectEvents(true);
+  }).catch((error: unknown) => {
+    if (sessionId.value === requestedSession) errorMessage.value = explainError(error);
+  });
 }
 
 function stopEvents(): void {
@@ -1358,6 +2096,18 @@ function stopEvents(): void {
   eventSource = null;
   if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
   reconnectTimer = undefined;
+}
+
+function updateConversationPinned(): void {
+  const element = conversationScroll.value;
+  conversationPinned.value = !element
+    || element.scrollHeight - element.scrollTop - element.clientHeight < 120;
+}
+
+function scrollToLatest(): void {
+  conversationPinned.value = true;
+  const element = conversationScroll.value;
+  if (element) element.scrollTop = element.scrollHeight;
 }
 
 function submitOnEnter(event: KeyboardEvent): void {
@@ -1368,11 +2118,14 @@ function submitOnEnter(event: KeyboardEvent): void {
 }
 
 watch(taskId, () => { void refreshInspector(); });
-watch([messages, chunks], () => conversationEnd.value?.scrollIntoView({ behavior: 'smooth', block: 'end' }));
+watch([messages, chunks, chatActivities, activeChatRun], () => {
+  if (conversationPinned.value && !olderScrollPosition) scrollToLatest();
+}, { flush: 'post' });
 onMounted(() => { void restoreLogin(); });
 onBeforeUnmount(() => {
   stopEvents();
-  if (runPollTimer !== undefined) window.clearInterval(runPollTimer);
+  stopRunPolling();
+  stopPersonalMemoryStatusPolling();
 });
 </script>
 
@@ -1564,14 +2317,13 @@ onBeforeUnmount(() => {
           </div>
           <div class="toolbar-actions">
             <span v-if="taskId" class="task-chip"><i></i>{{ taskId.slice(0, 16) }}</span>
-            <label class="assistant-mode"><input v-model="professionalMode" type="checkbox" data-testid="professional-assistant-mode" :disabled="busy">专业助手</label>
             <button v-if="canCreateTask" class="outline-button" type="button" :disabled="!sessionId || busy || !csrf" @click="toggleTaskForm">进入受控调查</button>
             <button class="inspector-toggle" type="button" aria-label="显示 Task 检查器" @click="narrowInspectorOpen = !narrowInspectorOpen">▤</button>
           </div>
         </div>
 
-        <div class="demo-notice"><span class="notice-icon">i</span><span>可以直接提问或粘贴材料，无需先创建任务。读取订单当前状态前，请确认已授权的业务对象。专业助手只做解释和只读调查；修复、审批与正式交接仍使用原有受控流程。</span></div>
-        <div v-if="sessionId && professionalMode" class="assistant-entry" data-testid="assistant-entry">
+        <div class="demo-notice"><span class="notice-icon">i</span><span>可以直接提问或粘贴材料，无需先创建任务。读取业务当前状态前，请确认已授权的对象。聊天助手进行解释和授权范围内的只读调查；正式调查、审批、修复和交接通过单独的受控流程推进。</span></div>
+        <div v-if="sessionId" class="assistant-entry" data-testid="assistant-entry">
           <label v-if="assistantScopes.items.length">资料项目
             <select :value="assistantScopes.selected_project ?? ''" data-testid="assistant-project" :disabled="busy || !csrf" @change="changeAssistantScope">
               <option v-if="!assistantScopes.selected_project" value="">请选择可访问的项目</option>
@@ -1579,7 +2331,7 @@ onBeforeUnmount(() => {
             </select>
           </label>
           <small v-if="assistantScopeNotice" role="status">{{ assistantScopeNotice }}</small>
-          <small v-if="taskId && !assistantTaskId">S1 调查使用原有专业调查核心；普通助手对话继续保存在此会话，不直接绑定 S1 任务。</small>
+          <small v-if="taskId && !assistantTaskId">当前 Task 不在助手只读绑定范围内。助手消息不会继承该 Task，请从独立的受控流程继续。</small>
           <button v-if="canCreateTask" class="outline-button" type="button" data-testid="assistant-order-open" :disabled="busy || !csrf" @click="openAssistantOrderForm">关联授权订单进行只读调查</button>
         </div>
         <form v-if="showAssistantOrderForm && canCreateTask" class="task-input-card" data-testid="assistant-order-form" @submit.prevent="bindAssistantOrder">
@@ -1608,7 +2360,12 @@ onBeforeUnmount(() => {
           <div class="task-input-actions"><span>输入会以未验证用户来源加入 Investigator 上下文。</span><button class="primary-button" type="submit" :disabled="!initialSymptom.trim() || busy || !csrf || (investigationKind === 'ASYNC_CALLBACK' && !selectedS3OrderId) || (investigationKind === 'AUTH_INCIDENT' && !s1DemoResource)">{{ investigationKind === 'ASYNC_CALLBACK' ? '确认订单并启动调查' : '确认并启动调查' }} <span>→</span></button></div>
         </form>
 
-        <div class="conversation-scroll" data-testid="conversation" aria-live="polite">
+        <div ref="conversationScroll" class="conversation-scroll" data-testid="conversation" role="region" aria-label="会话消息" @scroll="updateConversationPinned">
+          <div v-if="sessionId && hasOlderMessages" class="history-pagination">
+            <button class="text-button" type="button" :disabled="loadingOlderMessages || loading || revalidatingSessionMessages" @click="loadOlderMessages">
+              {{ loadingOlderMessages ? '正在加载…' : `加载更早消息（已显示 ${messages.length} 条）` }}
+            </button>
+          </div>
           <div v-if="!sessionId" class="welcome-state">
             <div class="orbit-illustration"><span class="orbit-core">OP</span><i></i><b></b></div>
             <span class="eyebrow">PROFESSIONAL SUPPORT, WITH EVIDENCE</span>
@@ -1631,11 +2388,25 @@ onBeforeUnmount(() => {
               </div>
             </article>
             <template v-for="item in thread.items" :key="item.id">
-              <article v-if="item.kind === 'CHAT_MESSAGE' && item.message" class="message-row assistant" :data-message-id="item.message.message_id" :data-run-id="item.runId">
+              <article v-if="item.kind === 'CHAT_MESSAGE' && item.message" class="message-row assistant" :data-message-id="item.message.message_id" :data-message-ids="assistantTurnMessages(item).map(message => message.message_id).join(',')" :data-run-id="item.runId">
                 <div class="message-avatar">✳</div><div class="message-content">
-                  <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(item.message.created_at) }}</span><span class="message-task">{{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序限制说明 · 非模型答复' : '聊天答复' }}</span></div>
-                  <div class="message-bubble">{{ item.message.body }}</div>
-                  <details class="followup-sources" @toggle="loadAssistantSources($event, item.runId, item.message.task_id)"><summary>查看答复来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ item.message.answer_kind === 'PROGRAM_LIMIT' ? '程序生成的限制说明，不是模型答复' : '持久化的聊天答复' }}</small>
+                  <div class="message-meta"><strong>OpsPilot</strong><span>{{ dateLabel(assistantTurnMessages(item)[0]?.created_at ?? item.message.created_at) }}</span><span class="message-task">{{ assistantTurnLabel(item) }}</span></div>
+                  <AssistantRunActivity v-if="item.activities" :activities="item.activities" :format-time="dateLabel" />
+                  <div class="message-bubble markdown-message">
+                    <div v-for="message in assistantTurnMessages(item)" :key="message.message_id" class="assistant-message-segment" :data-message-id="message.message_id">
+                      <span v-if="message.answer_kind === 'PROGRAM_LIMIT'" class="program-message-label">程序状态 · 非模型答复</span>
+                      <div v-if="message.answer_visibility === 'HISTORICAL_SNAPSHOT'" class="history-snapshot-notice" data-testid="historical-snapshot">
+                        <strong>历史快照</strong> · {{ message.source_status === 'S3_BUSINESS_VERSION_CHANGED' ? '业务版本已变化' : '来源已过期' }}。来源已失效，不可作为当前事实。
+                      </div>
+                      <div class="markdown-body" v-html="renderAssistantMarkdown(message.body)"></div>
+                    </div>
+                  </div>
+                  <div v-if="item.runId && assistantTurnMessages(item).some(message => message.answer_kind === 'CHAT_MODEL') && assistantInvestigationProposal(item.runId, thread.anchor.message_id)" class="outcome-message warm-outcome" data-testid="assistant-investigation-proposal">
+                    <p><strong>助手建议进入受控调查</strong> · {{ assistantInvestigationProposal(item.runId, thread.anchor.message_id)?.rationale }}</p>
+                    <small>这是与原问题关联的未验证建议；尚未创建 Task、审批或业务权限。</small>
+                    <button class="primary-button" type="button" :disabled="busy || !csrf" @click="openControlledInvestigation(thread.anchor)">核对原问题并确认进入调查</button>
+                  </div>
+                  <details v-if="!item.message.answer_visibility || item.message.answer_visibility === 'CURRENT'" class="followup-sources" @toggle="loadAssistantSources($event, item.runId, item.message.task_id)"><summary>查看工具与来源</summary><small>Run {{ item.runId }} · 来源问题 {{ thread.anchor.message_id }} · {{ assistantTurnSourceLabel(item) }}</small>
                     <template v-if="item.runId && assistantSourceDetails[item.runId]">
                       <small v-if="assistantSourceDetails[item.runId].message">{{ assistantSourceDetails[item.runId].message }}</small>
                       <ul v-if="assistantSourceDetails[item.runId].data"><li v-for="source in assistantSourceDetails[item.runId].data?.items ?? []" :key="source.call_id">
@@ -1650,7 +2421,7 @@ onBeforeUnmount(() => {
               <article v-else-if="item.kind === 'INVESTIGATION_ANSWER' && item.answer" class="readonly-followup-card" :data-testid="`investigation-answer-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
                 <div class="update-proposal-heading"><h2>本次调查答复</h2><span class="status-badge" :class="item.answer.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.answer.result_state === 'ANSWERED' ? '已答复' : item.answer.result_state === 'PARTIAL' ? '部分结果 · 仍有待核实事项' : item.answer.result_state === 'NOT_COMPLETED' ? '本次调查未完成' : '结果待确认' }}</span><span v-if="item.answer.currentness && item.answer.currentness !== 'CURRENT'" class="status-badge neutral">历史结果</span></div>
                 <small>形成于 {{ dateLabel(item.answer.created_at) }}。这是该 Run 的持久结果；刷新页面不会重新取证。</small>
-                <p>{{ item.answer.answer_text }}</p>
+                <div class="markdown-body result-markdown" v-html="renderAssistantMarkdown(item.answer.answer_text)"></div>
                 <div v-if="item.diagnosis" class="s3-result-card" data-testid="s3-diagnosis"><span>{{ item.diagnosis.currentness === 'CURRENT' ? '当前调查结果' : '历史调查结果 · 当前性已失效' }}</span><b>{{ readableS3Outcome(item.diagnosis.outcome) }}</b><small>仅只读诊断；未重发回调，也未宣称业务恢复。</small></div>
                 <details class="followup-sources"><summary>查看形成时间与来源（{{ item.answer.source_refs.length }}）</summary>
                   <small>{{ dateLabel(item.answer.created_at) }} · {{ item.answer.result?.delivery_mode === 'MODEL' ? '模型依据当时有效来源回答' : '可信事实与未知事项汇总' }}；这是对话答复，不授予业务操作资格。</small>
@@ -1660,7 +2431,7 @@ onBeforeUnmount(() => {
               </article>
               <article v-else-if="item.kind === 'READONLY_FOLLOWUP' && item.followup" class="readonly-followup-card" :data-testid="`readonly-followup-${item.runId}`" :data-source-message-id="thread.anchor.message_id">
                 <div class="update-proposal-heading"><span class="update-proposal-mark">↻</span><div><span class="eyebrow">补充调查</span><h2>同一任务的连续调查</h2></div><span class="status-badge" :class="item.followup.result_state === 'ANSWERED' ? 'good' : 'warm'">{{ item.followup.result_state === 'ANSWERED' ? '已答复' : item.followup.result_state === 'PARTIAL' ? '部分结果 · 仍有待核实事项' : item.followup.result_state === 'NOT_COMPLETED' ? '本次补查未完成' : item.followup.run_status === 'FAILED' ? '补查失败' : '调查中' }}</span></div>
-                <p>{{ item.followup.answer_text || (item.followup.result_state === 'NOT_COMPLETED' ? '本次补查未能完成当前目标。' : '本次补查尚未形成最终回答。') }}</p>
+                <div class="markdown-body result-markdown" v-html="renderAssistantMarkdown(item.followup.answer_text || (item.followup.result_state === 'NOT_COMPLETED' ? '本次补查未能完成当前目标。' : '本次补查尚未形成最终回答。'))"></div>
                 <details class="followup-sources"><summary>查看来源与调查记录（{{ item.followup.source_refs.length }}）</summary>
                   <ul><li v-for="(sourceRef, index) in item.followup.source_refs" :key="index"><code>{{ JSON.stringify(sourceRef) }}</code></li></ul>
                   <small>Run {{ item.followup.run_id }} · 来源消息 {{ item.followup.source_message_id }} · 控制版本 {{ item.followup.expected_control_revision }}</small>
@@ -1689,11 +2460,21 @@ onBeforeUnmount(() => {
                 <p v-else-if="item.run.status === 'FAILED' || item.run.status === 'BLOCKED'">本次工作未完成。请展开运行详情查看具体原因。</p>
                 <details class="followup-sources"><summary>查看运行详情</summary><small>Run {{ item.run.run_id }} · {{ dateLabel(item.run.started_at ?? item.run.created_at) }} · 来源问题 {{ thread.anchor.message_id }}<template v-if="item.run.blocked_reason || item.run.waiting_reason"> · 原因代码 {{ item.run.blocked_reason ?? item.run.waiting_reason }}</template></small></details>
               </article>
-              <div v-else-if="item.kind === 'STREAM' && item.run" class="streaming-row" data-testid="live-stream" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
-                <div class="message-avatar assistant-avatar">✳</div><div class="streaming-copy"><div class="message-meta"><strong>OpsPilot</strong><span class="streaming-label"><i></i>正在生成 · 暂存片段</span></div>
-                  <div class="stream-bubble" data-testid="stream-chunk">{{ (item.chunks ?? []).map((chunk) => chunk.body).join('') }}<span class="typing-cursor"></span></div>
+              <article v-else-if="item.kind === 'STREAM' && item.run" class="streaming-row" data-testid="live-stream" :data-run-id="item.run.run_id" :data-source-message-id="thread.anchor.message_id">
+                <div class="message-avatar assistant-avatar">✳</div>
+                <div class="message-content streaming-copy">
+                  <div class="message-meta">
+                    <strong>OpsPilot</strong>
+                    <span class="streaming-label" :class="{ 'streaming-label-incomplete': !['RUNNING', 'QUEUED'].includes(item.run.status) }">
+                      {{ item.chunks?.length ? (item.run.status === 'RUNNING' ? '暂存片段' : `未完成草稿 · ${readableStatus(item.run.status)}`) : readableStatus(item.run.status) }}
+                    </span>
+                  </div>
+                  <AssistantRunActivity v-if="item.activities" :activities="item.activities" :running="item.run.status === 'RUNNING'" :format-time="dateLabel" />
+                  <div v-if="item.chunks?.length" class="message-bubble markdown-message stream-bubble" :data-testid="item.run.status === 'RUNNING' ? 'stream-chunk' : 'incomplete-stream-draft'">
+                    <div class="markdown-body" v-html="renderAssistantMarkdown(item.chunks.map((chunk) => chunk.body).join(''))"></div>
+                  </div>
                 </div>
-              </div>
+              </article>
             </template>
             <article v-if="thread.anchor.investigation_origin_message_id && thread.anchor.task_id === taskId && inspector?.task.task_id === taskId" class="readonly-followup-card" data-testid="s1-bridge-result">
               <div class="update-proposal-heading"><h2>受控调查结果</h2><span class="status-badge" :class="statusTone(currentTaskStatus)">{{ readableStatus(currentTaskStatus) }}</span></div>
@@ -1706,6 +2487,7 @@ onBeforeUnmount(() => {
           <section v-if="conversationProjection.unassociatedItems.length" class="unassociated-results" data-testid="unassociated-results">
             <h3>未能关联到已加载问题的记录</h3><p>系统保留这些持久记录，但没有根据相邻消息猜测归属。</p>
             <article v-for="item in conversationProjection.unassociatedItems" :key="item.id" class="readonly-followup-card" :data-record-id="item.id">
+              <div v-if="item.message?.answer_visibility === 'HISTORICAL_SNAPSHOT'" class="history-snapshot-notice">历史快照 · 来源已失效，不可作为当前事实。</div>
               <p v-if="item.message">{{ item.message.body }}</p>
               <p v-else-if="item.answer">{{ item.answer.answer_text }}</p>
               <p v-else-if="item.followup">{{ item.followup.answer_text || '补查尚未完成。' }}</p>
@@ -1713,19 +2495,19 @@ onBeforeUnmount(() => {
               <details v-if="item.run || item.runId || item.answer" class="followup-sources"><summary>查看未关联记录详情</summary><small v-if="item.run || item.runId">Run {{ item.run?.run_id ?? item.runId }} · {{ readableStatus(item.run?.status ?? item.kind) }} · {{ readableRunReason(item.run?.blocked_reason ?? item.run?.waiting_reason ?? '来源问题暂不可见') }}</small><small v-if="item.answer">来源 {{ item.answer.source_message_id }} · Run {{ item.answer.run_id }}</small></details>
             </article>
           </section>
-          <div ref="conversationEnd"></div>
         </div>
 
         <div class="composer-wrap">
-          <TaskConditionReview v-if="assistantTaskId && useProfessionalAssistant && canCreateTask && csrf"
+          <TaskConditionReview v-if="assistantTaskId && canCreateTask && csrf"
             :key="assistantTaskId" :task-id="assistantTaskId" :source-id="conditionReviewSource" :csrf="csrf"
             :busy="busy" :revision="String(inspector?.trusted_state.control_revision ?? '')"
             @accepted="conditionReviewAccepted" @edit="editConditionSource" />
+          <button v-if="!conversationPinned && messages.length" class="outline-button scroll-latest" type="button" @click="scrollToLatest">回到最新消息 ↓</button>
           <div v-if="notice" class="notice-line" role="status">{{ notice }} <button v-if="reconnectPaused" type="button" @click="reconnectEvents">重新连接事件流</button></div>
           <div v-if="errorMessage" class="alert error-alert" role="alert">{{ errorMessage }}<button v-if="errorMessage.includes('登录状态')" type="button" @click="logout">重新登录</button></div>
           <form class="composer" @submit.prevent="sendMessage">
-            <textarea ref="messageComposer" v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" :placeholder="useProfessionalAssistant ? '提出技术问题、粘贴日志，或接着上一轮继续…' : '询问当前证据、任务状态，或继续上一轮对话…'" @keydown.enter="submitOnEnter"></textarea>
-            <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 正式业务输入更正需要确认</span><button v-if="useProfessionalAssistant && assistantTaskId && canCreateTask" class="text-button" type="button" data-testid="assistant-critical-correction" :disabled="!draft.trim() || busy || !csrf" @click="correctionDraft = draft; submitCriticalCorrection()">将此条作为正式更正</button><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
+            <textarea ref="messageComposer" v-model="draft" data-testid="message-input" :disabled="!sessionId || busy || !csrf" rows="2" placeholder="提出技术问题、粘贴日志，或接着上一轮继续…" @keydown.enter="submitOnEnter"></textarea>
+            <div class="composer-bottom"><span><kbd>Enter</kbd> 发送 <kbd>Shift + Enter</kbd> 换行 · 正式业务输入更正需要确认</span><button v-if="assistantTaskId && canCreateTask" class="text-button" type="button" data-testid="assistant-critical-correction" :disabled="!draft.trim() || busy || !csrf" @click="correctionDraft = draft; submitCriticalCorrection()">将此条作为正式更正</button><button class="send-button" :disabled="!sessionId || !draft.trim() || busy || !csrf" type="submit" aria-label="发送消息">{{ busy ? '…' : '↑' }}</button></div>
           </form>
           <div class="composer-footnote">回答只解释已授权信息。审批、修复和交付需要后续的可信控制流程。</div>
         </div>
@@ -1733,12 +2515,81 @@ onBeforeUnmount(() => {
 
       <aside class="inspector-panel panel" :class="{ open: narrowInspectorOpen }" aria-label="Task 检查器">
         <div class="inspector-header"><div><span class="eyebrow">LIVE CONTEXT</span><h2>Task 检查器</h2></div><button class="icon-button close-inspector" aria-label="关闭检查器" type="button" @click="narrowInspectorOpen = false">×</button></div>
-        <template v-if="inspector">
-          <div class="task-summary-card" :data-task-id="String(inspector.task.task_id ?? taskId)">
-            <div class="summary-top"><span class="task-symbol">◈</span><span class="status-badge" :class="statusTone(currentTaskStatus)"><i></i>{{ readableStatus(currentTaskStatus) }}</span></div>
-            <span class="eyebrow">ACTIVE TASK</span><h3>{{ String(inspector.task.task_id ?? taskId).slice(0, 24) }}</h3>
-            <p>{{ String(inspector.task.service_id ?? 'orders-demo') }} <span>·</span> {{ String(inspector.task.integration_id ?? 'integration-a') }}</p>
+        <div v-if="inspector" class="task-summary-card" :data-task-id="String(inspector.task.task_id ?? taskId)">
+          <div class="summary-top"><span class="task-symbol">◈</span><span class="status-badge" :class="statusTone(currentTaskStatus)"><i></i>{{ readableStatus(currentTaskStatus) }}</span></div>
+          <span class="eyebrow">ACTIVE TASK</span><h3>{{ String(inspector.task.task_id ?? taskId).slice(0, 24) }}</h3>
+          <p>{{ String(inspector.task.service_id ?? 'orders-demo') }} <span>·</span> {{ String(inspector.task.integration_id ?? 'integration-a') }}</p>
+        </div>
+        <section v-if="user" class="inspector-section memory-section personal-memory-manager" data-testid="personal-memory-manager">
+          <div class="section-heading"><h3>个人长期记忆</h3><button class="text-button" type="button" :disabled="busy" @click="loadPersonalMemories">刷新</button></div>
+          <p class="memory-warning">作用域由登录身份确定：{{ user.tenant_id }} · {{ user.actor_id }}。记忆只作为个人背景，不是业务事实或授权，也不会共享给同项目其他用户。个人记忆目前会在创建后 180 天到期；到期后需重新确认或保存。</p>
+          <label v-if="user.role === 'SUPPORT'" class="personal-memory-recall-toggle" data-testid="personal-memory-recall-setting">
+            <input type="checkbox" :checked="personalMemoryRecallEnabled" :disabled="!personalMemorySettingsReady || personalMemorySettingsSaving || !csrf" @change="updatePersonalMemoryRecall" />
+            <span><strong>使用个人长期记忆</strong><small>关闭后只影响后续 Provider 请求；已保存记忆和 Session 历史仍保留。</small></span>
+          </label>
+          <label v-if="user.role === 'SUPPORT'" class="personal-memory-recall-toggle" data-testid="personal-memory-auto-learn-setting">
+            <input type="checkbox" :checked="personalMemoryAutoLearnEnabled" :disabled="!personalMemorySettingsReady || personalMemorySettingsSaving || !csrf || !personalMemoryRecallEnabled || !personalMemoryAutoLearnAvailable" @change="updatePersonalMemoryAutoLearn" />
+            <span><strong>自动从对话中学习</strong><small>累计至少 6 条已完成用户消息后，后台最多每 10 分钟整理一批，每批最多 12 条、4 条记忆、1 次提取模型调用。可能产生额外费用，调用受 Runtime Grant 预算约束。</small></span>
+          </label>
+          <small v-if="user.role === 'SUPPORT'" class="memory-settings-status" data-testid="personal-memory-auto-learn-status">{{ personalMemoryAutoLearnStatusText() }} {{ personalMemoryAutoLearnAvailable ? '已配置后台模型入口；每次调用仍须通过有效 Runtime Grant 和可用预算检查。' : '此环境未开放 Runtime Grant 自动学习。' }}</small>
+          <small v-if="personalMemorySettingsError" class="memory-settings-error" role="status">{{ personalMemorySettingsError }}</small>
+          <div class="memory-review-grid">
+            <div class="memory-candidate-list">
+              <div v-if="personalMemories.length === 0" class="muted-card">还没有个人记忆。你可以从已保存的用户消息提议一条。</div>
+              <button v-for="item in personalMemories" :key="item.memory_id" class="memory-candidate-item" :class="{ selected: selectedPersonalMemory?.memory_id === item.memory_id }" type="button" :data-testid="`personal-memory-${item.memory_id}`" @click="selectPersonalMemory(item)">
+                <strong>{{ item.memory_kind }} · {{ personalMemoryModeLabel(item.memory_mode) }} · {{ item.memory_key }} · {{ item.state }} v{{ item.version }}</strong>
+                <small>{{ item.content }}</small><small>{{ personalMemoryCreationSourceLabel(item.creation_source) }} · 来源 {{ item.source_message_id }} · 到期 {{ dateLabel(item.expires_at) }}</small>
+              </button>
+            </div>
+            <div v-if="selectedPersonalMemory" class="memory-detail" data-testid="personal-memory-preview">
+              <div class="plan-row"><span>预览 / 状态</span><b>{{ selectedPersonalMemory.state }} · v{{ selectedPersonalMemory.version }}</b></div>
+              <div class="plan-row"><span>个人 Key</span><b>{{ selectedPersonalMemory.memory_kind }} · {{ selectedPersonalMemory.memory_key }}</b></div>
+              <div class="plan-row"><span>召回方式 / 来源</span><b>{{ personalMemoryModeLabel(selectedPersonalMemory.memory_mode) }} · {{ personalMemoryCreationSourceLabel(selectedPersonalMemory.creation_source) }}</b></div>
+              <div class="plan-row"><span>内容</span><b>{{ selectedPersonalMemory.content }}</b></div>
+              <div class="plan-row"><span>个人作用域</span><b>{{ selectedPersonalMemory.tenant_id }} · {{ selectedPersonalMemory.owner_actor_id }}</b></div>
+              <div class="memory-json"><strong>来源引用</strong><code>{{ JSON.stringify(selectedPersonalMemory.source_refs) }}</code></div>
+              <small>来源当前性：{{ selectedPersonalMemory.source_current ? '有效' : '无效，禁止召回' }} · {{ selectedPersonalMemory.source_message_id }}</small>
+              <small class="memory-digest">SHA-256 {{ selectedPersonalMemory.content_digest }} · 到期 {{ dateLabel(selectedPersonalMemory.expires_at) }}</small>
+              <div class="approval-buttons">
+                <button v-if="selectedPersonalMemory.state === 'CANDIDATE' && selectedPersonalMemory.source_current" class="primary-button" type="button" data-testid="confirm-personal-memory" :disabled="busy || !csrf" @click="decidePersonalMemory(selectedPersonalMemory, 'confirm')">确认并保存</button>
+                <button v-if="selectedPersonalMemory.state === 'ACTIVE'" class="outline-button" type="button" data-testid="revise-personal-memory" :disabled="busy || !csrf" @click="beginPersonalMemoryRevision(selectedPersonalMemory)">修改并提交新版本</button>
+                <button v-if="selectedPersonalMemory.state === 'ACTIVE'" class="outline-button" type="button" data-testid="revoke-personal-memory" :disabled="busy || !csrf" @click="decidePersonalMemory(selectedPersonalMemory, 'revoke')">撤销</button>
+              </div>
+            </div>
           </div>
+          <form v-if="sessionId" class="memory-create-row semantic-proposal-form" data-testid="personal-memory-proposal" @submit.prevent="createPersonalMemoryCandidate">
+            <strong>{{ personalMemoryRevisionTarget ? `更新 ${personalMemoryRevisionTarget.memory_key} · 期望 v${personalMemoryRevisionTarget.version}` : '从当前会话提议个人记忆' }}</strong>
+            <p>候选只供预览，不会进入模型 Context，直到本人明确确认。避免保存密码、Token、凭据或临时业务事实。</p>
+            <label>来源用户消息
+              <select v-model="personalMemorySourceMessageId" :disabled="busy || !csrf || personalSourceMessages.length === 0">
+                <option value="">选择一条已持久化的用户消息</option>
+                <option v-for="item in personalSourceMessages" :key="item.message_id" :value="item.message_id">#{{ item.sequence }} · {{ item.body.slice(0, 100) }}</option>
+              </select>
+            </label>
+            <label>类型
+              <select v-model="personalMemoryDraftKind" :disabled="busy || !csrf" @change="adjustPersonalMemoryModeForKind"><option value="PREFERENCE">沟通偏好</option><option value="WORK_HABIT">工作习惯</option><option value="PROJECT_BACKGROUND">个人项目背景</option></select>
+            </label>
+            <label>召回方式
+              <select v-model="personalMemoryDraftMode" :disabled="busy || !csrf"><option value="RELEVANT">问题相关时召回</option><option value="PINNED" :disabled="personalMemoryDraftKind === 'PROJECT_BACKGROUND'">固定个人偏好（最多 3 条 / 约 250 Tokens）</option></select>
+            </label>
+            <label>记忆 Key<input v-model="personalMemoryDraftKey" maxlength="120" placeholder="例如 answer.style" :disabled="busy || !csrf" /></label>
+            <label>确认内容<textarea v-model="personalMemoryDraftContent" maxlength="800" rows="3" placeholder="写入稳定、非敏感且希望跨会话使用的信息。" :disabled="busy || !csrf"></textarea></label>
+            <small>候选来源 {{ personalMemorySourceMessageId || personalSourceMessages.at(-1)?.message_id || '尚无用户消息' }} · 保存后仍需预览和确认。</small>
+            <div class="approval-buttons">
+              <button class="outline-button" type="submit" data-testid="create-personal-memory-candidate" :disabled="busy || !csrf || !personalSourceMessages.length || !personalMemoryDraftKey.trim() || !personalMemoryDraftContent.trim()">建立待确认候选</button>
+              <button v-if="personalMemoryRevisionTarget" class="text-button" type="button" :disabled="busy" @click="cancelPersonalMemoryRevision">取消更新</button>
+            </div>
+          </form>
+          <div class="memory-applied-list" data-testid="personal-memory-context-provenance">
+            <strong>最近已完成的聊天模型调用 · 实际 Context 选择</strong>
+            <div v-if="latestPersonalMemorySelection.length === 0" class="muted-card">该次调用没有选用个人记忆，或尚未完成模型调用。</div>
+            <div v-for="item in latestPersonalMemorySelection" :key="String(item.memory_id)" class="trace-row">
+              <span class="trace-icon">↗</span><span><strong>{{ String(item.memory_id) }} · v{{ String(item.version) }} · 当前 {{ currentPersonalMemoryState(String(item.memory_id)) }}</strong><small>{{ String(item.memory_kind) }} · {{ String(item.memory_key) }} · 来源 {{ String(item.source_message_id) }}</small><small>{{ String(item.content) }} · SHA-256 {{ String(item.content_digest ?? item.digest ?? '') }}</small></span>
+            </div>
+            <div v-if="latestPersonalMemoryExclusions.length" class="evidence-footer">本轮排除个人记忆：{{ JSON.stringify(latestPersonalMemoryExclusions) }}</div>
+          </div>
+        </section>
+        <template v-if="inspector">
           <div class="inspector-section">
             <div class="section-heading"><h3>当前运行</h3><span class="section-count">{{ inspector.runs.length }}</span></div>
             <div v-if="latestBusinessRun" class="run-card"><div class="run-icon">⌁</div><div class="run-copy"><strong>{{ readableStatus(latestBusinessRun.kind) }}</strong><small>{{ readableStatus(latestBusinessRun.status) }}<template v-if="latestBusinessRun.blocked_reason"> · {{ readableRunReason(latestBusinessRun.blocked_reason) }}</template></small></div><span class="status-dot" :class="statusTone(latestBusinessRun.status)"></span></div>
@@ -1752,7 +2603,9 @@ onBeforeUnmount(() => {
                 <i class="status-dot" :class="statusTone(item.status)"></i>
               </div>
             </div>
-            <div v-if="activeChatContext" class="plan-card context-budget-card" data-testid="context-budget-provenance">
+            <details v-if="activeChatContext" class="inspector-foldout">
+              <summary>模型上下文预算 · Domain 估算</summary>
+              <div class="plan-card context-budget-card" data-testid="context-budget-provenance">
               <div class="section-heading"><h3>模型上下文预算</h3><span class="read-only-label">Domain 估算</span></div>
               <div class="plan-row"><span>策略 / 估算器</span><b>{{ String((activeChatContext.context_budget as Record<string, unknown>)?.strategy ?? '—') }} · {{ String((activeChatContext.context_budget as Record<string, unknown>)?.estimator ?? '—') }}</b></div>
               <div class="plan-row"><span>输入 Token</span><b>{{ String((activeChatContext.context_budget as Record<string, unknown>)?.estimated_input_tokens ?? '—') }} / {{ String((activeChatContext.context_budget as Record<string, unknown>)?.input_budget_tokens ?? '—') }}</b></div>
@@ -1768,17 +2621,20 @@ onBeforeUnmount(() => {
               </div>
               <div v-if="Array.isArray(activeChatContext.summary_refs) && activeChatContext.summary_refs.length" class="evidence-footer">已用历史摘要：{{ JSON.stringify(activeChatContext.summary_refs) }}</div>
               <div v-if="Array.isArray(activeChatContext.excluded_sources) && activeChatContext.excluded_sources.length" class="evidence-footer">排除来源：{{ JSON.stringify(activeChatContext.excluded_sources) }}</div>
-            </div>
+              </div>
+            </details>
           </div>
-          <div class="inspector-section">
-            <div class="section-heading"><h3>当前 Evidence</h3><span class="section-count">{{ inspector.evidence.length }}</span></div>
+          <details class="inspector-section inspector-foldout">
+            <summary>当前 Evidence · {{ inspector.evidence.length }}</summary>
+            <div class="inspector-detail-content">
             <div v-if="inspector.evidence.length === 0" class="muted-card">当前 Task 尚无可展示的有效 MCP Evidence。</div>
             <div v-for="item in inspector.evidence" :key="String(item.evidence_id)" class="evidence-card">
               <div class="evidence-heading"><span class="evidence-type">{{ String(item.fact_type).replaceAll('_', ' ') }}</span><span class="verified-mark">✓ VERIFIED</span></div>
               <div class="evidence-facts"><template v-for="(value, key) in (item.facts as Record<string, unknown>)" :key="String(key)"><div><span>{{ String(key).replaceAll('_', ' ') }}</span><strong :title="typeof value === 'object' ? JSON.stringify(value) : String(value)">{{ typeof value === 'object' ? JSON.stringify(value) : String(value) }}</strong></div></template></div>
               <div class="evidence-footer"><code>{{ String(item.evidence_id).slice(0, 22) }}</code><span>{{ dateLabel(item.fetched_at) }}</span></div>
             </div>
-          </div>
+            </div>
+          </details>
           <div class="inspector-section">
             <div class="section-heading"><h3>计划与授权</h3><span class="read-only-label">只读</span></div>
             <div class="plan-card"><div class="plan-row"><span>最新 Plan</span><b>{{ inspector.trusted_state.plan ? String((inspector.trusted_state.plan as Record<string, unknown>).plan_hash).slice(0, 14) : '尚未生成' }}</b></div><div class="plan-row"><span>审批状态</span><b>{{ readableStatus((inspector.trusted_state.plan as Record<string, unknown> | null)?.approval_decision ?? 'UNKNOWN') }}</b></div><p v-if="currentTaskStatus === 'WAITING_APPROVAL' && (inspector.trusted_state.plan as Record<string, unknown> | null)?.eligibility === 'ACTIVE'">Task 正等待同租户独立 APPROVER 审批。聊天文本不能代签或授予动作权限。</p><p v-else-if="currentTaskStatus">业务状态由可信 Domain 控制。用户线索与只读回答都不会改变审批资格或写入权限。</p>
@@ -1786,7 +2642,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="taskOutcome" class="inspector-section outcome-section" data-testid="task-outcome">
-            <div class="section-heading"><h3>Domain 业务回执</h3><span class="status-badge" :class="statusTone(taskOutcome.business_outcome)">{{ String(taskOutcome.business_outcome) }}</span></div>
+            <div class="section-heading"><h3>专业调查结果</h3><span class="status-badge" :class="statusTone(taskOutcome.business_outcome)">{{ readableStatus(taskOutcome.business_outcome) }}</span></div>
             <div v-if="taskOutcome.business_outcome === 'DELIVERED'" class="outcome-message good-outcome">同身份业务调用已恢复，冻结报告和工单交付回执均已核对。</div>
             <div v-else-if="taskOutcome.business_outcome === 'RECOVERED_NOT_DELIVERED'" class="outcome-message warm-outcome">业务已在线验证恢复，但工单尚未完成交付。</div>
             <div v-else-if="taskOutcome.business_outcome === 'REJECTED'" class="outcome-message warm-outcome">审批者已拒绝；拒绝报告来自原调查图，没有执行业务写入。</div>
@@ -1817,8 +2673,8 @@ onBeforeUnmount(() => {
             <div v-if="s3HandoffOutcome.business_outcome === 'HANDOFF_ACCEPTED' && s3HandoffOutcome.handoff_receipt" class="outcome-row good-outcome" data-testid="s3-handoff-receipt"><span>HANDOFF_ACCEPTED · HandoffReceipt</span><code>{{ String((s3HandoffOutcome.handoff_receipt as Record<string, unknown>).receipt_id) }}</code><span>Queue Entry {{ String((s3HandoffOutcome.queue_entry as Record<string, unknown> | null)?.entry_id ?? '') }} · {{ readableStatus((s3HandoffOutcome.queue_entry as Record<string, unknown> | null)?.queue_status ?? 'PENDING_REVIEW') }}</span></div>
             <div v-if="s3HandoffOutcome.business_outcome === 'HANDOFF_ACCEPTED'" class="outcome-message warm-outcome">本地处理队列已持久接收。此回执只证明 HANDOFF_ACCEPTED；订单未因此恢复，回调也未因此完成或重发。</div>
           </div>
-          <div v-if="taskMemoryContext" class="inspector-section memory-section" data-testid="task-memory-context">
-            <div class="section-heading"><h3>跨 Task 案例经验</h3><span class="read-only-label">仅历史方法提示</span></div>
+          <details v-if="taskMemoryContext" class="inspector-section memory-section inspector-foldout" data-testid="task-memory-context">
+            <summary>跨 Task 案例经验 · 仅历史方法提示</summary>
             <div class="memory-warning">案例不属于当前 Evidence，不改变 Gate、授权、Plan 或业务状态。目标 Task 只会读取不同 source_task_id 的已审核经验。</div>
             <div v-for="item in taskMemoryContext.source_memories" :key="item.memory_id" class="memory-case-card" data-testid="source-memory-case">
               <div class="plan-row"><span>来源案例</span><b>{{ item.problem_type }} · {{ item.source_outcome }} · {{ item.state }}</b></div>
@@ -1850,9 +2706,9 @@ onBeforeUnmount(() => {
             </div>
             <div v-else class="muted-card">最近模型调用没有选用 Memory；当前工具、Evidence Gate 与业务资格仍来自实时来源。</div>
             <div v-if="latestExcludedMemorySources.length" class="evidence-footer" data-testid="excluded-memory-provenance">本轮未选入模型上下文的记忆：{{ JSON.stringify(latestExcludedMemorySources) }}</div>
-          </div>
-          <div v-if="taskSemanticContext" class="inspector-section memory-section" data-testid="semantic-memory-context">
-            <div class="section-heading"><h3>项目 Semantic Memory</h3><span class="read-only-label">历史约定提示</span></div>
+          </details>
+          <details v-if="taskSemanticContext" class="inspector-section memory-section inspector-foldout" data-testid="semantic-memory-context">
+            <summary>项目 Semantic Memory · 历史约定提示</summary>
             <div class="memory-warning">只加载其他 Task 来源、经项目授权 APPROVER 确认且来源仍有效的内容。它不能证明当前事实或授权；续会摘要与历史回答在版本变化或撤销后失效。</div>
             <div v-if="taskSemanticContext.active_project_memories.length === 0" class="muted-card">当前 Task 没有可用的跨 Task 项目约定。</div>
             <div v-for="item in taskSemanticContext.active_project_memories" :key="item.memory_id" class="memory-case-card" data-testid="active-semantic-memory">
@@ -1880,9 +2736,9 @@ onBeforeUnmount(() => {
               <small>来源 Message {{ semanticSourceMessageId }} · 提案不会修改当前 Task、Gate 或权限。</small>
               <button class="outline-button" type="submit" :disabled="busy || !csrf || !semanticDraftKey.trim() || !semanticDraftContent.trim()">保存待审候选</button>
             </form>
-          </div>
-          <div class="inspector-section input-provenance-section">
-            <div class="section-heading"><h3>用户线索 Provenance</h3><span class="read-only-label">未验证</span></div>
+          </details>
+          <details class="inspector-section input-provenance-section inspector-foldout">
+            <summary>用户线索 Provenance · 未验证</summary>
             <div v-if="latestSelectedInputs.length === 0" class="muted-card">尚无模型调用上下文；已提交消息仍保存在会话与 Task Run 中。</div>
             <div v-for="item in latestSelectedInputs" :key="String(item.message_id ?? item.digest)" class="provenance-row">
               <span class="trace-icon">↳</span><span><strong>{{ readableInputKind(item.kind) }}</strong><small>{{ String(item.message_id ?? 'legacy fallback') }} · #{{ item.sequence ?? '—' }} · {{ String(item.provenance) }}</small><small>Digest {{ String(item.digest).slice(0, 16) }} · 控制版本 {{ item.applied_control_revision ?? item.accepted_control_revision ?? '—' }}</small></span>
@@ -1895,20 +2751,20 @@ onBeforeUnmount(() => {
             <div v-if="latestContextProvenance?.selected_skill" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).name) }} · v{{ String((latestContextProvenance.selected_skill as Record<string, unknown>).version) }}</strong><small>Skill SHA-256 {{ String((latestContextProvenance.selected_skill as Record<string, unknown>).digest).slice(0, 16) }}</small></span></div>
             <div v-for="item in latestSelectedKnowledge" :key="String(item.document_id)" class="trace-row"><span class="trace-icon">▤</span><span><strong>{{ String(item.document_id) }} · v{{ String(item.version) }}</strong><small>{{ String(item.source) }} · SHA-256 {{ String(item.digest).slice(0, 16) }}</small></span></div>
             <div class="gate-card"><span>确定性 Evidence Gate</span><b>{{ readableGate(inspector.current_gate.decision) }}</b><small>{{ String(inspector.current_gate.reason_code ?? '—') }} · 当前有效 Evidence {{ Array.isArray(inspector.current_gate.checked_fact_ids) ? (inspector.current_gate.checked_fact_ids as unknown[]).length : 0 }} 项</small></div>
-          </div>
+          </details>
           <div v-if="canCreateTask && taskId" class="inspector-section correction-section">
             <div class="section-heading"><h3>正式关键更正</h3><span class="status-badge warm">会提升控制版本</span></div>
             <p class="correction-warning">提交后会中断正在运行的业务调查，并让旧 Plan 与审批失效；新调查 Run 会重新消费更正。</p>
             <textarea v-model="correctionDraft" data-testid="critical-correction-input" rows="3" maxlength="20000" placeholder="更正：请说明新核实的事实或应优先调查的线索。" :disabled="busy || !csrf"></textarea>
             <button class="outline-button" type="button" data-testid="submit-critical-correction" :disabled="!correctionDraft.trim() || busy || !csrf" @click="submitCriticalCorrection">提交关键更正</button>
           </div>
-          <div class="inspector-section">
-            <div class="section-heading"><h3>MCP 与模型轨迹</h3><span class="section-count">{{ inspector.observations.length + inspector.investigation_model_traces.length + inspector.chat_model_attempts.length }}</span></div>
+          <details class="inspector-section inspector-foldout">
+            <summary>MCP 与模型轨迹 · {{ inspector.observations.length + inspector.investigation_model_traces.length + inspector.chat_model_attempts.length }}</summary>
             <div v-if="inspector.observations.length === 0 && inspector.investigation_model_traces.length === 0 && inspector.chat_model_attempts.length === 0" class="muted-card">尚无已记录的工具或模型调用。</div>
             <div v-for="item in inspector.observations.slice(0, 8)" :key="String(item.observation_id)" class="trace-row"><span class="trace-icon">⌕</span><span><strong>{{ String(item.tool_name) }}</strong><small>{{ String(item.status) }} · {{ dateLabel(item.created_at) }}</small></span><i class="status-dot" :class="statusTone(item.status)"></i></div>
             <div v-for="item in inspector.investigation_model_traces.slice(0, 4)" :key="String(item.provider_response_id ?? item.prompt_digest)" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String(item.model_id) }}</strong><small>{{ String(item.status) }} · {{ JSON.stringify(item.usage) }}</small></span><i class="status-dot" :class="statusTone(item.status)"></i></div>
             <div v-for="item in inspector.chat_model_attempts.slice(0, 4)" :key="String(item.attempt_id)" class="trace-row"><span class="trace-icon model-icon">✳</span><span><strong>{{ String(item.model_id) }}</strong><small>Chat {{ String(item.status) }} · {{ item.total_tokens ?? 'Token 未提供' }} tokens</small></span><i class="status-dot" :class="statusTone(item.status)"></i></div>
-          </div>
+          </details>
           <div class="inspector-section timeline-section"><div class="section-heading"><h3>事件时间线</h3><button class="text-button" type="button" @click="reconnectEvents">刷新</button></div>
             <div v-if="sessionEvents.length === 0" class="muted-card">持久事件到达后会显示在这里。</div>
             <div v-for="item in sessionEventProjection.slice(0, 12)" :key="item.event_seq" class="timeline-item"><span class="timeline-dot"></span><div><strong>{{ item.event_kind.replaceAll('_', ' ') }}</strong><small>{{ dateLabel(item.happened_at) }} · #{{ item.event_seq }}</small></div></div>

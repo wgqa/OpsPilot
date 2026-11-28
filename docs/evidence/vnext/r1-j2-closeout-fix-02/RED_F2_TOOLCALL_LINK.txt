@@ -1,0 +1,83 @@
+F
+================================== FAILURES ===================================
+_ test_model_context_projects_current_observation_metadata_without_duplicate_payload _
+
+    def test_model_context_projects_current_observation_metadata_without_duplicate_payload():
+        payload = {
+            "authority": "EXPLANATION_ONLY_NO_BUSINESS_RECEIPT",
+            "current_run": {
+                "run_id": "run-current",
+                "completed_tools": [
+                    {"tool": "get_callback_delivery", "call_id": "call-1", "completed_at": "2026-11-08T09:00:00Z"},
+                    {"tool": "get_receiver_processing", "call_id": "call-2", "completed_at": "2026-11-08T09:01:00Z"},
+                ],
+                "business_observations": [
+                    {
+                        "tool": "get_callback_delivery", "call_id": "call-1",
+                        "tool_call_id": "provider-call-1",
+                        "evidence_id": "evidence-1", "observation_id": "observation-1",
+                        "observed_at": "2026-11-08T09:00:00Z",
+                        "observed_versions": {"order": 3, "delivery": 7, "contract": 2},
+                        "result_digest": "a" * 64,
+                    },
+                    {
+                        "tool": "get_receiver_processing", "call_id": "call-2",
+                        "tool_call_id": "provider-call-2",
+                        "evidence_id": "evidence-2", "observation_id": "observation-2",
+                        "observed_at": "2026-11-08T09:01:00Z",
+                        "observed_versions": {"order": 3, "delivery": 7, "receiver": 8},
+                        "result_digest": "b" * 64,
+                    },
+                ],
+            },
+            "history_sources": [
+                {
+                    "run_id": "run-history",
+                    "current_source_valid": True,
+                    "exclusion_reason": None,
+                    "omitted_source_count": 0,
+                    "sources": [{
+                        "call_id": "old-call", "evidence_id": "old-evidence",
+                        "observation_id": "old-observation", "result_digest": "c" * 64,
+                        "observed_at": "2026-11-07T09:00:00Z", "completed_at": "2026-11-07T09:00:01Z",
+                        "summary": "历史快照：Receiver 曾为 QUEUED。",
+                    }],
+                },
+            ],
+            "prior_answers": [], "task_id": "task-current", "source_message_id": "message-current",
+            "summary_refs": [], "trusted_binding": {"service_id": "orders", "order_id": "order-a", "contract_version": 2},
+        }
+        original = copy.deepcopy(payload)
+
+        projected = source_context_for_model(payload)
+
+        current = projected["current_run"]
+>       assert current == {
+            "run_id": "run-current",
+            "description": "以下 2 条业务观察由本轮工具取得，只能对其实际覆盖的状态说本轮已查询。",
+            "business_observations": [
+                {
+                    "tool": "get_callback_delivery", "call_id": "call-1",
+                    "tool_call_id": "provider-call-1",
+                    "evidence_id": "evidence-1", "observation_id": "observation-1",
+                    "observed_at": "2026-11-08T09:00:00Z",
+                },
+                {
+                    "tool": "get_receiver_processing", "call_id": "call-2",
+                    "tool_call_id": "provider-call-2",
+                    "evidence_id": "evidence-2", "observation_id": "observation-2",
+                    "observed_at": "2026-11-08T09:01:00Z",
+                },
+            ],
+        }
+E       AssertionError: assert {'run_id': 'r...覆盖的状态说本轮已查询。'} == {'run_id': 'r...nce-2', ...}]}
+E
+E         Omitting 2 identical items, use -vv to show
+E         Differing items:
+E         {'business_observations': [{'tool': 'get_callback_delivery', 'call_id': 'call-1', 'evidence_id': 'evidence-1', 'observ... 'get_receiver_processing', 'call_id': 'call-2', 'evidence_id': 'evidence-2', 'observation_id': 'observation-2', ...}]} != {'business_observations': [{'tool': 'get_callback_delivery', 'call_id': 'call-1', 'tool_call_id': 'provider-call-1', '... 'get_receiver_processing', 'call_id': 'call-2', 'tool_call_id': 'provider-call-2', 'evidence_id': 'evidence-2', ...}]}
+E         Use -v to get more diff
+
+tests\test_r1_j2_closeout_fix_02.py:67: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_r1_j2_closeout_fix_02.py::test_model_context_projects_current_observation_metadata_without_duplicate_payload
+1 failed in 0.92s

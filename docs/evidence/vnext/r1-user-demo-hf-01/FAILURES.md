@@ -1,0 +1,8 @@
+# Failures and limits
+
+1. **Independent third-party raw reproduction:** unavailable in this checkout. The exact browser capture remains `UNVERIFIED`; see `ORIGINAL_FINDING.md`. Existing project history corroborates the reported `ORIGIN_REJECTED` but is not the missing raw artifact.
+2. **Initial Origin test assertion mismatch:** the first post-fix run expected FastAPI error JSON under `detail`; this app's registered handler returns `{"code":"ORIGIN_REJECTED"}`. The test was corrected to assert the actual stable API shape. The 403 security behavior was already present; final valid and invalid Origin/CSRF cases pass.
+3. **Initial runtime regression fixture error:** the pre-existing context-compression test manually registered a Worker and discarded the returned epoch, while the new send gate correctly requires that epoch. The test now supplies the epoch returned by `register_worker_owner`; the Runtime Grant file then passed 19/19 and the ordered regression passed 78/78.
+4. **Interrupted combined run:** an early quiet combined command printed two failures and reached the final long context test without completing. It was interrupted to avoid an unbounded wait; its exit code was 1 and it is preserved as `INTERRUPTED_COMBINED_RUN.txt`. The specific NameError is preserved in `INITIAL_RUNTIME_GRANT_FIXTURE_FAILURE.txt`; the final slice, Runtime Grant, campaign, R1 Journey/failure-closeout, and existing invalidated-summary tests were subsequently run to completion as listed in `TEST_LOG.txt`.
+
+No production or historical failure record was reclassified. No live Provider, browser, or external business write was attempted.

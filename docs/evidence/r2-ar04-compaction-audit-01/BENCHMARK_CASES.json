@@ -1,0 +1,118 @@
+{
+  "format_version": 1,
+  "task": "R2-AR04-COMPACTION-AUDIT-01",
+  "base_sha": "d8e30bcb82557e370f8fec664803a952b8d06e14",
+  "dataset": "synthetic_only",
+  "estimator": "tiktoken:cl100k_base:0.14.0",
+  "strategy_defaults": {
+    "context_window_tokens": 16384,
+    "configured_input_limit_tokens": 12000,
+    "output_reserved_tokens": 512,
+    "safety_margin_tokens": 1024,
+    "compression_input_cap_tokens": 6000,
+    "compression_output_cap_tokens": 512,
+    "recent_window_messages": 12,
+    "max_chat_attempts_including_compression": 3
+  },
+  "message_padding": {
+    "algorithm": "repeat fixed bilingual filler until cl100k token estimate is at least target",
+    "unit": "协议观察占位文本 alpha beta gamma delta，仅用于离线 Token 边界复现。",
+    "implementation": "run_audit.py::padded"
+  },
+  "cases": [
+    {
+      "case_id": "C01",
+      "strategy": "HYBRID",
+      "setup": "One current user message; no eligible old history; configured input limit is 7000 tokens.",
+      "fixed_truth": {"eligible_old_history": false, "expected_trigger": false, "expected_compression_calls": 0},
+      "purpose": "Under-budget no-history control. Required context must still fit and reach the fixture model."
+    },
+    {
+      "case_id": "C02",
+      "strategy": "HYBRID",
+      "setup": "Fourteen short deterministic turns precede the measured request; full candidate estimate remains under effective input budget.",
+      "fixed_truth": {"eligible_old_history": true, "expected_trigger": false, "expected_compression_calls": 0},
+      "purpose": "Separate existence of old history from a budget crossing."
+    },
+    {
+      "case_id": "C03",
+      "strategy": "HYBRID",
+      "setup": "Same deterministic history as C02. A first read-only context preparation measures its full/allocated estimate, then the harness sets the effective budget one token below that estimate and re-enters the production preparation path.",
+      "fixed_truth": {"eligible_old_history": true, "effective_budget_delta_from_estimate": -1, "expected_trigger": true},
+      "purpose": "Test the HYBRID trigger boundary without changing assertions to fit observed behavior."
+    },
+    {
+      "case_id": "C04",
+      "strategy": "ROLLING_SUMMARY",
+      "setup": "Same deterministic history as C02, but strategy is changed to ROLLING_SUMMARY only for the measured request.",
+      "fixed_truth": {"eligible_old_history": true, "expected_trigger": true},
+      "purpose": "Demonstrate proactive compression while below budget."
+    },
+    {
+      "case_id": "C05",
+      "strategy": "RECENT_WINDOW",
+      "setup": "Same deterministic history as C02, but strategy is changed to RECENT_WINDOW only for the measured request.",
+      "fixed_truth": {"eligible_old_history": true, "expected_trigger": false, "expected_summary_calls": 0},
+      "purpose": "Distinguish recency-only selection from summary generation."
+    },
+    {
+      "case_id": "C06_USER_OVERSIZE",
+      "strategy": "ROLLING_SUMMARY",
+      "setup": "Fourteen turns with the first user source padded to at least 5900 cl100k tokens; serialized source envelope and compressor prompt push the first batch beyond its 6000-token cap.",
+      "fixed_truth": {"first_eligible_user_source_plus_prompt_exceeds_6000": true, "expected_internal_error": "SUMMARY_SOURCE_EXCEEDS_COMPRESSION_BUDGET", "expected_public_error": "WORKER_RUN_FAILED", "expected_provider_calls": 0, "trigger_reached": true, "trigger_failure_point": "old-history trigger is true; first compression batch construction fails before an attempt manifest or provider call"},
+      "purpose": "Probe fail-closed behavior and error translation when a single user source cannot fit the compressor input cap."
+    },
+    {
+      "case_id": "C06_ASSISTANT_EXCERPT",
+      "strategy": "ROLLING_SUMMARY",
+      "setup": "Fourteen turns; the first fixture assistant answer is padded to at least 6400 cl100k tokens, while later assistant answers stay short and user sources remain short.",
+      "fixed_truth": {"oversized_source_role": "assistant", "expected_behavior": "request-only head/tail excerpt with omitted-text marker"},
+      "purpose": "Contrast assistant-history excerpting with user-source fail-closed behavior."
+    },
+    {
+      "case_id": "C07",
+      "strategy": "ROLLING_SUMMARY",
+      "setup": "Sixteen turns; each user row is padded to at least 450 cl100k tokens; current request runs after all turns are stored under a high seeding budget.",
+      "fixed_truth": {"old_history_exceeds_one_compression_batch": true, "expected_parent_summary_on_later_batch": true, "max_attempts": 3},
+      "purpose": "Measure batch boundaries, parent summary reuse, and compression-plus-answer attempt cap."
+    },
+    {
+      "case_id": "C08_BASE",
+      "strategy": "HYBRID",
+      "setup": "Fourteen turns padded to at least 320 cl100k tokens, normal read-only MCP schema, and an input limit high enough to fit the selected context.",
+      "fixed_truth": {"schema_changed": false, "expected_trigger": false},
+      "purpose": "Paired baseline for C08."
+    },
+    {
+      "case_id": "C08",
+      "strategy": "HYBRID",
+      "setup": "Same messages as C08_BASE. Add an unused synthetic read-only tool schema with a 1200-token description; set configured input limit to baseline estimate plus baseline reserve plus 10 tokens.",
+      "fixed_truth": {"schema_changed": true, "fake_tool_called": false, "expected_effective_budget_drop": true},
+      "purpose": "Show a schema footprint change reducing effective context available and causing the HYBRID trigger."
+    }
+  ],
+  "wp3_ground_truth": {
+    "source_status": "synthetic fixture data, not user data or live business evidence",
+    "facts": [
+      {"id": "GT-GOAL", "text": "Read-only callback protocol and processing-state investigation; HTTP 202 is not completion."},
+      {"id": "GT-CONFIG", "text": "Early endpoint=/callback; max_attempts=3."},
+      {"id": "GT-IDS-EARLY", "text": "Initial Request ID=req-482; Event ID=evt-731."},
+      {"id": "GT-CONSTRAINT", "text": "Do not change credentials or perform business writes; inspect evidence only."},
+      {"id": "GT-CORRECTION", "text": "Formal correction: Request ID=req-483; req-482 was a data-entry error; Event ID remains evt-731."},
+      {"id": "GT-REJECTED", "text": "Reject timeout hypothesis: deterministic fixture log has no timeout event."},
+      {"id": "GT-VERSION", "text": "Protocol v1.2 -> v1.3; max_attempts changes from 3 to 5; deployed version is unknown."},
+      {"id": "GT-TOOL-RESULT", "text": "Synthetic fixture result: Request=req-483, Event=evt-731, Delivery=HTTP 202 ACCEPTED, Receiver=QUEUED; not proof of completion."},
+      {"id": "GT-UNRESOLVED", "text": "Receiver completion remains unknown."},
+      {"id": "GT-LATEST", "text": "Latest fixture observation: Receiver=QUEUED at 2026-11-14T12:00Z."}
+    ],
+    "natural_language_quality": "NEEDS_LIVE_SEMANTIC_EVAL",
+    "fixture_output_is_not_model_recall_evidence": true
+  },
+  "determinism": {
+    "domain": "fresh reset_fixture(S1_POS) SQLite file for each case, stored only in TemporaryDirectory",
+    "checkpoint": "fresh SQLite checkpoint file for each case, stored only in TemporaryDirectory",
+    "model": "AuditFixtureModel, deterministic JSON summary and fixed answer behavior",
+    "provider_network": "none",
+    "live_mcp": "none; C08 adds an unused schema only; WP3 long tool result is explicitly synthetic fixture assistant content"
+  }
+}

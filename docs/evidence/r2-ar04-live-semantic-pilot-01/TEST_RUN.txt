@@ -1,0 +1,29 @@
+R2-AR04-LIVE-SEMANTIC-PILOT-01 — execution record
+
+Worktree: D:\学习\agent新项目\.worktrees\ar04a-context-journey-01
+Base: fd941299966f6cc54ae35be3102f071d2be29acc
+Branch: codex/r2-ar04-live-semantic-pilot-01
+Provider: DeepSeek official API, model alias deepseek-flash
+
+Preflight and source checks (no Provider request):
+
+1. `python -B -c "import ast,pathlib; ast.parse(pathlib.Path('docs/evidence/r2-ar04-live-semantic-pilot-01/run_direct_reference.py').read_text(encoding='utf-8')); print('AST_OK')"` — exit 0, `AST_OK`.
+2. `python -B docs/evidence/r2-ar04-live-semantic-pilot-01/run_direct_reference.py prepare` — exit 0; `READY_DIRECT_EVAL_REFERENCE_ONLY`, all seven D input checks passed, 0 Provider requests.
+3. Offline pre-send audit — 28 slots present, A/B/C 21 slots blocked, D 7 slots ready, empty gzip request log, request counter 0, full-scope peak estimate USD 0.3368064, D maximum reserve USD 0.1303008.
+
+Authorized live run:
+
+4. `python -B docs/evidence/r2-ar04-live-semantic-pilot-01/run_direct_reference.py send-direct-d` — sent 3 requests serially. Q02 and Q03 completed. Q06 returned `list_scoped_protocol_documents`; the call was recorded and not executed, and the runner stopped before Q07/Q08/Q10/Q12. No retry. No A/B/C Provider request. The command adapter reported exit code 1 for the stop condition; stdout contained the explicit stop message and no traceback.
+
+Offline scoring and evidence validation (no further Provider request):
+
+5. `python -B docs/evidence/r2-ar04-live-semantic-pilot-01/score_live_results.py` — exit 0; 28 result slots scored for status, 2 complete answers manually reviewed, 1 tool-call non-answer reviewed, 25 slots without responses.
+6. `python -B docs/evidence/r2-ar04-live-semantic-pilot-01/validate_live_evidence.py` — exit 0 when run after the scorer; 28 slots, 3 Provider requests, 6 raw events, secret scan, cost reconciliation, and Phase A hashes all validated.
+7. `python -B -c "import ast,pathlib; p=pathlib.Path('docs/evidence/r2-ar04-live-semantic-pilot-01'); [ast.parse((p/n).read_text(encoding='utf-8')) for n in ['run_direct_reference.py','score_live_results.py','validate_live_evidence.py']]; print('AST_OK=3')"` — exit 0.
+8. An initial validation invocation was run concurrently with the scoring writer and read the ledger before its update (`KeyError: retries`, exit 1). This was an ordering error in the validation invocation, not an experiment or Provider failure. The scorer and validator were then run sequentially; both exited 0 and the final validator passed. No Provider request occurred during either validation run.
+
+Live totals: 3 Provider requests; 0 summary requests; 0 retries; 0 UNKNOWN send states; 2 complete answers; 1 tool-call response; 4 D questions not sent after the stop; 21 A/B/C answers blocked before send. Provider usage was 78,766 input tokens and 532 output tokens. Conservative peak no-cache usage-cost upper estimate: USD 0.0242682. Exact billed USD amount was not provided by the API response.
+
+9. `git diff --cached --check` — exit 0; staged paths are limited to this new evidence directory. The pre-existing `.pytest-tmp/` remains untracked and untouched.
+
+No project pytest suite was run. No production source, Phase A source, historical trace, Gold, Runtime Grant, or business database was modified. No main merge was performed.

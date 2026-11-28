@@ -140,6 +140,11 @@ async def _process_run_inner(
     run: dict[str, object],
     worker_epoch: int | None,
 ) -> None:
+    from opspilot.config import require_legacy_provider_authorization
+
+    # Investigator remains a distinct legacy execution core. It must not
+    # inherit ASSISTANT_V1's Runtime Grant or fall back around it.
+    require_legacy_provider_authorization()
     from opspilot.investigator import run_investigation
 
     run_id = str(run["run_id"])
@@ -221,6 +226,9 @@ def _worker_error_class(error: BaseException) -> tuple[str, bool]:
                 return code, retryable
     if isinstance(error, TaskControlError):
         return error.code, error.code == "TASK_RUN_BUSY"
+    runtime_code = getattr(error, "code", None)
+    if isinstance(runtime_code, str) and runtime_code.startswith("RUNTIME_"):
+        return runtime_code, False
     if getattr(error, "code", None) == "D3_REVALIDATION_SOURCE_UNKNOWN":
         return "D3_REVALIDATION_SOURCE_UNKNOWN", True
     if "Missing required model configuration:" in str(error):
@@ -322,6 +330,11 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
         _record_provider_metadata,
     )
     from opspilot.domain.context_engineering import ContextBudgetExceeded
+    from opspilot.config import require_legacy_provider_authorization
+
+    # CHAT_READONLY predates the durable Runtime Grant. Keep it available only
+    # under its own explicit deployment authorization.
+    require_legacy_provider_authorization()
 
     run_id = str(run["run_id"])
     actor_id = await asyncio.to_thread(_chat_run_actor, db_path, run_id)
@@ -511,7 +524,8 @@ async def _process_chat_run(db_path: Path, worker_id: str, run: dict[str, object
 async def _dispatch_run(
     db_path: Path, checkpoint_path: Path, worker_id: str, executor_id: str,
     run: dict[str, object], worker_epoch: int | None = None, assistant_model_factory=None,
-    assistant_experiment_id: str | None = None,
+    assistant_experiment_id: str | None = None, assistant_runtime_enabled: bool = False,
+    assistant_streaming_enabled: bool = False,
 ) -> None:
     from opspilot.domain.assistant import selected as assistant_selected
     with connect(db_path) as connection:
@@ -521,11 +535,33 @@ async def _dispatch_run(
         from contextlib import suppress
         actor_id=await asyncio.to_thread(_chat_run_actor,db_path,str(run['run_id']))
         await asyncio.to_thread(claim_task_run,db_path,trusted_identity(db_path,actor_id),str(run['run_id']))
-        model=assistant_model_factory() if assistant_model_factory else None
+        runtime_binding = None
+        if assistant_runtime_enabled:
+            from opspilot.domain.assistant_runtime_grant import (
+                RuntimeGrantError, bind_run, runtime_config_from_env,
+            )
+            from opspilot.domain.assistant_experiment import EXPERIMENT_ENV
+
+            if (
+                assistant_experiment_id is not None
+                or os.environ.get(EXPERIMENT_ENV, "").strip()
+                or os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "").strip() != "1"
+                or assistant_model_factory is None
+            ):
+                raise RuntimeGrantError("RUNTIME_EXPLICIT_PROVIDER_AUTHORIZATION_REQUIRED")
+            runtime_binding = await asyncio.to_thread(
+                bind_run, db_path, str(run["run_id"]), runtime_config_from_env(),
+            )
+            model = assistant_model_factory(runtime_grant_binding=runtime_binding)
+            if model is None:
+                raise RuntimeGrantError("RUNTIME_PROVIDER_FACTORY_DISABLED")
+        else:
+            model=assistant_model_factory() if assistant_model_factory else None
         try:
             await run_assistant(
                 db_path, checkpoint_path, worker_id, str(run["run_id"]), model=model,
-                experiment_id=assistant_experiment_id,
+                experiment_id=assistant_experiment_id, runtime_grant_binding=runtime_binding,
+                worker_epoch=worker_epoch, streaming_enabled=assistant_streaming_enabled,
             )
         finally:
             # The formal factory owns one explicit HTTPX client pair per Run.
@@ -556,9 +592,17 @@ async def run_worker(
     worker_epoch: int | None = None,
     assistant_model_factory=None,
     assistant_experiment_id: str | None = None,
+    assistant_runtime_enabled: bool = False,
+    assistant_streaming_enabled: bool = False,
 ) -> None:
     resolved_db = Path(db_path).resolve()
     resolved_checkpoint = Path(checkpoint_db_path).resolve()
+    if assistant_runtime_enabled:
+        from opspilot.domain.assistant_runtime_grant import recover_interrupted_sends
+
+        # Only the new, exclusive Worker may classify an earlier process's
+        # send grant. UNKNOWN reservations remain charged and are never resent.
+        await asyncio.to_thread(recover_interrupted_sends, resolved_db, worker_id)
     while True:
         if not await asyncio.to_thread(
             worker_owner_matches, str(resolved_db), worker_id, worker_epoch
@@ -566,12 +610,69 @@ async def run_worker(
             raise TaskControlError("WORKER_FENCE_STALE")
         run = await asyncio.to_thread(next_worker_run, str(resolved_db))
         if run is None:
+            if (
+                assistant_runtime_enabled and assistant_experiment_id is None
+                and assistant_model_factory is not None
+            ):
+                from opspilot.domain.personal_memory_consolidation import (
+                    claim_next_personal_memory_job,
+                    finish_personal_memory_job,
+                    process_personal_memory_job,
+                )
+
+                job = await asyncio.to_thread(
+                    claim_next_personal_memory_job, resolved_db, worker_id,
+                )
+                if job is not None:
+                    model = None
+                    try:
+                        from opspilot.domain.assistant_runtime_grant import bind_run, runtime_config_from_env
+
+                        binding = await asyncio.to_thread(
+                            bind_run, resolved_db, str(job["source_run_id"]), runtime_config_from_env(),
+                        )
+                        model = assistant_model_factory(runtime_grant_binding=binding)
+                        if model is None:
+                            raise RuntimeError("RUNTIME_PROVIDER_FACTORY_DISABLED")
+                        await process_personal_memory_job(
+                            resolved_db, worker_id, str(job["job_id"]), model,
+                            runtime_binding=binding, worker_epoch=worker_epoch,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
+                        with connect(resolved_db) as connection:
+                            current = connection.execute(
+                                "SELECT status FROM personal_memory_consolidation_jobs WHERE job_id=?",
+                                (str(job["job_id"]),),
+                            ).fetchone()
+                        if current is not None and str(current["status"]) == "RUNNING":
+                            code = getattr(error, "code", type(error).__name__)
+                            if str(code) != "RUNTIME_RESPONSE_DURABLE_REPLAY_REQUIRED":
+                                terminal = "UNKNOWN" if "UNKNOWN" in str(code) else "FAILED"
+                                await asyncio.to_thread(
+                                    finish_personal_memory_job, resolved_db, str(job["job_id"]),
+                                    status=terminal, failure_code=str(code)[:120],
+                                )
+                    finally:
+                        from contextlib import suppress
+
+                        async_client = getattr(model, "http_async_client", None)
+                        if async_client is not None:
+                            with suppress(Exception):
+                                await async_client.aclose()
+                        sync_client = getattr(model, "http_client", None)
+                        if sync_client is not None:
+                            with suppress(Exception):
+                                sync_client.close()
+                    continue
             await asyncio.sleep(poll_interval)
             continue
         try:
             await _dispatch_run(
                 resolved_db, resolved_checkpoint, worker_id, executor_id, run, worker_epoch,
-                assistant_model_factory, assistant_experiment_id,
+                assistant_model_factory, assistant_experiment_id, assistant_runtime_enabled,
+                assistant_streaming_enabled,
             )
         except asyncio.CancelledError:
             raise

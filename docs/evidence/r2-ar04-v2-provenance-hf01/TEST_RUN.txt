@@ -1,0 +1,65 @@
+R2-AR04-V2-PROVENANCE-HF-01 — offline evidence log
+Base: 28d5d1e670801feec0bb6620bfc249ff850404f4
+Code commit: a9adae903740ca7799cecebd05095caaabe3f915
+Test commit: 32c207ea2cef666f8801edc689983496c5331a1b
+Provider calls: 0 | Cost: USD 0.00 | External MCP: 0
+
+1) Syntax compilation
+Command:
+  python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-prep-01/run_v2.py docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py
+Exit: 0
+
+2) First focused provenance invocation (setup failure; no test body ran)
+Command:
+  python -m pytest -q docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py -k provenance --basetemp docs/evidence/r2-ar04-v2-provenance-hf01/.pytest-prov-focused
+Exit: 1
+Outcome: pytest could not create --basetemp because the new evidence directory did not yet exist; 3 setup errors, 10 deselected. The error was environmental test setup, not an assertion result. The directory was then created without deleting any existing data.
+
+3) Focused provenance reverse tests after directory creation
+Command:
+  python -m pytest -q docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py -k provenance --basetemp docs/evidence/r2-ar04-v2-provenance-hf01/.pytest-prov-focused
+Exit: 0
+Output: 3 passed, 10 deselected in 3.48s
+
+4) First full V2 suite
+Command:
+  python -m pytest -q docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py --basetemp docs/evidence/r2-ar04-v2-provenance-hf01/.pytest-full-01
+Exit: 1
+Output: 1 failed, 12 passed in 55.84s. The failure found that the test compared provenance metadata against the frozen manifest while the runtime record also contained its internal summary_text field. The emitted provenance was corrected to contain source metadata only.
+
+5) Full V2 suite before the extra persisted-summary linkage assertions
+Command:
+  python -m pytest -q docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py --basetemp docs/evidence/r2-ar04-v2-provenance-hf01/.pytest-full-02
+Exit: 0
+Output: 13 passed in 52.74s
+
+6) Final full V2 suite (C01–C08, three provenance reverse cases, and Q02-A first-summary persistence linkage)
+Commands:
+  python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-prep-01/run_v2.py docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py
+  python -m pytest -q docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py --basetemp docs/evidence/r2-ar04-v2-provenance-hf01/.pytest-final-03
+Exit: 0
+Output: 13 passed in 50.73s
+The full-matrix assertion additionally hashes the Q02-A first Mock response and checks that the first persisted Domain summary contains `/callback` at source seq3, the formal request correction at seq7, and the protocol transition at seq11.
+
+7) Syntax and whitespace check before the code commits
+Commands:
+  python -m py_compile docs/evidence/r2-ar04-live-recheck-v2-prep-01/run_v2.py docs/evidence/r2-ar04-live-recheck-v2-prep-01/test_runner_v2.py
+  git diff --check
+Exit: 0
+
+8) Complete application-path Mock rerun using committed V2 code
+Command:
+  python docs/evidence/r2-ar04-live-recheck-v2-prep-01/run_v2.py mock --output docs/evidence/r2-ar04-v2-provenance-hf01/mock_run_01
+Exit: 0
+Output: {"status":"COMPLETED","case_matrix_passed":true,"mock_requests":9,"provider_requests_sent":0}
+The persisted trace has 18 events: 9 SEND_STARTED and 9 RESPONSE_RECEIVED. Each case has 2 persisted summaries and 1 answer; all dispatches use httpx.MockTransport.
+
+9) Independent artifact assertions
+Command: inline Python verification of MOCK_RESULTS.json, MOCK_TRACE.jsonl.gz, MOCK_COST_LEDGER.json, MOCK_REPLY_PROVENANCE.jsonl.gz, the three source pins, persisted-summary states, final prompt visibility, Q06-B PARTIAL/COMPLETE labels, and protected historical files.
+Exit: 0
+Output: PASS; 3/3 cases; 9 Mock requests; all 3 source entries validated.
+
+Historical preservation check:
+The Git-cleaned blobs at the Base for the old V2 FROZEN_INPUTS.json, MOCK_RESULTS.json, MOCK_TRACE.jsonl.gz, MOCK_COST_LEDGER.json, MOCK_REPLY_PROVENANCE.jsonl.gz and PREFLIGHT.json were compared with the working tree; all six matched. The Runner's protected-history guard also reported all 9 protected files matching Base and protected_paths_diff_from_base=false.
+
+Test evidence level: direct local pytest execution and local offline Assistant/Domain integration with HTTPX MockTransport. No live Provider semantic conclusion is claimed.
