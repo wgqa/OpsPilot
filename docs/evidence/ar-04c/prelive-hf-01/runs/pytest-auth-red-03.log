@@ -1,0 +1,103 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+______ test_ar04c_authorization_positive_claim_is_atomic_and_head_bound _______
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-prelive-red-03/test_ar04c_authorization_posit0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000260925BEEA0>
+
+    def test_ar04c_authorization_positive_claim_is_atomic_and_head_bound(tmp_path, monkeypatch):
+        import opspilot.assistant as assistant
+    
+        _auth_path, claim_path = _write_authorization(tmp_path, monkeypatch)
+    
+        def try_create():
+            try:
+                return assistant._ar04c_create_one_shot_claim()["claim_id"]
+            except RuntimeError:
+                return None
+    
+        with ThreadPoolExecutor(max_workers=2) as pool:
+>           results = list(pool.map(lambda _index: try_create(), range(2)))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar04c_prelive_hf01.py:99: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\concurrent\futures\_base.py:639: in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\concurrent\futures\_base.py:311: in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\concurrent\futures\_base.py:443: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\concurrent\futures\_base.py:395: in __get_result
+    raise self._exception
+D:\python\Lib\concurrent\futures\thread.py:86: in run
+    result = ctx.run(self.task)
+             ^^^^^^^^^^^^^^^^^^
+D:\python\Lib\concurrent\futures\thread.py:73: in run
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+tests\test_ar04c_prelive_hf01.py:99: in <lambda>
+    results = list(pool.map(lambda _index: try_create(), range(2)))
+                                           ^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def try_create():
+        try:
+>           return assistant._ar04c_create_one_shot_claim()["claim_id"]
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'opspilot.assistant' has no attribute '_ar04c_create_one_shot_claim'
+
+tests\test_ar04c_prelive_hf01.py:94: AttributeError
+______ test_ar04c_execution_head_missing_from_authorization_fails_closed ______
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-prelive-red-03/test_ar04c_execution_head_miss0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000260955609D0>
+
+    def test_ar04c_execution_head_missing_from_authorization_fails_closed(tmp_path, monkeypatch):
+        import opspilot.assistant as assistant
+    
+        _write_authorization(tmp_path, monkeypatch, include_execution_head=False)
+        with pytest.raises(RuntimeError, match="AR04C_ONE_SHOT_AUTHORIZATION_INVALID"):
+>           assistant._ar04c_create_one_shot_claim()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'opspilot.assistant' has no attribute '_ar04c_create_one_shot_claim'
+
+tests\test_ar04c_prelive_hf01.py:115: AttributeError
+_____ test_ar04c_consumed_claim_cannot_be_replayed_by_new_worker_process ______
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-prelive-red-03/test_ar04c_consumed_claim_cann0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002609551BAD0>
+
+    def test_ar04c_consumed_claim_cannot_be_replayed_by_new_worker_process(tmp_path, monkeypatch):
+        import opspilot.assistant as assistant
+    
+        auth_path, claim_path = _write_authorization(tmp_path, monkeypatch)
+>       assistant._ar04c_create_one_shot_claim()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'opspilot.assistant' has no attribute '_ar04c_create_one_shot_claim'
+
+tests\test_ar04c_prelive_hf01.py:122: AttributeError
+_____ test_ar04c_mock_provider_transport_requires_formal_dispatch_context _____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-prelive-red-03/test_ar04c_mock_provider_trans0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000026095513DF0>
+
+    def test_ar04c_mock_provider_transport_requires_formal_dispatch_context(tmp_path, monkeypatch):
+        import asyncio
+        import opspilot.assistant as assistant
+    
+        _write_authorization(tmp_path, monkeypatch)
+>       assistant._ar04c_create_one_shot_claim()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'opspilot.assistant' has no attribute '_ar04c_create_one_shot_claim'
+
+tests\test_ar04c_prelive_hf01.py:166: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_prelive_hf01.py::test_ar04c_authorization_positive_claim_is_atomic_and_head_bound
+FAILED tests/test_ar04c_prelive_hf01.py::test_ar04c_execution_head_missing_from_authorization_fails_closed
+FAILED tests/test_ar04c_prelive_hf01.py::test_ar04c_consumed_claim_cannot_be_replayed_by_new_worker_process
+FAILED tests/test_ar04c_prelive_hf01.py::test_ar04c_mock_provider_transport_requires_formal_dispatch_context
+4 failed in 1.31s

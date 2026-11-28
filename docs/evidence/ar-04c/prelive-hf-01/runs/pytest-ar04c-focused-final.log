@@ -1,0 +1,284 @@
+..........F..                                                            [100%]
+================================== FAILURES ===================================
+_____ test_ar04c_mock_provider_unknown_persists_stop_and_blocks_followup ______
+
+request = <Request('POST', 'https://api.deepseek.com/chat/completions')>
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+>       raise httpx.ConnectError("offline injected transport failure", request=request)
+E       httpx.ConnectError: offline injected transport failure
+
+tests\test_ar04c_prelive_hf01.py:347: ConnectError
+
+The above exception was the direct cause of the following exception:
+
+self = ChatOpenAI(metadata={'lc_versions': {'langchain-core': '1.6.12', 'langchain': '1.4.1', 'langchain-openai': '1.7.2'}}, ..._chunk_timeout=120.0, extra_body={'max_tokens': 2048, 'thinking': {'type': 'disabled'}}, include_response_headers=True)
+messages = [HumanMessage(content='offline-only', additional_kwargs={}, response_metadata={})]
+stop = None
+run_manager = <langchain_core.callbacks.manager.AsyncCallbackManagerForLLMRun object at 0x000001B99C82F390>
+kwargs = {}
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        payload = self._get_request_payload(messages, stop=stop, **kwargs)
+        generation_info = {}
+        raw_response = None
+        try:
+            if "response_format" in payload:
+                payload.pop("stream")
+                raw_response = await self.root_async_client.chat.completions.with_raw_response.parse(  # noqa: E501
+                    **payload
+                )
+                response = raw_response.parse()
+            elif self._use_responses_api(payload):
+                original_schema_obj = kwargs.get("response_format")
+                if original_schema_obj and _is_pydantic_class(original_schema_obj):
+                    raw_response = (
+                        await self.root_async_client.responses.with_raw_response.parse(
+                            **payload
+                        )
+                    )
+                else:
+                    raw_response = (
+                        await self.root_async_client.responses.with_raw_response.create(
+                            **payload
+                        )
+                    )
+                response = raw_response.parse()
+                if self.include_response_headers:
+                    generation_info = {"headers": dict(raw_response.headers)}
+                _add_gateway_metadata(generation_info, raw_response)
+                # Gateway metadata belongs on `generation_info`, not the message
+                # `response_metadata` that `metadata` populates.
+                gateway_metadata = generation_info.pop(
+                    GATEWAY_METADATA_RESPONSE_KEY, None
+                )
+                result = _construct_lc_result_from_responses_api(
+                    response,
+                    schema=original_schema_obj,
+                    metadata=generation_info,
+                    output_version=self.output_version,
+                )
+                if gateway_metadata is not None:
+                    for generation in result.generations:
+                        generation.generation_info = generation.generation_info or {}
+                        generation.generation_info[GATEWAY_METADATA_RESPONSE_KEY] = (
+                            gateway_metadata
+                        )
+                return result
+            else:
+>               raw_response = await self.async_client.with_raw_response.create(
+                    **payload
+                )
+
+..\..\.venv\Lib\site-packages\langchain_openai\chat_models\base.py:2295: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\.venv\Lib\site-packages\openai\_legacy_response.py:386: in wrapped
+    return cast(LegacyAPIResponse[R], await func(*args, **kwargs))
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\.venv\Lib\site-packages\openai\resources\chat\completions\completions.py:2952: in create
+    return await self._post(
+..\..\.venv\Lib\site-packages\openai\_base_client.py:2053: in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <openai.AsyncOpenAI object at 0x000001B99C82CF50>
+cast_to = <class 'openai.types.chat.chat_completion.ChatCompletion'>
+options = FinalRequestOptions(method='post', url='/chat/completions', params={}, headers={'X-Stainless-Raw-Response': 'true'}, m...ffline-only', 'role': 'user'}], 'temperature': 0.0}, extra_json={'max_tokens': 2048, 'thinking': {'type': 'disabled'}})
+stream = False
+stream_cls = openai.AsyncStream[openai.types.chat.chat_completion_chunk.ChatCompletionChunk]
+
+    async def request(
+        self,
+        cast_to: Type[ResponseT],
+        options: FinalRequestOptions,
+        *,
+        stream: bool = False,
+        stream_cls: type[_AsyncStreamT] | None = None,
+    ) -> ResponseT | _AsyncStreamT:
+        if self._platform is None:
+            # `get_platform` can make blocking IO calls so we
+            # execute it earlier while we are in an async context
+            self._platform = await asyncify(get_platform)()
+    
+        cast_to = self._maybe_override_cast_to(cast_to, options)
+    
+        # create a copy of the options we were given so that if the
+        # options are mutated later & we then retry, the retries are
+        # given the original options
+        input_options = model_copy(options)
+        if input_options.idempotency_key is None and input_options.method.lower() != "get":
+            # ensure the idempotency key is reused between requests
+            input_options.idempotency_key = self._idempotency_key()
+    
+        response: httpx2.Response | None = None
+        max_retries = input_options.get_max_retries(self.max_retries)
+        self._validate_max_retries(max_retries)
+    
+        retries_taken = 0
+        for retries_taken in range(max_retries + 1):
+            options = model_copy(input_options)
+            options = await self._prepare_options(options)
+            request_body_replay = _RequestBodyReplay(options)
+    
+            remaining_retries = max_retries - retries_taken
+            request = self._build_request(options, retries_taken=retries_taken)
+            await self._prepare_request(request)
+    
+            kwargs: HttpxSendArgs = {}
+            if self.custom_auth is not None:
+                kwargs["auth"] = (
+                    normalize_httpx2_auth(self.custom_auth)
+                    if is_httpx2_async_client(self._client)
+                    else normalize_legacy_httpx_auth(self.custom_auth)
+                )
+    
+            if options.follow_redirects is not None:
+                kwargs["follow_redirects"] = options.follow_redirects
+    
+            log.debug("Sending HTTP Request: %s", get_http_method_for_logging(request.method))
+    
+            response = None
+            try:
+                response = await self._send_request(
+                    request,
+                    stream=stream or self._should_stream_response_body(request=request),
+                    **kwargs,
+                )
+            except timeout_exceptions() as err:
+                log.debug("Encountered a timeout exception: %s", type(err).__name__)
+    
+                if remaining_retries > 0 and request_body_replay.rewind():
+                    await self._sleep_for_retry(
+                        retries_taken=retries_taken,
+                        max_retries=max_retries,
+                        options=input_options,
+                        response=None,
+                    )
+                    continue
+    
+                log.debug("Raising timeout error")
+                raise APITimeoutError(request=request) from err
+            except OpenAIError as err:
+                # Propagate OpenAIErrors as-is, without retrying or wrapping in APIConnectionError
+                raise err
+            except request_exceptions() as err:
+                log.debug("Encountered exception: %s", type(err).__name__)
+    
+                if remaining_retries > 0 and request_body_replay.rewind():
+                    await self._sleep_for_retry(
+                        retries_taken=retries_taken,
+                        max_retries=max_retries,
+                        options=input_options,
+                        response=None,
+                    )
+                    continue
+    
+                log.debug("Raising connection error")
+>               raise APIConnectionError(request=request) from err
+E               openai.APIConnectionError: Connection error.
+
+..\..\.venv\Lib\site-packages\openai\_base_client.py:1808: APIConnectionError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-prelive-focused-final/test_ar04c_mock_provider_unkno0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001B99B9C2510>
+
+    def test_ar04c_mock_provider_unknown_persists_stop_and_blocks_followup(tmp_path, monkeypatch):
+        import asyncio
+        import opspilot.assistant as assistant
+        from opspilot.domain.assistant_experiment import initialize_experiment
+    
+        _write_authorization(tmp_path, monkeypatch)
+        assistant._ar04c_create_one_shot_claim()
+        db_path = tmp_path / "condition-off.sqlite3"
+        initialize_experiment(db_path, EXPERIMENT_ID)
+        attempts = []
+    
+        def fail(request: httpx.Request) -> httpx.Response:
+            attempts.append(request)
+            raise httpx.ConnectError("offline injected transport failure", request=request)
+    
+        model = assistant.create_assistant_model(
+            transport_async=httpx.MockTransport(fail),
+            transport_sync=httpx.MockTransport(fail),
+        )
+        assistant._ar04c_bind_campaign_database(db_path, "OFF")
+        dispatch_token = assistant._AR04C_DISPATCH_CONTEXT.set({
+            "experiment_id": EXPERIMENT_ID,
+            "db_path": str(db_path.resolve()),
+            "memory_mode": "OFF",
+            "run_id": "offline-test-run",
+            "logical_key": "offline-test-call",
+        })
+        try:
+            with pytest.raises(httpx.ConnectError, match="offline injected"):
+>               asyncio.run(model.ainvoke("offline-only"))
+
+tests\test_ar04c_prelive_hf01.py:363: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+..\..\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py:511: in ainvoke
+    llm_result = await self.agenerate_prompt(
+..\..\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py:1888: in agenerate_prompt
+    return await self.agenerate(
+..\..\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py:1846: in agenerate
+    raise exceptions[0]
+..\..\.venv\Lib\site-packages\langchain_core\language_models\chat_models.py:2179: in _agenerate_with_cache
+    result = await self._agenerate(
+..\..\.venv\Lib\site-packages\langchain_openai\chat_models\base.py:2302: in _agenerate
+    _handle_openai_api_error(e)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+e = APIConnectionError('Connection error.')
+
+    def _handle_openai_api_error(e: openai.APIError) -> None:
+        error_message = str(e)
+        if "exceeds the context window" in error_message:
+            raise OpenAIAPIContextOverflowError(
+                message=e.message, request=e.request, body=e.body
+            ) from e
+        if isinstance(e, openai.AuthenticationError):
+            raise OpenAIAuthenticationError(
+                message=e.message, response=e.response, body=e.body
+            ) from e
+        if isinstance(e, openai.PermissionDeniedError):
+            raise OpenAIPermissionDeniedError(
+                message=e.message, response=e.response, body=e.body
+            ) from e
+        if isinstance(e, openai.NotFoundError):
+            raise OpenAIModelNotFoundError(
+                message=e.message, response=e.response, body=e.body
+            ) from e
+        if isinstance(e, openai.RateLimitError):
+            raise OpenAIRateLimitError(
+                message=e.message, response=e.response, body=e.body
+            ) from e
+        if isinstance(e, openai.InternalServerError):
+            raise OpenAIAPIError(message=e.message, response=e.response, body=e.body) from e
+        if isinstance(e, openai.APITimeoutError):
+            raise OpenAITimeoutError(e.request) from e
+        if isinstance(e, openai.APIConnectionError):
+>           raise OpenAIConnectionError(message=e.message, request=e.request) from e
+E           langchain_openai.chat_models.base.OpenAIConnectionError: Connection error.
+
+..\..\.venv\Lib\site-packages\langchain_openai\chat_models\base.py:744: OpenAIConnectionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_prelive_hf01.py::test_ar04c_mock_provider_unknown_persists_stop_and_blocks_followup
+1 failed, 12 passed in 17.44s

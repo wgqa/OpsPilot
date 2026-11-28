@@ -5,12 +5,17 @@ material resume campaign additionally requires its exact one-shot authorization.
 """
 from __future__ import annotations
 import asyncio
+import contextvars
 import hashlib
 import hmac
 import json
 import os
+import secrets
+import sqlite3
 import subprocess
 import sys
+import threading
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from pathlib import Path
 from langchain.agents import create_agent
@@ -50,6 +55,487 @@ MATERIAL_REMAINDER_LIVE_AUTHORIZATION_ID = "AR03-MATERIAL-REMAINDER-01-USER-AUTH
 MATERIAL_REMAINDER_LIVE_TOKEN_ENV = "OPSPILOT_AR03_MATERIAL_REMAINDER_LIVE_ONE_SHOT_TOKEN"
 MATERIAL_REMAINDER_LIVE_AUTH_RECORD = ROOT / "docs" / "evidence" / "ar-03" / "material-remainder-live-01" / "PAID_AUTHORIZATION.json"
 MATERIAL_REMAINDER_LIVE_CLAIM = ROOT.parent.parent / ".runtime" / "ar03-material-remainder-live-01-live" / "claim.json"
+
+AR04C_EXPERIMENT_ID = "AR-04C-REAL-JOURNEY-01"
+AR04C_AUTHORIZATION_ID = "AR04C-REAL-JOURNEY-01-USER-AUTH"
+AR04C_TOKEN_ENV = "OPSPILOT_AR04C_REAL_JOURNEY_01_ONE_SHOT_TOKEN"
+AR04C_MEMORY_MODE_ENV = "OPSPILOT_AR04C_MEMORY_MODE"
+AR04C_AUTH_RECORD = ROOT / "docs" / "evidence" / "ar-04c" / "real-journey-01" / "PAID_AUTHORIZATION.json"
+AR04C_CLAIM = ROOT.parent.parent / ".runtime" / "ar04c-real-journey-01" / "claim.json"
+AR04C_RECHECK_ID = "AR04C-F01-RECHECK-01"
+AR04C_RECHECK_AUTHORIZATION_ID = "AR04C-F01-RECHECK-01-USER-AUTH"
+AR04C_RECHECK_TOKEN_ENV = "OPSPILOT_AR04C_F01_RECHECK_ONE_SHOT_TOKEN"
+AR04C_RECHECK_AUTH_RECORD = ROOT.parent.parent / ".runtime" / "ar04c-f01-recheck-01" / "PAID_AUTHORIZATION.json"
+AR04C_RECHECK_CLAIM = ROOT.parent.parent / ".runtime" / "ar04c-f01-recheck-01" / "claim.json"
+_AR04C_STATE_LOCK = threading.RLock()
+_AR04C_PROVIDER_INFLIGHT_LOCK = threading.Lock()
+_AR04C_PROCESS_CAPABILITIES: dict[str, str] = {}
+_AR04C_DISPATCH_CONTEXT = contextvars.ContextVar("ar04c_dispatch_context", default=None)
+
+
+def _ar04c_scope(experiment_id: str) -> dict[str, object] | None:
+    from opspilot.domain.assistant_experiment import (
+        AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO, AR04C_RECHECK_RESERVATION_USD_MICRO,
+    )
+    if experiment_id == AR04C_EXPERIMENT_ID:
+        return {'id': experiment_id, 'authorization_id': AR04C_AUTHORIZATION_ID,
+                'token_env': AR04C_TOKEN_ENV, 'auth_record': AR04C_AUTH_RECORD, 'claim': AR04C_CLAIM,
+                'branch': 'codex/ar04c-real-journey-01', 'base_sha': '60eee87bfe3cca522011316cb4cd2c0064ad291b',
+                'authorization_source': 'Explicit user authorization for AR-04C-REAL-JOURNEY-01',
+                'provider_limit': 16, 'budget': 10_500_000, 'reservation': AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO}
+    if experiment_id == AR04C_RECHECK_ID:
+        return {'id': experiment_id, 'authorization_id': AR04C_RECHECK_AUTHORIZATION_ID,
+                'token_env': AR04C_RECHECK_TOKEN_ENV, 'auth_record': AR04C_RECHECK_AUTH_RECORD, 'claim': AR04C_RECHECK_CLAIM,
+                'branch': 'codex/ar04c-f01-context-currentness-01', 'base_sha': '08b007dda384b03a3b7d1ac6351d8c4ee1dcfb45',
+                'authorization_source': 'Explicit user authorization for AR04C-F01-RECHECK-01',
+                'provider_limit': 8, 'budget': 5_250_000, 'reservation': AR04C_RECHECK_RESERVATION_USD_MICRO}
+    return None
+
+
+def _ar04c_active_scope() -> dict[str, object] | None:
+    return _ar04c_scope(os.environ.get('OPSPILOT_ASSISTANT_EXPERIMENT_ID', '').strip())
+
+
+def _ar04c_claim_state_path() -> Path:
+    scope = _ar04c_active_scope()
+    claim = scope['claim'] if scope else AR04C_CLAIM
+    return Path(str(claim) + ".state.json")
+
+
+def _ar04c_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _ar04c_is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _ar04c_fsync_parent(path: Path) -> None:
+    # Windows does not expose portable directory fsync through os.open. The
+    # claim/state file itself is flushed before returning; POSIX also persists
+    # the directory entry where supported.
+    if os.name == "nt":
+        return
+    descriptor = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _ar04c_write_exclusive_json(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        _ar04c_fsync_parent(path)
+    except BaseException:
+        # Deliberately leave any partial O_EXCL file in place: it blocks replay
+        # and requires a new, independently authorized execution identity.
+        raise
+
+
+def _ar04c_replace_json(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
+    payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        _ar04c_fsync_parent(path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _ar04c_authorization_context(experiment_id: str) -> dict[str, object] | None:
+    """Validate the user grant against this exact checkout before claim creation."""
+    from opspilot.domain.assistant_experiment import (
+        AR04C_PRICE_VERSION,
+        AR04C_CONDITION_BUDGET_USD_MICRO,
+        AR04C_CONDITION_PROVIDER_LIMIT,
+    )
+
+    scope = _ar04c_scope(experiment_id)
+    if (
+        scope is None
+        or os.environ.get("OPSPILOT_ASSISTANT_EXPERIMENT_ID", "").strip() != experiment_id
+        or os.environ.get("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "").strip() != "1"
+        or (experiment_id == AR04C_RECHECK_ID and os.environ.get(AR04C_MEMORY_MODE_ENV, '').strip().upper() != 'ON')
+    ):
+        return None
+    token = os.environ.get(scope['token_env'], "")
+    contract_digest = _ar04c_contract_digest(experiment_id)
+    if not token or contract_digest is None:
+        return None
+    try:
+        authorization_bytes = Path(scope['auth_record']).read_bytes()
+        authorization = json.loads(authorization_bytes.decode("utf-8"))
+        branch_result = subprocess.run(
+            ["git", "branch", "--show-current"], cwd=ROOT,
+            capture_output=True, text=True, check=False,
+        )
+        head_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT,
+            capture_output=True, text=True, check=False,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if branch_result.returncode or head_result.returncode:
+        return None
+    branch, head = branch_result.stdout.strip(), head_result.stdout.strip()
+    if branch != scope['branch']:
+        return None
+    if type(authorization) is not dict:
+        return None
+    expected_authorization = {
+        "authorization_id": scope['authorization_id'],
+        "experiment_id": experiment_id,
+        "status": "AUTHORIZED_ONE_SHOT",
+        "authorization_source": scope['authorization_source'],
+        "branch": branch,
+        "base_sha": scope['base_sha'],
+        "execution_head_sha": head,
+        "frozen_contract_sha256": contract_digest,
+        "provider": "DeepSeek",
+        "model": "deepseek-flash",
+        "thinking": {"type": "disabled"},
+        "provider_limit": scope['provider_limit'],
+        "providers_per_condition": AR04C_CONDITION_PROVIDER_LIMIT,
+        "mcp_limit": None,
+        "application_budget_usd_micro": scope['budget'],
+        "condition_budget_usd_micro": AR04C_CONDITION_BUDGET_USD_MICRO,
+        "provider_reservation_usd_micro": scope['reservation'],
+        "price_version": AR04C_PRICE_VERSION,
+        "max_tokens": 2048,
+        "tool_choice": "auto when tools are supplied",
+        "parallel_tool_calls": False,
+        "stream": False,
+        "context_input_limit_tokens": 12000,
+        "request_timeout_seconds": 30,
+        "provider_concurrency": 1,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "business_writes_allowed": False,
+    }
+    if set(authorization) != set(expected_authorization) | {"authorized_on", "authorization_card_sha256"}:
+        return None
+    if any(
+        type(authorization.get(key)) is not type(value) or authorization.get(key) != value
+        for key, value in expected_authorization.items()
+    ):
+        return None
+    if not isinstance(authorization.get("authorized_on"), str) or not authorization["authorized_on"]:
+        return None
+    if not _ar04c_is_sha256(authorization.get("authorization_card_sha256")):
+        return None
+    return {
+        "authorization": authorization,
+        "authorization_bytes": authorization_bytes,
+        "authorization_sha256": hashlib.sha256(authorization_bytes).hexdigest(),
+        "contract_sha256": contract_digest,
+        "branch": branch,
+        "head": head,
+        "token": token,
+        "scope": scope,
+    }
+
+
+def _ar04c_expected_claim(context: dict[str, object], nonce: str) -> dict[str, object]:
+    from opspilot.domain.assistant_experiment import (
+        AR04C_PRICE_VERSION,
+        AR04C_CONDITION_BUDGET_USD_MICRO,
+        AR04C_CONDITION_PROVIDER_LIMIT,
+    )
+    scope = context['scope']
+    return {
+        "claim_id": f"{scope['id']}:one-shot:{scope['authorization_id']}",
+        "authorization_id": scope['authorization_id'],
+        "experiment_id": scope['id'],
+        "branch": context["branch"],
+        "execution_head_sha": context["head"],
+        "base_sha": scope['base_sha'],
+        "status": "CLAIMED_ONE_SHOT_NO_RETRY",
+        "provider_limit": scope['provider_limit'],
+        "providers_per_condition": AR04C_CONDITION_PROVIDER_LIMIT,
+        "mcp_limit": None,
+        "application_budget_usd_micro": scope['budget'],
+        "condition_budget_usd_micro": AR04C_CONDITION_BUDGET_USD_MICRO,
+        "provider_reservation_usd_micro": scope['reservation'],
+        "price_version": AR04C_PRICE_VERSION,
+        "automatic_retries": 0,
+        "manual_retries": 0,
+        "authorization_record_sha256": context["authorization_sha256"],
+        "frozen_contract_sha256": context["contract_sha256"],
+        "process_nonce_sha256": hashlib.sha256(nonce.encode("utf-8")).hexdigest(),
+    }
+
+
+def _ar04c_create_one_shot_claim() -> dict[str, str]:
+    """Atomically create a claim from a valid grant; never re-open a used claim."""
+    scope = _ar04c_active_scope()
+    context = _ar04c_authorization_context(scope['id']) if scope else None
+    if context is None:
+        raise RuntimeError("AR04C_ONE_SHOT_AUTHORIZATION_INVALID")
+    claim_path = Path(scope['claim'])
+    state_path = _ar04c_claim_state_path()
+    capability_key = str(claim_path.resolve())
+    with _AR04C_STATE_LOCK:
+        if claim_path.exists() or state_path.exists():
+            raise RuntimeError("AR04C_ONE_SHOT_CLAIM_ALREADY_EXISTS")
+        nonce = secrets.token_urlsafe(32)
+        claim = _ar04c_expected_claim(context, nonce)
+        claim.update({
+            "claimed_at": _ar04c_now(),
+            "token_sha256": hashlib.sha256(str(context["token"]).encode("utf-8")).hexdigest(),
+        })
+        try:
+            _ar04c_write_exclusive_json(claim_path, claim)
+        except FileExistsError as error:
+            raise RuntimeError("AR04C_ONE_SHOT_CLAIM_ALREADY_EXISTS") from error
+        _AR04C_PROCESS_CAPABILITIES[capability_key] = nonce
+    return {"claim_id": str(claim["claim_id"]), "execution_head_sha": str(claim["execution_head_sha"])}
+
+
+def _ar04c_verified_claim_context() -> dict[str, object] | None:
+    scope = _ar04c_active_scope()
+    context = _ar04c_authorization_context(scope['id']) if scope else None
+    if context is None:
+        return None
+    claim_path = Path(scope['claim'])
+    capability_key = str(claim_path.resolve())
+    nonce = _AR04C_PROCESS_CAPABILITIES.get(capability_key)
+    if not nonce:
+        return None
+    try:
+        claim_bytes = claim_path.read_bytes()
+        claim = json.loads(claim_bytes.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    expected = _ar04c_expected_claim(context, nonce)
+    if type(claim) is not dict or set(claim) != set(expected) | {"claimed_at", "token_sha256"}:
+        return None
+    if any(
+        type(claim.get(key)) is not type(value) or claim.get(key) != value
+        for key, value in expected.items()
+    ):
+        return None
+    if not isinstance(claim.get("claimed_at"), str) or not claim["claimed_at"]:
+        return None
+    if not _ar04c_is_sha256(claim.get("token_sha256")):
+        return None
+    token_digest = hashlib.sha256(str(context["token"]).encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(str(claim["token_sha256"]), token_digest):
+        return None
+    context.update({
+        "claim": claim,
+        "claim_bytes": claim_bytes,
+        "claim_sha256": hashlib.sha256(claim_bytes).hexdigest(),
+        "process_nonce": nonce,
+        "process_nonce_sha256": hashlib.sha256(nonce.encode("utf-8")).hexdigest(),
+    })
+    return context
+
+
+def _ar04c_initial_state(context: dict[str, object]) -> dict[str, object]:
+    return {
+        "claim_id": context["claim"]["claim_id"],
+        "claim_sha256": context["claim_sha256"],
+        "authorization_record_sha256": context["authorization_sha256"],
+        "frozen_contract_sha256": context["contract_sha256"],
+        "execution_head_sha": context["head"],
+        "process_nonce_sha256": context["process_nonce_sha256"],
+        "status": "PREPARED",
+        "consumed_at": None,
+        "stop_reason": None,
+        "database_ids": {},
+    }
+
+
+def _ar04c_read_state(context: dict[str, object]) -> dict[str, object] | None:
+    try:
+        state = json.loads(_ar04c_claim_state_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise RuntimeError("AR04C_ONE_SHOT_STATE_INVALID")
+    expected = _ar04c_initial_state(context)
+    if type(state) is not dict or set(state) != set(expected):
+        raise RuntimeError("AR04C_ONE_SHOT_STATE_INVALID")
+    for key in ("claim_id", "claim_sha256", "authorization_record_sha256", "frozen_contract_sha256", "execution_head_sha", "process_nonce_sha256"):
+        if state.get(key) != expected[key]:
+            raise RuntimeError("AR04C_ONE_SHOT_STATE_INVALID")
+    if state.get("status") not in {"PREPARED", "CONSUMED", "STOPPED"}:
+        raise RuntimeError("AR04C_ONE_SHOT_STATE_INVALID")
+    if not isinstance(state.get("database_ids"), dict):
+        raise RuntimeError("AR04C_ONE_SHOT_STATE_INVALID")
+    if state.get("status") == "STOPPED":
+        raise RuntimeError("AR04C_ONE_SHOT_STOPPED")
+    return state
+
+
+def _ar04c_store_state(context: dict[str, object], state: dict[str, object]) -> None:
+    path = _ar04c_claim_state_path()
+    if path.exists():
+        _ar04c_replace_json(path, state)
+    else:
+        try:
+            _ar04c_write_exclusive_json(path, state)
+        except FileExistsError:
+            # A concurrent writer wins; re-read it rather than replacing it.
+            raise RuntimeError("AR04C_ONE_SHOT_STATE_RACE")
+
+
+def _ar04c_bind_campaign_database(path: str | Path, memory_mode: str) -> None:
+    """Pin one persistent budget DB per OFF/ON condition for this claim."""
+    mode = str(memory_mode).strip().upper()
+    if mode not in {"OFF", "ON"}:
+        raise RuntimeError("AR04C_MEMORY_MODE_REQUIRED")
+    context = _ar04c_verified_claim_context()
+    if context is None:
+        raise RuntimeError("AR04C_ONE_SHOT_AUTHORIZATION_REQUIRED")
+    if context['scope']['id'] == AR04C_RECHECK_ID and mode != 'ON':
+        raise RuntimeError("AR04C_MEMORY_MODE_REQUIRED")
+    from opspilot.domain.assistant_experiment import (
+        AR04C_CONDITION_BUDGET_USD_MICRO,
+        AR04C_CONDITION_PROVIDER_LIMIT,
+        AR04C_PRICE_VERSION,
+    )
+    from opspilot.domain.database import connect
+
+    database_path = Path(path).resolve()
+    try:
+        stat = database_path.stat()
+        with connect(database_path) as connection:
+            row = connection.execute(
+                "SELECT provider_limit,budget_usd_micro,price_version,created_at,status "
+                "FROM ar02_live_experiment_budgets WHERE experiment_id=?",
+                (context['scope']['id'],),
+            ).fetchone()
+    except (OSError, sqlite3.Error) as error:
+        raise RuntimeError("AR04C_CAMPAIGN_DATABASE_INVALID") from error
+    if row is None or (
+        int(row["provider_limit"]) != AR04C_CONDITION_PROVIDER_LIMIT
+        or int(row["budget_usd_micro"]) != AR04C_CONDITION_BUDGET_USD_MICRO
+        or str(row["price_version"]) != AR04C_PRICE_VERSION
+        or str(row["status"]) != "OPEN"
+    ):
+        raise RuntimeError("AR04C_CAMPAIGN_DATABASE_INVALID")
+    database_material = {
+        "path_sha256": hashlib.sha256(str(database_path).encode("utf-8")).hexdigest(),
+        "device": int(stat.st_dev),
+        "file_id": int(stat.st_ino),
+        "budget_created_at": str(row["created_at"]),
+    }
+    identity = hashlib.sha256(json.dumps(database_material, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    with _AR04C_STATE_LOCK:
+        state = _ar04c_read_state(context)
+        if state is None:
+            state = _ar04c_initial_state(context)
+        databases = dict(state["database_ids"])
+        previous = databases.get(mode)
+        if previous is not None and previous != identity:
+            raise RuntimeError("AR04C_CAMPAIGN_DATABASE_REPLAY")
+        if any(other_mode != mode and other_identity == identity for other_mode, other_identity in databases.items()):
+            raise RuntimeError("AR04C_CONDITIONS_REQUIRE_SEPARATE_DATABASES")
+        if previous is None:
+            databases[mode] = identity
+            state["database_ids"] = databases
+            _ar04c_store_state(context, state)
+
+
+def _ar04c_consume_claim_before_provider_send() -> None:
+    dispatch = _AR04C_DISPATCH_CONTEXT.get()
+    scope = _ar04c_active_scope()
+    if scope is None or type(dispatch) is not dict or dispatch.get("experiment_id") != scope['id']:
+        raise RuntimeError("AR04C_ONE_SHOT_DISPATCH_CONTEXT_REQUIRED")
+    mode = str(dispatch.get("memory_mode", "")).strip().upper()
+    context = _ar04c_verified_claim_context()
+    if context is None:
+        raise RuntimeError("AR04C_ONE_SHOT_AUTHORIZATION_REQUIRED")
+    with _AR04C_STATE_LOCK:
+        state = _ar04c_read_state(context)
+        if state is None:
+            raise RuntimeError("AR04C_CAMPAIGN_DATABASE_NOT_BOUND")
+        database_ids = state["database_ids"]
+        if mode not in {"OFF", "ON"} or mode not in database_ids:
+            raise RuntimeError("AR04C_CAMPAIGN_DATABASE_NOT_BOUND")
+        _ar04c_bind_campaign_database(dispatch["db_path"], mode)
+        state = _ar04c_read_state(context)
+        if state is None:
+            raise RuntimeError("AR04C_ONE_SHOT_STATE_INVALID")
+        if state["status"] == "PREPARED":
+            state["status"] = "CONSUMED"
+            state["consumed_at"] = _ar04c_now()
+            _ar04c_store_state(context, state)
+
+
+def _ar04c_stop_claim(reason: str) -> None:
+    context = _ar04c_verified_claim_context()
+    if context is None:
+        return
+    with _AR04C_STATE_LOCK:
+        try:
+            state = _ar04c_read_state(context)
+        except RuntimeError:
+            return
+        if state is None or state["status"] == "STOPPED":
+            return
+        state["status"] = "STOPPED"
+        state["stop_reason"] = str(reason)[:100]
+        _ar04c_store_state(context, state)
+
+
+def _ar04c_contract_digest(experiment_id: str | None = None) -> str | None:
+    """Hash the frozen, non-secret A-C contract files for the later one-shot."""
+    paths = (
+        ROOT / "docs/evidence/ar-04c/real-journey-01/PLAN.md",
+        ROOT / "docs/evidence/ar-04c/real-journey-01/GOLD.md",
+        ROOT / "docs/evidence/ar-04c/real-journey-01/CASES.json",
+        ROOT / "docs/evidence/ar-04c/real-journey-01/BUDGET.md",
+        ROOT / "docs/evidence/ar-04c/real-journey-01/PAID_EXECUTION_CONTRACT.md",
+    )
+    if (experiment_id or os.environ.get('OPSPILOT_ASSISTANT_EXPERIMENT_ID')) == AR04C_RECHECK_ID:
+        paths += (ROOT / "docs/evidence/ar-04c/f01-recheck-01/CONTRACT.md",)
+    digest = hashlib.sha256()
+    try:
+        for path in paths:
+            content = path.read_bytes()
+            name = path.name.encode("utf-8")
+            digest.update(len(name).to_bytes(4, "big"))
+            digest.update(name)
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _ar04c_one_shot_authorized(experiment_id: str) -> bool:
+    """Fail closed until the exact future user grant and one-shot claim exist."""
+    scope = _ar04c_active_scope()
+    context = _ar04c_verified_claim_context() if scope and experiment_id == scope['id'] else None
+    if context is None:
+        return False
+    try:
+        state = _ar04c_read_state(context)
+    except RuntimeError:
+        return False
+    return state is None or state["status"] in {"PREPARED", "CONSUMED"}
 
 
 def _material_remainder_live_expected_authorization() -> dict[str, object]:
@@ -366,6 +852,7 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
         EXPERIMENT_ENV,
         EXPERIMENTS_AWAITING_PAID_AUTHORIZATION,
         AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID,
+        AR04C_CAMPAIGN_IDS,
         SUPPORTED_EXPERIMENT_IDS,
     )
 
@@ -373,12 +860,19 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     if experiment_id in EXPERIMENTS_AWAITING_PAID_AUTHORIZATION:
         if experiment_id == AR03_MATERIAL_REMAINDER_01_EXPERIMENT_ID:
             authorized = _material_remainder_live_one_shot_authorized(experiment_id)
+        elif experiment_id in AR04C_CAMPAIGN_IDS:
+            authorized = _ar04c_one_shot_authorized(experiment_id)
         elif experiment_id == MATERIAL_RESUME_02_EXPERIMENT_ID:
             authorized = _material_resume_02_one_shot_authorized(experiment_id)
         else:
             authorized = _material_resume_one_shot_authorized(experiment_id)
         if not authorized:
-            raise RuntimeError("AR03_MATERIAL_LIVE_PAID_AUTHORIZATION_REQUIRED")
+            code = (
+                "AR04C_ONE_SHOT_AUTHORIZATION_REQUIRED"
+                if experiment_id in AR04C_CAMPAIGN_IDS
+                else "AR03_MATERIAL_LIVE_PAID_AUTHORIZATION_REQUIRED"
+            )
+            raise RuntimeError(code)
     if experiment_id not in SUPPORTED_EXPERIMENT_IDS:
         raise RuntimeError("AR02_LIVE_EXPERIMENT_SCOPE_REQUIRED")
     model_id = os.environ.get(MODEL_NAME, '').strip()
@@ -413,18 +907,70 @@ def create_assistant_model(*, transport_async=None, transport_sync=None):
     ):
         raise TypeError("Explicit Provider transports must be HTTPX transports")
 
+    async_transport = transport_async or httpx.AsyncHTTPTransport(retries=0)
+    sync_transport = transport_sync or httpx.HTTPTransport(retries=0)
+    if experiment_id in AR04C_CAMPAIGN_IDS:
+        class AR04CGuardedAsyncTransport(httpx.AsyncBaseTransport):
+            def __init__(self, inner):
+                self.inner = inner
+
+            async def handle_async_request(self, request):
+                if not _AR04C_PROVIDER_INFLIGHT_LOCK.acquire(blocking=False):
+                    raise RuntimeError("AR04C_PROVIDER_CONCURRENCY_LIMIT")
+                try:
+                    _ar04c_consume_claim_before_provider_send()
+                    try:
+                        response = await self.inner.handle_async_request(request)
+                    except BaseException:
+                        _ar04c_stop_claim("PROVIDER_TRANSPORT_UNKNOWN")
+                        raise
+                    if response.status_code >= 400:
+                        _ar04c_stop_claim("PROVIDER_HTTP_ERROR")
+                    return response
+                finally:
+                    _AR04C_PROVIDER_INFLIGHT_LOCK.release()
+
+            async def aclose(self):
+                await self.inner.aclose()
+
+        class AR04CGuardedSyncTransport(httpx.BaseTransport):
+            def __init__(self, inner):
+                self.inner = inner
+
+            def handle_request(self, request):
+                if not _AR04C_PROVIDER_INFLIGHT_LOCK.acquire(blocking=False):
+                    raise RuntimeError("AR04C_PROVIDER_CONCURRENCY_LIMIT")
+                try:
+                    _ar04c_consume_claim_before_provider_send()
+                    try:
+                        response = self.inner.handle_request(request)
+                    except BaseException:
+                        _ar04c_stop_claim("PROVIDER_TRANSPORT_UNKNOWN")
+                        raise
+                    if response.status_code >= 400:
+                        _ar04c_stop_claim("PROVIDER_HTTP_ERROR")
+                    return response
+                finally:
+                    _AR04C_PROVIDER_INFLIGHT_LOCK.release()
+
+            def close(self):
+                self.inner.close()
+
+        async_transport = AR04CGuardedAsyncTransport(async_transport)
+        sync_transport = AR04CGuardedSyncTransport(sync_transport)
+
     timeout = httpx.Timeout(30)
     async_client = httpx.AsyncClient(
         timeout=timeout,
         trust_env=False,
         follow_redirects=False,
-        transport=transport_async or httpx.AsyncHTTPTransport(retries=0),
+        transport=async_transport,
     )
     sync_client = httpx.Client(
         timeout=timeout,
         trust_env=False,
         follow_redirects=False,
-        transport=transport_sync or httpx.HTTPTransport(retries=0),
+        transport=sync_transport,
     )
     # DeepSeek Chat Completions requires its own `max_tokens` wire field and
     # explicit non-thinking mode; the pinned SDK's native alias differs.
@@ -505,6 +1051,18 @@ def assistant_tool_hidden_for_experiment(tool_name, experiment_id):
     if mode not in {"ON", "OFF"}:
         raise RuntimeError("AR03_MATERIAL_SKILL_MODE_INVALID")
     return mode == "OFF"
+
+
+def assistant_memory_enabled_for_experiment(experiment_id):
+    """Return the frozen AR-04C Memory condition; ordinary runs stay unchanged."""
+    from opspilot.domain.assistant_experiment import AR04C_CAMPAIGN_IDS
+
+    if experiment_id not in AR04C_CAMPAIGN_IDS:
+        return True
+    mode = os.environ.get(AR04C_MEMORY_MODE_ENV, "").strip().upper()
+    if mode not in {"ON", "OFF"} or (experiment_id == AR04C_RECHECK_ID and mode != 'ON'):
+        raise RuntimeError("AR04C_MEMORY_MODE_REQUIRED")
+    return mode == "ON"
 
 class Loop(AgentMiddleware):
     def __init__(self,path,run_id,worker_id,client,specs,trace,model_id,experiment_id=None,reserved_tokens=0):
@@ -587,12 +1145,28 @@ class Loop(AgentMiddleware):
             )
 
     def context(self):
+        include_memories = assistant_memory_enabled_for_experiment(self.experiment_id)
         with connect(self.path) as c:
             run,_=domain.state(c,self.run_id,worker_id=self.worker_id)
-            prepared=_prepare_context(c,c.execute('SELECT * FROM task_runs WHERE run_id=?',(self.run_id,)).fetchone(),self.model_id,self.path,reserved_tokens=self.reserved_tokens)
+            prepared=_prepare_context(c,c.execute('SELECT * FROM task_runs WHERE run_id=?',(self.run_id,)).fetchone(),self.model_id,self.path,reserved_tokens=self.reserved_tokens,include_memories=include_memories)
             prior=domain.history_sources(c,run)
             own_valid,reason=domain.sources_current(c,self.run_id)
             if not own_valid: raise TaskControlError(reason)
+            current = {'run_id': self.run_id, 'completed_tools': [], 'business_observations': []}
+            for call in c.execute(
+                "SELECT * FROM assistant_calls WHERE run_id=? AND kind='MCP' AND status='OK' ORDER BY created_at",
+                (self.run_id,),
+            ):
+                request, result = json.loads(call['request_json']), json.loads(call['result_json'])
+                current['completed_tools'].append({
+                    'tool': request['name'], 'call_id': call['call_id'], 'completed_at': call['completed_at'],
+                })
+                if call['evidence_id'] and call['observation_id']:
+                    current['business_observations'].append({
+                        'tool': request['name'], 'evidence_id': call['evidence_id'],
+                        'observation_id': call['observation_id'], 'observed_at': result.get('observed_at'),
+                        'observed_versions': result.get('observed_versions'), 'result_digest': digest_json(result),
+                    })
             previous=[]
             selected_ids=set(prepared.get('selected_message_ids',[]))
             previous_rows = c.execute(
@@ -634,7 +1208,7 @@ class Loop(AgentMiddleware):
             )
         ]
         prepared['memory_guidance_messages'] = memory_guidance_messages
-        payload={'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
+        payload={'current_run':current,'history_sources':prior,'prior_answers':previous,'task_id':run['task_id'],
                  'authority':'EXPLANATION_ONLY_NO_BUSINESS_RECEIPT','source_message_id':run['source_message_id'],
                  'summary_refs':prepared.get('summary_refs',[])}
         if run['task_id']:
@@ -703,7 +1277,7 @@ class Loop(AgentMiddleware):
         if recorded != expected:
             raise TaskControlError("TASK_CONDITIONS_STALE")
         memory_guidance = list(prepared.get('memory_guidance_messages', []))
-        system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(payload)
+        system_content = SYSTEM+'\nWORK_CONTEXT\n'+canonical_json(domain.source_context_for_model(payload))
         if memory_guidance:
             system_content += '\n\n' + '\n\n'.join(memory_guidance)
         system=SystemMessage(content=system_content)
@@ -739,6 +1313,11 @@ class Loop(AgentMiddleware):
               'excluded_sources':provenance_metadata.get('excluded_sources',[]),
               'source_refs':wire_source_refs,'selected_message_ids':prepared['selected_message_ids'],'model_id':self.model_id}
         step=get_config().get('metadata',{}).get('langgraph_step',0)
+        from opspilot.domain.assistant_experiment import AR04C_CAMPAIGN_IDS
+        if self.experiment_id in AR04C_CAMPAIGN_IDS:
+            _ar04c_bind_campaign_database(
+                self.path, os.environ.get(AR04C_MEMORY_MODE_ENV, ""),
+            )
         call,fresh=domain.reserve(self.path,self.run_id,'MODEL',f'{step}:{digest_json(messages_to_dict(messages))}',wire,self.worker_id,experiment_id=self.experiment_id)
         self.trace('model_request',call_id=call['call_id'],replay=not fresh,**wire)
         if not fresh:
@@ -774,9 +1353,22 @@ class Loop(AgentMiddleware):
             # pinned ChatOpenAI emit DeepSeek's unsupported alias.
             model_settings={**request.model_settings,'parallel_tool_calls':False}
             tool_choice='auto' if request.tools else request.tool_choice
-            result=await asyncio.wait_for(handler(request.override(
-                system_message=system,tool_choice=tool_choice,model_settings=model_settings,
-            )),30)
+            dispatch_token = None
+            if self.experiment_id in AR04C_CAMPAIGN_IDS:
+                dispatch_token = _AR04C_DISPATCH_CONTEXT.set({
+                    "experiment_id": self.experiment_id,
+                    "db_path": str(Path(self.path).resolve()),
+                    "memory_mode": os.environ.get(AR04C_MEMORY_MODE_ENV, "").strip().upper(),
+                    "run_id": self.run_id,
+                    "logical_key": call["logical_key"],
+                })
+            try:
+                result=await asyncio.wait_for(handler(request.override(
+                    system_message=system,tool_choice=tool_choice,model_settings=model_settings,
+                )),30)
+            finally:
+                if dispatch_token is not None:
+                    _AR04C_DISPATCH_CONTEXT.reset(dispatch_token)
             messages_result = messages_to_dict(result.result)
             usage_result = [getattr(m,'usage_metadata',None) for m in result.result]
             if self.experiment_id:
@@ -821,6 +1413,8 @@ class Loop(AgentMiddleware):
                     reason='ASSISTANT_MEMORY_INVALIDATED_BEFORE_SEND',
                 )
                 raise
+            if self.experiment_id in AR04C_CAMPAIGN_IDS and send_started:
+                _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
             domain.finish(self.path,call['call_id'],'UNKNOWN')
             if self.experiment_id:
                 from opspilot.domain.assistant_experiment import mark_unknown
@@ -831,6 +1425,8 @@ class Loop(AgentMiddleware):
                 )
             raise
         except BaseException as error:
+            if self.experiment_id in AR04C_CAMPAIGN_IDS and send_started:
+                _ar04c_stop_claim("PROVIDER_RESULT_UNKNOWN")
             domain.finish(self.path,call['call_id'],'UNKNOWN')
             if self.experiment_id:
                 from opspilot.domain.assistant_experiment import mark_unknown
@@ -1133,6 +1729,8 @@ async def _prepare_assistant_context_impl(
     )
     from opspilot.domain.context_engineering import ContextBudgetExceeded
 
+    include_memories = assistant_memory_enabled_for_experiment(experiment_id)
+
     def stop(code: str, *, notice: str | None = None) -> dict[str, object]:
         with connect(path) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1143,13 +1741,14 @@ async def _prepare_assistant_context_impl(
         try:
             compression = prepare_chat_compression_attempt(
                 path, run_id, worker_id, model_id, reserved_tokens=reserved_tokens,
+                include_memories=include_memories,
             )
         except ContextBudgetExceeded as error:
             return stop(error.code, notice=_assistant_failure_notice(error))
         if compression is None:
             return await asyncio.to_thread(
                 prepare_chat_attempt, path, run_id, worker_id, model_id,
-                reserved_tokens=reserved_tokens,
+                reserved_tokens=reserved_tokens, include_memories=include_memories,
             )
         if compression.get("error"):
             return compression
@@ -1310,7 +1909,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
         with connect(path) as c:
             c.execute("UPDATE chat_attempts SET status='STREAMING' WHERE attempt_id=? AND status='INTERRUPTED'",(delivery,))
     model_id=getattr(model,'model_name',model._llm_type)
-    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV}})
+    params=StdioServerParameters(command=sys.executable,args=['-m','opspilot.assistant_mcp','--db',str(path),'--run-id',run_id],cwd=str(ROOT),env={k:v for k,v in os.environ.items() if k not in {'OPSPILOT_MODEL_API_KEY','OPENAI_API_KEY',MATERIAL_RESUME_TOKEN_ENV,MATERIAL_RESUME_02_TOKEN_ENV,MATERIAL_REMAINDER_LIVE_TOKEN_ENV,AR04C_TOKEN_ENV,AR04C_RECHECK_TOKEN_ENV}})
     async with Client(params) as client:
         listed=await client.list_tools()
         specs=[];tools=[]
@@ -1340,7 +1939,7 @@ async def _run_assistant(path,checkpoint_path,worker_id,run_id,*,model=None,trac
             base_reserved=tools_tokens+estimate_text_tokens(SYSTEM)+4
             probe=Loop(path,run_id,worker_id,client,specs,trace,model_id,experiment_id=experiment_id,reserved_tokens=base_reserved)
             _,probe_payload=probe.context()
-            reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(probe_payload))+4
+            reserved_tokens=base_reserved+estimate_text_tokens(canonical_json(domain.source_context_for_model(probe_payload)))+4
             if specs:
                 reserved_tokens+=ASSISTANT_TOOL_RESULT_RESERVE
             if delivery is None:

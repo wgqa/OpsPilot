@@ -9,6 +9,12 @@ from fastapi.testclient import TestClient
 
 from opspilot.domain.database import connect
 from opspilot.web.app import create_app
+from tests.d3_recovery_setup import (
+    approve_s1_repair,
+    claim_and_revalidate_s1_repair,
+    plan_s1_repair,
+    start_s1_investigation,
+)
 from tests.test_m4_01_dialogue_updates import (
     ORIGIN,
     PASSWORDS,
@@ -189,21 +195,27 @@ def test_pending_update_cannot_restart_an_aborted_task(m4_client, monkeypatch: p
 def test_pending_update_cannot_restart_a_really_delivered_s1_task(
     demo_db: Path, live_api: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from opspilot.domain.d2 import evaluate_evidence_gate
     from opspilot.domain.d3 import (
         execute_deliver, execute_repair, get_or_create_action_intent, get_or_create_report,
-        submit_plan_approval, verify_repair_online,
+        verify_repair_online,
     )
-    from tests.test_m1_task_control import _ready_task
+    from tests.test_m1_task_control import _append_ready_evidence
 
-    binding, _, plan = _ready_task(demo_db, live_api, "m4-completed-proposal")
+    binding, source_run_id = start_s1_investigation(demo_db, "m4-completed-proposal")
     task_id = str(binding["task_id"])
+    evidence = _append_ready_evidence(demo_db, live_api, task_id, "m4-completed-proposal")
+    gate = evaluate_evidence_gate(demo_db, task_id, evidence)
+    assert gate["decision"] == "READY"
+    plan = plan_s1_repair(demo_db, task_id, source_run_id, gate)
     app = create_app(db_path=demo_db, start_worker=False, credentials=PASSWORDS, expected_origin=ORIGIN)
     with TestClient(app, raise_server_exceptions=False) as client:
         headers = _login(client)
         message_id = _send_chat(client, headers, str(binding["session_id"]), task_id, "更正：请重新调查原来的凭证现象。")
         _install_classifier(monkeypatch, "CRITICAL_CORRECTION")
         proposal = _assess(client, headers, task_id, message_id).json()["proposal"]
-        submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
+        approval = approve_s1_repair(demo_db, task_id, str(plan["plan_hash"]))
+        claim_and_revalidate_s1_repair(demo_db, approval, live_api)
         repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
         repair = execute_repair(demo_db, str(repair_intent["action_id"]), "executor-a", "m4-actual-repair")
         verified = verify_repair_online(demo_db, task_id, str(plan["plan_hash"]), str(repair_intent["action_id"]), "executor-a", live_api)

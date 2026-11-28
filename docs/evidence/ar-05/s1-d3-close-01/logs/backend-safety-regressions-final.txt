@@ -1,0 +1,202 @@
+...........................................F..F.FF...............        [100%]
+================================== FAILURES ===================================
+_______ test_chat_readonly_run_does_not_change_business_task_lifecycle ________
+
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-final2/test_chat_readonly_run_does_no0/domain.sqlite3')
+live_api = 'http://127.0.0.1:61579'
+
+    def test_chat_readonly_run_does_not_change_business_task_lifecycle(demo_db: Path, live_api: str) -> None:
+        binding, _, plan = _ready_task(demo_db, live_api, "chat-readonly-lifecycle")
+        task_id = str(binding["task_id"])
+        identity = trusted_identity(demo_db, "support-a")
+    
+        chat = admit_task_message(
+            demo_db, identity, session_id=str(binding["session_id"]), task_id=task_id,
+            input_kind="CHAT_READONLY", body="Explain the current investigation status.",
+            idempotency_key="m1-chat-readonly-before-approval",
+        )
+        chat_run = claim_task_run(demo_db, identity, str(chat["run_id"]))
+        assert chat_run["kind"] == "CHAT_READONLY"
+        finish_task_run(demo_db, identity, str(chat["run_id"]), "SUCCEEDED")
+        with connect(demo_db) as connection:
+            status_after_chat = connection.execute(
+                "SELECT status FROM task_bindings WHERE task_id = ?", (task_id,)
+            ).fetchone()[0]
+        assert status_after_chat == "WAITING_APPROVAL"
+    
+        approval = submit_plan_approval(
+            demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED"
+        )
+        assert approval["decision"] == "APPROVED"
+>       repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_task_control.py:287: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\d3.py:949: in get_or_create_action_intent
+    _require_current_revalidation(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x00000154EB73D8A0>
+intent = {'tenant_id': 'tenant-a', 'task_id': 'task-120105cd-ede8-4f50-8372-3348e309f379', 'plan_hash': 'c9c71883bc937a76ddb6d24c9827fc0c9acc12da426aad859ef4d5ebd67b2c14'}
+binding = {'task_id': 'task-120105cd-ede8-4f50-8372-3348e309f379', 'thread_id': 'opspilot-0fb7d117-1fb4-48ef-9cdc-cf22b09c8d1a', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'allowed_delivery_fields': ['resolution_entry'], 'created_at': '2026-11-06T05:50:14.156+00:00', 'delivery_action_definition': {'action': 'APPEND_RESOLUTION_ENTRY', 'kind': 'DELIVER'}, 'environment': 'local-demo', ...}
+approval = {'approval_id': 'approval-6cd49638-96cb-4fbb-bda2-ce9698d9a73b', 'tenant_id': 'tenant-a', 'task_id': 'task-120105cd-ede8-4f50-8372-3348e309f379', 'plan_hash': 'c9c71883bc937a76ddb6d24c9827fc0c9acc12da426aad859ef4d5ebd67b2c14', ...}
+
+    def _require_current_revalidation(
+        connection: sqlite3.Connection,
+        *,
+        intent: dict[str, object],
+        binding: dict[str, object],
+        plan: dict[str, object],
+        approval: dict[str, object],
+    ) -> dict[str, object]:
+        row = connection.execute(
+            """SELECT * FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ?
+               AND plan_hash = ? AND approval_id = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
+            (intent["tenant_id"], intent["task_id"], intent["plan_hash"], approval["approval_id"]),
+        ).fetchone()
+        if row is None or str(row["status"]) != "VALID":
+>           raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E           opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+
+opspilot\domain\d3.py:1309: D3PreconditionRejected
+___ test_n1_10_correction_invalidates_old_run_and_new_run_binds_fresh_plan ____
+
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-final2/test_n1_10_correction_invalida0/domain.sqlite3')
+live_api = 'http://127.0.0.1:61590'
+
+    def test_n1_10_correction_invalidates_old_run_and_new_run_binds_fresh_plan(
+        demo_db: Path, live_api: str
+    ) -> None:
+        binding, old_gate, old_plan = _ready_task(demo_db, live_api, "n1-10")
+        task_id = str(binding["task_id"])
+        old_approval = submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(old_plan["plan_hash"]), "APPROVED")
+>       old_intent = get_or_create_action_intent(demo_db, task_id, str(old_plan["plan_hash"]), "REPAIR", "executor-a")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_task_control.py:402: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\d3.py:949: in get_or_create_action_intent
+    _require_current_revalidation(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x00000154F2A5D5D0>
+intent = {'tenant_id': 'tenant-a', 'task_id': 'task-d93978b7-946e-444c-9082-363ddc9b5b37', 'plan_hash': '0d7778766f7181beb165f61f9a298afb3fb839eb0d2acce17a61c594f91b2fc9'}
+binding = {'task_id': 'task-d93978b7-946e-444c-9082-363ddc9b5b37', 'thread_id': 'opspilot-c0e8a10d-6cc4-48a6-91cf-ba32d25ae63f', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'allowed_delivery_fields': ['resolution_entry'], 'created_at': '2026-11-06T05:50:17.563+00:00', 'delivery_action_definition': {'action': 'APPEND_RESOLUTION_ENTRY', 'kind': 'DELIVER'}, 'environment': 'local-demo', ...}
+approval = {'approval_id': 'approval-6288657a-08b6-46f7-aa92-5a6cb9df475c', 'tenant_id': 'tenant-a', 'task_id': 'task-d93978b7-946e-444c-9082-363ddc9b5b37', 'plan_hash': '0d7778766f7181beb165f61f9a298afb3fb839eb0d2acce17a61c594f91b2fc9', ...}
+
+    def _require_current_revalidation(
+        connection: sqlite3.Connection,
+        *,
+        intent: dict[str, object],
+        binding: dict[str, object],
+        plan: dict[str, object],
+        approval: dict[str, object],
+    ) -> dict[str, object]:
+        row = connection.execute(
+            """SELECT * FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ?
+               AND plan_hash = ? AND approval_id = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
+            (intent["tenant_id"], intent["task_id"], intent["plan_hash"], approval["approval_id"]),
+        ).fetchone()
+        if row is None or str(row["status"]) != "VALID":
+>           raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E           opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+
+opspilot\domain\d3.py:1309: D3PreconditionRejected
+___ test_abort_after_real_delivery_cannot_overwrite_completed_business_task ___
+
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-final2/test_abort_after_real_delivery0/domain.sqlite3')
+live_api = 'http://127.0.0.1:61594'
+
+    def test_abort_after_real_delivery_cannot_overwrite_completed_business_task(
+        demo_db: Path, live_api: str
+    ) -> None:
+        binding, _, plan = _ready_task(demo_db, live_api, "complete")
+        task_id = str(binding["task_id"])
+        submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
+>       repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_task_control.py:521: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\d3.py:949: in get_or_create_action_intent
+    _require_current_revalidation(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x00000154EB73C9A0>
+intent = {'tenant_id': 'tenant-a', 'task_id': 'task-0d1db472-3fd0-4091-9aec-7c379ed8cac4', 'plan_hash': 'd99550dbf2cd2de1cfbf076b0fdc01e33873e8a916b956985157c653c1a1e35f'}
+binding = {'task_id': 'task-0d1db472-3fd0-4091-9aec-7c379ed8cac4', 'thread_id': 'opspilot-7c68dc50-d7e0-4f4c-a6df-a80dbf463b98', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'allowed_delivery_fields': ['resolution_entry'], 'created_at': '2026-11-06T05:50:18.229+00:00', 'delivery_action_definition': {'action': 'APPEND_RESOLUTION_ENTRY', 'kind': 'DELIVER'}, 'environment': 'local-demo', ...}
+approval = {'approval_id': 'approval-cd3013ab-6953-4956-afed-d1adf761d5f1', 'tenant_id': 'tenant-a', 'task_id': 'task-0d1db472-3fd0-4091-9aec-7c379ed8cac4', 'plan_hash': 'd99550dbf2cd2de1cfbf076b0fdc01e33873e8a916b956985157c653c1a1e35f', ...}
+
+    def _require_current_revalidation(
+        connection: sqlite3.Connection,
+        *,
+        intent: dict[str, object],
+        binding: dict[str, object],
+        plan: dict[str, object],
+        approval: dict[str, object],
+    ) -> dict[str, object]:
+        row = connection.execute(
+            """SELECT * FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ?
+               AND plan_hash = ? AND approval_id = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
+            (intent["tenant_id"], intent["task_id"], intent["plan_hash"], approval["approval_id"]),
+        ).fetchone()
+        if row is None or str(row["status"]) != "VALID":
+>           raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E           opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+
+opspilot\domain\d3.py:1309: D3PreconditionRejected
+__ test_n1_11_repair_commit_survives_abort_and_old_checkpoint_cannot_deliver __
+
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-final2/test_n1_11_repair_commit_survi0/domain.sqlite3')
+live_api = 'http://127.0.0.1:61596'
+tmp_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-final2/test_n1_11_repair_commit_survi0')
+
+    def test_n1_11_repair_commit_survives_abort_and_old_checkpoint_cannot_deliver(
+        demo_db: Path, live_api: str, tmp_path: Path
+    ) -> None:
+        binding, _, plan = _ready_task(demo_db, live_api, "n1-11")
+        task_id = str(binding["task_id"])
+        approval = submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
+>       repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_task_control.py:548: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\d3.py:949: in get_or_create_action_intent
+    _require_current_revalidation(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x00000154F32DC220>
+intent = {'tenant_id': 'tenant-a', 'task_id': 'task-87cde6e8-846c-44d7-ad3d-a10ad242eefc', 'plan_hash': '92200353166e76f0e984648fd52b9b0891f9cc52de2499aac88068cd148b636d'}
+binding = {'task_id': 'task-87cde6e8-846c-44d7-ad3d-a10ad242eefc', 'thread_id': 'opspilot-37ce1a65-bd87-45db-b63f-f4d806c4afac', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'allowed_delivery_fields': ['resolution_entry'], 'created_at': '2026-11-06T05:50:18.621+00:00', 'delivery_action_definition': {'action': 'APPEND_RESOLUTION_ENTRY', 'kind': 'DELIVER'}, 'environment': 'local-demo', ...}
+approval = {'approval_id': 'approval-4dc8f3fb-e08e-4059-8a7d-760a381f82b7', 'tenant_id': 'tenant-a', 'task_id': 'task-87cde6e8-846c-44d7-ad3d-a10ad242eefc', 'plan_hash': '92200353166e76f0e984648fd52b9b0891f9cc52de2499aac88068cd148b636d', ...}
+
+    def _require_current_revalidation(
+        connection: sqlite3.Connection,
+        *,
+        intent: dict[str, object],
+        binding: dict[str, object],
+        plan: dict[str, object],
+        approval: dict[str, object],
+    ) -> dict[str, object]:
+        row = connection.execute(
+            """SELECT * FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ?
+               AND plan_hash = ? AND approval_id = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
+            (intent["tenant_id"], intent["task_id"], intent["plan_hash"], approval["approval_id"]),
+        ).fetchone()
+        if row is None or str(row["status"]) != "VALID":
+>           raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E           opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+
+opspilot\domain\d3.py:1309: D3PreconditionRejected
+=========================== short test summary info ===========================
+FAILED tests/test_m1_task_control.py::test_chat_readonly_run_does_not_change_business_task_lifecycle
+FAILED tests/test_m1_task_control.py::test_n1_10_correction_invalidates_old_run_and_new_run_binds_fresh_plan
+FAILED tests/test_m1_task_control.py::test_abort_after_real_delivery_cannot_overwrite_completed_business_task
+FAILED tests/test_m1_task_control.py::test_n1_11_repair_commit_survives_abort_and_old_checkpoint_cannot_deliver
+4 failed, 61 passed in 79.04s (0:01:19)

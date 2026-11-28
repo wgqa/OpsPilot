@@ -1,0 +1,72 @@
+{
+  "task": "AR-04C-PRELIVE-HF-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "repo": "wgqa/OpsPilot",
+  "branch": "codex/ar04c-real-journey-01",
+  "base_sha": "d99843b501df10a4411b44f43d900f7b997e8ab2",
+  "head_at_test_time": "d42838cf33a6da78723746fb89ddbd70adde406f",
+  "remote_main_at_check": "60eee87bfe3cca522011316cb4cd2c0064ad291b",
+  "remote_candidate_at_check": "d99843b501df10a4411b44f43d900f7b997e8ab2",
+  "north_star_blob": "e36f2f75509738551ac6d4a2de5b4f9cf44a7991",
+  "agents_blob": "f174a6ab7f23f9e6d8b3ef98d455b99a75193143",
+  "skill_blob": "d405c8d413d633824b279202cc1503dab4cf0b03",
+  "frozen_contract_blobs": {
+    "PLAN.md": "adff796cc35692fae8e98b2c3ef6c2cebbff1fcb",
+    "GOLD.md": "f57913861101b9a0aaff6c3219d908dc8ce18762",
+    "CASES.json": "4301b7feb2c79d4965105ae9587a07ade7226cdd",
+    "BUDGET.md": "e4d87e70b5fbc4a3c9b65bd0e2edb340e2ae3d40",
+    "PAID_EXECUTION_CONTRACT.md": "eaed67e5a315adb6c49ee38c70f7d72351d057d3"
+  },
+  "tests": [
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -vv -s -o faulthandler_timeout=60 --tb=short --basetemp=.pytest-tmp-ar04c-worker-lifecycle-green-04 tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff",
+      "result": "PASS",
+      "passed": 1,
+      "failed": 0,
+      "duration_seconds": 14.04,
+      "log": "runs/pytest-ar04c-worker-lifecycle-green-04.log"
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -vv -s -o faulthandler_timeout=60 --tb=short --basetemp=.pytest-tmp-ar04c-prelive-postcommit-01 tests/test_ar04c_real_journey_01.py tests/test_ar04c_prelive_hf01.py",
+      "result": "PASS",
+      "collected": 17,
+      "passed": 17,
+      "failed": 0,
+      "duration_seconds": 25.90,
+      "log": "runs/pytest-ar04c-prelive-postcommit-01.log",
+      "tested_head": "d42838cf33a6da78723746fb89ddbd70adde406f"
+    },
+    {
+      "command": "D:\\学习\\agent新项目\\.venv\\Scripts\\python.exe -m pytest -vv -s --basetemp=.pytest-tmp-ar04c-prelive-ar03-target-01 tests/test_ar03_material_remainder_01.py::test_remainder_mocktransport_formal_worker_observes_same_event_and_serializes_live_contract",
+      "result": "PASS",
+      "collected": 4,
+      "passed": 4,
+      "failed": 0,
+      "duration_seconds": 13.05,
+      "log": "runs/pytest-ar03-shutdown-target-01.log",
+      "note": "Run before the AR-04C test-only lifecycle change; its production code was not modified by this task."
+    }
+  ],
+  "red_evidence": {
+    "authorization_claim_tests_on_base_source": "4 failed because the one-shot claim creator was absent",
+    "log": "runs/pytest-auth-red-03.log"
+  },
+  "shutdown_diagnosis": {
+    "observed_stall": "TestClient.wait_shutdown / TestClient.__exit__",
+    "initial_run": "runs/pytest-ar04c-final-green-02.log",
+    "classification": "same shutdown-wait category as the R1 test lifecycle race; exact underlying task is not proven by the AR-04C stack alone",
+    "fix_scope": "test-only wait for final _dispatch_run completion and next_worker_run returning no queued run"
+  },
+  "provider_http_requests": 0,
+  "real_paid_claim_created_or_consumed": false,
+  "real_ar04c_authorization_file_present": false,
+  "real_ar04c_claim_file_present": false,
+  "external_business_writes": 0,
+  "full_pytest": "NOT_RUN",
+  "browser": "NOT_RUN",
+  "known_limits": [
+    "MockTransport tests prove local serialization and pre-send ordering only, not DeepSeek behavior or billing.",
+    "The historical AR-03 TestClient.wait_shutdown target passed 4/4; the full suite was not rerun.",
+    "The AR-04C initial faulthandler trace identifies shutdown waiting, but does not prove every low-level cancellation or MCP cleanup cause."
+  ]
+}

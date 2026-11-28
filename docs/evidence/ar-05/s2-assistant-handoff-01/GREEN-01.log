@@ -1,0 +1,140 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar05-s2-assistant-handoff-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_ar05_s2_assistant_handoff_01.py::test_ar05_same_session_assistant_to_s2_handoff_receipt FAILED
+
+================================== FAILURES ===================================
+___________ test_ar05_same_session_assistant_to_s2_handoff_receipt ____________
+
+demo_db = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar05-s2-assistant-handoff-01/.pytest-tmp-ar05-handoff-02/test_ar05_same_session_assista0/domain.sqlite3')
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar05-s2-assistant-handoff-01/.pytest-tmp-ar05-handoff-02/test_ar05_same_session_assista0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001AF86FA29E0>
+
+    def test_ar05_same_session_assistant_to_s2_handoff_receipt(
+        demo_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Formal API -> Assistant -> Task Worker -> task-bound MCP -> trusted S2 Queue."""
+        import opspilot.investigator as investigator
+    
+        reset_fixture(demo_db, "S2_SCOPE_DENIED")
+        monkeypatch.setattr(investigator, "ChatOpenAI", _S2InvestigatorFixture)
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-placeholder")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "offline-deterministic-model")
+        checkpoint_db = tmp_path / "ar05-s2-checkpoint.sqlite3"
+        app = create_app(
+            db_path=demo_db,
+            checkpoint_db_path=checkpoint_db,
+            start_worker=False,
+            credentials=PASSWORDS,
+            expected_origin=ORIGIN,
+            assistant_model_factory=_AssistantAnswerModel,
+        )
+    
+        def dispatch(run_id: str) -> None:
+            worker = SingleInstanceWorker(demo_db)
+            worker.acquire()
+            worker.register()
+            try:
+                selected = next_worker_run(demo_db)
+                assert selected is not None and str(selected["run_id"]) == run_id
+                asyncio.run(_dispatch_run(
+                    demo_db, checkpoint_db, worker.owner_id, "executor-a", selected,
+                    worker_epoch=worker.epoch, assistant_model_factory=_AssistantAnswerModel,
+                ))
+            finally:
+                worker.release()
+    
+        with TestClient(app, raise_server_exceptions=False) as client:
+            headers = _login(client)[1]
+            session_id = _session(client, headers)
+    
+            chat = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**headers, "Idempotency-Key": "ar05-s2-original-question"},
+                json={"body": QUESTION, "task_id": None},
+            )
+            assert chat.status_code == 202, chat.text
+            origin_message_id = str(chat.json()["message_id"])
+            dispatch(str(chat.json()["run_id"]))
+            chat_run = client.get(f"/api/runs/{chat.json()['run_id']}").json()
+            assert chat_run["execution_core"] == "ASSISTANT_V1"
+    
+            # This POST models the user's explicit "enter controlled investigation" confirmation.
+            task_response = client.post(
+                f"/api/sessions/{session_id}/tasks",
+                headers={**headers, "Idempotency-Key": "ar05-s2-task-confirm"},
+                json={
+                    "initial_message": QUESTION,
+                    "investigation_kind": "AUTH_INCIDENT",
+                    "source_message_id": origin_message_id,
+                },
+            )
+            assert task_response.status_code == 202, task_response.text
+            created = task_response.json()
+            task_id, task_run_id = str(created["task_id"]), str(created["run_id"])
+            replay = client.post(
+                f"/api/sessions/{session_id}/tasks",
+                headers={**headers, "Idempotency-Key": "ar05-s2-task-confirm"},
+                json={
+                    "initial_message": QUESTION,
+                    "investigation_kind": "AUTH_INCIDENT",
+                    "source_message_id": origin_message_id,
+                },
+            )
+            assert replay.status_code == 200 and replay.json()["task_id"] == task_id
+            dispatch(task_run_id)
+    
+            run = client.get(f"/api/runs/{task_run_id}").json()
+            assert run["status"] == "SUCCEEDED", run
+            assert run["execution_core"] == "PROFESSIONAL_INVESTIGATOR"
+            handoff_response = client.get(f"/api/tasks/{task_id}/handoff")
+            assert handoff_response.status_code == 200, handoff_response.text
+            ready = handoff_response.json()
+            assert ready["business_outcome"] == "HANDOFF_READY", ready
+            assert ready["currentness"] == "CURRENT"
+            assert ready["submitted"] is False
+            assert ready.get("scope_authorized") is not True and ready.get("recovered") is not True
+            assert ready["diagnosis_receipt"]["run_id"] == task_run_id
+            assert ready["draft"]["draft_id"]
+>           assert _counts(demo_db, task_id) == {
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+                "queue": 0, "receipts": 0, "handoff_outbox": 0, "scope_grant_rows": 1, "repairs": 0,
+            }
+
+tests\test_ar05_s2_assistant_handoff_01.py:192: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar05-s2-assistant-handoff-01/.pytest-tmp-ar05-handoff-02/test_ar05_same_session_assista0/domain.sqlite3')
+task_id = 'task-d3551014-7335-46eb-b336-abe4bd20f43d'
+
+    def _counts(db_path: Path, task_id: str) -> dict[str, int]:
+        with connect(db_path) as db:
+            return {
+                "queue": int(db.execute(
+                    "SELECT COUNT(*) FROM s2_handoff_queue_entries WHERE task_id=?", (task_id,),
+                ).fetchone()[0]),
+                "receipts": int(db.execute(
+                    "SELECT COUNT(*) FROM s2_handoff_receipts WHERE task_id=?", (task_id,),
+                ).fetchone()[0]),
+>               "handoff_outbox": int(db.execute(
+                    "SELECT COUNT(*) FROM domain_outbox WHERE task_id=? AND event_type='S2_HANDOFF_ACCEPTED'",
+                    (task_id,),
+                ).fetchone()[0]),
+                "scope_grant_rows": int(db.execute(
+                    "SELECT COUNT(*) FROM principal_scope_grants WHERE tenant_id='tenant-a' AND principal_id='principal-a'",
+                ).fetchone()[0]),
+                "repairs": int(db.execute(
+                    "SELECT COUNT(*) FROM d3_action_ledgers WHERE task_id=?", (task_id,),
+                ).fetchone()[0]),
+            }
+E           sqlite3.OperationalError: no such column: event_type
+
+tests\test_ar05_s2_assistant_handoff_01.py:93: OperationalError
+=========================== short test summary info ===========================
+FAILED tests/test_ar05_s2_assistant_handoff_01.py::test_ar05_same_session_assistant_to_s2_handoff_receipt - sqlite3.OperationalError: no such column: event_type
+============================== 1 failed in 5.05s ==============================

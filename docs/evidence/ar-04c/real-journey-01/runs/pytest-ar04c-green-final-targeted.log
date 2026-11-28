@@ -1,0 +1,124 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04c-real-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 6 items
+
+tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_unknown_dispatch_keeps_reservation_and_stops_next_request PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_task_policy_allows_more_than_old_mcp_limit_and_preserves_time PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff FAILED
+tests/test_ar04c_real_journey_01.py::test_ar04c_paid_factory_fails_closed_without_authorization_and_claim PASSED
+tests/test_ar04c_real_journey_01.py::test_ar04c_memory_mode_is_explicit_and_scoped PASSED
+
+================================== FAILURES ===================================
+_ test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-final-targeted/test_ar04c_formal_worker_mock_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D89BBABA80>
+
+    def test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff(tmp_path: Path, monkeypatch):
+        from opspilot.domain.assistant_experiment import initialize_experiment
+    
+        seed_db = tmp_path / "seed.sqlite3"
+        off_db, on_db = tmp_path / "off.sqlite3", tmp_path / "on.sqlite3"
+        memory = _prepare_memory_seed(seed_db, tmp_path / "seed-checkpoint.sqlite3", off_db, on_db)
+        for db_path in (off_db, on_db):
+            initialize_experiment(db_path, EXPERIMENT_ID)
+        before_off, before_on = _protected_counts(off_db), _protected_counts(on_db)
+>       off = _run_condition(off_db, tmp_path / "off-checkpoint.sqlite3", "OFF", memory["memory"], monkeypatch)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_ar04c_real_journey_01.py:690: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-final-targeted/test_ar04c_formal_worker_mock_0/off.sqlite3')
+checkpoint = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-final-targeted/test_ar04c_formal_worker_mock_0/off-checkpoint.sqlite3')
+condition = 'OFF'
+memory = {'memory_id': 'episodic-f0b4a6cd-2a2f-4483-b3ef-77c011ce447c', 'version': 2, 'content_digest': '0b36966d914e4771461b586477a2a0fe54f2803c3b021e6133da546cbe2db20c'}
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001D89BBABA80>
+
+    def _run_condition(db_path: Path, checkpoint: Path, condition: str, memory: dict, monkeypatch) -> dict:
+        from opspilot.assistant import create_assistant_model
+        from opspilot.domain.assistant_experiment import read_budget
+        from opspilot.domain.d2 import configure_ar04c_memory_budget
+        from opspilot.domain.database import connect
+        from opspilot.web.app import create_app
+    
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_EXPERIMENT_ID", EXPERIMENT_ID)
+        monkeypatch.setenv("OPSPILOT_ASSISTANT_PROVIDER_ENABLED", "1")
+        monkeypatch.setenv("OPSPILOT_MODEL_API_KEY", "offline-only-placeholder")
+        monkeypatch.setenv("OPSPILOT_MODEL_NAME", "deepseek-flash")
+        monkeypatch.setenv("OPSPILOT_MODEL_BASE_URL", "https://api.deepseek.com")
+        monkeypatch.setenv("OPSPILOT_AR04C_MEMORY_MODE", condition)
+        monkeypatch.setattr("opspilot.assistant._ar04c_one_shot_authorized", lambda _id: True)
+        from opspilot.assistant import AR04C_AUTH_RECORD, AR04C_CLAIM
+        assert not AR04C_AUTH_RECORD.exists()
+        assert not AR04C_CLAIM.exists()
+        assert read_budget(db_path, EXPERIMENT_ID)["provider_used"] == 0
+    
+        # The trusted order API creates one pending formal Run while no Worker is
+        # running. Configure the scoped budget before the official Worker resumes it.
+        intake_app = create_app(
+            db_path=db_path, checkpoint_db_path=checkpoint, start_worker=False,
+            credentials=PASSWORDS, expected_origin=ORIGIN, assistant_experiment_id=EXPERIMENT_ID,
+        )
+        with TestClient(intake_app) as client:
+            support = _login(client)
+            session = client.post("/api/sessions", headers=support)
+            assert session.status_code == 201, session.text
+            session_id = str(session.json()["session_id"])
+            accepted = client.post(
+                f"/api/sessions/{session_id}/assistant/order",
+                headers={**support, "Idempotency-Key": f"ar04c-{condition.lower()}-j2"},
+                json={"order_id": "ar04c-order", "initial_message": J2},
+            )
+            assert accepted.status_code == 202, accepted.text
+            j2 = accepted.json()
+            assert configure_ar04c_memory_budget(db_path, str(j2["task_id"]), EXPERIMENT_ID) == {
+                "MODEL": 8, "MCP": None,
+            }
+    
+        provider = _MockProvider(db_path, condition)
+        def model_factory():
+            return create_assistant_model(
+                transport_async=httpx.MockTransport(provider.handle),
+                transport_sync=httpx.MockTransport(provider.sync_handle),
+            )
+    
+        worker_app = create_app(
+            db_path=db_path, checkpoint_db_path=checkpoint, start_worker=True,
+            credentials=PASSWORDS, expected_origin=ORIGIN, assistant_experiment_id=EXPERIMENT_ID,
+            assistant_model_factory=model_factory,
+        )
+        with TestClient(worker_app) as client:
+            _login(client)
+            assert _wait_for_run(client, str(j2["run_id"]))["status"] == "SUCCEEDED"
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            j2_answer = next(item["body"] for item in messages if item["role"] == "ASSISTANT")
+            assert "HTTP 202" in j2_answer and "QUEUED" in j2_answer
+            assert "���ܾݴ�ȷ�������Ѵ���" in j2_answer and "δ�ύ" in j2_answer
+            assert "receiver-ack-contract-v2" in j2_answer and "v2.1.0" in j2_answer
+            followup = client.post(
+                f"/api/sessions/{session_id}/assistant/messages",
+                headers={**_login(client), "Idempotency-Key": f"ar04c-{condition.lower()}-j4"},
+                json={"task_id": j2["task_id"], "body": J4},
+            )
+            assert followup.status_code == 202, followup.text
+            j4 = followup.json()
+            assert _wait_for_run(client, str(j4["run_id"]))["status"] == "SUCCEEDED"
+            messages = client.get(f"/api/sessions/{session_id}/messages").json()["items"]
+            answers = [item for item in messages if item["role"] == "ASSISTANT"]
+            assert len(answers) == 2
+            j4_answer = answers[-1]["body"]
+            assert "ͬ Event" in j4_answer and "QUEUED" in j4_answer
+            assert "����֤�����ϲ���汾" in j4_answer
+>           assert "��δ�ύ" in j4_answer
+E           AssertionError: assert '\u5c1a\u672a\u63d0\u4ea4' in '\u672c\u6b21\u540c Event=event-7328dccf-e9d2-402a-bdfd-dd2a17e18d76 \u7684\u6700\u65b0 Receiver \u89c2\u5bdf\u4e3a QUEUED\uff1bHTTP 202/ACKNOWLEDGED \u53ea\u8bc1\u660e\u4f20\u8f93\u53d7\u7406\u3002\u672c\u8f6e\u6ca1\u6709\u5411\u6a21\u578b\u63d0\u4f9b\u5386\u53f2 Memory\uff0c\u4e0d\u80fd\u58f0\u79f0\u5f15\u7528\u4e86\u65e7\u7ecf\u9a8c\u3002\u534f\u8bae\u8d44\u6599\u7248\u672c\u4e0d\u80fd\u8bc1\u660e\u7ebf\u4e0a\u90e8\u7f72\u7248\u672c\u3002\u8bf4\u660e\u4ecd\u662f\u672a\u63d0\u4ea4\u8349\u7a3f\uff0c\u6ca1\u6709\u6267\u884c\u4e1a\u52a1\u5199\u5165\u3002'
+
+tests\test_ar04c_real_journey_01.py:410: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_formal_worker_mock_pair_keeps_current_queued_facts_and_memory_only_diff - AssertionError: assert '\u5c1a\u672a\u63d0\u4ea4' in '\u672c\u6b21\u540c Event=event-7328dccf-e9d2-402a-bdfd-dd2a17e18d76 \u7684\u6700\u65b0 Receiver \u89c2\u5bdf\u4e3a QUEUED\uff1bHTTP 202/ACKNOWLEDGED \u53ea\u8bc1\u660e\u4f20\u8f93\u53d7\u7406\u3002\u672c\u8f6e\u6ca1\u6709\u5411\u6a21\u578b\u63d0\u4f9b\u5386\u53f2 Memory\uff0c\u4e0d\u80fd\u58f0\u79f0\u5f15\u7528\u4e86\u65e7\u7ecf\u9a8c\u3002\u534f\u8bae\u8d44\u6599\u7248\u672c\u4e0d\u80fd\u8bc1\u660e\u7ebf\u4e0a\u90e8\u7f72\u7248\u672c\u3002\u8bf4\u660e\u4ecd\u662f\u672a\u63d0\u4ea4\u8349\u7a3f\uff0c\u6ca1\u6709\u6267\u884c\u4e1a\u52a1\u5199\u5165\u3002'
+======================== 1 failed, 5 passed in 18.54s =========================

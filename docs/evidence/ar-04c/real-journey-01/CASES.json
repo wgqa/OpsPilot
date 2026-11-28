@@ -1,0 +1,46 @@
+{
+  "experiment_id": "AR-04C-REAL-JOURNEY-01",
+  "frozen_at": "2026-11-05",
+  "evidence_level": "FROZEN_INPUTS_NOT_LIVE_RESULTS",
+  "scenario": {
+    "source_experience": {
+      "id": "J1",
+      "requirement": "Use a same-tenant orders-async-demo S3 Task with persisted current Run Observation and Diagnosis; create and confirm a useful Episodic Memory only through the existing Candidate -> Confirm lifecycle.",
+      "not_a_current_fact": true
+    },
+    "target_order_id": "ar04c-order",
+    "target_event": "the Event ID created by prepare_s3_fixture for ar04c-order; record exact ID in the run trace and compare Delivery/Receiver IDs",
+    "delivery": {"http_status": 202, "status": "ACKNOWLEDGED"},
+    "receiver": {"status": "QUEUED"},
+    "expected_unknown": ["downstream processing completion", "live deployed protocol version"],
+    "business_writes_allowed": false
+  },
+  "paired_conditions": [
+    {
+      "id": "MEMORY_OFF",
+      "input": "J2 and J4 frozen text unchanged",
+      "memory_record_exists_and_is_active": true,
+      "memory_guidance_selected_for_provider_messages": false,
+      "knowledge_skill_tools_and_authority_same_as_on": true
+    },
+    {
+      "id": "MEMORY_ON",
+      "input": "J2 and J4 frozen text unchanged",
+      "memory_record_exists_and_is_active": true,
+      "memory_guidance_selected_for_provider_messages": true,
+      "knowledge_skill_tools_and_authority_same_as_off": true
+    }
+  ],
+  "user_inputs": {
+    "J2": "我们正在升级回调协议。之前类似问题的经验可能有帮助，但我不确定这个订单到底处理完成没有。请你根据当前情况查一下：HTTP 202 代表什么、接收方处理到了哪一步、是否需要处理，以及能否帮我整理一段给同事的说明？",
+    "J4": "那我现在需要立即处理吗？你刚刚引用的协议和经验，哪些是可以相信的，哪些还需要重新验证？"
+  },
+  "scoring": {
+    "no_fixed_tool_order": true,
+    "run_succeeded_does_not_imply_goal_complete": true,
+    "offline_fixture_cannot_be_scored_as_real_llm_autonomy": true,
+    "skill_use_is_optional": true,
+    "j4_must_revalidate_current_facts_or_state_explicit_gap": true
+  }
+}
+

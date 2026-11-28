@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import sys
-import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,13 +114,18 @@ def run_intent(args: list[str]) -> int:
     os._exit(76)
 
 
-async def _run_graph(db_path: str, checkpoint_path: str, thread_id: str, task_id: str, failpoint: str) -> int:
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
-    from opspilot.domain.api import make_server
+async def _run_graph(db_path: str, checkpoint_path: str, task_id: str, run_id: str, failpoint: str) -> int:
+    from opspilot import investigator
+    from opspilot.config import MODEL_API_KEY, MODEL_NAME
     from opspilot.domain.d2 import get_task_binding
-    from opspilot.investigator import build_investigation_graph
+    from opspilot.domain.task_control import get_approval_resume_link, trusted_identity
+    from opspilot.web.worker import SingleInstanceWorker
+    from tests.d3_recovery_setup import NoRecoveryModel, recovery_snapshot
 
+    # Only the test process installs crash hooks or replaces model construction.
+    os.environ[MODEL_API_KEY] = "d4-fixture-no-provider"
+    os.environ[MODEL_NAME] = "d4-model-not-called"
+    investigator.ChatOpenAI = NoRecoveryModel
     if failpoint != "-":
         if failpoint in {
             "repair_before_commit",
@@ -132,50 +136,39 @@ async def _run_graph(db_path: str, checkpoint_path: str, thread_id: str, task_id
             _install_failpoint(db_path, failpoint)
         else:
             _install_graph_failpoint(db_path, failpoint)
-    binding = get_task_binding(db_path, task_id)
-    api_server = make_server(db_path, str(binding["tenant_id"]), "127.0.0.1", 0)
-    api_thread = threading.Thread(target=api_server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
-    api_thread.start()
-    host, port = api_server.server_address
+    worker = SingleInstanceWorker(db_path)
+    worker.acquire()
     try:
-        async with AsyncSqliteSaver.from_conn_string(checkpoint_path) as checkpointer:
-            await checkpointer.setup()
-            graph = build_investigation_graph(
-                db_path,
-                task_id,
-                "d4-model-not-called",
-                None,
-                [],
-                [],
-                None,
-                checkpointer,
-                checkpoint_path,
-                d3_mode=True,
-                submitter_id=str(binding["actor_id"]),
-                executor_id="executor-a",
-                business_api_url=f"http://{host}:{port}",
-            )
-            config = {"configurable": {"thread_id": thread_id}}
-            before = await graph.aget_state(config)
-            emit("checkpoint_before_replay", pid=os.getpid(), next_nodes=list(before.next), stage=before.values.get("stage"))
-            await graph.ainvoke(None, config)
-            after = await graph.aget_state(config)
-            emit(
-                "graph_replay_completed",
-                pid=os.getpid(),
-                stage=after.values.get("stage"),
-                repair_action_id=after.values.get("repair_action_id"),
-                repair_ledger_ref=after.values.get("repair_ledger_ref"),
-                verification_id=after.values.get("verification_id"),
-                frozen_report_ref=after.values.get("frozen_report_ref"),
-                deliver_action_id=after.values.get("deliver_action_id"),
-                deliver_ledger_ref=after.values.get("deliver_ledger_ref"),
-            )
-            return 0
+        worker.register()
+        recovered = await worker.recover_after_exclusive_start()
+        binding = get_task_binding(db_path, task_id)
+        actor = str(binding["actor_id"])
+        link = get_approval_resume_link(db_path, trusted_identity(db_path, actor), run_id)
+        assert link["task_id"] == task_id
+        emit(
+            "graph_process_start", pid=os.getpid(), run_id=run_id, worker_epoch=worker.epoch,
+            recovered_run_ids=recovered, checkpoint_thread_id=link["source_checkpoint_thread_id"],
+            domain=recovery_snapshot(db_path, task_id),
+        )
+        result = await investigator.run_investigation(
+            task_id, actor, db_path=db_path, checkpoint_db_path=checkpoint_path,
+            resume=True, d3_mode=True, executor_id="executor-a", run_id=run_id,
+        )
+        state = result["graph_state"]
+        emit(
+            "graph_replay_completed", pid=os.getpid(), run_id=run_id,
+            stage=state.get("stage"), next_nodes=result.get("next_nodes"),
+            repair_action_id=state.get("repair_action_id"),
+            repair_ledger_ref=state.get("repair_ledger_ref"),
+            verification_id=state.get("verification_id"),
+            frozen_report_ref=state.get("frozen_report_ref"),
+            deliver_action_id=state.get("deliver_action_id"),
+            deliver_ledger_ref=state.get("deliver_ledger_ref"),
+            domain=recovery_snapshot(db_path, task_id),
+        )
+        return 0
     finally:
-        api_server.shutdown()
-        api_thread.join(timeout=2)
-        api_server.server_close()
+        worker.release()
 
 
 def main() -> int:

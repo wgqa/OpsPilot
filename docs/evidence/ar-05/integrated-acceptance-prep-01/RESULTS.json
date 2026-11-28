@@ -1,0 +1,105 @@
+{
+  "task": "AR-05-INTEGRATED-ACCEPTANCE-PREP-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "merge_readiness_recommendation": "HOLD",
+  "tested_base_head": "e011e7cbbbef3bbd28210120d4165169cf761183",
+  "remote_main": "60eee87bfe3cca522011316cb4cd2c0064ad291b",
+  "remote_candidate": "e011e7cbbbef3bbd28210120d4165169cf761183",
+  "pytest": {
+    "full": {
+      "collected": 741,
+      "passed": 701,
+      "failed": 40,
+      "skipped": 0,
+      "duration_seconds": 1009.46,
+      "exit_code": 1,
+      "log": "logs/full-pytest.txt"
+    },
+    "targeted": [
+      {
+        "scope": "S1 bridge, S1 business, D3 actions, approval, TaskControl, worker recovery",
+        "passed": 71,
+        "failed": 0,
+        "exit_code": 0,
+        "log": "logs/s1-offline-regression.txt"
+      },
+      {
+        "scope": "S2 Assistant handoff, M2-03 handoff, M2-02 diagnosis",
+        "passed": 22,
+        "failed": 0,
+        "exit_code": 0,
+        "log": "logs/s2-offline-regression.txt"
+      },
+      {
+        "scope": "AR-03 material live runner and recovery tests",
+        "passed": 13,
+        "failed": 0,
+        "exit_code": 0,
+        "log": "logs/ar03-runner-regression.txt"
+      },
+      {
+        "scope": "historical shutdown target",
+        "passed": 1,
+        "failed": 0,
+        "exit_code": 0,
+        "duration_seconds": 5.65,
+        "log": "logs/shutdown-target-current.txt"
+      },
+      {
+        "scope": "Runner wrong-branch test with external pytest basetemp (before fix)",
+        "passed": 0,
+        "failed": 1,
+        "expected_red": true,
+        "log": "logs/ar03-runner-preflight-red.txt"
+      },
+      {
+        "scope": "Runner wrong-branch test with external pytest basetemp (after fixture fix)",
+        "passed": 1,
+        "failed": 0,
+        "exit_code": 0,
+        "log": "logs/ar03-runner-preflight-green.txt"
+      }
+    ],
+    "full_failure_groups": {
+      "AR-04C authorization_or_claim_scope": 12,
+      "D4 recovery_and_replay_precondition_fixtures": 24,
+      "M1_M4 revalidation precondition fixtures": 3,
+      "obsolete C1 READONLY_FOLLOWUP historical RED": 1
+    }
+  },
+  "frontend": {
+    "typecheck": {"status": "PASS", "log": "logs/frontend-typecheck.txt"},
+    "production_build": {"status": "PASS", "log": "logs/frontend-build.txt"},
+    "node_unit_tests": {"passed": 27, "skipped": 1, "failed": 0, "log": "logs/frontend-unit-tests-transform.txt"},
+    "eslint": {
+      "status": "FAIL",
+      "existing_errors": 2,
+      "file": "frontend/e2e/m4-03-s3-journey.mjs",
+      "log": "logs/frontend-lint.txt"
+    }
+  },
+  "business_journeys": {
+    "J-S1": {
+      "offline_formal_api_worker_domain_trace": "PASS",
+      "targeted_tests": 71,
+      "browser": "NOT_RUN",
+      "real_provider": "NOT_RUN"
+    },
+    "J-S2": {
+      "offline_formal_api_worker_domain_trace": "PASS",
+      "targeted_tests": 22,
+      "browser": "NOT_RUN",
+      "real_provider": "NOT_RUN"
+    }
+  },
+  "side_effects": {
+    "real_provider_requests": 0,
+    "production_or_external_business_writes": 0,
+    "browser_automation": "NOT_RUN_EXISTING_STOP",
+    "main_merge": "NOT_RUN",
+    "historical_gold_modified": false,
+    "historical_trace_mutations": 0,
+    "historical_claims_consumed_or_modified": 0
+  },
+  "remaining_blocker": "Full suite is not green. D4 crash/replay coverage must be exercised with current trusted revalidation receipts; AR-04C one-shot tests remain bound to their original execution identity; legacy C1 intent remains intentionally unsupported. Main merge recommendation is HOLD pending independent review."
+}

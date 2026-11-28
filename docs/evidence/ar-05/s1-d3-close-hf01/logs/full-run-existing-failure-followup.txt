@@ -1,0 +1,63 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\python\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar05-s1-d3-close-hf01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_ar03_material_live_exec_prep.py::test_resume_runner_preflight_rejects_wrong_branch_and_existing_campaign_state FAILED [100%]
+
+================================== FAILURES ===================================
+_ test_resume_runner_preflight_rejects_wrong_branch_and_existing_campaign_state _
+
+tmp_path = WindowsPath('D:/tmp/ops-pilot-ar05-s1-d3-close-hf01-existing-one/test_resume_runner_preflight_r0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023F429D7E10>
+
+    def test_resume_runner_preflight_rejects_wrong_branch_and_existing_campaign_state(tmp_path, monkeypatch):
+        runner = _load_resume_runner()
+        module = runner._bound_base_runner()
+        module.ROOT = tmp_path
+        module.EVIDENCE = tmp_path / "docs/evidence/ar-03/material-live-01/resume-01"
+        module.CASES_PATH = tmp_path / "docs/evidence/ar-03/material-01/CASES.json"
+        module.CASES_PATH.parent.mkdir(parents=True)
+        module.CASES_PATH.write_bytes((ROOT / "docs/evidence/ar-03/material-01/CASES.json").read_bytes())
+        module.RUNTIME = tmp_path / ".runtime" / "ar03-material-live-01-resume-01"
+        module.DOMAIN_DB = module.RUNTIME / "domain.sqlite3"
+        module.CHECKPOINT_DB = module.RUNTIME / "checkpoints.sqlite3"
+        module.BRANCH = runner.BRANCH
+        module.BASE_SHA = runner.BASE_SHA
+        module.FREEZE_SHA = runner.FREEZE_SHA
+        module.EXPERIMENT_ID = runner.EXPERIMENT_ID
+        module._load_environment = lambda: tmp_path / ".env"
+    
+        env = {
+            "OPSPILOT_MODEL_API_KEY": "offline-placeholder-not-a-secret",
+            "OPSPILOT_MODEL_NAME": "deepseek-flash",
+            "OPSPILOT_MODEL_BASE_URL": "https://api.deepseek.com/v1",
+            "OPSPILOT_ASSISTANT_PROVIDER_ENABLED": "0",
+            "OPSPILOT_ASSISTANT_EXPERIMENT_ID": "",
+        }
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+    
+        original_git = module._git
+    
+        def wrong_branch_git(*args, **kwargs):
+            if args == ("branch", "--show-current"):
+                return "codex/unapproved-branch"
+            return original_git(*args, **kwargs)
+    
+        monkeypatch.setattr(module, "_git", wrong_branch_git)
+>       with pytest.raises(RuntimeError, match="MATERIAL_LIVE_BRANCH_MISMATCH"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'MATERIAL_LIVE_BRANCH_MISMATCH'
+E         Actual message: 'GIT_PREFLIGHT_FAILED:rev-parse HEAD'
+
+tests\test_ar03_material_live_exec_prep.py:278: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar03_material_live_exec_prep.py::test_resume_runner_preflight_rejects_wrong_branch_and_existing_campaign_state - AssertionError: Regex pattern did not match.
+  Expected regex: 'MATERIAL_LIVE_BRANCH_MISMATCH'
+  Actual message: 'GIT_PREFLIGHT_FAILED:rev-parse HEAD'
+============================== 1 failed in 0.30s ==============================

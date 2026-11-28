@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -267,18 +268,20 @@ def test_resume_runner_preflight_rejects_wrong_branch_and_existing_campaign_stat
     for key, value in env.items():
         monkeypatch.setenv(key, value)
 
-    original_git = module._git
+    # The Runner resolves Git metadata from ROOT. Make tmp_path an explicit
+    # checkout so this test does not accidentally inherit the parent checkout
+    # when pytest's --basetemp happens to be inside a worktree.
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "OpsPilot pytest"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "opspilot-pytest@example.invalid"], cwd=tmp_path, check=True)
+    (tmp_path / "fixture.txt").write_text("isolated runner checkout\n", encoding="utf-8")
+    subprocess.run(["git", "add", "fixture.txt"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "test fixture"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "branch", "--move", "codex/unapproved-branch"], cwd=tmp_path, check=True)
 
-    def wrong_branch_git(*args, **kwargs):
-        if args == ("branch", "--show-current"):
-            return "codex/unapproved-branch"
-        return original_git(*args, **kwargs)
-
-    monkeypatch.setattr(module, "_git", wrong_branch_git)
     with pytest.raises(RuntimeError, match="MATERIAL_LIVE_BRANCH_MISMATCH"):
         module._validate_preflight()
 
-    monkeypatch.setattr(module, "_git", original_git)
     monkeypatch.setattr(module, "_git", lambda *args, **kwargs: {
         ("rev-parse", "HEAD"): "test-head",
         ("branch", "--show-current"): runner.BRANCH,

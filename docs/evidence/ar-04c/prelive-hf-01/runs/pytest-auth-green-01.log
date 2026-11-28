@@ -1,0 +1,63 @@
+....F..                                                                  [100%]
+================================== FAILURES ===================================
+_ test_ar04c_mock_provider_success_consumes_claim_before_http_and_pins_database _
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-prelive-green-01/test_ar04c_mock_provider_succe0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000270A2276140>
+
+    def test_ar04c_mock_provider_success_consumes_claim_before_http_and_pins_database(tmp_path, monkeypatch):
+        import asyncio
+        import opspilot.assistant as assistant
+        from opspilot.domain.assistant_experiment import initialize_experiment
+    
+        _write_authorization(tmp_path, monkeypatch)
+        assistant._ar04c_create_one_shot_claim()
+        db_path = tmp_path / "condition-off.sqlite3"
+        initialize_experiment(db_path, EXPERIMENT_ID)
+        sent = []
+    
+        def respond(request: httpx.Request) -> httpx.Response:
+            state = json.loads(assistant._ar04c_claim_state_path().read_text(encoding="utf-8"))
+            assert state["status"] == "CONSUMED"
+            assert state["database_ids"].get("OFF")
+            assert request.url == "https://api.deepseek.com/chat/completions"
+            sent.append(request)
+            return httpx.Response(200, json={
+                "id": "chatcmpl-ar04c-prelive-success",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "deepseek-flash",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": "offline mock reply"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 4, "completion_tokens": 3, "total_tokens": 7},
+            }, request=request)
+    
+        model = assistant.create_assistant_model(
+            transport_async=httpx.MockTransport(respond),
+            transport_sync=httpx.MockTransport(respond),
+        )
+        assistant._ar04c_bind_campaign_database(db_path, "OFF")
+        dispatch_token = assistant._AR04C_DISPATCH_CONTEXT.set({
+            "experiment_id": EXPERIMENT_ID,
+            "db_path": str(db_path.resolve()),
+            "memory_mode": "OFF",
+            "run_id": "offline-test-run",
+            "logical_key": "offline-test-call",
+        })
+        try:
+            result = asyncio.run(model.ainvoke("offline-only"))
+        finally:
+            assistant._AR04C_DISPATCH_CONTEXT.reset(dispatch_token)
+        assert result.content == "offline mock reply"
+        assert len(sent) == 1
+        state = json.loads(assistant._ar04c_claim_state_path().read_text(encoding="utf-8"))
+        assert state["status"] == "CONSUMED"
+>       with pytest.raises(RuntimeError, match="AR04C_CAMPAIGN_DATABASE_REPLAY"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'AR04C_CAMPAIGN_DATABASE_REPLAY'
+E         Actual message: 'AR04C_CAMPAIGN_DATABASE_INVALID'
+
+tests\test_ar04c_prelive_hf01.py:250: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_prelive_hf01.py::test_ar04c_mock_provider_success_consumes_claim_before_http_and_pins_database
+1 failed, 6 passed in 16.56s

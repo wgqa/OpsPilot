@@ -1,0 +1,230 @@
+.........................F.....FF...........                             [100%]
+================================== FAILURES ===================================
+_ test_hf04_hf06_approval_resume_recovers_after_real_process_exit[repair-repair_after_commit_before_response] _
+
+approval_client = <starlette.testclient.TestClient object at 0x000001DD6D12F130>
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-reg1/test_hf04_hf06_approval_resume0/domain.sqlite3')
+live_api = 'http://127.0.0.1:51304'
+tmp_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-reg1/test_hf04_hf06_approval_resume0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001DD6D15C390>
+window = 'repair', failpoint = 'repair_after_commit_before_response'
+
+    @pytest.mark.parametrize(
+        ("window", "failpoint"),
+        [
+            ("repair", "repair_after_commit_before_response"),
+            ("deliver", "deliver_after_commit_before_response"),
+        ],
+    )
+    def test_hf04_hf06_approval_resume_recovers_after_real_process_exit(
+        approval_client: TestClient,
+        demo_db: Path,
+        live_api: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        window: str,
+        failpoint: str,
+    ) -> None:
+        monkeypatch.setenv(MODEL_API_KEY, "m1-hf-child-test-placeholder")
+        monkeypatch.setenv(MODEL_NAME, "m1-hf-child-no-model-call")
+        task = _prepare_waiting_task(
+            approval_client, demo_db, live_api, tmp_path, key=f"hf-process-{window}",
+        )
+        accepted = _approve(approval_client, task, key=f"hf-process-approve-{window}")
+        assert accepted.status_code == 202
+        resume_run_id = str(accepted.json()["resume_run_id"])
+        worker_script = Path(__file__).with_name("m1_hf_approval_resume_worker.py")
+        child_env = os.environ.copy()
+        child_env[MODEL_API_KEY] = "m1-hf-child-test-placeholder"
+        child_env[MODEL_NAME] = "m1-hf-child-no-model-call"
+        crash = subprocess.run(
+            [
+                sys.executable, str(worker_script), "crash", str(demo_db), str(task["checkpoint_path"]),
+                str(task["task_id"]), resume_run_id, failpoint,
+            ],
+            cwd=Path(__file__).resolve().parents[1], env=child_env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90,
+        )
+        print(f"HF_CHILD_CRASH_STDOUT[{window}]\n{crash.stdout}", flush=True)
+        print(f"HF_CHILD_CRASH_STDERR[{window}]\n{crash.stderr}", flush=True)
+        assert crash.returncode == 87
+        assert '"event": "hf_approval_resume_crash_after_commit"' in crash.stdout
+        assert f'"failpoint": "{failpoint}"' in crash.stdout
+        link = get_approval_resume_link(demo_db, trusted_identity(demo_db, "support-a"), resume_run_id)
+        assert link["source_checkpoint_thread_id"] == f"{task['binding']['thread_id']}::{task['source_run_id']}"
+        with connect(demo_db) as connection:
+            crashed_run = connection.execute(
+                "SELECT status, kind FROM task_runs WHERE run_id = ?", (resume_run_id,)
+            ).fetchone()
+        assert tuple(crashed_run) == ("RUNNING", "APPROVAL_RESUME")
+        after_crash = get_task_action_state(demo_db, str(task["task_id"]), "support-a")
+        assert sum(row["action_kind"] == "REPAIR" for row in after_crash["action_ledgers"]) == 1
+        assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 8
+        if window == "repair":
+            assert after_crash["action_ledgers"][-1]["action_kind"] == "REPAIR"
+            assert after_crash["ticket_entries"] == []
+        else:
+            assert sum(row["action_kind"] == "DELIVER" for row in after_crash["action_ledgers"]) == 1
+            assert len(after_crash["ticket_entries"]) == len(after_crash["delivery_records"]) == 1
+    
+        recovery = subprocess.run(
+            [
+                sys.executable, str(worker_script), "recover", str(demo_db), str(task["checkpoint_path"]),
+                str(task["task_id"]), resume_run_id, "-",
+            ],
+            cwd=Path(__file__).resolve().parents[1], env=child_env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90,
+        )
+        print(f"HF_CHILD_RECOVERY_STDOUT[{window}]\n{recovery.stdout}", flush=True)
+        print(f"HF_CHILD_RECOVERY_STDERR[{window}]\n{recovery.stderr}", flush=True)
+>       assert recovery.returncode == 0
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['D:\\python\\python.exe', 'D:\\ѧϰ\\agent����Ŀ\\.worktrees\\ar05-s1-d3-close-01\\tests\\m1_hf_appr...id": "run-8345d645-4099-4dce-8607-38c11cd9664f", "task_id": "task-40422172-6a29-420c-8892-0112418f1df3"}\n', stderr='').returncode
+
+tests\test_m1_web_approval.py:732: AssertionError
+---------------------------- Captured stdout call -----------------------------
+HF_CHILD_CRASH_STDOUT[repair]
+{"event": "hf_approval_resume_started", "failpoint": "repair_after_commit_before_response", "pid": 39852, "run_id": "run-8345d645-4099-4dce-8607-38c11cd9664f", "task_id": "task-40422172-6a29-420c-8892-0112418f1df3"}
+{"config_version": 8, "deliver_action_id": null, "deliver_ledger_id": null, "deliver_ledgers": 0, "delivery_id": null, "event": "hf_approval_resume_crash_after_commit", "failpoint": "repair_after_commit_before_response", "in_transaction": false, "pid": 39852, "repair_action_id": "action-97cf3ac5-b8b5-43d0-a90b-14867c8db7c4", "repair_ledger_id": "ledger-e4bbe2a1-814a-412a-93cd-ce7fc53e3724", "repair_ledgers": 1, "ticket_entries": 0, "ticket_entry_id": null}
+
+HF_CHILD_CRASH_STDERR[repair]
+
+HF_CHILD_RECOVERY_STDOUT[repair]
+{"event": "hf_approval_resume_recovery_started", "pid": 40804, "recovered_run_ids": ["run-8345d645-4099-4dce-8607-38c11cd9664f"], "worker_epoch": 1, "worker_id": "worker-42362e64-4d05-4698-bbad-d48a9ed2415c"}
+{"event": "hf_approval_resume_recovery_timeout", "pid": 40804, "run_id": "run-8345d645-4099-4dce-8607-38c11cd9664f", "task_id": "task-40422172-6a29-420c-8892-0112418f1df3"}
+
+HF_CHILD_RECOVERY_STDERR[repair]
+
+________ test_hf09_missing_action_receipt_fails_closed[repair_ledger] _________
+
+approval_client = <starlette.testclient.TestClient object at 0x000001DD6D843130>
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-reg1/test_hf09_missing_action_recei0/domain.sqlite3')
+live_api = 'http://127.0.0.1:51434'
+tmp_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-reg1/test_hf09_missing_action_recei0')
+missing_receipt = 'repair_ledger'
+
+    @pytest.mark.parametrize("missing_receipt", ["repair_ledger", "delivery_record"])
+    def test_hf09_missing_action_receipt_fails_closed(
+        approval_client: TestClient,
+        demo_db: Path,
+        live_api: str,
+        tmp_path: Path,
+        missing_receipt: str,
+    ) -> None:
+        from opspilot.domain.d3 import (
+            execute_deliver,
+            execute_repair,
+            get_or_create_action_intent,
+            get_or_create_report,
+            verify_repair_online,
+        )
+    
+        task = _prepare_waiting_task(
+            approval_client, demo_db, live_api, tmp_path, key=f"hf-missing-{missing_receipt}",
+        )
+        accepted = _approve(approval_client, task, key=f"hf-missing-approve-{missing_receipt}")
+        assert accepted.status_code == 202
+        plan_hash = str(task["plan"]["plan_hash"])
+        task_id = str(task["task_id"])
+>       repair = get_or_create_action_intent(demo_db, task_id, plan_hash, "REPAIR", "executor-a")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_web_approval.py:829: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\d3.py:931: in get_or_create_action_intent
+    _require_current_revalidation(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x000001DD6D76DB70>
+intent = {'tenant_id': 'tenant-a', 'task_id': 'task-a96d0321-6ad3-433e-b9d8-3789c602ad9c', 'plan_hash': 'fcec48b4856300f5a58ec78c526eb3065c10152b5b6b09c9b79bc32498046115'}
+binding = {'task_id': 'task-a96d0321-6ad3-433e-b9d8-3789c602ad9c', 'thread_id': 'opspilot-2396b5f7-e6f4-4234-9d11-44ce397cd97c', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'allowed_delivery_fields': ['resolution_entry'], 'created_at': '2026-11-06T05:37:06.017+00:00', 'delivery_action_definition': {'action': 'APPEND_RESOLUTION_ENTRY', 'kind': 'DELIVER'}, 'environment': 'local-demo', ...}
+approval = {'approval_id': 'approval-d094efe6-e078-48d6-aabb-1cc35a0554dc', 'tenant_id': 'tenant-a', 'task_id': 'task-a96d0321-6ad3-433e-b9d8-3789c602ad9c', 'plan_hash': 'fcec48b4856300f5a58ec78c526eb3065c10152b5b6b09c9b79bc32498046115', ...}
+
+    def _require_current_revalidation(
+        connection: sqlite3.Connection,
+        *,
+        intent: dict[str, object],
+        binding: dict[str, object],
+        plan: dict[str, object],
+        approval: dict[str, object],
+    ) -> dict[str, object]:
+        row = connection.execute(
+            """SELECT * FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ?
+               AND plan_hash = ? AND approval_id = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
+            (intent["tenant_id"], intent["task_id"], intent["plan_hash"], approval["approval_id"]),
+        ).fetchone()
+        if row is None or str(row["status"]) != "VALID":
+>           raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E           opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+
+opspilot\domain\d3.py:1257: D3PreconditionRejected
+_______ test_hf09_missing_action_receipt_fails_closed[delivery_record] ________
+
+approval_client = <starlette.testclient.TestClient object at 0x000001DD6DBE4050>
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-reg1/test_hf09_missing_action_recei1/domain.sqlite3')
+live_api = 'http://127.0.0.1:51440'
+tmp_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-backend-reg1/test_hf09_missing_action_recei1')
+missing_receipt = 'delivery_record'
+
+    @pytest.mark.parametrize("missing_receipt", ["repair_ledger", "delivery_record"])
+    def test_hf09_missing_action_receipt_fails_closed(
+        approval_client: TestClient,
+        demo_db: Path,
+        live_api: str,
+        tmp_path: Path,
+        missing_receipt: str,
+    ) -> None:
+        from opspilot.domain.d3 import (
+            execute_deliver,
+            execute_repair,
+            get_or_create_action_intent,
+            get_or_create_report,
+            verify_repair_online,
+        )
+    
+        task = _prepare_waiting_task(
+            approval_client, demo_db, live_api, tmp_path, key=f"hf-missing-{missing_receipt}",
+        )
+        accepted = _approve(approval_client, task, key=f"hf-missing-approve-{missing_receipt}")
+        assert accepted.status_code == 202
+        plan_hash = str(task["plan"]["plan_hash"])
+        task_id = str(task["task_id"])
+>       repair = get_or_create_action_intent(demo_db, task_id, plan_hash, "REPAIR", "executor-a")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_web_approval.py:829: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+opspilot\domain\d3.py:931: in get_or_create_action_intent
+    _require_current_revalidation(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x000001DD6D76F790>
+intent = {'tenant_id': 'tenant-a', 'task_id': 'task-267f5ae9-de7d-472b-aa71-a02f01b85ae3', 'plan_hash': 'b7b2d727931d3cda0efd004ed7155457dd9761492a8debab656b8eae0da10e71'}
+binding = {'task_id': 'task-267f5ae9-de7d-472b-aa71-a02f01b85ae3', 'thread_id': 'opspilot-db6105cf-7663-42a7-ad01-ba885b06f84b', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'allowed_delivery_fields': ['resolution_entry'], 'created_at': '2026-11-06T05:37:06.588+00:00', 'delivery_action_definition': {'action': 'APPEND_RESOLUTION_ENTRY', 'kind': 'DELIVER'}, 'environment': 'local-demo', ...}
+approval = {'approval_id': 'approval-3c53b915-d0c2-4d64-a6c2-1aec071cf57e', 'tenant_id': 'tenant-a', 'task_id': 'task-267f5ae9-de7d-472b-aa71-a02f01b85ae3', 'plan_hash': 'b7b2d727931d3cda0efd004ed7155457dd9761492a8debab656b8eae0da10e71', ...}
+
+    def _require_current_revalidation(
+        connection: sqlite3.Connection,
+        *,
+        intent: dict[str, object],
+        binding: dict[str, object],
+        plan: dict[str, object],
+        approval: dict[str, object],
+    ) -> dict[str, object]:
+        row = connection.execute(
+            """SELECT * FROM d3_revalidation_receipts WHERE tenant_id = ? AND task_id = ?
+               AND plan_hash = ? AND approval_id = ? ORDER BY observed_at DESC, rowid DESC LIMIT 1""",
+            (intent["tenant_id"], intent["task_id"], intent["plan_hash"], approval["approval_id"]),
+        ).fetchone()
+        if row is None or str(row["status"]) != "VALID":
+>           raise D3PreconditionRejected("REVALIDATION_REQUIRED")
+E           opspilot.domain.d3.D3PreconditionRejected: REVALIDATION_REQUIRED
+
+opspilot\domain\d3.py:1257: D3PreconditionRejected
+=========================== short test summary info ===========================
+FAILED tests/test_m1_web_approval.py::test_hf04_hf06_approval_resume_recovers_after_real_process_exit[repair-repair_after_commit_before_response]
+FAILED tests/test_m1_web_approval.py::test_hf09_missing_action_receipt_fails_closed[repair_ledger]
+FAILED tests/test_m1_web_approval.py::test_hf09_missing_action_receipt_fails_closed[delivery_record]
+3 failed, 41 passed in 96.32s (0:01:36)

@@ -1,0 +1,113 @@
+.F.                                                                      [100%]
+================================== FAILURES ===================================
+_ test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval _
+
+approval_client = <starlette.testclient.TestClient object at 0x000002887E5F2350>
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen5/test_ar05_approved_plan_fact_c0/domain.sqlite3')
+live_api = 'http://127.0.0.1:60878'
+tmp_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen5/test_ar05_approved_plan_fact_c0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002887E3EF5C0>
+
+    def test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval(
+        approval_client: TestClient,
+        demo_db: Path,
+        live_api: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(MODEL_API_KEY, "ar05-test-no-provider-call")
+        monkeypatch.setenv(MODEL_NAME, "ar05-resume-does-not-call-model")
+        task = _prepare_waiting_task(approval_client, demo_db, live_api, tmp_path, key="revalidation-replan")
+        old_plan_hash = str(task["plan"]["plan_hash"])
+        first_approval = _approve(approval_client, task, key="revalidation-first-approval")
+        assert first_approval.status_code == 202
+        first_resume_id = str(first_approval.json()["resume_run_id"])
+        with connect(demo_db) as connection:
+            connection.execute(
+                "UPDATE integrations SET config_version = config_version + 1 "
+                "WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+            )
+    
+        from opspilot.investigator import run_investigation
+    
+>       stopped = asyncio.run(run_investigation(
+            str(task["task_id"]), "support-a", db_path=demo_db,
+            checkpoint_db_path=task["checkpoint_path"], resume=True, d3_mode=True,
+            executor_id="executor-a", run_id=first_resume_id,
+        ))
+
+tests\test_m1_web_approval.py:509: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+D:\python\Lib\asyncio\runners.py:204: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\runners.py:127: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+D:\python\Lib\asyncio\base_events.py:719: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+opspilot\investigator.py:2399: in run_investigation
+    approval_resume_link = get_approval_resume_link(resolved_db, task_identity, run_id)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+opspilot\domain\task_control.py:571: in get_approval_resume_link
+    return _validate_approval_resume_in_transaction(connection, run)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+connection = <sqlite3.Connection object at 0x000002887E4D1E40>
+run = <sqlite3.Row object at 0x000002887E648910>
+
+    def _validate_approval_resume_in_transaction(
+        connection: sqlite3.Connection, run: sqlite3.Row
+    ) -> dict[str, object]:
+        link = connection.execute(
+            """SELECT l.*, a.decision, a.approver_id, a.approved_plan_digest,
+                      r.status AS source_status, r.kind AS source_kind,
+                      r.consumed_message_seq AS source_consumed_message_seq,
+                      b.thread_id, b.status AS task_status,
+                      c.terminal_state, c.control_revision AS current_control_revision,
+                      c.pending_critical_message_seq, c.applied_critical_message_seq,
+                      pc.bound_control_revision, pc.consumed_message_seq AS plan_consumed_message_seq,
+                      auth.eligibility
+               FROM approval_resume_links l
+               JOIN d3_approvals a ON a.approval_id = l.approval_id
+               JOIN task_runs r ON r.run_id = l.source_investigation_run_id
+               JOIN task_bindings b ON b.tenant_id = l.tenant_id AND b.task_id = l.task_id
+               JOIN task_controls c ON c.tenant_id = l.tenant_id AND c.task_id = l.task_id
+               JOIN d3_plan_control_bindings pc ON pc.tenant_id = l.tenant_id
+                 AND pc.task_id = l.task_id AND pc.plan_hash = l.plan_hash
+               JOIN d3_plan_authorizations auth ON auth.tenant_id = l.tenant_id
+                 AND auth.task_id = l.task_id AND auth.plan_hash = l.plan_hash
+               WHERE l.resume_run_id = ? AND l.tenant_id = ? AND l.task_id = ?""",
+            (str(run["run_id"]), str(run["tenant_id"]), str(run["task_id"])),
+        ).fetchone()
+        if link is None:
+            raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+        expected_revision = run["expected_control_revision"]
+        if (
+            str(link["source_kind"]) not in {"INVESTIGATE", "RESUME", "APPROVAL_RESUME"}
+            or str(link["source_status"]) != "WAITING_APPROVAL"
+            or str(link["thread_id"]) + "::" + str(link["source_investigation_run_id"])
+                != str(link["source_checkpoint_thread_id"])
+            or str(link["plan_hash"]) != str(link["approved_plan_digest"])
+            or int(link["control_revision"]) != int(link["bound_control_revision"])
+            or expected_revision is None
+            or int(link["control_revision"]) != int(expected_revision)
+            or int(link["control_revision"]) != int(link["current_control_revision"])
+            or link["terminal_state"] != "ACTIVE"
+            or link["pending_critical_message_seq"] is not None
+            or int(link["plan_consumed_message_seq"]) < int(link["applied_critical_message_seq"])
+            or link["eligibility"] != "ACTIVE"
+            or int(link["plan_consumed_message_seq"]) != int(link["source_consumed_message_seq"])
+            or str(link["decision"]) not in {"APPROVED", "REJECTED"}
+        ):
+            raise TaskControlError("TASK_CONTROL_STALE")
+        if not _approval_resume_domain_stage_is_consistent(connection, link):
+>           raise TaskControlError("APPROVAL_RESUME_LINK_INVALID")
+E           opspilot.domain.task_control.TaskControlError: APPROVAL_RESUME_LINK_INVALID
+
+opspilot\domain\task_control.py:620: TaskControlError
+=========================== short test summary info ===========================
+FAILED tests/test_m1_web_approval.py::test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval
+1 failed, 2 passed in 6.39s

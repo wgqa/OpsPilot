@@ -1,0 +1,51 @@
+============================= test session starts =============================
+platform win32 -- Python 3.14.0, pytest-9.1.1, pluggy-1.7.0 -- D:\ѧϰ\agent����Ŀ\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\ѧϰ\agent����Ŀ\.worktrees\ar04c-real-journey-01
+configfile: pyproject.toml
+plugins: anyio-4.15.1, langsmith-0.14.11
+collecting ... collected 1 item
+
+tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged FAILED
+
+================================== FAILURES ===================================
+____ test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged ____
+
+tmp_path = WindowsPath('D:/ѧϰ/agent����Ŀ/.worktrees/ar04c-real-journey-01/.pytest-tmp-ar04c-price-red-01/test_ar04c_campaign_caps_are_s0')
+
+    def test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged(tmp_path: Path):
+        from opspilot.domain.assistant_experiment import (
+            AR04C_CONDITION_BUDGET_USD_MICRO, AR04C_CONDITION_PROVIDER_LIMIT,
+            AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO, AR04C_PRICE_VERSION,
+            BUDGET_USD_MICRO, EXPERIMENT_ID as LEGACY_ID, MAX_PROVIDER_RESERVATION_USD_MICRO,
+            PRICE_VERSION, ExperimentBudgetError, complete_dispatch, initialize_experiment,
+            read_budget, reserve_dispatch, _actual_cost_micro,
+        )
+        from opspilot.domain.database import reset_fixture
+    
+        on_db, off_db, old_db = (tmp_path / name for name in ("on.sqlite3", "off.sqlite3", "old.sqlite3"))
+        for db_path in (on_db, off_db, old_db):
+            reset_fixture(db_path, "S1_POS")
+        for db_path in (on_db, off_db):
+            initialize_experiment(db_path, EXPERIMENT_ID)
+            budget = read_budget(db_path, EXPERIMENT_ID)
+            assert budget["provider_limit"] == AR04C_CONDITION_PROVIDER_LIMIT == 8
+            assert budget["mcp_limit"] is None
+            assert budget["budget_usd_micro"] == AR04C_CONDITION_BUDGET_USD_MICRO == 5_250_000
+        initialize_experiment(old_db, LEGACY_ID)
+        old = read_budget(old_db, LEGACY_ID)
+        from opspilot.domain.assistant_experiment import MCP_LIMIT
+        assert old["provider_limit"] == 16 and old["mcp_limit"] == MCP_LIMIT
+        assert old["budget_usd_micro"] == BUDGET_USD_MICRO == 10_500_000
+        assert old["usd_reserved_micro"] == old["usd_settled_micro"] == 0
+        assert PRICE_VERSION == "DEEPSEEK_FLASH_PEAK_2026-11-01"
+        assert MAX_PROVIDER_RESERVATION_USD_MICRO == 645_600
+        assert AR04C_PRICE_VERSION == "DEEPSEEK_FLASH_PEAK_2026-11-05"
+        assert AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO == 691_680
+>       assert AR04C_MAX_PROVIDER_RESERVATION_USD_MICRO * AR04C_CONDITION_PROVIDER_LIMIT <= AR04C_CONDITION_BUDGET_USD_MICRO
+E       assert (691680 * 8) <= 5250000
+
+tests\test_ar04c_real_journey_01.py:571: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_ar04c_real_journey_01.py::test_ar04c_campaign_caps_are_symmetric_and_legacy_ledger_is_unchanged - assert (691680 * 8) <= 5250000
+============================== 1 failed in 0.75s ==============================

@@ -438,7 +438,7 @@ def submit_web_plan_approval(
             (source_run_id, identity.tenant_id, task_id),
         ).fetchone()
         if (
-            source is None or str(source["kind"]) not in {"INVESTIGATE", "RESUME"}
+            source is None or str(source["kind"]) not in {"INVESTIGATE", "RESUME", "APPROVAL_RESUME"}
             or str(source["status"]) != "WAITING_APPROVAL"
             or source["expected_control_revision"] is None
             or int(source["expected_control_revision"]) != int(plan_binding["bound_control_revision"])
@@ -506,6 +506,18 @@ def submit_web_plan_approval(
             raise TaskControlError("APPROVAL_SCOPE_DENIED") from error
         approval_id = str(approval["approval_id"])
         checkpoint_thread_id = f"{binding['thread_id']}::{source_run_id}"
+        if str(source["kind"]) == "APPROVAL_RESUME":
+            prior_link = connection.execute(
+                """SELECT source_checkpoint_thread_id FROM approval_resume_links
+                   WHERE tenant_id = ? AND task_id = ? AND resume_run_id = ?""",
+                (identity.tenant_id, task_id, source_run_id),
+            ).fetchone()
+            if prior_link is None:
+                raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+            # A reapproval generated during a resumed graph continues the same
+            # persisted checkpoint thread; the Plan's originating Run is still
+            # separately recorded in d3_plan_control_bindings.
+            checkpoint_thread_id = str(prior_link["source_checkpoint_thread_id"])
         result = {
             "status": "ACCEPTED", "task_id": task_id, "plan_hash": plan_hash,
             "decision": decision, "approval_id": approval_id,
@@ -599,12 +611,23 @@ def _validate_approval_resume_in_transaction(
     ).fetchone()
     if link is None:
         raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+    expected_checkpoint_thread_id = (
+        f"{link['thread_id']}::{link['source_investigation_run_id']}"
+    )
+    if str(link["source_kind"]) == "APPROVAL_RESUME":
+        prior_link = connection.execute(
+            """SELECT source_checkpoint_thread_id FROM approval_resume_links
+               WHERE tenant_id = ? AND task_id = ? AND resume_run_id = ?""",
+            (str(link["tenant_id"]), str(link["task_id"]), str(link["source_investigation_run_id"])),
+        ).fetchone()
+        if prior_link is None:
+            raise TaskControlError("APPROVAL_RESUME_LINK_MISSING")
+        expected_checkpoint_thread_id = str(prior_link["source_checkpoint_thread_id"])
     expected_revision = run["expected_control_revision"]
     if (
-        str(link["source_kind"]) not in {"INVESTIGATE", "RESUME"}
+        str(link["source_kind"]) not in {"INVESTIGATE", "RESUME", "APPROVAL_RESUME"}
         or str(link["source_status"]) != "WAITING_APPROVAL"
-        or str(link["thread_id"]) + "::" + str(link["source_investigation_run_id"])
-            != str(link["source_checkpoint_thread_id"])
+            or expected_checkpoint_thread_id != str(link["source_checkpoint_thread_id"])
         or str(link["plan_hash"]) != str(link["approved_plan_digest"])
         or int(link["control_revision"]) != int(link["bound_control_revision"])
         or expected_revision is None
@@ -897,7 +920,7 @@ def _approval_resume_domain_stage_is_consistent(
         ).fetchone()
         config_version = int(plan["expected_config_version"]) + (1 if repair_ledger is not None else 0)
         credential_ref = plan["new_credential_ref"] if repair_ledger is not None else plan["old_credential_ref"]
-        if (
+        current_matches_plan = not (
             current is None
             or str(current["principal_id"]) != str(plan["principal_id"])
             or str(current["principal_status"]) != "ENABLED"
@@ -905,7 +928,18 @@ def _approval_resume_domain_stage_is_consistent(
             or int(current["config_version"]) != config_version
             or int(current["principal_version"]) != int(plan["expected_principal_version"])
             or int(current["policy_version"]) != int(plan["expected_auth_policy_version"])
-        ):
+        )
+        # An approval resume must be allowed to reach the trusted post-approval
+        # revalidation node when the resource has drifted. Before any action
+        # intent or ledger exists, that node can safely block or create a new
+        # Plan requiring fresh approval. Ordinary INVESTIGATE/RESUME links and
+        # any phase with committed action state remain bound to the old Plan.
+        revalidation_only_resume = (
+            str(link["decision"]) == "APPROVED"
+            and task_status in {"APPROVED", "INTERRUPTED_RECOVERABLE"}
+            and not any((intents, ledgers, receipts, reports, deliveries, entries))
+        )
+        if not current_matches_plan and not revalidation_only_resume:
             return False
     if task_status == "COMPLETED":
         return False
@@ -954,6 +988,7 @@ def create_task_with_initial_run(
     deadline_ms: int = 300_000,
     s3_order_id: str | None = None,
     assistant_core: bool = False,
+    source_message_id: str | None = None,
 ) -> dict[str, object]:
     """Atomically create a trusted S1 binding and its first Message/Command/Run."""
     if not initial_message.strip():
@@ -978,6 +1013,10 @@ def create_task_with_initial_run(
         if service_id != "orders-async-demo":
             raise TaskControlError("ASSISTANT_BINDING_KIND_INVALID")
         request["execution_core"] = "ASSISTANT_V1"
+    if source_message_id is not None:
+        if service_id == "orders-async-demo" or assistant_core:
+            raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
+        request["origin_message_id"] = source_message_id
     request_digest = _digest(request)
     with connect(path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -995,6 +1034,15 @@ def create_task_with_initial_run(
         ).fetchone()
         if session is None:
             raise TaskControlError("SESSION_SCOPE_DENIED")
+        origin = None
+        if source_message_id is not None:
+            origin = connection.execute(
+                """SELECT message_id, body, body_digest FROM messages
+                   WHERE message_id = ? AND tenant_id = ? AND session_id = ? AND role = 'USER'""",
+                (source_message_id, identity.tenant_id, session_id),
+            ).fetchone()
+            if origin is None or hashlib.sha256(str(origin["body"]).encode("utf-8")).hexdigest() != str(origin["body_digest"]):
+                raise TaskControlError("UPDATE_SOURCE_MESSAGE_INVALID")
         try:
             from opspilot.domain.d2 import ScopeDenied, _create_task_binding_in_transaction
 
@@ -1034,6 +1082,8 @@ def create_task_with_initial_run(
             "run_status": "QUEUED", "request_digest": request_digest,
             "application_state": "RECEIVED_NOT_APPLIED", "replayed": False,
         }
+        if origin is not None:
+            result["origin_message_id"] = str(origin["message_id"])
         _record_command(
             connection, command_id=command_id, identity=identity, command_kind=command_kind,
             target_ref=session_id, idempotency_key=idempotency_key, request_digest=request_digest,
@@ -1047,6 +1097,12 @@ def create_task_with_initial_run(
             (message_id, identity.tenant_id, session_id, task_id, sequence,
              initial_message, body_digest, command_id, now),
         )
+        if origin is not None:
+            connection.execute(
+                """INSERT INTO chat_message_sources (message_id, source_kind, source_ref, source_digest)
+                   VALUES (?, 'MESSAGE', ?, ?)""",
+                (message_id, str(origin["message_id"]), str(origin["body_digest"])),
+            )
         connection.execute(
             """INSERT INTO task_runs
                (run_id, tenant_id, task_id, session_id, command_id, source_message_id,

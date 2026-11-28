@@ -20,12 +20,13 @@ from opspilot.domain.d2 import (
     record_tool_observation,
 )
 from opspilot.domain.database import connect, get_integration_info
-from opspilot.domain.d3 import cancel_plan, get_task_action_state
+from opspilot.domain.d3 import D3PreconditionRejected, cancel_plan, get_task_action_state, revalidate_approved_plan
 from opspilot.domain.task_control import (
     TaskControlError,
     claim_task_run,
     finish_task_run,
     get_approval_resume_link,
+    get_task_run,
     trusted_identity,
 )
 from opspilot.domain.d3 import create_plan_from_gate
@@ -484,6 +485,176 @@ def test_apr03_new_run_resumes_original_graph_and_completes_domain_closed_loop(
     assert tuple(resume) == ("SUCCEEDED", "APPROVAL_RESUME")
 
 
+def test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval(
+    approval_client: TestClient,
+    demo_db: Path,
+    live_api: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(MODEL_API_KEY, "ar05-test-no-provider-call")
+    monkeypatch.setenv(MODEL_NAME, "ar05-resume-does-not-call-model")
+    task = _prepare_waiting_task(approval_client, demo_db, live_api, tmp_path, key="revalidation-replan")
+    old_plan_hash = str(task["plan"]["plan_hash"])
+
+    def process_queued_worker_run(expected_run_id: str) -> None:
+        from opspilot.domain.task_control import next_worker_run
+        from opspilot.web.worker import SingleInstanceWorker, _process_run
+
+        worker = SingleInstanceWorker(demo_db)
+        worker.acquire()
+        worker.register()
+        try:
+            selected = next_worker_run(demo_db)
+            assert selected is not None and str(selected["run_id"]) == expected_run_id
+            asyncio.run(_process_run(
+                demo_db, task["checkpoint_path"], worker.owner_id, "executor-a", selected, worker.epoch,
+            ))
+        finally:
+            worker.release()
+
+    first_approval = _approve(approval_client, task, key="revalidation-first-approval")
+    assert first_approval.status_code == 202
+    first_resume_id = str(first_approval.json()["resume_run_id"])
+    first_link = get_approval_resume_link(
+        demo_db, trusted_identity(demo_db, "support-a"), first_resume_id,
+    )
+    with connect(demo_db) as connection:
+        connection.execute(
+            "UPDATE integrations SET config_version = config_version + 1 "
+            "WHERE tenant_id = 'tenant-a' AND integration_id = 'integration-a'"
+        )
+
+    process_queued_worker_run(first_resume_id)
+    first_run = approval_client.get(f"/api/runs/{first_resume_id}").json()
+    assert first_run["status"] == "WAITING_APPROVAL"
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(task["task_id"]),)) == 0
+    assert _count(demo_db, "d3_action_intents", "task_id = ?", (str(task["task_id"]),)) == 0
+    support_headers = _login(approval_client, "support-a")
+    new_outcome = approval_client.get(
+        f"/api/tasks/{task['task_id']}/outcome", headers=support_headers,
+    ).json()
+    assert new_outcome.get("business_outcome") == "REAPPROVAL_REQUIRED", new_outcome
+    new_plan_hash = str(new_outcome["plan"]["plan_hash"])
+    assert new_plan_hash != old_plan_hash
+    assert new_outcome["repair"] is None and new_outcome["delivery"] is None
+    authorization_state = get_task_action_state(demo_db, str(task["task_id"]), "support-a")
+    old_authorization = next(row for row in authorization_state["plan_authorizations"] if row["plan_hash"] == old_plan_hash)
+    old_permissions = [row for row in authorization_state["permissions"] if row["plan_hash"] == old_plan_hash]
+    assert old_authorization["eligibility"] == "SUPERSEDED"
+    assert old_permissions and all(row["state"] == "REVOKED" for row in old_permissions)
+    assert new_outcome["plan"]["eligibility"] == "ACTIVE"
+    with pytest.raises(D3PreconditionRejected, match="APPROVAL_OR_PLAN_NOT_CURRENT"):
+        revalidate_approved_plan(
+            demo_db, str(task["task_id"]), old_plan_hash,
+            str(first_link["approval_id"]), "executor-a", live_api,
+        )
+
+    replacement_task = {**task, "plan": {**task["plan"], "plan_hash": new_plan_hash}}
+    second_approval = _approve(
+        approval_client, replacement_task, key="revalidation-second-approval",
+    )
+    assert second_approval.status_code == 202, second_approval.text
+    second_resume_id = str(second_approval.json()["resume_run_id"])
+    second_link = get_approval_resume_link(
+        demo_db, trusted_identity(demo_db, "support-a"), second_resume_id,
+    )
+    assert second_link["source_investigation_run_id"] == first_resume_id
+    assert second_link["source_checkpoint_thread_id"] == first_link["source_checkpoint_thread_id"]
+    process_queued_worker_run(second_resume_id)
+    support_headers = _login(approval_client, "support-a")
+    second_run = approval_client.get(
+        f"/api/runs/{second_resume_id}", headers=support_headers,
+    ).json()
+    assert second_run.get("status") == "SUCCEEDED", second_run
+    support_headers = _login(approval_client, "support-a")
+    outcome = approval_client.get(
+        f"/api/tasks/{task['task_id']}/outcome", headers=support_headers,
+    ).json()
+    assert outcome["business_outcome"] == "DELIVERED"
+    assert outcome["verification"]["recovery_verified"] is True
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ? AND action_kind='REPAIR'", (str(task["task_id"]),)) == 1
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ? AND action_kind='DELIVER'", (str(task["task_id"]),)) == 1
+    assert _count(demo_db, "d3_revalidation_receipts", "task_id = ? AND status='REAPPROVAL_REQUIRED'", (str(task["task_id"]),)) == 1
+    assert _count(demo_db, "d3_revalidation_receipts", "task_id = ? AND plan_hash = ? AND status='VALID'", (str(task["task_id"]), new_plan_hash)) == 1
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["credential_ref"] == "cred-v2"
+
+
+def test_ar05_transient_revalidation_unknown_keeps_approval_resume_recoverable(
+    approval_client: TestClient,
+    demo_db: Path,
+    live_api: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(MODEL_API_KEY, "ar05-test-no-provider-call")
+    monkeypatch.setenv(MODEL_NAME, "ar05-resume-does-not-call-model")
+    task = _prepare_waiting_task(approval_client, demo_db, live_api, tmp_path, key="revalidation-unknown-recovery")
+    approval_response = _approve(approval_client, task, key="revalidation-unknown-recovery-approval")
+    assert approval_response.status_code == 202, approval_response.text
+    resume_run_id = str(approval_response.json()["resume_run_id"])
+    identity = trusted_identity(demo_db, "support-a")
+    original_probe = probe_endpoint_fact
+    attempts = 0
+
+    def fail_once(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("temporary loopback source failure")
+        return original_probe(*args, **kwargs)
+
+    monkeypatch.setattr("opspilot.domain.d2.probe_endpoint_fact", fail_once)
+
+    def process_resume_run() -> None:
+        from opspilot.web.worker import SingleInstanceWorker, _process_run
+
+        worker = SingleInstanceWorker(demo_db)
+        worker.acquire()
+        worker.register()
+        try:
+            run = get_task_run(demo_db, identity, resume_run_id)
+            asyncio.run(_process_run(
+                demo_db, task["checkpoint_path"], worker.owner_id, "executor-a", run, worker.epoch,
+            ))
+        finally:
+            worker.release()
+
+    process_resume_run()
+    recoverable = get_task_run(demo_db, identity, resume_run_id)
+    assert recoverable["status"] == "INTERRUPTED_RECOVERABLE", recoverable
+    assert recoverable["blocked_reason"] == "D3_REVALIDATION_SOURCE_UNKNOWN", recoverable
+    link = get_approval_resume_link(demo_db, identity, resume_run_id)
+    assert link["approval_id"] == approval_response.json()["approval_id"]
+    action_state = get_task_action_state(demo_db, str(task["task_id"]), "support-a")
+    old_authorization = next(
+        row for row in action_state["plan_authorizations"]
+        if row["plan_hash"] == task["plan"]["plan_hash"]
+    )
+    assert old_authorization["eligibility"] == "ACTIVE"
+    assert all(row["state"] == "AVAILABLE" for row in action_state["permissions"])
+    assert _count(demo_db, "d3_action_intents", "task_id = ?", (str(task["task_id"]),)) == 0
+    assert _count(demo_db, "d3_action_ledgers", "task_id = ?", (str(task["task_id"]),)) == 0
+
+    process_resume_run()
+    completed = get_task_run(demo_db, identity, resume_run_id)
+    assert completed["status"] == "SUCCEEDED", completed
+    assert attempts == 2
+    assert _count(
+        demo_db, "d3_revalidation_receipts",
+        "task_id = ? AND plan_hash = ? AND status = 'UNKNOWN'", (str(task["task_id"]), str(task["plan"]["plan_hash"])),
+    ) == 1
+    assert _count(
+        demo_db, "d3_revalidation_receipts",
+        "task_id = ? AND plan_hash = ? AND status = 'VALID'", (str(task["task_id"]), str(task["plan"]["plan_hash"])),
+    ) == 1
+    assert _count(
+        demo_db, "d3_action_ledgers",
+        "task_id = ? AND action_kind = 'REPAIR' AND status = 'COMMITTED'", (str(task["task_id"]),),
+    ) == 1
+    assert get_integration_info(demo_db, "tenant-a", "integration-a")["config_version"] == 8
+
+
 @pytest.mark.parametrize(
     ("window", "expected_task_status"),
     [
@@ -740,6 +911,7 @@ def test_hf09_missing_action_receipt_fails_closed(
         execute_repair,
         get_or_create_action_intent,
         get_or_create_report,
+        revalidate_approved_plan,
         verify_repair_online,
     )
 
@@ -750,6 +922,10 @@ def test_hf09_missing_action_receipt_fails_closed(
     assert accepted.status_code == 202
     plan_hash = str(task["plan"]["plan_hash"])
     task_id = str(task["task_id"])
+    revalidate_approved_plan(
+        demo_db, task_id, plan_hash, str(accepted.json()["approval_id"]),
+        "executor-a", live_api,
+    )
     repair = get_or_create_action_intent(demo_db, task_id, plan_hash, "REPAIR", "executor-a")
     execute_repair(demo_db, str(repair["action_id"]), "executor-a", "hf-missing-repair")
     if missing_receipt == "repair_ledger":

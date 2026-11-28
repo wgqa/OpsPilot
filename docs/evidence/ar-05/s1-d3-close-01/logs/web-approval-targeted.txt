@@ -1,0 +1,128 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+_ test_apr03_new_run_resumes_original_graph_and_completes_domain_closed_loop __
+
+approval_client = <starlette.testclient.TestClient object at 0x000001E7B423EBA0>
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_apr03_new_run_resumes_ori0/domain.sqlite3')
+live_api = 'http://127.0.0.1:52868'
+tmp_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_apr03_new_run_resumes_ori0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E7B422BBB0>
+
+    def test_apr03_new_run_resumes_original_graph_and_completes_domain_closed_loop(
+        approval_client: TestClient, demo_db: Path, live_api: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(MODEL_API_KEY, "m1-05-test-placeholder")
+        monkeypatch.setenv(MODEL_NAME, "m1-05-provider-not-called-on-resume")
+>       task = _prepare_waiting_task(approval_client, demo_db, live_api, tmp_path, key="approved-task")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_web_approval.py:460: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m1_web_approval.py:118: in _prepare_waiting_task
+    _seed_approval_interrupt(db, checkpoint_path, binding, plan, source_run_id, live_api)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_apr03_new_run_resumes_ori0/domain.sqlite3')
+checkpoint_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_apr03_new_run_resumes_ori0/checkpoint-task-340feec6-2563-4651-9533-5d84a88873dd.sqlite3')
+binding = {'task_id': 'task-340feec6-2563-4651-9533-5d84a88873dd', 'thread_id': 'opspilot-09c12df6-3ce2-47ee-9e97-483ac51c1334', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'schema_version': 'opspilot-plan-v1', 'tenant_id': 'tenant-a', 'task_id': 'task-340feec6-2563-4651-9533-5d84a88873dd', 'environment': 'local-demo', ...}
+source_run_id = 'run-2ed7b32f-e084-4107-845c-c1b6d81bde20'
+live_api = 'http://127.0.0.1:52868'
+
+    def _seed_approval_interrupt(
+        db: Path, checkpoint_path: Path, binding: dict[str, object], plan: dict[str, object],
+        source_run_id: str, live_api: str,
+    ) -> None:
+>       from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+E       ModuleNotFoundError: No module named 'langgraph'
+
+tests\test_m1_web_approval.py:130: ModuleNotFoundError
+_ test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval _
+
+approval_client = <starlette.testclient.TestClient object at 0x000001E7B4A7D450>
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_ar05_approved_plan_fact_c0/domain.sqlite3')
+live_api = 'http://127.0.0.1:52872'
+tmp_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_ar05_approved_plan_fact_c0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E7B43B89D0>
+
+    def test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval(
+        approval_client: TestClient,
+        demo_db: Path,
+        live_api: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(MODEL_API_KEY, "ar05-test-no-provider-call")
+        monkeypatch.setenv(MODEL_NAME, "ar05-resume-does-not-call-model")
+>       task = _prepare_waiting_task(approval_client, demo_db, live_api, tmp_path, key="revalidation-replan")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_web_approval.py:496: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m1_web_approval.py:118: in _prepare_waiting_task
+    _seed_approval_interrupt(db, checkpoint_path, binding, plan, source_run_id, live_api)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_ar05_approved_plan_fact_c0/domain.sqlite3')
+checkpoint_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_ar05_approved_plan_fact_c0/checkpoint-task-57a8cda4-5842-4e42-8946-de0e5bc42f45.sqlite3')
+binding = {'task_id': 'task-57a8cda4-5842-4e42-8946-de0e5bc42f45', 'thread_id': 'opspilot-aea7c263-7e4e-430b-9749-1ba7d1d0e0ea', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'schema_version': 'opspilot-plan-v1', 'tenant_id': 'tenant-a', 'task_id': 'task-57a8cda4-5842-4e42-8946-de0e5bc42f45', 'environment': 'local-demo', ...}
+source_run_id = 'run-e2de76bc-5aae-4286-b25f-d1a1b5b73682'
+live_api = 'http://127.0.0.1:52872'
+
+    def _seed_approval_interrupt(
+        db: Path, checkpoint_path: Path, binding: dict[str, object], plan: dict[str, object],
+        source_run_id: str, live_api: str,
+    ) -> None:
+>       from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+E       ModuleNotFoundError: No module named 'langgraph'
+
+tests\test_m1_web_approval.py:130: ModuleNotFoundError
+_____ test_apr04_rejection_resumes_original_graph_without_action_intents ______
+
+approval_client = <starlette.testclient.TestClient object at 0x000001E7B4B1E850>
+demo_db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_apr04_rejection_resumes_o0/domain.sqlite3')
+live_api = 'http://127.0.0.1:52878'
+tmp_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_apr04_rejection_resumes_o0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001E7B43F5910>
+
+    def test_apr04_rejection_resumes_original_graph_without_action_intents(
+        approval_client: TestClient, demo_db: Path, live_api: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(MODEL_API_KEY, "m1-05-test-placeholder")
+        monkeypatch.setenv(MODEL_NAME, "m1-05-provider-not-called-on-resume")
+>       task = _prepare_waiting_task(approval_client, demo_db, live_api, tmp_path, key="rejected-task")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_m1_web_approval.py:434: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_m1_web_approval.py:118: in _prepare_waiting_task
+    _seed_approval_interrupt(db, checkpoint_path, binding, plan, source_run_id, live_api)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_apr04_rejection_resumes_o0/domain.sqlite3')
+checkpoint_path = WindowsPath('D:/tmp/opspilot-ar05-s1-d3-close-20261106-webgreen4/test_apr04_rejection_resumes_o0/checkpoint-task-89c3edb2-fd8f-485d-a5ca-00aa83bfd2eb.sqlite3')
+binding = {'task_id': 'task-89c3edb2-fd8f-485d-a5ca-00aa83bfd2eb', 'thread_id': 'opspilot-05bf9eaa-0b19-43c4-813d-96f8a764f0ee', 'tenant_id': 'tenant-a', 'actor_id': 'support-a', ...}
+plan = {'schema_version': 'opspilot-plan-v1', 'tenant_id': 'tenant-a', 'task_id': 'task-89c3edb2-fd8f-485d-a5ca-00aa83bfd2eb', 'environment': 'local-demo', ...}
+source_run_id = 'run-c50902ed-f971-4fc3-82a0-95de513d5cf8'
+live_api = 'http://127.0.0.1:52878'
+
+    def _seed_approval_interrupt(
+        db: Path, checkpoint_path: Path, binding: dict[str, object], plan: dict[str, object],
+        source_run_id: str, live_api: str,
+    ) -> None:
+>       from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+E       ModuleNotFoundError: No module named 'langgraph'
+
+tests\test_m1_web_approval.py:130: ModuleNotFoundError
+============================== warnings summary ===============================
+..\..\..\..\python\Lib\site-packages\fastapi\testclient.py:1
+  D:\python\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_m1_web_approval.py::test_apr03_new_run_resumes_original_graph_and_completes_domain_closed_loop
+FAILED tests/test_m1_web_approval.py::test_ar05_approved_plan_fact_change_creates_new_plan_and_requires_new_approval
+FAILED tests/test_m1_web_approval.py::test_apr04_rejection_resumes_original_graph_without_action_intents
+3 failed, 1 warning in 1.72s

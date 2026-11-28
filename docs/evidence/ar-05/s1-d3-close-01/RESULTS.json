@@ -1,0 +1,90 @@
+{
+  "task": "AR-05-S1-D3-CLOSE-01",
+  "status": "ACCEPTANCE_CANDIDATE",
+  "base_head": "ca7706d14f155bda237fcb4057dae8606b78c41f",
+  "branch": "codex/ar05-s1-d3-close-01",
+  "main_sha_checked": "60eee87bfe3cca522011316cb4cd2c0064ad291b",
+  "project_north_star_blob": "e36f2f75509738551ac6d4a2de5b4f9cf44a7991",
+  "agents_blob": "f174a6ab7f23f9e6d8b3ef98d455b99a75193143",
+  "review_skill_blob": "d405c8d413d633824b279202cc1503dab4cf0b03",
+  "provider_http_requests": 0,
+  "external_business_writes": 0,
+  "isolated_demo_business_writes": {
+    "repair_commits": 1,
+    "ticket_entries": 1
+  },
+  "browser": "NOT_RUN_HISTORICAL_STOP",
+  "full_pytest": "NOT_RUN",
+  "results": {
+    "approval_revalidation_negative_cases": {
+      "passed": 6,
+      "failed": 0,
+      "log": "logs/revalidation-negative-cases-final-02.txt"
+    },
+    "affected_backend_regression": {
+      "passed": 68,
+      "failed": 0,
+      "duration_seconds": 87.01,
+      "files": [
+        "tests/test_ar05_s1_session_bridge_01.py",
+        "tests/test_d2_investigation.py",
+        "tests/test_d3_actions.py",
+        "tests/test_m1_task_control.py",
+        "tests/test_m1_web_approval.py"
+      ],
+      "log": "logs/backend-revalidation-final-02.txt"
+    },
+    "frontend_build_and_typecheck": {
+      "status": "PASS",
+      "command": "npm run build",
+      "log": "logs/frontend-build-final.txt"
+    },
+    "changed_file_eslint": {
+      "status": "PASS",
+      "command": "npx eslint src/api.ts src/s1-bridge.ts test/ar05-s1-bridge.test.ts",
+      "log": "logs/frontend-eslint-changed-files.txt"
+    },
+    "frontend_node_unit": {
+      "passed": 4,
+      "skipped": 1,
+      "failed": 0,
+      "command": "node --experimental-transform-types --test test/ar05-s1-bridge.test.ts",
+      "log": "logs/frontend-unit-transform-final.txt"
+    },
+    "full_frontend_eslint": {
+      "status": "FAIL_UNRELATED_EXISTING_ERRORS",
+      "count": 2,
+      "file": "frontend/e2e/m4-03-s3-journey.mjs",
+      "details": [
+        "unused access import",
+        "setTimeout is not defined"
+      ],
+      "log": "logs/frontend-eslint-full-final.txt"
+    },
+    "diff_check": "PASS_FOR_SOURCE_AND_TEST_DIFF; RAW_CAPTURED_LOGS_PRESERVED_AS_IS"
+  },
+  "local_journey": {
+    "evidence_level": "DETERMINISTIC_FORMAL_API_WORKER_REAL_LOCAL_MCP_HTTP_SQLITE",
+    "outcome": "DELIVERED",
+    "runs": 3,
+    "model_tool_choices": 4,
+    "approval_revalidation": [
+      "REAPPROVAL_REQUIRED after configuration facts changed",
+      "VALID after a new plan and independent approval"
+    ],
+    "verification_http_status": 200,
+    "configuration_version": 9,
+    "trace": "TRACE.json",
+    "trace_sha256": "6c14e1bfa7ebc3967a1f687fb2886a0d65401efab6ea7ad03d997318fbdf9eca"
+  },
+  "gold": {
+    "G1_session_continuity": "PASS_LOCAL",
+    "G2_trusted_approval": "PASS_TARGETED",
+    "G3_fresh_evidence_and_reapproval": "PASS_TARGETED",
+    "G4_local_401_to_cas_to_http_200": "PASS_LOCAL_DEMO",
+    "G5_report_then_independent_delivery": "PASS_TARGETED",
+    "G6_session_outcome_projection": "PASS_API_AND_PROJECTION_TESTS; BROWSER_NOT_RUN",
+    "G7_negative_scope_and_replay_cases": "PASS_TARGETED_REGRESSION",
+    "G8_affected_regressions": "PASS_68_TESTS; FULL_SUITE_NOT_RUN"
+  }
+}

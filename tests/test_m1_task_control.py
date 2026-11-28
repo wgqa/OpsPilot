@@ -31,6 +31,7 @@ from opspilot.domain.d3 import (
     get_or_create_action_intent,
     get_or_create_report,
     get_task_action_state,
+    revalidate_approved_plan,
     submit_plan_approval,
     verify_repair_online,
 )
@@ -284,6 +285,9 @@ def test_chat_readonly_run_does_not_change_business_task_lifecycle(demo_db: Path
         demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED"
     )
     assert approval["decision"] == "APPROVED"
+    revalidate_approved_plan(
+        demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]), "executor-a", live_api,
+    )
     repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
     repair = execute_repair(demo_db, str(repair_intent["action_id"]), "executor-a", "m1-chat-readonly-repair")
     receipt = verify_repair_online(
@@ -399,6 +403,9 @@ def test_n1_10_correction_invalidates_old_run_and_new_run_binds_fresh_plan(
     binding, old_gate, old_plan = _ready_task(demo_db, live_api, "n1-10")
     task_id = str(binding["task_id"])
     old_approval = submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(old_plan["plan_hash"]), "APPROVED")
+    revalidate_approved_plan(
+        demo_db, task_id, str(old_plan["plan_hash"]), str(old_approval["approval_id"]), "executor-a", live_api,
+    )
     old_intent = get_or_create_action_intent(demo_db, task_id, str(old_plan["plan_hash"]), "REPAIR", "executor-a")
     identity = trusted_identity(demo_db, "support-a")
     correction = admit_task_message(
@@ -465,6 +472,9 @@ def test_n1_10_correction_invalidates_old_run_and_new_run_binds_fresh_plan(
     assert _count(demo_db, "d3_action_permissions", "task_id = ? AND plan_hash = ? AND state = 'AVAILABLE'", (task_id, old_plan["plan_hash"])) == 0
 
     new_approval = submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(fresh_plan["plan_hash"]), "APPROVED")
+    revalidate_approved_plan(
+        demo_db, task_id, str(fresh_plan["plan_hash"]), str(new_approval["approval_id"]), "executor-a", live_api,
+    )
     finish_task_run(demo_db, identity, str(correction["run_id"]), "WAITING_APPROVAL")
     resumed_run = resume_task_run(demo_db, identity, str(correction["run_id"]))
     assert resumed_run["status"] == "RUNNING"
@@ -517,7 +527,12 @@ def test_abort_after_real_delivery_cannot_overwrite_completed_business_task(
 ) -> None:
     binding, _, plan = _ready_task(demo_db, live_api, "complete")
     task_id = str(binding["task_id"])
-    submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
+    approval = submit_plan_approval(
+        demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED",
+    )
+    revalidate_approved_plan(
+        demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]), "executor-a", live_api,
+    )
     repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
     repair = execute_repair(demo_db, str(repair_intent["action_id"]), "executor-a", "m1-complete-repair")
     receipt = verify_repair_online(demo_db, task_id, str(plan["plan_hash"]), str(repair_intent["action_id"]), "executor-a", live_api)
@@ -545,6 +560,9 @@ def test_n1_11_repair_commit_survives_abort_and_old_checkpoint_cannot_deliver(
     binding, _, plan = _ready_task(demo_db, live_api, "n1-11")
     task_id = str(binding["task_id"])
     approval = submit_plan_approval(demo_db, str(binding["thread_id"]), "approver-a", str(plan["plan_hash"]), "APPROVED")
+    revalidate_approved_plan(
+        demo_db, task_id, str(plan["plan_hash"]), str(approval["approval_id"]), "executor-a", live_api,
+    )
     repair_intent = get_or_create_action_intent(demo_db, task_id, str(plan["plan_hash"]), "REPAIR", "executor-a")
     repair_ledger = execute_repair(demo_db, str(repair_intent["action_id"]), "executor-a", "n1-11-repair")
     verification = verify_repair_online(

@@ -33,6 +33,17 @@ def attempt_policy_in_transaction(connection, task_id):
                 or row["aux_provider_limit"] is not None):
             raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
         return {"version":version, "MODEL":16, "MCP":None, "AUX":None}
+    if version == "AR04C_MEMORY_ON_OFF_V1":
+        binding = connection.execute(
+            "SELECT service_id,tenant_id FROM task_bindings WHERE task_id=?", (task_id,),
+        ).fetchone()
+        if (binding is None or binding["service_id"] != "orders-async-demo"
+                or binding["tenant_id"] != row["tenant_id"] or pair != (8, 0)
+                or row["aux_provider_limit"] is not None):
+            raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
+        # The durable 0 is a sentinel on the existing NOT NULL schema. Campaign
+        # Provider/time/money ceilings remain the outer exploration boundary.
+        return {"version":version, "MODEL":8, "MCP":None, "AUX":None}
     if any(type(n) is not int for n in pair):
         raise ScopeDenied("TASK_ATTEMPT_POLICY_INVALID")
     if version == "CONTUX_S3_V1":
@@ -120,7 +131,7 @@ def investigation_budget_in_transaction(connection, task_id, run_id=None):
             if not run_remaining and reasons[kind] is None:
                 reasons[kind] = f"RUN_{kind}_LIMIT"
     clock = connection.execute("SELECT active_elapsed_ms,deadline_ms FROM task_execution_budgets WHERE task_id=?",(task_id,)).fetchone()
-    if policy["version"] in {"CONTUX_S3_V1", "AR03_MATERIAL_REMAINDER_01_V1"} and clock and clock["active_elapsed_ms"] >= clock["deadline_ms"]:
+    if policy["version"] in {"CONTUX_S3_V1", "AR03_MATERIAL_REMAINDER_01_V1", "AR04C_MEMORY_ON_OFF_V1"} and clock and clock["active_elapsed_ms"] >= clock["deadline_ms"]:
         remaining = {"MODEL":0,"MCP":0}
         reasons = {"MODEL":"ACTIVE_TIME_LIMIT","MCP":"ACTIVE_TIME_LIMIT"}
     return {"policy_version":policy["version"], "task_limits":task_limits,"run_limits":run_limits,
